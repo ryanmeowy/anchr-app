@@ -43,6 +43,7 @@
 6. 缺少按 `segmentId` 稳定查询 segment 元数据的能力，预览链路不能依赖入库期临时缓存。
 7. 预览加载策略未定稿，PDF/TXT/MD 直接加载对象存储 URL 可能受 CORS、Range Request 与签名过期影响。
 8. React/Next.js 正式版缺少 API Client、鉴权、401 处理与环境配置约束。
+9. 图片 OCR bbox 入库与查询能力尚未形成闭环，图片预览定位需要在 Phase2 主链路前补齐。
 
 ## 3. 产品范围
 
@@ -72,7 +73,7 @@
 9. 预览加载策略定稿：明确直接签名 URL 或后端受控内容代理的适用边界。
 10. 摘要失败与无证据兜底：LLM 超时、无证据、引用不一致时有明确降级。
 11. 预览响应支持 `surroundingChunks`：用于 TXT/MD 上下文展示、snippet 定位失败兜底和用户理解命中上下文。
-12. 图片 bbox 降级策略：bbox 缺失或无效时不做伪定位，仅展示原图与命中文本。
+12. 图片 OCR bbox 入库与查询能力：作为 Phase2 前置能力，详见《多轮对话检索_二期_bbox前置PRD.md》；bbox 缺失或无效时仍需安全降级，不绘制错误框。
 
 ### 3.1.1 P1 增强范围（建议本期做，允许不阻断 MVP）
 
@@ -228,7 +229,7 @@
 3. 定位规则：
 - PDF：定位页码（`pageNo`）
 - TXT/MD：定位 chunk 或关键词片段
-- 图片：定位 bbox（有则展示，无则仅展示原图）
+- 图片：基于 OCR bbox 定位命中区域，bbox 缺失或无效时展示原图与命中文本并记录数据质量问题
 4. 预览服务必须通过 `segmentId` 稳定解析 asset 与 anchor 信息，不依赖入库任务临时缓存。
 5. PDF/TXT/MD 加载方式必须在实现前完成验证：
 - 直接签名 URL：必须验证 CORS、Range Request、TXT/MD fetch 可用
@@ -261,10 +262,10 @@
   - 加载全文后按 `snippet` 首个命中滚动定位
   - 若未命中，则优先用 `surroundingChunks.current` 定位，再按 `anchor.chunkOrder` 近似定位
 - `IMAGE`：
-  - 本期默认仅打开原图并展示 OCR/命中文本文案
-  - 若数据中已有有效 `anchor.bbox`，允许安全绘制命中框，但不作为二期验收硬指标
+  - Phase2 启动前必须补齐图片 OCR bbox 入库与查询能力
+  - 默认基于有效 `anchor.bbox` 在原图上绘制命中框
   - 若 `bbox` 缺失、越界、比例异常或无法映射到渲染尺寸，忽略 bbox 并展示 OCR/命中文本提示
-  - 后续版本必须在图片入库链路稳定写入 bbox 后补齐精准框选能力
+  - bbox 缺失应记录为数据质量问题，不作为图片主路径的正常状态
 
 5. 全文浏览要求：
 - 定位后用户仍可自由翻页、滚动、缩放，不锁死在命中片段。
@@ -279,7 +280,7 @@
 验收：
 1. `PDF` 页级定位成功率 >= 98%。
 2. `TXT/MD` 片段或近似定位成功率 >= 90%。
-3. `IMAGE` 本期可打开原图并展示 OCR/命中文本；bbox 缺失或无效时必须安全降级，不画错框。
+3. `IMAGE` 有效 bbox 样例可在原图上绘制命中框；bbox 缺失或无效时必须安全降级，不画错框。
 4. 预览链接过期场景自动恢复成功率 >= 90%（单次自动重试）。
 
 ### FR-4 保留关键词检索入口
@@ -465,7 +466,7 @@ P1 可选接口：
 11. `ConversationTurn` 需要新增 `resultCardsJson` 字段；`resultCards` 必须随 turn 持久化，历史消息直接读取已保存的 `resultCards`。
 12. `retrievalTraceJson` 用于开发者调试和审计，不作为历史卡片重建的唯一数据源。
 13. `preferredModalities` 一期已有基础能力，二期不作为新增功能，仅在开发者模式中展示其 rewrite 输出和生效情况。
-14. `ConversationSession` 需要新增可空 `userId` 字段，作为未来 SSO 用户隔离的兼容口；当前无 SSO 时使用轻量 user key。
+14. 图片 OCR bbox 入库、查询、DTO 透传和前端映射作为 Phase2 前置能力；图片预览主路径应基于 bbox 定位，降级仅处理异常数据。
 15. 预览签发必须支持防抖/去重，避免同一 segment 在短时间内重复签发 URL。
 
 ## 8A. 工程要求
@@ -513,7 +514,7 @@ P1 可选接口：
 10. 鉴权失效、无权限、资源不存在、摘要失败均有明确降级体验。
 11. Top3 在多 asset 候选充足时优先覆盖不同 asset。
 12. 预览响应支持 `surroundingChunks`，TXT/MD 可展示当前命中上下文。
-13. bbox 缺失或无效时安全降级，不绘制错误命中框。
+13. 图片 OCR bbox 前置能力已完成；有效 bbox 可绘制命中框，bbox 缺失或无效时安全降级，不绘制错误命中框。
 14. `resultCards` 由当轮检索候选生成并随 turn 保存，历史回放不二次检索。
 15. `ConversationTurn.resultCardsJson` 与 `ConversationSession.userId` 字段完成兼容改造。
 16. 预览接口接入轻量 token 鉴权，且同一 `segmentId+tokenHash` 的预览 URL 可在有效期内复用。
@@ -565,7 +566,7 @@ P1 可选接口：
 1. Streamlit MVP：输入、回答、resultCards 基础展示。
 2. React/Next.js 正式版骨架：左侧会话 + 底部输入 + 消息流（至少完成静态路由与接口联调）。
 3. React/Next.js API Client、鉴权、baseURL、401/403/404 错误态。
-4. React 预览页按 bbox 降级策略处理图片预览。
+4. React 预览页支持图片 bbox 命中框定位，并具备无效 bbox 安全降级。
 
 ### M3（2-3 天）
 
@@ -606,8 +607,8 @@ P1 可选接口：
 9. 风险：`surroundingChunks` 响应过大或泄露无权限内容。
 - 应对：默认只返回前后各 1 个 chunk，单 chunk 限长，并在权限校验后返回。
 
-10. 风险：bbox 坐标异常导致前端画错框。
-- 应对：二期不依赖 bbox 作为硬验收；前端异常时忽略 bbox 并展示原图与命中文本；后续版本在入库链路稳定写入 bbox 后补齐精准框选。
+10. 风险：bbox 入库能力未先补齐，导致图片预览只能降级为原图展示。
+- 应对：新增《多轮对话检索_二期_bbox前置PRD.md》，在 Phase2 主链路前完成 bbox 协议、入库、查询、preview API 透传和前端映射；异常 bbox 仍需安全降级。
 
 11. 风险：历史卡片回放为了展示 Top3 触发二次检索，导致结果漂移。
 - 应对：`resultCards` 由当轮 `retrievalResult.topCandidates` 生成并随 turn 持久化，历史回放直接读取保存结果。

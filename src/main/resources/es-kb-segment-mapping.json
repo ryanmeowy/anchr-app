@@ -40,6 +40,29 @@
       "type": "integer"
     },
     "bbox": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "unit": {
+          "type": "keyword"
+        }
+      }
+    },
+    "imageWidth": {
+      "type": "integer"
+    },
+    "imageHeight": {
       "type": "integer"
     },
     "embedding": {

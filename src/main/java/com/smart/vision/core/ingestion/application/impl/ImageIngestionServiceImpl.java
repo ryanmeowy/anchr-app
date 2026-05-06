@@ -23,6 +23,7 @@ import com.smart.vision.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.smart.vision.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.smart.vision.core.ingestion.domain.port.IngestionOcrPort;
 import com.smart.vision.core.common.util.IdGen;
+import com.smart.vision.core.ingestion.domain.model.OcrStructuredResult;
 import com.smart.vision.core.ingestion.infrastructure.persistence.es.document.IngestionImageDocument;
 import com.smart.vision.core.ingestion.infrastructure.persistence.es.EsBatchTemplate;
 import com.smart.vision.core.ingestion.infrastructure.persistence.es.ImageSegmentIndexWriter;
@@ -239,7 +240,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
         try {
             String tempUrl = objectStoragePort.buildAiImageInput(item.getKey());
             List<Float> vector = embeddingPort.embedImage(tempUrl);
-            String ocrText = ocrPort.extractText(tempUrl);
+            OcrStructuredResult structuredOcr = ocrPort.extractStructuredText(tempUrl);
             List<String> tags = contentPort.generateTags(tempUrl);
             List<GraphTriple> graphTriples = contentPort.generateGraph(tempUrl);
 
@@ -249,7 +250,8 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
             doc.setRawFilename(item.getFileName());
             doc.setFileName(genFileName(tempUrl));
             doc.setImageEmbedding(vector);
-            doc.setOcrContent(ocrText);
+            doc.setOcrContent(structuredOcr.getFullText());
+            doc.setStructuredOcr(structuredOcr);
             doc.setCreateTime(System.currentTimeMillis());
             doc.setTags(tags);
             doc.setFileHash(item.getFileHash());

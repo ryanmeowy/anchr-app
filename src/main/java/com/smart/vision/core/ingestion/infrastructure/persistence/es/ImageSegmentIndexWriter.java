@@ -1,9 +1,14 @@
 package com.smart.vision.core.ingestion.infrastructure.persistence.es;
 
 import com.smart.vision.core.ingestion.infrastructure.persistence.es.document.IngestionImageDocument;
+import com.smart.vision.core.ingestion.domain.model.OcrBoundingBox;
+import com.smart.vision.core.ingestion.domain.model.OcrParagraph;
+import com.smart.vision.core.ingestion.domain.model.OcrStructuredResult;
+import com.smart.vision.core.search.domain.model.Bbox;
 import com.smart.vision.core.search.domain.model.KbAssetTypeEnum;
 import com.smart.vision.core.search.domain.model.Segment;
 import com.smart.vision.core.search.domain.model.SegmentType;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -18,7 +23,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ImageSegmentIndexWriter {
 
+    private static final String BBOX_WRITE_SUCCESS_METRIC = "smartvision.ingestion.bbox.write_success";
+    private static final String BBOX_MISSING_METRIC = "smartvision.ingestion.bbox.missing";
+    private static final String BBOX_OUT_OF_BOUNDS_METRIC = "smartvision.ingestion.bbox.out_of_bounds";
+    private static final String IMAGE_SIZE_MISSING_METRIC = "smartvision.ingestion.bbox.image_size_missing";
+
     private final KbSegmentBulkWriter kbSegmentBulkWriter;
+    private final MeterRegistry meterRegistry;
 
     public void write(IngestionImageDocument imageDocument) {
         if (imageDocument == null || imageDocument.getId() == null) {
@@ -53,14 +64,27 @@ public class ImageSegmentIndexWriter {
                     .build());
         }
 
-        if (StringUtils.hasText(doc.getOcrContent())) {
+        List<OcrParagraph> paragraphs = resolveParagraphs(doc.getStructuredOcr(), doc.getOcrContent());
+        Integer imageWidth = resolveImageWidth(doc.getStructuredOcr());
+        Integer imageHeight = resolveImageHeight(doc.getStructuredOcr());
+        if (!paragraphs.isEmpty() && !hasValidImageSize(imageWidth, imageHeight)) {
+            meterRegistry.counter(IMAGE_SIZE_MISSING_METRIC).increment();
+        }
+        for (OcrParagraph paragraph : paragraphs) {
+            if (!StringUtils.hasText(paragraph.getText())) {
+                continue;
+            }
+            Bbox bbox = resolveBbox(paragraph.getBbox(), imageWidth, imageHeight);
             segments.add(Segment.builder()
-                    .segmentId(assetId + ":ocr:0")
+                    .segmentId(assetId + ":ocr:" + paragraph.getIndex())
                     .assetId(assetId)
                     .assetType(KbAssetTypeEnum.IMAGE)
                     .segmentType(SegmentType.IMAGE_OCR_BLOCK)
                     .title(title)
-                    .ocrText(doc.getOcrContent())
+                    .ocrText(paragraph.getText())
+                    .bbox(bbox)
+                    .imageWidth(imageWidth)
+                    .imageHeight(imageHeight)
                     .sourceRef(doc.getImagePath())
                     .thumbnail(doc.getImagePath())
                     .ocrSummary(ocrSummary)
@@ -69,6 +93,57 @@ public class ImageSegmentIndexWriter {
                     .build());
         }
         return segments;
+    }
+
+    private List<OcrParagraph> resolveParagraphs(OcrStructuredResult structuredOcr, String ocrContent) {
+        if (structuredOcr != null && structuredOcr.getParagraphs() != null && !structuredOcr.getParagraphs().isEmpty()) {
+            return structuredOcr.getParagraphs();
+        }
+        if (!StringUtils.hasText(ocrContent)) {
+            return List.of();
+        }
+        return List.of(OcrParagraph.builder()
+                .index(0)
+                .text(ocrContent)
+                .build());
+    }
+
+    private Integer resolveImageWidth(OcrStructuredResult structuredOcr) {
+        return structuredOcr == null ? null : structuredOcr.getImageWidth();
+    }
+
+    private Integer resolveImageHeight(OcrStructuredResult structuredOcr) {
+        return structuredOcr == null ? null : structuredOcr.getImageHeight();
+    }
+
+    private Bbox resolveBbox(OcrBoundingBox box, Integer imageWidth, Integer imageHeight) {
+        if (box == null || !box.isValid()) {
+            meterRegistry.counter(BBOX_MISSING_METRIC).increment();
+            return null;
+        }
+        if (hasValidImageSize(imageWidth, imageHeight) && isOutOfBounds(box, imageWidth, imageHeight)) {
+            meterRegistry.counter(BBOX_OUT_OF_BOUNDS_METRIC).increment();
+            return null;
+        }
+        meterRegistry.counter(BBOX_WRITE_SUCCESS_METRIC).increment();
+        return Bbox.builder()
+                .x(box.getX())
+                .y(box.getY())
+                .width(box.getWidth())
+                .height(box.getHeight())
+                .unit(box.getUnit())
+                .build();
+    }
+
+    private boolean isOutOfBounds(OcrBoundingBox box, int imageWidth, int imageHeight) {
+        return box.getX() < 0
+                || box.getY() < 0
+                || box.getX() + box.getWidth() > imageWidth
+                || box.getY() + box.getHeight() > imageHeight;
+    }
+
+    private boolean hasValidImageSize(Integer imageWidth, Integer imageHeight) {
+        return imageWidth != null && imageHeight != null && imageWidth > 0 && imageHeight > 0;
     }
 
     private String resolveCaptionText(IngestionImageDocument doc) {

@@ -1,5 +1,6 @@
 package com.smart.vision.core.search.infrastructure.persistence.es.document;
 
+import com.smart.vision.core.search.domain.model.Bbox;
 import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.elasticsearch.annotations.Document;
@@ -43,8 +44,14 @@ public class KbSegmentDocument {
     @Field(type = FieldType.Integer)
     private Integer chunkOrder;
 
+    @Field(type = FieldType.Object)
+    private Bbox bbox;
+
     @Field(type = FieldType.Integer)
-    private List<Integer> bbox;
+    private Integer imageWidth;
+
+    @Field(type = FieldType.Integer)
+    private Integer imageHeight;
 
     @Field(type = FieldType.Dense_Vector, similarity = "dot_product")
     private List<Float> embedding;

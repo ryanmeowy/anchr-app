@@ -208,6 +208,32 @@ public class AliyunGenManager {
     }
 
     @Retryable(retryFor = Exception.class, backoff = @Backoff(delay = 1000, multiplier = 2))
+    public String enhanceOcrParagraph(String imageUrl, String prompt) throws NoApiKeyException, UploadFileException {
+        MultiModalMessage userMessage = MultiModalMessage.builder()
+                .role(Role.USER.getValue())
+                .content(Arrays.asList(Map.of("image", imageUrl), Map.of("text", prompt)))
+                .build();
+        MultiModalConversationParam param = MultiModalConversationParam.builder()
+                .model(resolveImageGenModel())
+                .message(userMessage)
+                .apiKey(resolveApiKey())
+                .build();
+        MultiModalConversation conv = new MultiModalConversation();
+        MultiModalConversationResult callResult = conv.call(param);
+        String rawText = Optional.ofNullable(callResult)
+                .map(MultiModalConversationResult::getOutput)
+                .map(MultiModalConversationOutput::getChoices)
+                .filter(CollectionUtil::isNotEmpty)
+                .map(List::getFirst)
+                .map(MultiModalConversationOutput.Choice::getMessage)
+                .map(MultiModalMessage::getContent)
+                .map(Object::toString)
+                .orElse(Strings.EMPTY);
+        Matcher matcher = TEXT_PATTERN.matcher(rawText);
+        return matcher.find() ? matcher.group(1) : rawText;
+    }
+
+    @Retryable(retryFor = Exception.class, backoff = @Backoff(delay = 1000, multiplier = 2))
     public String generateText(String prompt) throws NoApiKeyException, InputRequiredException {
         Generation gen = new Generation();
         Message systemMsg = Message.builder()

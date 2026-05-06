@@ -1043,6 +1043,8 @@ def _render_kb_search_results(results: list[Any]) -> None:
             parts.append(f"chunkOrder={chunk_order}")
         if isinstance(bbox, list) and bbox:
             parts.append(f"bbox={bbox}")
+        elif isinstance(bbox, dict) and bbox:
+            parts.append(f"bbox={bbox}")
         return ", ".join(parts) if parts else "-"
 
     for idx, item in enumerate(normalized, start=1):

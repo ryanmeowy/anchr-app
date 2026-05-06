@@ -79,6 +79,8 @@ public class KbSegmentBulkWriter {
         document.setPageNo(segment.getPageNo());
         document.setChunkOrder(segment.getChunkOrder());
         document.setBbox(segment.getBbox());
+        document.setImageWidth(segment.getImageWidth());
+        document.setImageHeight(segment.getImageHeight());
         document.setEmbedding(segment.getEmbedding());
         document.setSourceRef(segment.getSourceRef());
         document.setThumbnail(segment.getThumbnail());

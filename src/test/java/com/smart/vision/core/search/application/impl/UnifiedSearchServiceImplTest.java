@@ -2,6 +2,7 @@ package com.smart.vision.core.search.application.impl;
 
 import com.smart.vision.core.search.application.KbQueryEmbeddingService;
 import com.smart.vision.core.search.config.AppSearchProperties;
+import com.smart.vision.core.search.domain.model.Bbox;
 import com.smart.vision.core.search.domain.model.KbSegmentHit;
 import com.smart.vision.core.search.domain.port.KbSegmentSearchPort;
 import com.smart.vision.core.search.domain.port.SearchRerankPort;
@@ -157,6 +158,9 @@ class UnifiedSearchServiceImplTest {
         assertThat(results.getFirst().getExplain().getImageSignals().isCaption()).isFalse();
         assertThat(results.getFirst().getExplain().getImageSignals().isTag()).isTrue();
         assertThat(results.getFirst().getExplain().getHitSources()).contains("TAG");
+        assertThat(results.getFirst().getAnchor().getBbox().getUnit()).isEqualTo("PIXEL");
+        assertThat(results.getFirst().getAnchor().getImageWidth()).isEqualTo(1920);
+        assertThat(results.getFirst().getAnchor().getImageHeight()).isEqualTo(1080);
     }
 
     @Test
@@ -299,6 +303,17 @@ class UnifiedSearchServiceImplTest {
         doc.setPageNo(pageNo);
         if ("IMAGE_OCR_BLOCK".equals(segmentType) || "IMAGE_CAPTION".equals(segmentType)) {
             doc.setTags(List.of("mysql"));
+        }
+        if ("IMAGE_OCR_BLOCK".equals(segmentType)) {
+            doc.setBbox(Bbox.builder()
+                    .x(120)
+                    .y(80)
+                    .width(360)
+                    .height(48)
+                    .unit("PIXEL")
+                    .build());
+            doc.setImageWidth(1920);
+            doc.setImageHeight(1080);
         }
         if ("TEXT_CHUNK".equals(segmentType)) {
             doc.setChunkOrder(0);

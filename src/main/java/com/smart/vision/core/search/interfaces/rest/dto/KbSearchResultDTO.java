@@ -1,5 +1,6 @@
 package com.smart.vision.core.search.interfaces.rest.dto;
 
+import com.smart.vision.core.search.domain.model.Bbox;
 import lombok.Builder;
 import lombok.Data;
 
@@ -42,7 +43,9 @@ public class KbSearchResultDTO implements Serializable {
     public static class Anchor implements Serializable {
         private Integer pageNo;
         private Integer chunkOrder;
-        private List<Integer> bbox;
+        private Bbox bbox;
+        private Integer imageWidth;
+        private Integer imageHeight;
     }
 
     @Data
