@@ -186,6 +186,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .pageNo(doc.getPageNo())
                 .chunkOrder(doc.getChunkOrder())
                 .bbox(doc.getBbox())
+                .imageWidth(doc.getImageWidth())
+                .imageHeight(doc.getImageHeight())
                 .build();
         return KbSearchResultDTO.builder()
                 .segmentType(doc.getSegmentType())
