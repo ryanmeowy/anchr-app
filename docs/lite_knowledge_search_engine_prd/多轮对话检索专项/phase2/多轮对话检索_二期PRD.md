@@ -150,11 +150,12 @@
 1. 提供会话列表、消息流、底部输入。
 2. 支持会话创建、切换、加载历史消息。
 3. 每轮消息展示：`query`、`answer`、`createdAt`。
-4. 支持从后端读取最近会话列表，刷新页面后左侧历史可恢复。
+4. 支持从后端读取最近会话列表，刷新页面后左侧历史可在 TTL 内恢复。
 5. P1：支持会话删除；重命名可手动或沿用自动标题。
 6. 会话历史必须具备用户维度：列表、删除、重命名只能作用于当前用户可访问的会话。
 7. 存储策略：
 - 二期优先沿用现有 Redis 会话存储，补充 `userId -> sessionId` 索引与删除/重命名能力。
+- `ConversationSession` 预留 `userId` 字段；当前无 SSO 时可使用 `default`、`anonymous` 或 `X-Access-Token` hash 作为轻量 user key。
 - 不为了删除/重命名单独引入 DB。
 - 若要求长期保存、审计查询或超过 Redis TTL 的稳定历史，再单独立项引入 DB。
 
@@ -195,6 +196,7 @@
 3. 每张卡片必须包含 `primaryHit.segmentId`。
 4. 卡片点击后必须能通过 `primaryHit.segmentId` 找到预览所需元数据。
 5. 同一 asset 的多个命中不应占用多张 Top3 卡片。
+6. `resultCards` 必须保存到 `ConversationTurn.resultCardsJson`，历史回放不二次检索。
 
 ### FR-2A 摘要总结规范（本期必须）
 
@@ -371,6 +373,11 @@
 说明：
 - 优先通过 `segmentId` 解析 `sourceRef` 并签发 URL，减少对短 TTL 元数据的依赖。
 - 如需补充可加 `GET /api/v1/preview/assets/{assetId}`。
+- `surroundingChunks` 查询需要支持按当前 segment 查前后相邻 chunk，建议能力：
+  - `findBySegmentId(segmentId)`
+  - `findNeighborChunks(assetId, pageNo, chunkOrder, window)`
+  - 默认 `window=1`
+- 若当前 segment 缺少 `chunkOrder` 或相邻 chunk 不存在，仅返回 `current`。
 
 ### 7.3 新增会话历史列表接口
 
@@ -378,11 +385,13 @@
 
 返回：
 1. `items[].sessionId`
-2. `items[].title`
-3. `items[].createdAt`
-4. `items[].updatedAt`
-5. `items[].lastMessagePreview`
-6. `nextCursor`
+2. `items[].userId`
+3. `items[].title`
+4. `items[].createdAt`
+5. `items[].updatedAt`
+6. `items[].lastMessagePreview`
+7. `items[].expiresAt`
+8. `nextCursor`
 
 说明：
 1. 用于左侧会话历史列表。
@@ -390,6 +399,7 @@
 3. 前端可以做本地缓存优化，但不能把本地缓存作为唯一历史来源。
 4. 二期优先沿用 Redis 存储，需要补充当前用户的 session 索引。
 5. 如果当前认证上下文暂未提供稳定 `userId`，需要先定义匿名/默认用户策略，避免所有用户共享同一会话历史。
+6. 当前无 SSO 时，允许使用 `X-Access-Token` hash 作为轻量 user key；未来接 SSO 后替换为真实 `userId`。
 
 P1 可选接口：
 1. `PATCH /api/conversations/{sessionId}`：重命名会话。
@@ -425,6 +435,20 @@ P1 可选接口：
 1. PDF 优先验证直接签名 URL + PDF.js。
 2. TXT/MD 若 CORS 不稳定，优先走后端受控内容 API。
 3. 不在日志中打印完整 `previewUrl`。
+4. 预览接口必须接入轻量鉴权：
+- 请求头使用现有 `X-Access-Token` 或等价 token
+- 后端校验 token 后才签发 `previewUrl`
+- token 可用于计算 `userKey/tokenHash`，参与会话归属和 preview cache key
+5. 签名 URL 泄露处理：
+- 直接 OSS 签名 URL 一旦泄露，后端无法中途撤销单个 URL
+- 必须使用短 TTL（默认 5-15 分钟）
+- 禁止日志打印完整 URL
+- 必要时切换后端受控代理/内容 API，以便后端持续鉴权
+6. 预览 URL 防抖/去重：
+- 前端同一 `segmentId` 连续点击只发起一次预览请求
+- 前端在 `expiresAt` 前可复用已有预览响应
+- 后端可按 `preview:segment:{segmentId}:token:{tokenHash}` 缓存 preview response
+- 后端缓存 TTL 取 `previewUrl` 剩余有效期减去安全 buffer（建议 30 秒）
 
 ## 8. 技术实现原则（结合现有能力）
 
@@ -438,9 +462,11 @@ P1 可选接口：
 8. Top3 选择优先保证 asset 多样性，同时不丢失 segment 级命中信息。
 9. 会话历史二期优先补 Redis 用户索引和操作能力，不把 DB 作为删除/重命名的前置依赖。
 10. `surroundingChunks` 只返回受控上下文，不承担全文预览职责。
-11. `resultCards` 必须随 turn 持久化，历史消息直接读取已保存的 `resultCards`。
+11. `ConversationTurn` 需要新增 `resultCardsJson` 字段；`resultCards` 必须随 turn 持久化，历史消息直接读取已保存的 `resultCards`。
 12. `retrievalTraceJson` 用于开发者调试和审计，不作为历史卡片重建的唯一数据源。
 13. `preferredModalities` 一期已有基础能力，二期不作为新增功能，仅在开发者模式中展示其 rewrite 输出和生效情况。
+14. `ConversationSession` 需要新增可空 `userId` 字段，作为未来 SSO 用户隔离的兼容口；当前无 SSO 时使用轻量 user key。
+15. 预览签发必须支持防抖/去重，避免同一 segment 在短时间内重复签发 URL。
 
 ## 8A. 工程要求
 
@@ -456,6 +482,10 @@ P1 可选接口：
 - 默认关闭
 - 开启后展示 `retrievalTrace`、query rewrite、`preferredModalities`、候选 segment 数量、answer fallback 信息
 - 不影响普通用户主流程
+6. 预览接口必须使用现有轻量 token 鉴权：
+- 优先复用 `@RequireAuth` / `X-Access-Token`
+- token 不写入日志
+- 前端请求预览接口必须带 token/header
 
 验收：
 1. 对话、会话历史、关键词检索、预览页都通过统一 API Client 请求后端。
@@ -485,6 +515,8 @@ P1 可选接口：
 12. 预览响应支持 `surroundingChunks`，TXT/MD 可展示当前命中上下文。
 13. bbox 缺失或无效时安全降级，不绘制错误命中框。
 14. `resultCards` 由当轮检索候选生成并随 turn 保存，历史回放不二次检索。
+15. `ConversationTurn.resultCardsJson` 与 `ConversationSession.userId` 字段完成兼容改造。
+16. 预览接口接入轻量 token 鉴权，且同一 `segmentId+tokenHash` 的预览 URL 可在有效期内复用。
 
 ## 11. 建议与取舍
 
@@ -525,6 +557,8 @@ P1 可选接口：
 6. 预览加载策略验证与定稿。
 7. Top3 asset 多样性去重规则。
 8. `surroundingChunks` 预览协议。
+9. `ConversationTurn.resultCardsJson`、`ConversationSession.userId` 字段兼容改造。
+10. 预览接口轻量 token 鉴权、URL 去重复用和签名 URL 泄露边界说明。
 
 ### M2（4-6 天）
 
