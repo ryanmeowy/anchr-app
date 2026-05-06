@@ -1,8 +1,10 @@
 package com.smart.vision.core.ingestion.infrastructure.persistence.es.document;
 
 import com.smart.vision.core.common.model.GraphTriple;
+import com.smart.vision.core.ingestion.domain.model.OcrStructuredResult;
 import lombok.Data;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
@@ -45,4 +47,7 @@ public class IngestionImageDocument {
 
     @Field(type = FieldType.Nested)
     private List<GraphTriple> relations;
+
+    @Transient
+    private OcrStructuredResult structuredOcr;
 }
