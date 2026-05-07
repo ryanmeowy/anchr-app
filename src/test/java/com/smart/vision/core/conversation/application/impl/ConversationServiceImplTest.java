@@ -7,7 +7,9 @@ import com.smart.vision.core.conversation.application.ConversationRetrievalOrche
 import com.smart.vision.core.conversation.application.FollowUpQuestionService;
 import com.smart.vision.core.conversation.application.QueryRewriteService;
 import com.smart.vision.core.conversation.application.assembler.ConversationCitationMapper;
+import com.smart.vision.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.smart.vision.core.conversation.application.assembler.ConversationResultCardMapper;
+import com.smart.vision.core.conversation.application.assembler.ConversationTurnCodec;
 import com.smart.vision.core.conversation.application.model.AnswerGenerationResult;
 import com.smart.vision.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.smart.vision.core.conversation.application.model.ConversationRetrievalResult;
@@ -69,14 +71,19 @@ class ConversationServiceImplTest {
         repository = new InMemoryConversationRepository();
         objectMapper = new ObjectMapper();
         meterRegistry = new SimpleMeterRegistry();
-        service = new ConversationServiceImpl(
-                repository,
+        ConversationMessagePipeline conversationMessagePipeline = new ConversationMessagePipeline(
                 queryRewriteService,
                 conversationRetrievalOrchestrator,
                 new ConversationCitationMapper(),
                 new ConversationResultCardMapper(),
-                answerGenerationService,
+                answerGenerationService
+        );
+        service = new ConversationServiceImpl(
+                repository,
+                conversationMessagePipeline,
                 followUpQuestionService,
+                new ConversationTurnCodec(objectMapper),
+                new ConversationRetrievalTraceBuilder(objectMapper),
                 objectMapper,
                 meterRegistry
         );
