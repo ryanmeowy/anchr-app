@@ -1,8 +1,7 @@
 package com.smart.vision.core.conversation.application.assembler;
 
+import com.smart.vision.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.smart.vision.core.conversation.domain.model.ConversationCitation;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchExplainDTO;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -24,12 +23,12 @@ public class ConversationCitationMapper {
     private static final String SEGMENT_IMAGE_CAPTION = "IMAGE_CAPTION";
     private static final String SEGMENT_TEXT = "TEXT_CHUNK";
 
-    public List<ConversationCitation> mapFromSearchResults(List<KbSearchResultDTO> results) {
+    public List<ConversationCitation> mapFromSearchResults(List<ConversationRetrievalCandidate> results) {
         if (results == null || results.isEmpty()) {
             return List.of();
         }
         List<ConversationCitation> citations = new ArrayList<>();
-        for (KbSearchResultDTO result : results) {
+        for (ConversationRetrievalCandidate result : results) {
             if (result == null) {
                 continue;
             }
@@ -45,18 +44,18 @@ public class ConversationCitationMapper {
         return citations;
     }
 
-    private String resolveSnippet(KbSearchResultDTO result) {
+    private String resolveSnippet(ConversationRetrievalCandidate result) {
         if (StringUtils.hasText(result.getSnippet())) {
             return result.getSnippet();
         }
         if (result.getTopChunks() == null || result.getTopChunks().isEmpty()) {
             return null;
         }
-        KbSearchResultDTO.TopChunk topChunk = result.getTopChunks().getFirst();
+        ConversationRetrievalCandidate.TopChunk topChunk = result.getTopChunks().getFirst();
         return topChunk == null ? null : topChunk.getSnippet();
     }
 
-    private String resolveHitType(KbSearchResultDTO result) {
+    private String resolveHitType(ConversationRetrievalCandidate result) {
         String segmentType = safeUpper(result.getSegmentType());
         if (SEGMENT_IMAGE_OCR.equals(segmentType)) {
             return HIT_TYPE_OCR;
@@ -67,7 +66,7 @@ public class ConversationCitationMapper {
         if (SEGMENT_TEXT.equals(segmentType)) {
             return HIT_TYPE_TEXT;
         }
-        KbSearchExplainDTO explain = result.getExplain();
+        ConversationRetrievalCandidate.Explain explain = result.getExplain();
         if (explain != null && explain.getHitSources() != null) {
             for (String hitSource : explain.getHitSources()) {
                 if (HIT_TYPE_VECTOR.equals(safeUpper(hitSource))) {
@@ -99,4 +98,3 @@ public class ConversationCitationMapper {
         return value.trim().toUpperCase(Locale.ROOT);
     }
 }
-

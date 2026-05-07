@@ -9,6 +9,7 @@ import com.smart.vision.core.conversation.application.QueryRewriteService;
 import com.smart.vision.core.conversation.application.assembler.ConversationCitationMapper;
 import com.smart.vision.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.smart.vision.core.conversation.application.model.AnswerGenerationResult;
+import com.smart.vision.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.smart.vision.core.conversation.application.model.ConversationRetrievalResult;
 import com.smart.vision.core.conversation.application.model.RewriteResult;
 import com.smart.vision.core.conversation.domain.model.ConversationCitation;
@@ -23,8 +24,6 @@ import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessio
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchExplainDTO;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -252,7 +251,7 @@ class ConversationServiceImplTest {
         assertThat(response.getResultCards()).extracting(ResultCardDTO::getAssetId)
                 .containsExactly("asset_1", "asset_2", "asset_3");
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<KbSearchResultDTO>> candidatesCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<ConversationRetrievalCandidate>> candidatesCaptor = ArgumentCaptor.forClass(List.class);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ConversationCitation>> citationsCaptor = ArgumentCaptor.forClass(List.class);
         verify(answerGenerationService).generate(
@@ -261,7 +260,7 @@ class ConversationServiceImplTest {
                 candidatesCaptor.capture(),
                 citationsCaptor.capture()
         );
-        assertThat(candidatesCaptor.getValue()).extracting(KbSearchResultDTO::getSegmentId)
+        assertThat(candidatesCaptor.getValue()).extracting(ConversationRetrievalCandidate::getSegmentId)
                 .containsExactly("seg_asset_1", "seg_asset_2", "seg_asset_3");
         assertThat(citationsCaptor.getValue()).extracting(ConversationCitation::getSegmentId)
                 .containsExactly("seg_asset_1", "seg_asset_2", "seg_asset_3");
@@ -439,7 +438,7 @@ class ConversationServiceImplTest {
         return result;
     }
 
-    private ConversationRetrievalResult buildRetrievalResult(List<KbSearchResultDTO> topCandidates) {
+    private ConversationRetrievalResult buildRetrievalResult(List<ConversationRetrievalCandidate> topCandidates) {
         ConversationRetrievalResult result = new ConversationRetrievalResult();
         result.setTopCandidates(topCandidates);
         ConversationRetrievalResult.GroupedResult groupedResult = new ConversationRetrievalResult.GroupedResult();
@@ -449,20 +448,20 @@ class ConversationServiceImplTest {
         return result;
     }
 
-    private KbSearchResultDTO buildResult(String segmentId,
-                                          String assetId,
-                                          String segmentType,
-                                          String sourceRef,
-                                          String snippet,
-                                          Integer pageNo) {
-        return KbSearchResultDTO.builder()
+    private ConversationRetrievalCandidate buildResult(String segmentId,
+                                                       String assetId,
+                                                       String segmentType,
+                                                       String sourceRef,
+                                                       String snippet,
+                                                       Integer pageNo) {
+        return ConversationRetrievalCandidate.builder()
                 .segmentId(segmentId)
                 .assetId(assetId)
                 .segmentType(segmentType)
                 .snippet(snippet)
                 .sourceRef(sourceRef)
                 .pageNo(pageNo)
-                .explain(KbSearchExplainDTO.builder()
+                .explain(ConversationRetrievalCandidate.Explain.builder()
                         .strategyEffective("KB_RRF_RERANK")
                         .hitSources(List.of("VECTOR", "CONTENT"))
                         .build())

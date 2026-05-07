@@ -13,6 +13,7 @@ import com.smart.vision.core.conversation.application.ConversationRetrievalOrche
 import com.smart.vision.core.conversation.application.assembler.ConversationCitationMapper;
 import com.smart.vision.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.smart.vision.core.conversation.application.model.AnswerGenerationResult;
+import com.smart.vision.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.smart.vision.core.conversation.application.model.ConversationRetrievalResult;
 import com.smart.vision.core.conversation.application.model.RewriteResult;
 import com.smart.vision.core.conversation.domain.model.ConversationCitation;
@@ -30,7 +31,6 @@ import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnDT
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultHitDTO;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -214,7 +214,7 @@ public class ConversationServiceImpl implements ConversationService {
         );
         List<ResultCardDTO> resultCards = conversationResultCardMapper.map(retrievalResult.getTopCandidates());
         LinkedHashSet<String> resultCardSegmentIds = collectResultCardSegmentIds(resultCards);
-        List<KbSearchResultDTO> answerCandidates = retrievalResult.getTopCandidates()
+        List<ConversationRetrievalCandidate> answerCandidates = retrievalResult.getTopCandidates()
                 .stream()
                 .filter(candidate -> isTraceableCandidate(candidate, resultCardSegmentIds))
                 .limit(ANSWER_CITATION_LIMIT)
@@ -255,7 +255,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
     }
 
-    private boolean isTraceableCandidate(KbSearchResultDTO candidate, LinkedHashSet<String> resultCardSegmentIds) {
+    private boolean isTraceableCandidate(ConversationRetrievalCandidate candidate, LinkedHashSet<String> resultCardSegmentIds) {
         return candidate != null
                 && StringUtils.hasText(candidate.getSegmentId())
                 && resultCardSegmentIds.contains(candidate.getSegmentId().trim());
@@ -446,7 +446,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
     }
 
-    private static String safeSegmentId(KbSearchResultDTO item) {
+    private static String safeSegmentId(ConversationRetrievalCandidate item) {
         return item == null ? null : item.getSegmentId();
     }
 
@@ -480,7 +480,7 @@ public class ConversationServiceImpl implements ConversationService {
             return List.of();
         }
         LinkedHashSet<String> hitSources = new LinkedHashSet<>();
-        for (KbSearchResultDTO candidate : retrievalResult.getTopCandidates()) {
+        for (ConversationRetrievalCandidate candidate : retrievalResult.getTopCandidates()) {
             if (candidate == null || candidate.getExplain() == null || candidate.getExplain().getHitSources() == null) {
                 continue;
             }
@@ -502,7 +502,7 @@ public class ConversationServiceImpl implements ConversationService {
         if (retrievalResult.getTopCandidates() == null || retrievalResult.getTopCandidates().isEmpty()) {
             return fallbackStrategy;
         }
-        for (KbSearchResultDTO candidate : retrievalResult.getTopCandidates()) {
+        for (ConversationRetrievalCandidate candidate : retrievalResult.getTopCandidates()) {
             if (candidate == null || candidate.getExplain() == null) {
                 continue;
             }

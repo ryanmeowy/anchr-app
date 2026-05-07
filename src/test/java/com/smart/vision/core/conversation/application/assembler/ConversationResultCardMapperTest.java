@@ -1,9 +1,8 @@
 package com.smart.vision.core.conversation.application.assembler;
 
+import com.smart.vision.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultHitDTO;
-import com.smart.vision.core.search.domain.model.Bbox;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -16,7 +15,7 @@ class ConversationResultCardMapperTest {
 
     @Test
     void map_shouldGroupByAssetAndKeepTopThreeCards() {
-        List<KbSearchResultDTO> candidates = List.of(
+        List<ConversationRetrievalCandidate> candidates = List.of(
                 candidate("seg_a_1", "asset_a", "PDF", "TEXT_CHUNK", "oss://bucket/a.pdf", "a primary", 0.92d, 3, 12),
                 candidate("seg_b_1", "asset_b", "IMAGE", "IMAGE_OCR_BLOCK", "oss://bucket/b.png", "b primary", 0.91d, null, null),
                 candidate("seg_a_2", "asset_a", "PDF", "TEXT_CHUNK", "oss://bucket/a.pdf", "a additional 1", 0.88d, 5, 2),
@@ -50,7 +49,7 @@ class ConversationResultCardMapperTest {
 
     @Test
     void map_shouldUseDeterministicTieBreakAndSkipInvalidCandidates() {
-        List<KbSearchResultDTO> cards = List.of(
+        List<ConversationRetrievalCandidate> cards = List.of(
                 candidate("seg_b", "asset_b", "PDF", "TEXT_CHUNK", "oss://bucket/b.pdf", "b", 0.80d, 1, 0),
                 candidate("seg_a", "asset_a", "PDF", "TEXT_CHUNK", "oss://bucket/a.pdf", "a", 0.80d, 1, 0),
                 candidate(null, "asset_invalid", "PDF", "TEXT_CHUNK", "oss://bucket/invalid.pdf", "invalid", 1.0d, 1, 0),
@@ -64,16 +63,16 @@ class ConversationResultCardMapperTest {
                 .containsExactly("asset_a", "asset_b");
     }
 
-    private KbSearchResultDTO candidate(String segmentId,
-                                        String assetId,
-                                        String assetType,
-                                        String segmentType,
-                                        String sourceRef,
-                                        String snippet,
-                                        Double score,
-                                        Integer pageNo,
-                                        Integer chunkOrder) {
-        return KbSearchResultDTO.builder()
+    private ConversationRetrievalCandidate candidate(String segmentId,
+                                                     String assetId,
+                                                     String assetType,
+                                                     String segmentType,
+                                                     String sourceRef,
+                                                     String snippet,
+                                                     Double score,
+                                                     Integer pageNo,
+                                                     Integer chunkOrder) {
+        return ConversationRetrievalCandidate.builder()
                 .segmentId(segmentId)
                 .assetId(assetId)
                 .assetType(assetType)
@@ -82,10 +81,10 @@ class ConversationResultCardMapperTest {
                 .snippet(snippet)
                 .score(score)
                 .pageNo(pageNo)
-                .anchor(KbSearchResultDTO.Anchor.builder()
+                .anchor(ConversationRetrievalCandidate.Anchor.builder()
                         .pageNo(pageNo)
                         .chunkOrder(chunkOrder)
-                        .bbox("IMAGE".equals(assetType) ? Bbox.builder()
+                        .bbox("IMAGE".equals(assetType) ? ConversationRetrievalCandidate.Bbox.builder()
                                 .x(10)
                                 .y(20)
                                 .width(300)

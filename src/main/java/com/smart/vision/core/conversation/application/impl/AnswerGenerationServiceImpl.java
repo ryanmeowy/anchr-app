@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smart.vision.core.conversation.application.AnswerGenerationService;
 import com.smart.vision.core.conversation.application.model.AnswerGenerationResult;
+import com.smart.vision.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.smart.vision.core.conversation.domain.model.ConversationCitation;
 import com.smart.vision.core.conversation.domain.port.ConversationRewritePort;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -48,7 +48,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     @Override
     public AnswerGenerationResult generate(String userQuery,
                                            String rewrittenQuery,
-                                           List<KbSearchResultDTO> topCandidates,
+                                           List<ConversationRetrievalCandidate> topCandidates,
                                            List<ConversationCitation> citations) {
         meterRegistry.counter("answer.generate.count").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -89,14 +89,15 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         }
     }
 
-    private List<GroundingSegment> pickGroundingSegments(List<KbSearchResultDTO> topCandidates, List<ConversationCitation> citations) {
+    private List<GroundingSegment> pickGroundingSegments(List<ConversationRetrievalCandidate> topCandidates,
+                                                         List<ConversationCitation> citations) {
         if (topCandidates == null || topCandidates.isEmpty() || citations == null || citations.isEmpty()) {
             return List.of();
         }
         List<GroundingSegment> segments = new ArrayList<>();
         int limit = Math.min(Math.min(topCandidates.size(), citations.size()), GROUNDING_LIMIT);
         for (int i = 0; i < limit; i++) {
-            KbSearchResultDTO candidate = topCandidates.get(i);
+            ConversationRetrievalCandidate candidate = topCandidates.get(i);
             ConversationCitation citation = citations.get(i);
             if (candidate == null || citation == null) {
                 continue;
@@ -117,7 +118,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         return segments;
     }
 
-    private String resolveEvidence(KbSearchResultDTO candidate, ConversationCitation citation) {
+    private String resolveEvidence(ConversationRetrievalCandidate candidate, ConversationCitation citation) {
         if (StringUtils.hasText(citation.getSnippet())) {
             return citation.getSnippet().trim();
         }
@@ -125,7 +126,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             return candidate.getSnippet().trim();
         }
         if (candidate.getTopChunks() != null && !candidate.getTopChunks().isEmpty()) {
-            KbSearchResultDTO.TopChunk first = candidate.getTopChunks().getFirst();
+            ConversationRetrievalCandidate.TopChunk first = candidate.getTopChunks().getFirst();
             if (first != null && StringUtils.hasText(first.getSnippet())) {
                 return first.getSnippet().trim();
             }
@@ -207,7 +208,8 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         }
     }
 
-    private String resolveNoEvidenceReason(List<GroundingSegment> groundingSegments, List<KbSearchResultDTO> topCandidates) {
+    private String resolveNoEvidenceReason(List<GroundingSegment> groundingSegments,
+                                           List<ConversationRetrievalCandidate> topCandidates) {
         if (groundingSegments == null || groundingSegments.isEmpty()) {
             return "no_grounding_segment";
         }
@@ -224,12 +226,12 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         return null;
     }
 
-    private double resolveMaxScore(List<KbSearchResultDTO> topCandidates) {
+    private double resolveMaxScore(List<ConversationRetrievalCandidate> topCandidates) {
         if (topCandidates == null || topCandidates.isEmpty()) {
             return -1D;
         }
         double maxScore = -1D;
-        for (KbSearchResultDTO candidate : topCandidates) {
+        for (ConversationRetrievalCandidate candidate : topCandidates) {
             if (candidate == null || candidate.getScore() == null) {
                 continue;
             }

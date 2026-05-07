@@ -1,10 +1,9 @@
 package com.smart.vision.core.conversation.application.assembler;
 
+import com.smart.vision.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.smart.vision.core.conversation.interfaces.rest.dto.PreviewAnchorDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultHitDTO;
-import com.smart.vision.core.search.domain.model.Bbox;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -24,11 +23,11 @@ public class ConversationResultCardMapper {
     private static final int MAX_RESULT_CARDS = 3;
     private static final int MAX_ADDITIONAL_HITS = 2;
 
-    public List<ResultCardDTO> map(List<KbSearchResultDTO> candidates) {
+    public List<ResultCardDTO> map(List<ConversationRetrievalCandidate> candidates) {
         if (candidates == null || candidates.isEmpty()) {
             return List.of();
         }
-        List<KbSearchResultDTO> sortedCandidates = candidates.stream()
+        List<ConversationRetrievalCandidate> sortedCandidates = candidates.stream()
                 .filter(this::canBuildHit)
                 .sorted(candidateComparator())
                 .toList();
@@ -36,14 +35,14 @@ public class ConversationResultCardMapper {
             return List.of();
         }
 
-        Map<String, List<KbSearchResultDTO>> candidatesByAsset = new LinkedHashMap<>();
-        for (KbSearchResultDTO candidate : sortedCandidates) {
+        Map<String, List<ConversationRetrievalCandidate>> candidatesByAsset = new LinkedHashMap<>();
+        for (ConversationRetrievalCandidate candidate : sortedCandidates) {
             candidatesByAsset.computeIfAbsent(candidate.getAssetId().trim(), ignored -> new ArrayList<>())
                     .add(candidate);
         }
 
         List<ResultCardDTO> cards = new ArrayList<>();
-        for (List<KbSearchResultDTO> assetCandidates : candidatesByAsset.values()) {
+        for (List<ConversationRetrievalCandidate> assetCandidates : candidatesByAsset.values()) {
             ResultCardDTO card = toCard(assetCandidates);
             if (card != null) {
                 cards.add(card);
@@ -55,11 +54,11 @@ public class ConversationResultCardMapper {
         return cards;
     }
 
-    private ResultCardDTO toCard(List<KbSearchResultDTO> assetCandidates) {
+    private ResultCardDTO toCard(List<ConversationRetrievalCandidate> assetCandidates) {
         if (assetCandidates == null || assetCandidates.isEmpty()) {
             return null;
         }
-        KbSearchResultDTO primaryCandidate = assetCandidates.getFirst();
+        ConversationRetrievalCandidate primaryCandidate = assetCandidates.getFirst();
         ResultHitDTO primaryHit = toHit(primaryCandidate);
         if (primaryHit == null) {
             return null;
@@ -82,7 +81,7 @@ public class ConversationResultCardMapper {
         return card;
     }
 
-    private ResultHitDTO toHit(KbSearchResultDTO candidate) {
+    private ResultHitDTO toHit(ConversationRetrievalCandidate candidate) {
         if (!canBuildHit(candidate)) {
             return null;
         }
@@ -96,8 +95,8 @@ public class ConversationResultCardMapper {
         return hit;
     }
 
-    private PreviewAnchorDTO toAnchor(KbSearchResultDTO candidate) {
-        KbSearchResultDTO.Anchor source = candidate.getAnchor();
+    private PreviewAnchorDTO toAnchor(ConversationRetrievalCandidate candidate) {
+        ConversationRetrievalCandidate.Anchor source = candidate.getAnchor();
         if (source == null && candidate.getPageNo() == null) {
             return null;
         }
@@ -114,7 +113,7 @@ public class ConversationResultCardMapper {
         return anchor;
     }
 
-    private PreviewAnchorDTO.BboxDTO toBbox(Bbox source) {
+    private PreviewAnchorDTO.BboxDTO toBbox(ConversationRetrievalCandidate.Bbox source) {
         if (source == null) {
             return null;
         }
@@ -127,14 +126,14 @@ public class ConversationResultCardMapper {
         return bbox;
     }
 
-    private Comparator<KbSearchResultDTO> candidateComparator() {
+    private Comparator<ConversationRetrievalCandidate> candidateComparator() {
         return Comparator
-                .comparing((KbSearchResultDTO candidate) -> nullSafeScore(candidate.getScore())).reversed()
+                .comparing((ConversationRetrievalCandidate candidate) -> nullSafeScore(candidate.getScore())).reversed()
                 .thenComparing(candidate -> nullSafeText(candidate.getAssetId()))
                 .thenComparing(candidate -> nullSafeText(candidate.getSegmentId()));
     }
 
-    private boolean canBuildHit(KbSearchResultDTO candidate) {
+    private boolean canBuildHit(ConversationRetrievalCandidate candidate) {
         return candidate != null
                 && StringUtils.hasText(candidate.getAssetId())
                 && StringUtils.hasText(candidate.getSegmentId());
@@ -144,7 +143,7 @@ public class ConversationResultCardMapper {
         return score == null ? 0.0d : score;
     }
 
-    private String resolveAssetType(KbSearchResultDTO candidate) {
+    private String resolveAssetType(ConversationRetrievalCandidate candidate) {
         if (StringUtils.hasText(candidate.getAssetType())) {
             return candidate.getAssetType().trim();
         }
@@ -154,7 +153,7 @@ public class ConversationResultCardMapper {
         return null;
     }
 
-    private String resolveFileName(KbSearchResultDTO candidate) {
+    private String resolveFileName(ConversationRetrievalCandidate candidate) {
         if (!StringUtils.hasText(candidate.getSourceRef())) {
             return null;
         }
@@ -166,7 +165,7 @@ public class ConversationResultCardMapper {
         return sourceRef.substring(slashIndex + 1);
     }
 
-    private String resolveTitle(KbSearchResultDTO candidate) {
+    private String resolveTitle(ConversationRetrievalCandidate candidate) {
         String fileName = resolveFileName(candidate);
         if (StringUtils.hasText(fileName)) {
             return fileName;

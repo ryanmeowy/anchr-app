@@ -1,9 +1,9 @@
 package com.smart.vision.core.conversation.application.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smart.vision.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.smart.vision.core.conversation.domain.model.ConversationCitation;
 import com.smart.vision.core.conversation.domain.port.ConversationRewritePort;
-import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,7 +53,7 @@ class AnswerGenerationServiceImplTest {
 
     @Test
     void generate_shouldFallbackWhenEvidenceTooShort() {
-        KbSearchResultDTO candidate = KbSearchResultDTO.builder()
+        ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_001")
                 .score(0.88D)
                 .snippet("too short")
@@ -78,7 +78,7 @@ class AnswerGenerationServiceImplTest {
     @Test
     void generate_shouldFallbackWhenRetrievalScoreTooLow() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(4);
-        KbSearchResultDTO candidate = KbSearchResultDTO.builder()
+        ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_002")
                 .score(0.03D)
                 .snippet(longEvidence)
@@ -103,7 +103,7 @@ class AnswerGenerationServiceImplTest {
     @Test
     void generate_shouldFallbackWhenModelReturnsInvalidCitation() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
-        KbSearchResultDTO candidate = KbSearchResultDTO.builder()
+        ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_003")
                 .score(0.88D)
                 .snippet(longEvidence)
@@ -130,7 +130,7 @@ class AnswerGenerationServiceImplTest {
     @Test
     void generate_shouldFallbackWhenModelFails() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
-        KbSearchResultDTO candidate = KbSearchResultDTO.builder()
+        ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_004")
                 .score(0.88D)
                 .snippet(longEvidence)
