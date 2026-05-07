@@ -11,6 +11,7 @@ import com.smart.vision.core.conversation.application.assembler.ConversationResu
 import com.smart.vision.core.conversation.application.model.AnswerGenerationResult;
 import com.smart.vision.core.conversation.application.model.ConversationRetrievalResult;
 import com.smart.vision.core.conversation.application.model.RewriteResult;
+import com.smart.vision.core.conversation.domain.model.ConversationCitation;
 import com.smart.vision.core.conversation.domain.model.ConversationSession;
 import com.smart.vision.core.conversation.domain.model.ConversationTurn;
 import com.smart.vision.core.conversation.domain.repository.ConversationRepository;
@@ -26,6 +27,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -41,6 +43,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -214,6 +217,85 @@ class ConversationServiceImplTest {
         assertThat(trace.get("answerFallback")).isEqualTo(true);
         assertThat(trace.get("answerFallbackReason")).isEqualTo("no_evidence");
         assertThat(meterRegistry.counter("answer.citation.empty.count").count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void createMessage_shouldGenerateAnswerOnlyFromResultCardSegments() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        String sessionId = session.getSessionId();
+
+        RewriteResult rewriteResult = buildRewrite(
+                "mysql 索引有哪些",
+                "mysql 索引 类型 适用场景",
+                "rewrite_by_model",
+                false
+        );
+        when(queryRewriteService.rewrite(eq(sessionId), eq("mysql 索引有哪些"))).thenReturn(rewriteResult);
+        when(conversationRetrievalOrchestrator.retrieve(
+                eq("mysql 索引 类型 适用场景"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+        )).thenReturn(buildRetrievalResult(List.of(
+                buildResult("seg_asset_1", "asset_1", "TEXT_CHUNK", "oss://bucket/mysql-1.pdf", "BTree 索引适合范围查询", 1),
+                buildResult("seg_asset_2", "asset_2", "TEXT_CHUNK", "oss://bucket/mysql-2.pdf", "Hash 索引适合等值查询", 2),
+                buildResult("seg_asset_3", "asset_3", "TEXT_CHUNK", "oss://bucket/mysql-3.pdf", "全文索引用于文本匹配", 3),
+                buildResult("seg_asset_4", "asset_4", "TEXT_CHUNK", "oss://bucket/mysql-4.pdf", "空间索引用于地理数据", 4)
+        )));
+        when(answerGenerationService.generate(eq("mysql 索引有哪些"), eq("mysql 索引 类型 适用场景"), anyList(), anyList()))
+                .thenReturn(buildAnswer("MySQL 常见索引包括 BTree、Hash 和全文索引。[1][2][3]", false, null,
+                        List.of("seg_asset_1", "seg_asset_2", "seg_asset_3")));
+        when(followUpQuestionService.generate(eq("mysql 索引有哪些"), eq("mysql 索引 类型 适用场景"), anyList()))
+                .thenReturn(List.of());
+
+        ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql 索引有哪些"));
+
+        assertThat(response.getResultCards()).extracting(ResultCardDTO::getAssetId)
+                .containsExactly("asset_1", "asset_2", "asset_3");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<KbSearchResultDTO>> candidatesCaptor = ArgumentCaptor.forClass(List.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ConversationCitation>> citationsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(answerGenerationService).generate(
+                eq("mysql 索引有哪些"),
+                eq("mysql 索引 类型 适用场景"),
+                candidatesCaptor.capture(),
+                citationsCaptor.capture()
+        );
+        assertThat(candidatesCaptor.getValue()).extracting(KbSearchResultDTO::getSegmentId)
+                .containsExactly("seg_asset_1", "seg_asset_2", "seg_asset_3");
+        assertThat(citationsCaptor.getValue()).extracting(ConversationCitation::getSegmentId)
+                .containsExactly("seg_asset_1", "seg_asset_2", "seg_asset_3");
+    }
+
+    @Test
+    void createMessage_shouldReturnResultCardsWhenAnswerGenerationFallback() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        String sessionId = session.getSessionId();
+
+        RewriteResult rewriteResult = buildRewrite(
+                "mysql redo log 是什么",
+                "mysql redo log 作用",
+                "rewrite_by_model",
+                false
+        );
+        when(queryRewriteService.rewrite(eq(sessionId), eq("mysql redo log 是什么"))).thenReturn(rewriteResult);
+        when(conversationRetrievalOrchestrator.retrieve(
+                eq("mysql redo log 作用"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+        )).thenReturn(buildRetrievalResult(List.of(
+                buildResult("seg_redo_1", "asset_redo_1", "TEXT_CHUNK", "oss://bucket/mysql-redo.pdf", "redo log 保障崩溃恢复", 8),
+                buildResult("seg_redo_2", "asset_redo_2", "TEXT_CHUNK", "oss://bucket/mysql-log.pdf", "redo log 先写日志再刷盘", 9)
+        )));
+        when(answerGenerationService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), anyList(), anyList()))
+                .thenReturn(buildAnswer("根据当前知识库，先给出可确认的信息：", true, "model_unavailable",
+                        List.of("seg_redo_1", "seg_redo_2")));
+        when(followUpQuestionService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), anyList()))
+                .thenReturn(List.of());
+
+        ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql redo log 是什么"));
+
+        assertThat(response.getResultCards()).hasSize(2);
+        assertThat(response.getResultCards()).extracting(ResultCardDTO::getAssetId)
+                .containsExactly("asset_redo_1", "asset_redo_2");
+        assertThat(response.getRetrievalTrace().getAnswerFallback()).isTrue();
+        assertThat(response.getRetrievalTrace().getAnswerFallbackReason()).isEqualTo("model_unavailable");
     }
 
     @Test

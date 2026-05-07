@@ -31,6 +31,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     private static final int MIN_TOTAL_EVIDENCE_CHARS = 80;
     private static final double MIN_TOP_SCORE_THRESHOLD = 0.12D;
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
+    private static final Pattern CITATION_REFERENCE_PATTERN = Pattern.compile("\\[(\\d+)]");
     private static final String NO_EVIDENCE_TEMPLATE = """
             未找到足够内容支持该问题。
             建议改写检索问题：%s
@@ -66,6 +67,10 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             if (!StringUtils.hasText(answerText)) {
                 meterRegistry.counter("answer.generate.fallback.count").increment();
                 return buildModelFallback(groundingSegments, "empty_model_answer");
+            }
+            if (hasInvalidCitationReference(answerText, groundingSegments.size())) {
+                meterRegistry.counter("answer.generate.fallback.count").increment();
+                return buildModelFallback(groundingSegments, "invalid_answer_citation");
             }
             AnswerGenerationResult result = new AnswerGenerationResult();
             result.setAnswerText(answerText.trim());
@@ -181,6 +186,25 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             return text;
         }
         return null;
+    }
+
+    private boolean hasInvalidCitationReference(String answerText, int evidenceCount) {
+        Matcher matcher = CITATION_REFERENCE_PATTERN.matcher(answerText);
+        while (matcher.find()) {
+            int citationNumber = parseCitationNumber(matcher.group(1));
+            if (citationNumber < 1 || citationNumber > evidenceCount) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int parseCitationNumber(String citationText) {
+        try {
+            return Integer.parseInt(citationText);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     private String resolveNoEvidenceReason(List<GroundingSegment> groundingSegments, List<KbSearchResultDTO> topCandidates) {

@@ -27,6 +27,8 @@ import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessio
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ResultHitDTO;
+import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -85,7 +87,6 @@ public class ConversationServiceImpl implements ConversationService {
         boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
         MessagePipelineResult pipelineResult = executeMessagePipeline(session.getSessionId(), request);
-        List<ResultCardDTO> resultCards = conversationResultCardMapper.map(pipelineResult.retrievalResult.getTopCandidates());
 
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId(newTurnId());
@@ -95,7 +96,7 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setRewrittenQuery(pipelineResult.rewriteResult.getRewrittenQuery());
         turn.setAnswer(pipelineResult.answerGenerationResult.getAnswerText());
         turn.setCitationsJson(serializeCitations(pipelineResult.answerCitations));
-        turn.setResultCardsJson(serializeResultCards(resultCards));
+        turn.setResultCardsJson(serializeResultCards(pipelineResult.resultCards));
         turn.setRetrievalTraceJson(buildRetrievalTraceJson(
                 request,
                 pipelineResult.rewriteResult,
@@ -118,7 +119,7 @@ public class ConversationServiceImpl implements ConversationService {
         response.setRewrittenQuery(pipelineResult.rewriteResult.getRewrittenQuery());
         response.setAnswer(turn.getAnswer());
         response.setCitations(toCitationDTOs(pipelineResult.answerCitations));
-        response.setResultCards(resultCards);
+        response.setResultCards(pipelineResult.resultCards);
         List<String> suggestedQuestions = followUpQuestionService.generate(
                 request.getQuery().trim(),
                 pipelineResult.rewriteResult.getRewrittenQuery(),
@@ -158,21 +159,53 @@ public class ConversationServiceImpl implements ConversationService {
                 request.getStrategy(),
                 rewriteResult.getPreferredModalities()
         );
-        List<ConversationCitation> allCitations = conversationCitationMapper.mapFromSearchResults(retrievalResult.getTopCandidates());
-        List<ConversationCitation> answerCitations = allCitations.stream()
-                .limit(ANSWER_CITATION_LIMIT)
-                .toList();
-        List<com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO> answerCandidates = retrievalResult.getTopCandidates()
+        List<ResultCardDTO> resultCards = conversationResultCardMapper.map(retrievalResult.getTopCandidates());
+        LinkedHashSet<String> resultCardSegmentIds = collectResultCardSegmentIds(resultCards);
+        List<KbSearchResultDTO> answerCandidates = retrievalResult.getTopCandidates()
                 .stream()
+                .filter(candidate -> isTraceableCandidate(candidate, resultCardSegmentIds))
                 .limit(ANSWER_CITATION_LIMIT)
                 .toList();
+        List<ConversationCitation> answerCitations = conversationCitationMapper.mapFromSearchResults(answerCandidates);
         AnswerGenerationResult answerGenerationResult = answerGenerationService.generate(
                 request.getQuery().trim(),
                 rewriteResult.getRewrittenQuery(),
                 answerCandidates,
                 answerCitations
         );
-        return new MessagePipelineResult(rewriteResult, retrievalResult, answerCitations, answerGenerationResult);
+        return new MessagePipelineResult(rewriteResult, retrievalResult, resultCards, answerCitations, answerGenerationResult);
+    }
+
+    private LinkedHashSet<String> collectResultCardSegmentIds(List<ResultCardDTO> resultCards) {
+        if (resultCards == null || resultCards.isEmpty()) {
+            return new LinkedHashSet<>();
+        }
+        LinkedHashSet<String> segmentIds = new LinkedHashSet<>();
+        for (ResultCardDTO card : resultCards) {
+            if (card == null) {
+                continue;
+            }
+            addHitSegmentId(segmentIds, card.getPrimaryHit());
+            if (card.getAdditionalHits() == null || card.getAdditionalHits().isEmpty()) {
+                continue;
+            }
+            for (ResultHitDTO hit : card.getAdditionalHits()) {
+                addHitSegmentId(segmentIds, hit);
+            }
+        }
+        return segmentIds;
+    }
+
+    private void addHitSegmentId(LinkedHashSet<String> segmentIds, ResultHitDTO hit) {
+        if (hit != null && StringUtils.hasText(hit.getSegmentId())) {
+            segmentIds.add(hit.getSegmentId().trim());
+        }
+    }
+
+    private boolean isTraceableCandidate(KbSearchResultDTO candidate, LinkedHashSet<String> resultCardSegmentIds) {
+        return candidate != null
+                && StringUtils.hasText(candidate.getSegmentId())
+                && resultCardSegmentIds.contains(candidate.getSegmentId().trim());
     }
 
     @Override
@@ -301,7 +334,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
     }
 
-    private static String safeSegmentId(com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO item) {
+    private static String safeSegmentId(KbSearchResultDTO item) {
         return item == null ? null : item.getSegmentId();
     }
 
@@ -335,7 +368,7 @@ public class ConversationServiceImpl implements ConversationService {
             return List.of();
         }
         LinkedHashSet<String> hitSources = new LinkedHashSet<>();
-        for (com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO candidate : retrievalResult.getTopCandidates()) {
+        for (KbSearchResultDTO candidate : retrievalResult.getTopCandidates()) {
             if (candidate == null || candidate.getExplain() == null || candidate.getExplain().getHitSources() == null) {
                 continue;
             }
@@ -357,7 +390,7 @@ public class ConversationServiceImpl implements ConversationService {
         if (retrievalResult.getTopCandidates() == null || retrievalResult.getTopCandidates().isEmpty()) {
             return fallbackStrategy;
         }
-        for (com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO candidate : retrievalResult.getTopCandidates()) {
+        for (KbSearchResultDTO candidate : retrievalResult.getTopCandidates()) {
             if (candidate == null || candidate.getExplain() == null) {
                 continue;
             }
@@ -442,6 +475,7 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private record MessagePipelineResult(RewriteResult rewriteResult, ConversationRetrievalResult retrievalResult,
+                                         List<ResultCardDTO> resultCards,
                                          List<ConversationCitation> answerCitations,
                                          AnswerGenerationResult answerGenerationResult) {
     }
