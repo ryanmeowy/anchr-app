@@ -23,7 +23,9 @@ import com.smart.vision.core.conversation.domain.repository.ConversationReposito
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationRenameRequestDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
@@ -34,13 +36,16 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Default conversation application service.
@@ -51,8 +56,13 @@ public class ConversationServiceImpl implements ConversationService {
 
     private static final int DEFAULT_TURN_LIMIT = 20;
     private static final int MAX_TURN_LIMIT = 100;
+    private static final int DEFAULT_SESSION_LIST_LIMIT = 20;
+    private static final int MAX_SESSION_LIST_LIMIT = 50;
+    private static final long SESSION_TTL_MILLIS = TimeUnit.DAYS.toMillis(30);
     private static final int ANSWER_CITATION_LIMIT = 5;
     private static final int AUTO_TITLE_MAX_LENGTH = 128;
+    private static final int LAST_MESSAGE_PREVIEW_MAX_LENGTH = 80;
+    private static final String DEFAULT_USER_ID = "uk_default";
 
     private final ConversationRepository conversationRepository;
     private final QueryRewriteService queryRewriteService;
@@ -66,9 +76,20 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public ConversationSessionDTO createSession(ConversationCreateRequestDTO request) {
+        return createSession(DEFAULT_USER_ID, request);
+    }
+
+    @Override
+    public ConversationSessionDTO createSession(String userId, ConversationCreateRequestDTO request) {
         long now = System.currentTimeMillis();
         String title = safeTrim(request.getTitle());
-        ConversationSession session = ConversationSession.createActive(newSessionId(), title, now);
+        ConversationSession session = ConversationSession.createActive(
+                newSessionId(),
+                normalizeUserId(userId),
+                title,
+                now,
+                resolveExpiresAt(now)
+        );
         conversationRepository.saveSession(session);
         meterRegistry.counter("conversation.created.count").increment();
         return toSessionDto(session);
@@ -81,8 +102,58 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
+    public ConversationSessionDTO getSession(String userId, String sessionId) {
+        ConversationSession session = loadSessionOrThrow(normalizeUserId(userId), sessionId);
+        return toSessionDto(session);
+    }
+
+    @Override
+    public ConversationSessionListDTO listSessions(String userId, Integer limit, String cursor) {
+        String normalizedUserId = normalizeUserId(userId);
+        int boundedLimit = normalizeSessionListLimit(limit);
+        int offset = decodeSessionListCursor(cursor);
+        List<ConversationSession> sessions = conversationRepository.findRecentSessions(
+                normalizedUserId,
+                offset + boundedLimit + 1
+        );
+        List<ConversationSession> page = sessions.stream()
+                .skip(offset)
+                .limit(boundedLimit)
+                .toList();
+
+        ConversationSessionListDTO response = new ConversationSessionListDTO();
+        response.setItems(page.stream().map(this::toSessionListItemDto).toList());
+        if (sessions.size() > offset + boundedLimit) {
+            response.setNextCursor(encodeSessionListCursor(offset + boundedLimit));
+        }
+        return response;
+    }
+
+    @Override
+    public ConversationSessionDTO renameSession(String userId, String sessionId, ConversationRenameRequestDTO request) {
+        ConversationSession session = loadSessionOrThrow(normalizeUserId(userId), sessionId);
+        long now = System.currentTimeMillis();
+        session.setTitle(request.getTitle().trim());
+        session.touch(now, resolveExpiresAt(now));
+        conversationRepository.saveSession(session);
+        return toSessionDto(session);
+    }
+
+    @Override
+    public void deleteSession(String userId, String sessionId) {
+        loadSessionOrThrow(normalizeUserId(userId), sessionId);
+        conversationRepository.deleteSession(sessionId);
+    }
+
+    @Override
     public ConversationMessageResponseDTO createMessage(String sessionId, ConversationMessageRequestDTO request) {
-        ConversationSession session = loadSessionOrThrow(sessionId);
+        return createMessage(DEFAULT_USER_ID, sessionId, request);
+    }
+
+    @Override
+    public ConversationMessageResponseDTO createMessage(String userId, String sessionId, ConversationMessageRequestDTO request) {
+        String normalizedUserId = normalizeUserId(userId);
+        ConversationSession session = loadSessionOrThrow(normalizedUserId, sessionId);
         long now = System.currentTimeMillis();
         boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
@@ -110,7 +181,7 @@ public class ConversationServiceImpl implements ConversationService {
         if (shouldAutoTitle) {
             session.setTitle(buildAutoTitle(request.getQuery(), pipelineResult.rewriteResult.getRewrittenQuery()));
         }
-        session.touch(now);
+        session.touch(now, resolveExpiresAt(now));
         conversationRepository.saveSession(session);
 
         ConversationMessageResponseDTO response = new ConversationMessageResponseDTO();
@@ -210,7 +281,12 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public ConversationTurnListDTO listMessages(String sessionId, Integer limit, String beforeTurnId) {
-        ConversationSession session = loadSessionOrThrow(sessionId);
+        return listMessages(DEFAULT_USER_ID, sessionId, limit, beforeTurnId);
+    }
+
+    @Override
+    public ConversationTurnListDTO listMessages(String userId, String sessionId, Integer limit, String beforeTurnId) {
+        ConversationSession session = loadSessionOrThrow(normalizeUserId(userId), sessionId);
         int boundedLimit = normalizeLimit(limit);
         List<ConversationTurn> candidates = conversationRepository.findRecentTurns(session.getSessionId(), MAX_TURN_LIMIT);
         if (candidates.isEmpty()) {
@@ -248,14 +324,47 @@ public class ConversationServiceImpl implements ConversationService {
                 .orElseThrow(() -> new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND));
     }
 
+    private ConversationSession loadSessionOrThrow(String userId, String sessionId) {
+        ConversationSession session = loadSessionOrThrow(sessionId);
+        if (!userId.equals(normalizeUserId(session.getUserId()))) {
+            throw new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND);
+        }
+        return session;
+    }
+
     private ConversationSessionDTO toSessionDto(ConversationSession session) {
         ConversationSessionDTO dto = new ConversationSessionDTO();
         dto.setSessionId(session.getSessionId());
+        dto.setUserId(session.getUserId());
         dto.setTitle(session.getTitle());
         dto.setStatus(session.getStatus().name());
         dto.setCreatedAt(session.getCreatedAt());
         dto.setUpdatedAt(session.getUpdatedAt());
+        dto.setExpiresAt(session.getExpiresAt());
         return dto;
+    }
+
+    private ConversationSessionDTO toSessionListItemDto(ConversationSession session) {
+        ConversationSessionDTO dto = toSessionDto(session);
+        dto.setLastMessagePreview(resolveLastMessagePreview(session.getSessionId()));
+        return dto;
+    }
+
+    private String resolveLastMessagePreview(String sessionId) {
+        List<ConversationTurn> turns = conversationRepository.findRecentTurns(sessionId, 1);
+        if (turns.isEmpty()) {
+            return null;
+        }
+        ConversationTurn latest = turns.getFirst();
+        String preview = StringUtils.hasText(latest.getAnswer()) ? latest.getAnswer() : latest.getQuery();
+        if (!StringUtils.hasText(preview)) {
+            return null;
+        }
+        String normalized = preview.trim().replaceAll("\\s+", " ");
+        if (normalized.length() <= LAST_MESSAGE_PREVIEW_MAX_LENGTH) {
+            return normalized;
+        }
+        return normalized.substring(0, LAST_MESSAGE_PREVIEW_MAX_LENGTH);
     }
 
     private ConversationTurnDTO toTurnDto(ConversationTurn turn) {
@@ -276,6 +385,47 @@ public class ConversationServiceImpl implements ConversationService {
             return DEFAULT_TURN_LIMIT;
         }
         return Math.max(1, Math.min(limit, MAX_TURN_LIMIT));
+    }
+
+    private int normalizeSessionListLimit(Integer limit) {
+        if (limit == null) {
+            return DEFAULT_SESSION_LIST_LIMIT;
+        }
+        return Math.max(1, Math.min(limit, MAX_SESSION_LIST_LIMIT));
+    }
+
+    private String normalizeUserId(String userId) {
+        if (!StringUtils.hasText(userId)) {
+            return DEFAULT_USER_ID;
+        }
+        return userId.trim();
+    }
+
+    private long resolveExpiresAt(long now) {
+        return now + SESSION_TTL_MILLIS;
+    }
+
+    private String encodeSessionListCursor(int offset) {
+        String payload = "{\"offset\":" + Math.max(0, offset) + "}";
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private int decodeSessionListCursor(String cursor) {
+        if (!StringUtils.hasText(cursor)) {
+            return 0;
+        }
+        try {
+            byte[] decoded = Base64.getUrlDecoder().decode(cursor.trim());
+            Map<?, ?> payload = objectMapper.readValue(decoded, Map.class);
+            Object offset = payload.get("offset");
+            if (offset instanceof Number number) {
+                return Math.max(0, number.intValue());
+            }
+            return 0;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("cursor is invalid");
+        }
     }
 
     private String safeTrim(String text) {

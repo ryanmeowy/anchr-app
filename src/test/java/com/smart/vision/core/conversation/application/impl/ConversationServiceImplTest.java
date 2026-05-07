@@ -18,7 +18,9 @@ import com.smart.vision.core.conversation.domain.repository.ConversationReposito
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationRenameRequestDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.KbSearchExplainDTO;
@@ -41,6 +43,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -299,6 +302,88 @@ class ConversationServiceImplTest {
     }
 
     @Test
+    void createMessage_shouldKeepSameAssetHitsInOneResultCard() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        String sessionId = session.getSessionId();
+
+        RewriteResult rewriteResult = buildRewrite(
+                "mysql buffer pool",
+                "mysql buffer pool 机制",
+                "rewrite_by_model",
+                false
+        );
+        when(queryRewriteService.rewrite(eq(sessionId), eq("mysql buffer pool"))).thenReturn(rewriteResult);
+        when(conversationRetrievalOrchestrator.retrieve(
+                eq("mysql buffer pool 机制"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+        )).thenReturn(buildRetrievalResult(List.of(
+                buildResult("seg_pool_1", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 缓存数据页", 3),
+                buildResult("seg_pool_2", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 使用 LRU 链表", 4)
+        )));
+        when(answerGenerationService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), anyList(), anyList()))
+                .thenReturn(buildAnswer("Buffer pool 用于缓存数据页和索引页。[1]", false, null, List.of("seg_pool_1")));
+        when(followUpQuestionService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), anyList()))
+                .thenReturn(List.of());
+
+        ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql buffer pool"));
+
+        assertThat(response.getResultCards()).hasSize(1);
+        ResultCardDTO card = response.getResultCards().getFirst();
+        assertThat(card.getPrimaryHit().getSegmentId()).isEqualTo("seg_pool_1");
+        assertThat(card.getAdditionalHits()).hasSize(1);
+        assertThat(card.getAdditionalHits().getFirst().getSegmentId()).isEqualTo("seg_pool_2");
+    }
+
+    @Test
+    void listSessions_shouldReturnCurrentUserSessionsWithCursorAndPreview() {
+        ConversationSessionDTO first = service.createSession("user_a", new ConversationCreateRequestDTO());
+        ConversationSessionDTO second = service.createSession("user_a", new ConversationCreateRequestDTO());
+        service.createSession("user_b", new ConversationCreateRequestDTO());
+        repository.findSession(first.getSessionId()).orElseThrow().setUpdatedAt(1000L);
+        repository.findSession(second.getSessionId()).orElseThrow().setUpdatedAt(2000L);
+
+        ConversationTurn firstTurn = new ConversationTurn();
+        firstTurn.setTurnId("turn_preview");
+        firstTurn.setSessionId(first.getSessionId());
+        firstTurn.setQuery("preview query");
+        firstTurn.setAnswer("preview answer ".repeat(10));
+        firstTurn.setCreatedAt(System.currentTimeMillis());
+        repository.saveTurn(firstTurn);
+
+        ConversationSessionListDTO firstPage = service.listSessions("user_a", 1, null);
+
+        assertThat(firstPage.getItems()).hasSize(1);
+        assertThat(firstPage.getItems().getFirst().getUserId()).isEqualTo("user_a");
+        assertThat(firstPage.getItems().getFirst().getSessionId()).isEqualTo(second.getSessionId());
+        assertThat(firstPage.getNextCursor()).isNotBlank();
+
+        ConversationSessionListDTO secondPage = service.listSessions("user_a", 1, firstPage.getNextCursor());
+
+        assertThat(secondPage.getItems()).hasSize(1);
+        assertThat(secondPage.getItems().getFirst().getSessionId()).isEqualTo(first.getSessionId());
+        assertThat(secondPage.getItems().getFirst().getLastMessagePreview()).startsWith("preview answer");
+        assertThat(secondPage.getNextCursor()).isNull();
+    }
+
+    @Test
+    void renameAndDeleteSession_shouldBeIsolatedByUser() {
+        ConversationCreateRequestDTO createRequest = new ConversationCreateRequestDTO();
+        createRequest.setTitle("原标题");
+        ConversationSessionDTO session = service.createSession("user_a", createRequest);
+        ConversationRenameRequestDTO renameRequest = new ConversationRenameRequestDTO();
+        renameRequest.setTitle("新标题");
+
+        ConversationSessionDTO renamed = service.renameSession("user_a", session.getSessionId(), renameRequest);
+
+        assertThat(renamed.getTitle()).isEqualTo("新标题");
+        assertThatThrownBy(() -> service.renameSession("user_b", session.getSessionId(), renameRequest))
+                .hasMessageContaining("Conversation session not found");
+
+        service.deleteSession("user_a", session.getSessionId());
+
+        assertThat(repository.findSession(session.getSessionId())).isEmpty();
+    }
+
+    @Test
     void createMessage_shouldKeepExistingTitleWhenAlreadyProvided() {
         ConversationCreateRequestDTO createRequest = new ConversationCreateRequestDTO();
         createRequest.setTitle("手动命名会话");
@@ -419,6 +504,21 @@ class ConversationServiceImplTest {
         @Override
         public Optional<ConversationSession> findSession(String sessionId) {
             return Optional.ofNullable(sessions.get(sessionId));
+        }
+
+        @Override
+        public List<ConversationSession> findRecentSessions(String userId, int limit) {
+            return sessions.values().stream()
+                    .filter(session -> userId.equals(session.getUserId()))
+                    .sorted(Comparator.comparingLong(ConversationSession::getUpdatedAt).reversed())
+                    .limit(Math.max(1, limit))
+                    .collect(Collectors.toCollection(ArrayList::new));
+        }
+
+        @Override
+        public void deleteSession(String sessionId) {
+            sessions.remove(sessionId);
+            turnsBySession.remove(sessionId);
         }
 
         @Override

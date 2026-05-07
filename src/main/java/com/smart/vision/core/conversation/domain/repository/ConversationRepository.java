@@ -15,10 +15,13 @@ public interface ConversationRepository {
 
     Optional<ConversationSession> findSession(String sessionId);
 
+    List<ConversationSession> findRecentSessions(String userId, int limit);
+
+    void deleteSession(String sessionId);
+
     void saveTurn(ConversationTurn turn);
 
     Optional<ConversationTurn> findTurn(String sessionId, String turnId);
 
     List<ConversationTurn> findRecentTurns(String sessionId, int limit);
 }
-

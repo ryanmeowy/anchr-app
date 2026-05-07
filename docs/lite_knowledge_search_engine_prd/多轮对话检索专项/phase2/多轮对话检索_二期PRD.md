@@ -156,7 +156,7 @@
 6. 会话历史必须具备用户维度：列表、删除、重命名只能作用于当前用户可访问的会话。
 7. 存储策略：
 - 二期优先沿用现有 Redis 会话存储，补充 `userId -> sessionId` 索引与删除/重命名能力。
-- `ConversationSession` 预留 `userId` 字段；当前无 SSO 时可使用 `default`、`anonymous` 或 `X-Access-Token` hash 作为轻量 user key。
+- `ConversationSession` 预留 `userId` 字段；当前无 SSO 时使用稳定 `X-User-Key` 的不可逆 hash 作为轻量 user key，`X-Access-Token` 仅用于认证。
 - 不为了删除/重命名单独引入 DB。
 - 若要求长期保存、审计查询或超过 Redis TTL 的稳定历史，再单独立项引入 DB。
 
@@ -406,7 +406,7 @@ anchor 规范：
 3. 前端可以做本地缓存优化，但不能把本地缓存作为唯一历史来源。
 4. 二期优先沿用 Redis 存储，需要补充当前用户的 session 索引。
 5. 如果当前认证上下文暂未提供稳定 `userId`，需要先定义匿名/默认用户策略，避免所有用户共享同一会话历史。
-6. 当前无 SSO 时，允许使用 `X-Access-Token` hash 作为轻量 user key；未来接 SSO 后替换为真实 `userId`。
+6. 当前无 SSO 时，使用稳定 `X-User-Key` 的不可逆 hash 作为轻量 user key；未来接 SSO 后替换为真实 `userId`。
 
 P1 可选接口：
 1. `PATCH /api/conversations/{sessionId}`：重命名会话。

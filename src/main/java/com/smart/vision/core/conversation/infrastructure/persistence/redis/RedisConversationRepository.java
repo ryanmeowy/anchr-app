@@ -28,8 +28,10 @@ public class RedisConversationRepository implements ConversationRepository {
     private static final String SESSION_KEY_PREFIX = "conversation:session:";
     private static final String TURN_KEY_PREFIX = "conversation:turn:";
     private static final String TURN_INDEX_KEY_PREFIX = "conversation:turn:index:";
+    private static final String SESSION_INDEX_KEY_PREFIX = "conversation:session:index:";
     private static final long DEFAULT_TTL_SECONDS = TimeUnit.DAYS.toSeconds(30);
     private static final int MAX_RECENT_LIMIT = 100;
+    private static final int MAX_SESSION_LIST_LIMIT = 200;
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -45,6 +47,11 @@ public class RedisConversationRepository implements ConversationRepository {
                 DEFAULT_TTL_SECONDS,
                 TimeUnit.SECONDS
         );
+        if (StringUtils.hasText(session.getUserId())) {
+            String indexKey = sessionIndexKey(session.getUserId());
+            redisTemplate.opsForZSet().add(indexKey, session.getSessionId(), session.getUpdatedAt());
+            redisTemplate.expire(indexKey, DEFAULT_TTL_SECONDS, TimeUnit.SECONDS);
+        }
     }
 
     @Override
@@ -64,6 +71,54 @@ public class RedisConversationRepository implements ConversationRepository {
             redisTemplate.delete(key);
             return Optional.empty();
         }
+    }
+
+    @Override
+    public List<ConversationSession> findRecentSessions(String userId, int limit) {
+        if (!StringUtils.hasText(userId)) {
+            return List.of();
+        }
+        int boundedLimit = Math.max(1, Math.min(limit, MAX_SESSION_LIST_LIMIT));
+        String indexKey = sessionIndexKey(userId);
+        Set<String> sessionIds = redisTemplate.opsForZSet().reverseRange(indexKey, 0, boundedLimit - 1);
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return List.of();
+        }
+        List<ConversationSession> sessions = new ArrayList<>();
+        for (String sessionId : sessionIds) {
+            Optional<ConversationSession> session = findSession(sessionId);
+            if (session.isEmpty()) {
+                redisTemplate.opsForZSet().remove(indexKey, sessionId);
+                continue;
+            }
+            if (userId.equals(session.get().getUserId())) {
+                sessions.add(session.get());
+            }
+        }
+        return sessions;
+    }
+
+    @Override
+    public void deleteSession(String sessionId) {
+        if (!StringUtils.hasText(sessionId)) {
+            return;
+        }
+        findSession(sessionId).ifPresent(session -> {
+            if (StringUtils.hasText(session.getUserId())) {
+                redisTemplate.opsForZSet().remove(sessionIndexKey(session.getUserId()), sessionId);
+            }
+        });
+        String indexKey = turnIndexKey(sessionId);
+        Set<String> turnIds = redisTemplate.opsForZSet().range(indexKey, 0, -1);
+        List<String> keys = new ArrayList<>();
+        keys.add(sessionKey(sessionId));
+        keys.add(indexKey);
+        if (turnIds != null && !turnIds.isEmpty()) {
+            for (String turnId : turnIds) {
+                keys.add(turnKey(sessionId, turnId));
+            }
+        }
+        redisTemplate.delete(keys);
     }
 
     @Override
@@ -142,5 +197,8 @@ public class RedisConversationRepository implements ConversationRepository {
     private String turnIndexKey(String sessionId) {
         return TURN_INDEX_KEY_PREFIX + sessionId;
     }
-}
 
+    private String sessionIndexKey(String userId) {
+        return SESSION_INDEX_KEY_PREFIX + userId;
+    }
+}
