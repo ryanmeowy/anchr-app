@@ -6,12 +6,14 @@ import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.application.KbQueryEmbeddingService;
 import com.smart.vision.core.search.application.UnifiedSearchService;
 import com.smart.vision.core.search.config.AppSearchProperties;
+import com.smart.vision.core.search.domain.model.KbAssetTypeEnum;
 import com.smart.vision.core.search.domain.model.KbSegmentHit;
+import com.smart.vision.core.search.domain.model.Segment;
 import com.smart.vision.core.search.domain.model.SegmentRerankCandidate;
-import com.smart.vision.core.search.domain.port.KbSegmentSearchPort;
 import com.smart.vision.core.search.domain.port.SearchRerankPort;
 import com.smart.vision.core.search.domain.port.SearchRerankPort.RerankItem;
-import com.smart.vision.core.search.infrastructure.persistence.es.document.KbSegmentDocument;
+import com.smart.vision.core.search.domain.model.SegmentType;
+import com.smart.vision.core.search.domain.repository.KbSegmentRepository;
 import com.smart.vision.core.search.interfaces.rest.dto.KbSearchExplainDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.KbSearchQueryDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
@@ -42,7 +44,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private static final String STRATEGY_CODE = "KB_RRF";
     private static final String STRATEGY_CODE_RERANK = "KB_RRF_RERANK";
 
-    private final KbSegmentSearchPort kbSegmentSearchPort;
+    private final KbSegmentRepository kbSegmentRepository;
     private final KbQueryEmbeddingService kbQueryEmbeddingService;
     private final SearchRerankPort searchRerankPort;
     private final AppSearchProperties appSearchProperties;
@@ -61,8 +63,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         boolean rerankRequested = STRATEGY_CODE_RERANK.equals(requestedStrategyCode);
 
         List<Float> queryVector = kbQueryEmbeddingService.embedQuery(keyword);
-        List<KbSegmentHit> textHits = kbSegmentSearchPort.textSearch(keyword, recallTopK);
-        List<KbSegmentHit> vectorHits = kbSegmentSearchPort.vectorSearch(queryVector, recallTopK);
+        List<KbSegmentHit> textHits = kbSegmentRepository.textSearch(keyword, recallTopK);
+        List<KbSegmentHit> vectorHits = kbSegmentRepository.vectorSearch(queryVector, recallTopK);
         log.info("kb search recall completed, keyword={}, strategy={}, rerankRequested={}, recallTopK={}, textHits={}, vectorHits={}",
                 keyword, requestedStrategyCode, rerankRequested, recallTopK, textHits.size(), vectorHits.size());
 
@@ -109,8 +111,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         }
         for (int i = 0; i < ranking.size(); i++) {
             KbSegmentHit hit = ranking.get(i);
-            KbSegmentDocument doc = hit == null ? null : hit.getDocument();
-            String segmentId = doc == null ? null : doc.getSegmentId();
+            Segment segment = hit == null ? null : hit.getSegment();
+            String segmentId = segment == null ? null : segment.getSegmentId();
             if (!StringUtils.hasText(segmentId)) {
                 continue;
             }
@@ -137,16 +139,16 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
     private SegmentRerankCandidate toCandidate(Accumulator acc) {
         KbSegmentHit displaySource = acc.textSource != null ? acc.textSource : acc.vectorSource;
-        KbSegmentDocument doc = displaySource == null ? null : displaySource.getDocument();
-        if (doc == null) {
+        Segment segment = displaySource == null ? null : displaySource.getSegment();
+        if (segment == null) {
             return null;
         }
         Map<String, String> highlights = acc.textSource == null || acc.textSource.getHighlights() == null
                 ? Map.of()
                 : acc.textSource.getHighlights();
         return new SegmentRerankCandidate(
-                doc.getSegmentId(),
-                doc,
+                segment.getSegmentId(),
+                segment,
                 highlights,
                 acc.rrfScore,
                 acc.bestRawScore,
@@ -156,12 +158,12 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private KbSearchResultDTO toResult(SegmentRerankCandidate candidate, String keyword, String strategyCode) {
-        KbSegmentDocument doc = candidate.document();
+        Segment segment = candidate.segment();
         Map<String, String> highlights = candidate.highlights();
-        boolean titleHit = highlights.containsKey("title") || containsIgnoreCase(doc.getTitle(), keyword);
-        boolean contentHit = highlights.containsKey("contentText") || containsIgnoreCase(doc.getContentText(), keyword);
-        boolean ocrHit = highlights.containsKey("ocrText") || containsIgnoreCase(doc.getOcrText(), keyword);
-        boolean tagHit = hasTagHit(doc, keyword, highlights);
+        boolean titleHit = highlights.containsKey("title") || containsIgnoreCase(segment.getTitle(), keyword);
+        boolean contentHit = highlights.containsKey("contentText") || containsIgnoreCase(segment.getContentText(), keyword);
+        boolean ocrHit = highlights.containsKey("ocrText") || containsIgnoreCase(segment.getOcrText(), keyword);
+        boolean tagHit = hasTagHit(segment, keyword, highlights);
 
         List<String> hitSources = new ArrayList<>();
         if (candidate.vectorHit()) {
@@ -180,30 +182,30 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             hitSources.add("TAG");
         }
 
-        String content = resolveContent(doc);
+        String content = resolveContent(segment);
         String snippet = pickSnippet(content, highlights);
         KbSearchResultDTO.Anchor anchor = KbSearchResultDTO.Anchor.builder()
-                .pageNo(doc.getPageNo())
-                .chunkOrder(doc.getChunkOrder())
-                .bbox(doc.getBbox())
-                .imageWidth(doc.getImageWidth())
-                .imageHeight(doc.getImageHeight())
+                .pageNo(segment.getPageNo())
+                .chunkOrder(segment.getChunkOrder())
+                .bbox(segment.getBbox())
+                .imageWidth(segment.getImageWidth())
+                .imageHeight(segment.getImageHeight())
                 .build();
         return KbSearchResultDTO.builder()
-                .segmentType(doc.getSegmentType())
+                .segmentType(toCode(segment.getSegmentType()))
                 .content(content)
-                .resultType(doc.getSegmentType())
-                .assetType(doc.getAssetType())
+                .resultType(toCode(segment.getSegmentType()))
+                .assetType(toCode(segment.getAssetType()))
                 .snippet(snippet)
-                .pageNo(doc.getPageNo())
+                .pageNo(segment.getPageNo())
                 .score(candidate.score())
-                .segmentId(doc.getSegmentId())
-                .assetId(doc.getAssetId())
-                .sourceRef(doc.getSourceRef())
+                .segmentId(segment.getSegmentId())
+                .assetId(segment.getAssetId())
+                .sourceRef(segment.getSourceRef())
                 .anchor(anchor)
-                .thumbnail(resolveThumbnail(doc))
-                .ocrSummary(resolveOcrSummary(doc))
-                .explain(buildExplain(doc, strategyCode, hitSources, candidate.vectorHit(), titleHit, contentHit, ocrHit, tagHit))
+                .thumbnail(resolveThumbnail(segment))
+                .ocrSummary(resolveOcrSummary(segment))
+                .explain(buildExplain(segment, strategyCode, hitSources, candidate.vectorHit(), titleHit, contentHit, ocrHit, tagHit))
                 .build();
     }
 
@@ -291,7 +293,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return "__fallback__" + item.hashCode();
     }
 
-    private KbSearchExplainDTO buildExplain(KbSegmentDocument doc,
+    private KbSearchExplainDTO buildExplain(Segment segment,
                                             String strategyCode,
                                             List<String> hitSources,
                                             boolean vectorHit,
@@ -309,18 +311,18 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         KbSearchExplainDTO.TextSignals textSignals = null;
         KbSearchExplainDTO.ImageSignals imageSignals = null;
 
-        if (isTextSegment(doc)) {
+        if (isTextSegment(segment)) {
             textSignals = KbSearchExplainDTO.TextSignals.builder()
                     .semantic(vectorHit)
                     .keyword(titleHit || contentHit || ocrHit)
-                    .pageHit(doc.getPageNo() != null)
-                    .chunkHit(doc.getChunkOrder() != null)
+                    .pageHit(segment.getPageNo() != null)
+                    .chunkHit(segment.getChunkOrder() != null)
                     .build();
-        } else if (isImageSegment(doc)) {
+        } else if (isImageSegment(segment)) {
             imageSignals = KbSearchExplainDTO.ImageSignals.builder()
                     .vector(vectorHit)
                     .ocr(ocrHit)
-                    .caption(isImageCaptionSegment(doc) && (titleHit || contentHit))
+                    .caption(isImageCaptionSegment(segment) && (titleHit || contentHit))
                     .tag(tagHit)
                     .build();
         }
@@ -357,64 +359,64 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return text.substring(0, maxLen);
     }
 
-    private String resolveContent(KbSegmentDocument doc) {
-        if (doc == null) {
+    private String resolveContent(Segment segment) {
+        if (segment == null) {
             return "";
         }
-        if (StringUtils.hasText(doc.getContentText())) {
-            return doc.getContentText();
+        if (StringUtils.hasText(segment.getContentText())) {
+            return segment.getContentText();
         }
-        if (StringUtils.hasText(doc.getOcrText())) {
-            return doc.getOcrText();
+        if (StringUtils.hasText(segment.getOcrText())) {
+            return segment.getOcrText();
         }
-        if (StringUtils.hasText(doc.getTitle())) {
-            return doc.getTitle();
+        if (StringUtils.hasText(segment.getTitle())) {
+            return segment.getTitle();
         }
         return "";
     }
 
-    private String resolveThumbnail(KbSegmentDocument doc) {
-        if (doc == null || !"IMAGE".equalsIgnoreCase(doc.getAssetType())) {
+    private String resolveThumbnail(Segment segment) {
+        if (segment == null || segment.getAssetType() != KbAssetTypeEnum.IMAGE) {
             return null;
         }
-        if (StringUtils.hasText(doc.getThumbnail())) {
-            return doc.getThumbnail();
+        if (StringUtils.hasText(segment.getThumbnail())) {
+            return segment.getThumbnail();
         }
-        return doc.getSourceRef();
+        return segment.getSourceRef();
     }
 
-    private String resolveOcrSummary(KbSegmentDocument doc) {
-        if (doc == null || !"IMAGE".equalsIgnoreCase(doc.getAssetType())) {
+    private String resolveOcrSummary(Segment segment) {
+        if (segment == null || segment.getAssetType() != KbAssetTypeEnum.IMAGE) {
             return null;
         }
-        if (StringUtils.hasText(doc.getOcrSummary())) {
-            return doc.getOcrSummary();
+        if (StringUtils.hasText(segment.getOcrSummary())) {
+            return segment.getOcrSummary();
         }
-        return clip(doc.getOcrText(), 180);
+        return clip(segment.getOcrText(), 180);
     }
 
-    private boolean isTextSegment(KbSegmentDocument doc) {
-        return doc != null && "TEXT_CHUNK".equalsIgnoreCase(doc.getSegmentType());
+    private boolean isTextSegment(Segment segment) {
+        return segment != null && segment.getSegmentType() == SegmentType.TEXT_CHUNK;
     }
 
-    private boolean isImageSegment(KbSegmentDocument doc) {
-        return doc != null
-                && StringUtils.hasText(doc.getSegmentType())
-                && doc.getSegmentType().toUpperCase(Locale.ROOT).startsWith("IMAGE_");
+    private boolean isImageSegment(Segment segment) {
+        return segment != null
+                && segment.getSegmentType() != null
+                && segment.getSegmentType().name().startsWith("IMAGE_");
     }
 
-    private boolean isImageCaptionSegment(KbSegmentDocument doc) {
-        return doc != null && "IMAGE_CAPTION".equalsIgnoreCase(doc.getSegmentType());
+    private boolean isImageCaptionSegment(Segment segment) {
+        return segment != null && segment.getSegmentType() == SegmentType.IMAGE_CAPTION;
     }
 
-    private boolean hasTagHit(KbSegmentDocument doc, String keyword, Map<String, String> highlights) {
+    private boolean hasTagHit(Segment segment, String keyword, Map<String, String> highlights) {
         if (highlights != null && highlights.containsKey("tags")) {
             return true;
         }
-        if (doc == null || !StringUtils.hasText(keyword)) {
+        if (segment == null || !StringUtils.hasText(keyword)) {
             return false;
         }
-        List<String> tags = doc.getTags();
+        List<String> tags = segment.getTags();
         if (tags == null || tags.isEmpty()) {
             return false;
         }
@@ -503,7 +505,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             double fusedScore = alpha * retrievalScore + beta * rerankScore;
             SegmentRerankCandidate updatedCandidate = new SegmentRerankCandidate(
                     candidate.segmentId(),
-                    candidate.document(),
+                    candidate.segment(),
                     candidate.highlights(),
                     fusedScore,
                     candidate.bestRawScore(),
@@ -574,17 +576,17 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private String buildRerankDocument(SegmentRerankCandidate candidate) {
-        if (candidate == null || candidate.document() == null) {
+        if (candidate == null || candidate.segment() == null) {
             return "";
         }
-        KbSegmentDocument doc = candidate.document();
+        Segment segment = candidate.segment();
         StringBuilder sb = new StringBuilder(256);
-        appendRerankField(sb, "segmentType", doc.getSegmentType());
-        appendRerankField(sb, "title", doc.getTitle());
-        appendRerankField(sb, "content", doc.getContentText());
-        appendRerankField(sb, "ocr", doc.getOcrText());
-        if (doc.getTags() != null && !doc.getTags().isEmpty()) {
-            appendRerankField(sb, "tags", String.join(", ", doc.getTags()));
+        appendRerankField(sb, "segmentType", toCode(segment.getSegmentType()));
+        appendRerankField(sb, "title", segment.getTitle());
+        appendRerankField(sb, "content", segment.getContentText());
+        appendRerankField(sb, "ocr", segment.getOcrText());
+        if (segment.getTags() != null && !segment.getTags().isEmpty()) {
+            appendRerankField(sb, "tags", String.join(", ", segment.getTags()));
         }
         String merged = sb.toString();
         int maxDocChars = Math.max(64, appSearchProperties.getRerank().getMaxDocChars());
@@ -627,6 +629,10 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             return normalized;
         }
         throw new BusinessException(ApiError.INVALID_REQUEST, "unsupported strategy: " + strategy);
+    }
+
+    private String toCode(Enum<?> value) {
+        return value == null ? null : value.name();
     }
 
     private static final class Accumulator {

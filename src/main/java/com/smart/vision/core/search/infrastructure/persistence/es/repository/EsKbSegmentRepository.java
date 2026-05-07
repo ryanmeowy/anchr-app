@@ -1,6 +1,7 @@
 package com.smart.vision.core.search.infrastructure.persistence.es.repository;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
@@ -9,7 +10,10 @@ import com.smart.vision.core.common.constant.EmbeddingConstant;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.search.domain.model.KbSegmentHit;
-import com.smart.vision.core.search.domain.port.KbSegmentSearchPort;
+import com.smart.vision.core.search.domain.model.KbAssetTypeEnum;
+import com.smart.vision.core.search.domain.model.Segment;
+import com.smart.vision.core.search.domain.model.SegmentType;
+import com.smart.vision.core.search.domain.repository.KbSegmentRepository;
 import com.smart.vision.core.search.infrastructure.persistence.es.document.KbSegmentDocument;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +24,7 @@ import org.springframework.util.StringUtils;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Elasticsearch repository for unified kb_segment retrieval.
@@ -27,7 +32,7 @@ import java.util.Map;
 @Slf4j
 @Repository
 @RequiredArgsConstructor
-public class EsKbSegmentSearchRepository implements KbSegmentSearchPort {
+public class EsKbSegmentRepository implements KbSegmentRepository {
 
     private final ElasticsearchClient esClient;
     private final KbSegmentConfig kbSegmentConfig;
@@ -58,6 +63,29 @@ public class EsKbSegmentSearchRepository implements KbSegmentSearchPort {
             return convertHits(response);
         } catch (Exception e) {
             log.error("kb vector search failed", e);
+            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+        }
+    }
+
+    @Override
+    public Optional<Segment> findBySegmentId(String segmentId) {
+        if (!StringUtils.hasText(segmentId)) {
+            return Optional.empty();
+        }
+        try {
+            GetResponse<KbSegmentDocument> response = esClient.get(g -> g
+                    .index(kbSegmentConfig.getReadTargetName())
+                    .id(segmentId.trim()), KbSegmentDocument.class);
+            if (response == null || !response.found() || response.source() == null) {
+                return Optional.empty();
+            }
+            KbSegmentDocument doc = response.source();
+            if (!StringUtils.hasText(doc.getSegmentId())) {
+                doc.setSegmentId(segmentId.trim());
+            }
+            return Optional.of(toSegment(doc));
+        } catch (Exception e) {
+            log.error("kb segment get failed, segmentId={}", segmentId, e);
             throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
@@ -116,11 +144,48 @@ public class EsKbSegmentSearchRepository implements KbSegmentSearchPort {
             doc.setSegmentId(hit.id());
         }
         return KbSegmentHit.builder()
-                .document(doc)
+                .segment(toSegment(doc))
                 .rawScore(hit.score())
                 .highlights(extractHighlightMap(hit))
                 .highlightFields(hit.highlight() == null ? List.of() : List.copyOf(hit.highlight().keySet()))
                 .build();
+    }
+
+    private Segment toSegment(KbSegmentDocument doc) {
+        return Segment.builder()
+                .segmentId(doc.getSegmentId())
+                .assetId(doc.getAssetId())
+                .assetType(parseAssetType(doc.getAssetType()))
+                .segmentType(parseSegmentType(doc.getSegmentType()))
+                .title(doc.getTitle())
+                .contentText(doc.getContentText())
+                .ocrText(doc.getOcrText())
+                .pageNo(doc.getPageNo())
+                .chunkOrder(doc.getChunkOrder())
+                .bbox(doc.getBbox())
+                .imageWidth(doc.getImageWidth())
+                .imageHeight(doc.getImageHeight())
+                .embedding(doc.getEmbedding())
+                .sourceRef(doc.getSourceRef())
+                .thumbnail(doc.getThumbnail())
+                .ocrSummary(doc.getOcrSummary())
+                .tags(doc.getTags())
+                .createdAt(doc.getCreatedAt())
+                .build();
+    }
+
+    private KbAssetTypeEnum parseAssetType(String assetType) {
+        if (!StringUtils.hasText(assetType)) {
+            return null;
+        }
+        return KbAssetTypeEnum.valueOf(assetType.trim().toUpperCase());
+    }
+
+    private SegmentType parseSegmentType(String segmentType) {
+        if (!StringUtils.hasText(segmentType)) {
+            return null;
+        }
+        return SegmentType.valueOf(segmentType.trim().toUpperCase());
     }
 
     private Map<String, String> extractHighlightMap(Hit<KbSegmentDocument> hit) {

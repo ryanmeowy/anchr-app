@@ -1,7 +1,5 @@
 package com.smart.vision.core.search.domain.model;
 
-import com.smart.vision.core.search.infrastructure.persistence.es.document.KbSegmentDocument;
-
 import java.util.Map;
 
 /**
@@ -9,7 +7,7 @@ import java.util.Map;
  */
 public record SegmentRerankCandidate(
         String segmentId,
-        KbSegmentDocument document,
+        Segment segment,
         Map<String, String> highlights,
         double score,
         double bestRawScore,
