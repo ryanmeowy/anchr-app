@@ -17,6 +17,7 @@ public class ConversationTurnDTO implements Serializable {
     private String rewrittenQuery;
     private String answer;
     private List<CitationDTO> citations;
+    private List<ResultCardDTO> resultCards;
     private long createdAt;
 
     @Data
@@ -29,4 +30,3 @@ public class ConversationTurnDTO implements Serializable {
         private String segmentId;
     }
 }
-

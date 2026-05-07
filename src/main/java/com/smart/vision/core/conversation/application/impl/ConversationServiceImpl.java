@@ -11,6 +11,7 @@ import com.smart.vision.core.conversation.application.QueryRewriteService;
 import com.smart.vision.core.conversation.application.ConversationService;
 import com.smart.vision.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.smart.vision.core.conversation.application.assembler.ConversationCitationMapper;
+import com.smart.vision.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.smart.vision.core.conversation.application.model.AnswerGenerationResult;
 import com.smart.vision.core.conversation.application.model.ConversationRetrievalResult;
 import com.smart.vision.core.conversation.application.model.RewriteResult;
@@ -25,6 +26,7 @@ import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessag
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -54,6 +56,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final QueryRewriteService queryRewriteService;
     private final ConversationRetrievalOrchestrator conversationRetrievalOrchestrator;
     private final ConversationCitationMapper conversationCitationMapper;
+    private final ConversationResultCardMapper conversationResultCardMapper;
     private final AnswerGenerationService answerGenerationService;
     private final FollowUpQuestionService followUpQuestionService;
     private final ObjectMapper objectMapper;
@@ -82,6 +85,7 @@ public class ConversationServiceImpl implements ConversationService {
         boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
         MessagePipelineResult pipelineResult = executeMessagePipeline(session.getSessionId(), request);
+        List<ResultCardDTO> resultCards = conversationResultCardMapper.map(pipelineResult.retrievalResult.getTopCandidates());
 
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId(newTurnId());
@@ -91,6 +95,7 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setRewrittenQuery(pipelineResult.rewriteResult.getRewrittenQuery());
         turn.setAnswer(pipelineResult.answerGenerationResult.getAnswerText());
         turn.setCitationsJson(serializeCitations(pipelineResult.answerCitations));
+        turn.setResultCardsJson(serializeResultCards(resultCards));
         turn.setRetrievalTraceJson(buildRetrievalTraceJson(
                 request,
                 pipelineResult.rewriteResult,
@@ -113,6 +118,7 @@ public class ConversationServiceImpl implements ConversationService {
         response.setRewrittenQuery(pipelineResult.rewriteResult.getRewrittenQuery());
         response.setAnswer(turn.getAnswer());
         response.setCitations(toCitationDTOs(pipelineResult.answerCitations));
+        response.setResultCards(resultCards);
         List<String> suggestedQuestions = followUpQuestionService.generate(
                 request.getQuery().trim(),
                 pipelineResult.rewriteResult.getRewrittenQuery(),
@@ -227,6 +233,7 @@ public class ConversationServiceImpl implements ConversationService {
         dto.setRewrittenQuery(turn.getRewrittenQuery());
         dto.setAnswer(turn.getAnswer());
         dto.setCitations(parseCitations(turn.getCitationsJson()));
+        dto.setResultCards(parseResultCards(turn.getResultCardsJson()));
         dto.setCreatedAt(turn.getCreatedAt());
         return dto;
     }
@@ -378,6 +385,14 @@ public class ConversationServiceImpl implements ConversationService {
         }
     }
 
+    private String serializeResultCards(List<ResultCardDTO> resultCards) {
+        try {
+            return objectMapper.writeValueAsString(resultCards == null ? List.of() : resultCards);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize result cards.", e);
+        }
+    }
+
     private List<ConversationTurnDTO.CitationDTO> parseCitations(String citationsJson) {
         if (!StringUtils.hasText(citationsJson)) {
             return List.of();
@@ -387,6 +402,19 @@ public class ConversationServiceImpl implements ConversationService {
                     .constructCollectionType(List.class, ConversationCitation.class);
             List<ConversationCitation> citations = objectMapper.readValue(citationsJson, listType);
             return toCitationDTOs(citations);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private List<ResultCardDTO> parseResultCards(String resultCardsJson) {
+        if (!StringUtils.hasText(resultCardsJson)) {
+            return List.of();
+        }
+        try {
+            CollectionType listType = objectMapper.getTypeFactory()
+                    .constructCollectionType(List.class, ResultCardDTO.class);
+            return objectMapper.readValue(resultCardsJson, listType);
         } catch (Exception e) {
             return List.of();
         }

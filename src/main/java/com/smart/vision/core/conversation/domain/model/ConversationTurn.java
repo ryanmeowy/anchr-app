@@ -17,7 +17,7 @@ public class ConversationTurn {
     private String rewrittenQuery;
     private String answer;
     private String citationsJson;
+    private String resultCardsJson;
     private String retrievalTraceJson;
     private long createdAt;
 }
-

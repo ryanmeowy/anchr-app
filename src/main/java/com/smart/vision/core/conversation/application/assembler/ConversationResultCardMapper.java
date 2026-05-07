@@ -1,0 +1,180 @@
+package com.smart.vision.core.conversation.application.assembler;
+
+import com.smart.vision.core.conversation.interfaces.rest.dto.PreviewAnchorDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ResultHitDTO;
+import com.smart.vision.core.search.domain.model.Bbox;
+import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * Builds asset-level result cards from the current retrieval candidates.
+ */
+@Component
+public class ConversationResultCardMapper {
+
+    private static final int MAX_RESULT_CARDS = 3;
+    private static final int MAX_ADDITIONAL_HITS = 2;
+
+    public List<ResultCardDTO> map(List<KbSearchResultDTO> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        List<KbSearchResultDTO> sortedCandidates = candidates.stream()
+                .filter(this::canBuildHit)
+                .sorted(candidateComparator())
+                .toList();
+        if (sortedCandidates.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, List<KbSearchResultDTO>> candidatesByAsset = new LinkedHashMap<>();
+        for (KbSearchResultDTO candidate : sortedCandidates) {
+            candidatesByAsset.computeIfAbsent(candidate.getAssetId().trim(), ignored -> new ArrayList<>())
+                    .add(candidate);
+        }
+
+        List<ResultCardDTO> cards = new ArrayList<>();
+        for (List<KbSearchResultDTO> assetCandidates : candidatesByAsset.values()) {
+            ResultCardDTO card = toCard(assetCandidates);
+            if (card != null) {
+                cards.add(card);
+            }
+            if (cards.size() >= MAX_RESULT_CARDS) {
+                break;
+            }
+        }
+        return cards;
+    }
+
+    private ResultCardDTO toCard(List<KbSearchResultDTO> assetCandidates) {
+        if (assetCandidates == null || assetCandidates.isEmpty()) {
+            return null;
+        }
+        KbSearchResultDTO primaryCandidate = assetCandidates.getFirst();
+        ResultHitDTO primaryHit = toHit(primaryCandidate);
+        if (primaryHit == null) {
+            return null;
+        }
+
+        ResultCardDTO card = new ResultCardDTO();
+        card.setAssetId(primaryCandidate.getAssetId());
+        card.setAssetType(resolveAssetType(primaryCandidate));
+        card.setFileName(resolveFileName(primaryCandidate));
+        card.setTitle(resolveTitle(primaryCandidate));
+        card.setScore(primaryHit.getScore());
+        card.setHitCount(assetCandidates.size());
+        card.setPrimaryHit(primaryHit);
+        card.setAdditionalHits(assetCandidates.stream()
+                .skip(1)
+                .limit(MAX_ADDITIONAL_HITS)
+                .map(this::toHit)
+                .filter(Objects::nonNull)
+                .toList());
+        return card;
+    }
+
+    private ResultHitDTO toHit(KbSearchResultDTO candidate) {
+        if (!canBuildHit(candidate)) {
+            return null;
+        }
+        ResultHitDTO hit = new ResultHitDTO();
+        hit.setSegmentId(candidate.getSegmentId().trim());
+        hit.setSnippet(candidate.getSnippet());
+        hit.setScore(candidate.getScore());
+        hit.setPageNo(candidate.getPageNo());
+        hit.setAnchor(toAnchor(candidate));
+        hit.setHitType(candidate.getSegmentType());
+        return hit;
+    }
+
+    private PreviewAnchorDTO toAnchor(KbSearchResultDTO candidate) {
+        KbSearchResultDTO.Anchor source = candidate.getAnchor();
+        if (source == null && candidate.getPageNo() == null) {
+            return null;
+        }
+        PreviewAnchorDTO anchor = new PreviewAnchorDTO();
+        if (source == null) {
+            anchor.setPageNo(candidate.getPageNo());
+            return anchor;
+        }
+        anchor.setPageNo(source.getPageNo() == null ? candidate.getPageNo() : source.getPageNo());
+        anchor.setChunkOrder(source.getChunkOrder());
+        anchor.setBbox(toBbox(source.getBbox()));
+        anchor.setImageWidth(source.getImageWidth());
+        anchor.setImageHeight(source.getImageHeight());
+        return anchor;
+    }
+
+    private PreviewAnchorDTO.BboxDTO toBbox(Bbox source) {
+        if (source == null) {
+            return null;
+        }
+        PreviewAnchorDTO.BboxDTO bbox = new PreviewAnchorDTO.BboxDTO();
+        bbox.setX(source.getX());
+        bbox.setY(source.getY());
+        bbox.setWidth(source.getWidth());
+        bbox.setHeight(source.getHeight());
+        bbox.setUnit(source.getUnit());
+        return bbox;
+    }
+
+    private Comparator<KbSearchResultDTO> candidateComparator() {
+        return Comparator
+                .comparing((KbSearchResultDTO candidate) -> nullSafeScore(candidate.getScore())).reversed()
+                .thenComparing(candidate -> nullSafeText(candidate.getAssetId()))
+                .thenComparing(candidate -> nullSafeText(candidate.getSegmentId()));
+    }
+
+    private boolean canBuildHit(KbSearchResultDTO candidate) {
+        return candidate != null
+                && StringUtils.hasText(candidate.getAssetId())
+                && StringUtils.hasText(candidate.getSegmentId());
+    }
+
+    private double nullSafeScore(Double score) {
+        return score == null ? 0.0d : score;
+    }
+
+    private String resolveAssetType(KbSearchResultDTO candidate) {
+        if (StringUtils.hasText(candidate.getAssetType())) {
+            return candidate.getAssetType().trim();
+        }
+        if (StringUtils.hasText(candidate.getResultType())) {
+            return candidate.getResultType().trim();
+        }
+        return null;
+    }
+
+    private String resolveFileName(KbSearchResultDTO candidate) {
+        if (!StringUtils.hasText(candidate.getSourceRef())) {
+            return null;
+        }
+        String sourceRef = candidate.getSourceRef().trim();
+        int slashIndex = sourceRef.lastIndexOf('/');
+        if (slashIndex < 0 || slashIndex == sourceRef.length() - 1) {
+            return sourceRef;
+        }
+        return sourceRef.substring(slashIndex + 1);
+    }
+
+    private String resolveTitle(KbSearchResultDTO candidate) {
+        String fileName = resolveFileName(candidate);
+        if (StringUtils.hasText(fileName)) {
+            return fileName;
+        }
+        return candidate.getAssetId();
+    }
+
+    private String nullSafeText(String text) {
+        return StringUtils.hasText(text) ? text.trim() : "";
+    }
+}

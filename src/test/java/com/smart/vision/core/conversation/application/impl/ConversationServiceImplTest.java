@@ -7,6 +7,7 @@ import com.smart.vision.core.conversation.application.ConversationRetrievalOrche
 import com.smart.vision.core.conversation.application.FollowUpQuestionService;
 import com.smart.vision.core.conversation.application.QueryRewriteService;
 import com.smart.vision.core.conversation.application.assembler.ConversationCitationMapper;
+import com.smart.vision.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.smart.vision.core.conversation.application.model.AnswerGenerationResult;
 import com.smart.vision.core.conversation.application.model.ConversationRetrievalResult;
 import com.smart.vision.core.conversation.application.model.RewriteResult;
@@ -18,6 +19,7 @@ import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessag
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.KbSearchExplainDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.KbSearchResultDTO;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -68,6 +70,7 @@ class ConversationServiceImplTest {
                 queryRewriteService,
                 conversationRetrievalOrchestrator,
                 new ConversationCitationMapper(),
+                new ConversationResultCardMapper(),
                 answerGenerationService,
                 followUpQuestionService,
                 objectMapper,
@@ -126,6 +129,11 @@ class ConversationServiceImplTest {
         assertThat(secondResponse.getRewrittenQuery()).isEqualTo("mysql 架构中的 InnoDB 作用");
         assertThat(secondResponse.getCitations()).hasSize(1);
         assertThat(secondResponse.getCitations().getFirst().getFileName()).isEqualTo("mysql-notes.pdf");
+        assertThat(firstResponse.getResultCards()).hasSize(2);
+        assertThat(firstResponse.getResultCards()).extracting(ResultCardDTO::getAssetId)
+                .containsExactly("asset_1", "asset_2");
+        assertThat(firstResponse.getResultCards().getFirst().getPrimaryHit().getSegmentId()).isEqualTo("seg_text_1");
+        assertThat(firstResponse.getResultCards().getFirst().getPrimaryHit().getAnchor().getPageNo()).isEqualTo(3);
         assertThat(secondResponse.getRetrievalTrace().getTopK()).isEqualTo(60);
         assertThat(secondResponse.getRetrievalTrace().getRewriteReason()).isEqualTo("rewrite_by_model");
         assertThat(secondResponse.getRetrievalTrace().getRetrievedCount()).isEqualTo(1);
@@ -139,10 +147,20 @@ class ConversationServiceImplTest {
         assertThat(messageList.getTurns()).hasSize(2);
         assertThat(messageList.getTurns().getFirst().getQuery()).isEqualTo("mysql 架构是什么");
         assertThat(messageList.getTurns().get(1).getQuery()).isEqualTo("那 InnoDB 呢");
+        assertThat(messageList.getTurns().getFirst().getResultCards()).hasSize(2);
+        assertThat(messageList.getTurns().getFirst().getResultCards().getFirst().getPrimaryHit().getSegmentId())
+                .isEqualTo("seg_text_1");
+        assertThat(messageList.getTurns().get(1).getResultCards()).hasSize(1);
+        assertThat(messageList.getTurns().get(1).getResultCards().getFirst().getPrimaryHit().getSegmentId())
+                .isEqualTo("seg_text_2");
 
         List<ConversationTurn> storedTurns = repository.findRecentTurns(sessionId, 10);
         assertThat(storedTurns).hasSize(2);
         ConversationTurn latestTurn = storedTurns.getFirst();
+        List<ResultCardDTO> persistedResultCards = objectMapper.readValue(latestTurn.getResultCardsJson(), new TypeReference<>() {
+        });
+        assertThat(persistedResultCards).hasSize(1);
+        assertThat(persistedResultCards.getFirst().getPrimaryHit().getSegmentId()).isEqualTo("seg_text_2");
         Map<String, Object> trace = objectMapper.readValue(latestTurn.getRetrievalTraceJson(), new TypeReference<>() {
         });
         assertThat(trace.get("rewriteFallback")).isEqualTo(false);
@@ -177,6 +195,7 @@ class ConversationServiceImplTest {
 
         assertThat(response.getSessionId()).isEqualTo(sessionId);
         assertThat(response.getCitations()).isEmpty();
+        assertThat(response.getResultCards()).isEmpty();
         assertThat(response.getAnswer()).contains("未找到足够内容支持该问题");
         assertThat(response.getRetrievalTrace().getRetrievedCount()).isEqualTo(0);
         assertThat(response.getRetrievalTrace().getAnswerFallback()).isTrue();
@@ -186,6 +205,9 @@ class ConversationServiceImplTest {
         List<ConversationTurn> storedTurns = repository.findRecentTurns(sessionId, 10);
         assertThat(storedTurns).hasSize(1);
         ConversationTurn storedTurn = storedTurns.getFirst();
+        List<ResultCardDTO> persistedResultCards = objectMapper.readValue(storedTurn.getResultCardsJson(), new TypeReference<>() {
+        });
+        assertThat(persistedResultCards).isEmpty();
         Map<String, Object> trace = objectMapper.readValue(storedTurn.getRetrievalTraceJson(), new TypeReference<>() {
         });
         assertThat(trace.get("retrievedCount")).isEqualTo(0);
@@ -221,6 +243,25 @@ class ConversationServiceImplTest {
         service.createMessage(sessionId, buildMessageRequest("那 InnoDB 呢"));
 
         assertThat(service.getSession(sessionId).getTitle()).isEqualTo("手动命名会话");
+    }
+
+    @Test
+    void listMessages_shouldReturnEmptyResultCardsForLegacyTurn() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        ConversationTurn legacyTurn = new ConversationTurn();
+        legacyTurn.setTurnId("turn_legacy");
+        legacyTurn.setSessionId(session.getSessionId());
+        legacyTurn.setQuery("legacy query");
+        legacyTurn.setRewrittenQuery("legacy query");
+        legacyTurn.setAnswer("legacy answer");
+        legacyTurn.setCitationsJson("[]");
+        legacyTurn.setCreatedAt(System.currentTimeMillis());
+        repository.saveTurn(legacyTurn);
+
+        ConversationTurnListDTO response = service.listMessages(session.getSessionId(), 20, null);
+
+        assertThat(response.getTurns()).hasSize(1);
+        assertThat(response.getTurns().getFirst().getResultCards()).isEmpty();
     }
 
     private RewriteResult buildRewrite(String originalQuery, String rewrittenQuery, String reason, boolean fallback) {

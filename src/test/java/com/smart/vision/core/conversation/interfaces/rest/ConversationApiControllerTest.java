@@ -7,6 +7,9 @@ import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessag
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.smart.vision.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.PreviewAnchorDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ResultCardDTO;
+import com.smart.vision.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -91,6 +94,26 @@ class ConversationApiControllerTest {
         response.setRewrittenQuery("mysql 架构中的 InnoDB 作用");
         response.setAnswer("InnoDB 是默认事务引擎。[1]");
         response.setCitations(List.of());
+        ResultHitDTO primaryHit = new ResultHitDTO();
+        primaryHit.setSegmentId("seg_text_001");
+        primaryHit.setSnippet("InnoDB 是默认事务引擎。");
+        primaryHit.setScore(0.91d);
+        primaryHit.setPageNo(3);
+        primaryHit.setHitType("TEXT_CHUNK");
+        PreviewAnchorDTO anchor = new PreviewAnchorDTO();
+        anchor.setPageNo(3);
+        anchor.setChunkOrder(12);
+        primaryHit.setAnchor(anchor);
+        ResultCardDTO card = new ResultCardDTO();
+        card.setAssetId("asset_001");
+        card.setAssetType("PDF");
+        card.setFileName("mysql-notes.pdf");
+        card.setTitle("mysql-notes.pdf");
+        card.setScore(0.91d);
+        card.setHitCount(1);
+        card.setPrimaryHit(primaryHit);
+        card.setAdditionalHits(List.of());
+        response.setResultCards(List.of(card));
         ConversationMessageResponseDTO.RetrievalTraceDTO trace = new ConversationMessageResponseDTO.RetrievalTraceDTO();
         trace.setTopK(60);
         trace.setLimit(20);
@@ -120,6 +143,9 @@ class ConversationApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.turnId").value("turn_test_001"))
+                .andExpect(jsonPath("$.data.resultCards[0].assetId").value("asset_001"))
+                .andExpect(jsonPath("$.data.resultCards[0].primaryHit.segmentId").value("seg_text_001"))
+                .andExpect(jsonPath("$.data.resultCards[0].primaryHit.anchor.pageNo").value(3))
                 .andExpect(jsonPath("$.data.retrievalTrace.topK").value(60))
                 .andExpect(jsonPath("$.data.retrievalTrace.rewriteReason").value("rewrite_by_model"))
                 .andExpect(jsonPath("$.data.retrievalTrace.retrievedCount").value(3));
