@@ -40,6 +40,7 @@ LAYOUT_OPTIONS = ["Large (2 per row)", "Compact (3 per row)"]
 OCR_PREVIEW_MAX_CHARS = 100
 SPO_PREVIEW_MAX_ITEMS = 3
 SPO_PREVIEW_MAX_CHARS = 140
+KB_PREVIEW_CACHE_KEY = "kb_segment_preview_cache"
 
 
 def render_text_search_page(base_url: str) -> None:
@@ -290,6 +291,9 @@ def render_kb_search_page(base_url: str) -> None:
             key="kb_search_run_btn",
             disabled=_is_action_busy("kb_search_run", payload),
         )
+        mock_col1, mock_col2 = st.columns(2)
+        load_bbox_mock = mock_col1.button("Load Mock BBox Result", key="kb_mock_bbox_btn")
+        load_degraded_mock = mock_col2.button("Load Mock Degraded Result", key="kb_mock_degraded_btn")
 
     st.session_state[query_store_key] = query
     st.session_state[topk_store_key] = int(top_k)
@@ -300,6 +304,13 @@ def render_kb_search_page(base_url: str) -> None:
             st.warning("Query is required.")
             return
         _queue_action("kb_search_run", payload)
+        st.rerun()
+
+    if load_bbox_mock:
+        _load_kb_mock_state(state, degraded=False)
+        st.rerun()
+    if load_degraded_mock:
+        _load_kb_mock_state(state, degraded=True)
         st.rerun()
 
     if _consume_queued_action("kb_search_run", payload):
@@ -326,7 +337,7 @@ def render_kb_search_page(base_url: str) -> None:
         _render_response_meta(state["status_code"], state["headers"])
         if state["payload_text"]:
             st.code(state["payload_text"], language="json")
-        _render_kb_search_results(state["results"])
+        _render_kb_search_results(state["results"], base_url=base_url)
 
 
 def render_conversation_search_page(base_url: str) -> None:
@@ -1020,8 +1031,9 @@ def render_image_search_page(base_url: str) -> None:
         _render_search_results(state["results"], layout_key="image")
 
 
-def _render_kb_search_results(results: list[Any]) -> None:
+def _render_kb_search_results(results: list[Any], *, base_url: str) -> None:
     st.markdown("### KB Results")
+    _inject_bbox_preview_styles()
     if not results:
         st.info("No results found.")
         return
@@ -1041,10 +1053,12 @@ def _render_kb_search_results(results: list[Any]) -> None:
             parts.append(f"pageNo={page_no}")
         if isinstance(chunk_order, int):
             parts.append(f"chunkOrder={chunk_order}")
-        if isinstance(bbox, list) and bbox:
+        if isinstance(bbox, dict) and bbox:
             parts.append(f"bbox={bbox}")
-        elif isinstance(bbox, dict) and bbox:
-            parts.append(f"bbox={bbox}")
+        image_width = anchor_payload.get("imageWidth")
+        image_height = anchor_payload.get("imageHeight")
+        if isinstance(image_width, int) and isinstance(image_height, int):
+            parts.append(f"image={image_width}x{image_height}")
         return ", ".join(parts) if parts else "-"
 
     for idx, item in enumerate(normalized, start=1):
@@ -1103,6 +1117,12 @@ def _render_kb_search_results(results: list[Any]) -> None:
                 st.caption(" | ".join(id_parts))
             if source_ref:
                 st.caption(f"sourceRef: {source_ref}")
+            _render_segment_preview_controls(
+                base_url=base_url,
+                segment_id=segment_id,
+                button_label="Preview Primary Hit",
+                key_suffix=f"kb-primary-{idx}",
+            )
 
             with st.expander(f"Top Chunks ({len(top_chunk_items)})"):
                 for chunk_idx, chunk in enumerate(top_chunk_items, start=1):
@@ -1121,6 +1141,272 @@ def _render_kb_search_results(results: list[Any]) -> None:
                     st.caption(f"anchor: {chunk_anchor_text}")
                     if chunk_source_ref:
                         st.caption(f"sourceRef: {chunk_source_ref}")
+                    _render_segment_preview_controls(
+                        base_url=base_url,
+                        segment_id=chunk_segment_id,
+                        button_label="Preview Chunk",
+                        key_suffix=f"kb-chunk-{idx}-{chunk_idx}",
+                    )
+
+
+def _load_kb_mock_state(state: dict[str, Any], *, degraded: bool) -> None:
+    preview = _build_mock_segment_preview(degraded=degraded)
+    segment_id = _safe_str(preview.get("segmentId"))
+    _get_segment_preview_cache()[segment_id] = preview
+    anchor = preview.get("anchor") if isinstance(preview.get("anchor"), dict) else {}
+    result = {
+        "segmentType": "IMAGE_OCR_BLOCK",
+        "content": _safe_str(preview.get("snippet")),
+        "resultType": "IMAGE_OCR_BLOCK",
+        "assetType": "IMAGE",
+        "snippet": _safe_str(preview.get("snippet")),
+        "score": 0.8731,
+        "segmentId": segment_id,
+        "assetId": _safe_str(preview.get("assetId")),
+        "sourceRef": _safe_str(preview.get("sourceRef")),
+        "thumbnail": _safe_str(preview.get("previewUrl")),
+        "ocrSummary": _safe_str(preview.get("ocrSummary")),
+        "anchor": anchor,
+        "totalHits": 1,
+        "topChunks": [
+            {
+                "segmentId": segment_id,
+                "segmentType": "IMAGE_OCR_BLOCK",
+                "snippet": _safe_str(preview.get("snippet")),
+                "score": 0.8731,
+                "anchor": anchor,
+                "sourceRef": _safe_str(preview.get("sourceRef")),
+                "thumbnail": _safe_str(preview.get("previewUrl")),
+                "ocrSummary": _safe_str(preview.get("ocrSummary")),
+            }
+        ],
+        "explain": {
+            "hitSources": ["OCR"],
+            "strategyEffective": "MOCK",
+            "matchedBy": {"ocr": True},
+            "imageSignals": {"ocr": True},
+        },
+    }
+    state["results"] = [result]
+    state["headers"] = {}
+    state["status_code"] = 200
+    state["payload_text"] = _pretty_json({"mock": True, "degraded": degraded})
+    state["has_searched"] = True
+
+
+def _build_mock_segment_preview(*, degraded: bool) -> dict[str, Any]:
+    segment_id = "mock:image:ocr:degraded" if degraded else "mock:image:ocr:bbox"
+    image_url = _mock_bbox_image_data_uri()
+    anchor = {
+        "bbox": {
+            "x": 70,
+            "y": 62,
+            "width": 330,
+            "height": 86,
+            "unit": "PIXEL",
+        },
+        "imageWidth": 640,
+        "imageHeight": 360,
+    }
+    if degraded:
+        anchor = {
+            "bbox": {
+                "x": 520,
+                "y": 300,
+                "width": 180,
+                "height": 90,
+                "unit": "PIXEL",
+            },
+            "imageWidth": 640,
+            "imageHeight": 360,
+        }
+    snippet = "设备故障代码 E102，检查电源模块与温控传感器。"
+    return {
+        "segmentId": segment_id,
+        "assetId": "mock-asset-image-001",
+        "assetType": "IMAGE",
+        "segmentType": "IMAGE_OCR_BLOCK",
+        "previewType": "IMAGE",
+        "previewUrl": image_url,
+        "sourceRef": image_url,
+        "thumbnail": image_url,
+        "title": "mock-control-panel.png",
+        "snippet": snippet,
+        "ocrSummary": snippet,
+        "anchor": anchor,
+    }
+
+
+def _mock_bbox_image_data_uri() -> str:
+    svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+      <rect width="640" height="360" fill="#f7f9fc"/>
+      <rect x="42" y="38" width="556" height="284" rx="8" fill="#ffffff" stroke="#c9d3e2" stroke-width="2"/>
+      <text x="70" y="88" font-family="Arial, sans-serif" font-size="28" fill="#26384f">设备故障代码 E102</text>
+      <text x="70" y="132" font-family="Arial, sans-serif" font-size="20" fill="#26384f">检查电源模块与温控传感器</text>
+      <line x1="70" y1="170" x2="570" y2="170" stroke="#d7dee9" stroke-width="2"/>
+      <rect x="72" y="205" width="138" height="58" rx="6" fill="#eef5ff" stroke="#7aa7df"/>
+      <rect x="250" y="205" width="138" height="58" rx="6" fill="#fff7e8" stroke="#e0ad52"/>
+      <rect x="428" y="205" width="138" height="58" rx="6" fill="#eefaf1" stroke="#73b884"/>
+      <text x="104" y="241" font-family="Arial, sans-serif" font-size="18" fill="#26384f">电源</text>
+      <text x="282" y="241" font-family="Arial, sans-serif" font-size="18" fill="#26384f">温控</text>
+      <text x="460" y="241" font-family="Arial, sans-serif" font-size="18" fill="#26384f">网络</text>
+    </svg>
+    """
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+def _render_segment_preview_controls(
+    *,
+    base_url: str,
+    segment_id: str,
+    button_label: str,
+    key_suffix: str,
+) -> None:
+    if not segment_id or segment_id == "-":
+        return
+    cache = _get_segment_preview_cache()
+    button_key = f"preview_btn_{key_suffix}_{_stable_key(segment_id)}"
+    if st.button(button_label, key=button_key):
+        preview = _request_segment_preview(base_url=base_url, segment_id=segment_id)
+        if preview is not None:
+            cache[segment_id] = preview
+    preview_payload = cache.get(segment_id)
+    if isinstance(preview_payload, dict):
+        _render_segment_preview(preview_payload)
+
+
+def _get_segment_preview_cache() -> dict[str, Any]:
+    cache = st.session_state.get(KB_PREVIEW_CACHE_KEY)
+    if not isinstance(cache, dict):
+        cache = {}
+        st.session_state[KB_PREVIEW_CACHE_KEY] = cache
+    return cache
+
+
+def _request_segment_preview(*, base_url: str, segment_id: str) -> dict[str, Any] | None:
+    if segment_id == "mock:image:ocr:bbox":
+        return _build_mock_segment_preview(degraded=False)
+    if segment_id == "mock:image:ocr:degraded":
+        return _build_mock_segment_preview(degraded=True)
+    response_payload = _request_object_json(
+        method="GET",
+        url=f"{_normalize_base_url(base_url)}/api/v1/preview/segments/{segment_id}",
+    )
+    if response_payload is None:
+        return None
+    data, _, _ = response_payload
+    if not isinstance(data, dict):
+        st.error("Unexpected preview response shape: data is not an object.")
+        return None
+    return data
+
+
+def _render_segment_preview(preview: dict[str, Any]) -> None:
+    image_url = _safe_str(preview.get("previewUrl")) or _safe_str(preview.get("sourceRef")) or _safe_str(preview.get("thumbnail"))
+    snippet = _safe_str(preview.get("snippet")) or _safe_str(preview.get("ocrSummary")) or "-"
+    anchor = preview.get("anchor") if isinstance(preview.get("anchor"), dict) else {}
+    bbox_state = _resolve_preview_bbox_state(anchor)
+
+    with st.container(border=True):
+        st.caption(
+            f"Preview: segmentId={_safe_str(preview.get('segmentId')) or '-'} "
+            f"| type={_safe_str(preview.get('previewType')) or '-'}"
+        )
+        if image_url:
+            _render_image_preview_with_bbox(image_url, bbox_state)
+        else:
+            st.info("Preview image is unavailable.")
+        st.write(snippet)
+        if not bbox_state.get("valid"):
+            st.caption("Hit region is unavailable for this preview.")
+
+
+def _resolve_preview_bbox_state(anchor: dict[str, Any]) -> dict[str, Any]:
+    bbox = anchor.get("bbox")
+    image_width = anchor.get("imageWidth")
+    image_height = anchor.get("imageHeight")
+    if not isinstance(bbox, dict):
+        return {"valid": False}
+    if not isinstance(image_width, int) or not isinstance(image_height, int):
+        return {"valid": False}
+    if image_width <= 0 or image_height <= 0:
+        return {"valid": False}
+    x = bbox.get("x")
+    y = bbox.get("y")
+    width = bbox.get("width")
+    height = bbox.get("height")
+    unit = _safe_str(bbox.get("unit")).upper()
+    if not all(isinstance(value, int) for value in [x, y, width, height]):
+        return {"valid": False}
+    if x < 0 or y < 0 or width <= 0 or height <= 0:
+        return {"valid": False}
+    if x + width > image_width or y + height > image_height:
+        return {"valid": False}
+    if unit and unit != "PIXEL":
+        return {"valid": False}
+    return {
+        "valid": True,
+        "left": x / image_width * 100,
+        "top": y / image_height * 100,
+        "width": width / image_width * 100,
+        "height": height / image_height * 100,
+    }
+
+
+def _render_image_preview_with_bbox(image_url: str, bbox_state: dict[str, Any]) -> None:
+    safe_url = html.escape(image_url, quote=True)
+    overlay = ""
+    if bbox_state.get("valid"):
+        overlay = (
+            "<div class='bbox-preview-box' "
+            f"style='left:{bbox_state['left']:.4f}%;"
+            f"top:{bbox_state['top']:.4f}%;"
+            f"width:{bbox_state['width']:.4f}%;"
+            f"height:{bbox_state['height']:.4f}%;'></div>"
+        )
+    st.markdown(
+        "<div class='bbox-preview-frame'>"
+        f"<img src=\"{safe_url}\" class='bbox-preview-image' />"
+        f"{overlay}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _inject_bbox_preview_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .bbox-preview-frame {
+          position: relative;
+          width: min(100%, 760px);
+          background: rgba(13, 18, 28, 0.72);
+          overflow: hidden;
+          border-radius: 8px;
+          border: 1px solid rgba(120, 130, 150, 0.35);
+        }
+        .bbox-preview-image {
+          width: 100%;
+          height: auto;
+          display: block;
+        }
+        .bbox-preview-box {
+          position: absolute;
+          border: 2px solid #ff4d4f;
+          background: rgba(255, 77, 79, 0.14);
+          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75);
+          pointer-events: none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _stable_key(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
 
 def render_image_analyze_page(base_url: str) -> None:
