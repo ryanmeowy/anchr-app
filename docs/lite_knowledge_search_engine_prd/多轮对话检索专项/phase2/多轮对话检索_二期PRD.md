@@ -186,10 +186,10 @@
 - 点击卡片默认跳转 `primaryHit.segmentId` 对应预览位置。
 6. Top3 去重与聚合策略：
 - 按 segment 候选相关性排序后，先按 `assetId` 聚合。
-- 每个 asset 的分数默认取 `primaryHit.score`，可叠加同 asset 多命中数量作为轻量加权。
+- 每个 asset 的分数固定取 `primaryHit.score`，本期不引入同 asset 多命中加权。
 - Top3 默认取前 3 个 asset。
 - 候选 asset 少于 3 个时按实际数量返回。
-- 卡片内可显示“同文档另有 N 个相关片段”，并允许展开 `additionalHits`。
+- 卡片内可显示“同文档另有 N 个相关片段”，`additionalHits` 默认最多返回 2 条。
 
 验收：
 1. 每轮最多展示 3 张卡片。
