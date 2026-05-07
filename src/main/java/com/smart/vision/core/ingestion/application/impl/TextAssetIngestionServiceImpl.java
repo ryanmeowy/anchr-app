@@ -31,6 +31,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
@@ -163,21 +164,21 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
                 return;
             }
 
-            java.util.List<BatchTaskItem> pendingItems = task.pendingItems();
+            List<BatchTaskItem> pendingItems = task.pendingItems();
             if (pendingItems.isEmpty()) {
                 task.refreshSummary(System.currentTimeMillis());
                 saveTask(task);
                 return;
             }
 
-            java.util.List<java.util.concurrent.CompletableFuture<Void>> futures = pendingItems.stream()
-                    .map(item -> java.util.concurrent.CompletableFuture.runAsync(
+            List<CompletableFuture<Void>> futures = pendingItems.stream()
+                    .map(item -> CompletableFuture.runAsync(
                             () -> processTaskItem(task, item.getItemId()),
                             ingestionTaskExecutor
                     ))
                     .toList();
 
-            java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             synchronized (task) {
                 task.refreshSummary(System.currentTimeMillis());
                 saveTask(task);

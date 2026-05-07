@@ -106,14 +106,14 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             if (!StringUtils.hasText(evidence)) {
                 continue;
             }
-            GroundingSegment segment = new GroundingSegment();
-            segment.index = i + 1;
-            segment.hitType = citation.getHitType();
-            segment.fileName = citation.getFileName();
-            segment.pageNo = citation.getPageNo();
-            segment.segmentId = citation.getSegmentId();
-            segment.evidence = evidence;
-            segments.add(segment);
+            segments.add(new GroundingSegment(
+                    i + 1,
+                    citation.getFileName(),
+                    citation.getPageNo(),
+                    citation.getHitType(),
+                    citation.getSegmentId(),
+                    evidence
+            ));
         }
         return segments;
     }
@@ -147,15 +147,15 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         builder.append("证据列表：");
         for (GroundingSegment segment : segments) {
             builder.append("[")
-                    .append(segment.index)
+                    .append(segment.index())
                     .append("] file=")
-                    .append(segment.fileName)
+                    .append(segment.fileName())
                     .append(",page=")
-                    .append(segment.pageNo == null ? "NA" : segment.pageNo)
+                    .append(segment.pageNo() == null ? "NA" : segment.pageNo())
                     .append(",type=")
-                    .append(segment.hitType)
+                    .append(segment.hitType())
                     .append(",snippet=")
-                    .append(segment.evidence)
+                    .append(segment.evidence())
                     .append(";");
         }
         return builder.toString();
@@ -214,7 +214,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             return "no_grounding_segment";
         }
         int totalEvidenceChars = groundingSegments.stream()
-                .map(segment -> segment.evidence == null ? 0 : segment.evidence.length())
+                .map(segment -> segment.evidence() == null ? 0 : segment.evidence().length())
                 .reduce(0, Integer::sum);
         if (totalEvidenceChars < MIN_TOTAL_EVIDENCE_CHARS && groundingSegments.size() < 2) {
             return "evidence_too_short";
@@ -266,9 +266,9 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         for (GroundingSegment segment : segments) {
             answer.append(System.lineSeparator())
                     .append("- [")
-                    .append(segment.index)
+                    .append(segment.index())
                     .append("] ")
-                    .append(segment.evidence);
+                    .append(segment.evidence());
         }
         answer.append(System.lineSeparator()).append("如需更精确答案，请继续追问。");
         AnswerGenerationResult result = new AnswerGenerationResult();
@@ -284,17 +284,16 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             return List.of();
         }
         return segments.stream()
-                .map(segment -> segment.segmentId)
+                .map(GroundingSegment::segmentId)
                 .filter(StringUtils::hasText)
                 .toList();
     }
 
-    private static class GroundingSegment {
-        private int index;
-        private String fileName;
-        private Integer pageNo;
-        private String hitType;
-        private String segmentId;
-        private String evidence;
+    private record GroundingSegment(int index,
+                                    String fileName,
+                                    Integer pageNo,
+                                    String hitType,
+                                    String segmentId,
+                                    String evidence) {
     }
 }
