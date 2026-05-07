@@ -53,12 +53,12 @@ class ConversationApiControllerTest {
     void createSession_shouldReturnResultEnvelope() throws Exception {
         ConversationSessionDTO session = new ConversationSessionDTO();
         session.setSessionId("cvs_test_001");
-        session.setUserId("uk_default");
+        session.setUserId("single_user");
         session.setStatus("ACTIVE");
         session.setCreatedAt(1777520000000L);
         session.setUpdatedAt(1777520000000L);
         session.setExpiresAt(1780112000000L);
-        when(conversationService.createSession(eq("uk_default"), eq(new ConversationCreateRequestDTO()))).thenReturn(session);
+        when(conversationService.createSession(eq(new ConversationCreateRequestDTO()))).thenReturn(session);
 
         mockMvc.perform(post("/api/conversations")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -66,7 +66,7 @@ class ConversationApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.sessionId").value("cvs_test_001"))
-                .andExpect(jsonPath("$.data.userId").value("uk_default"))
+                .andExpect(jsonPath("$.data.userId").value("single_user"))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"));
     }
 
@@ -74,7 +74,7 @@ class ConversationApiControllerTest {
     void listSessions_shouldReturnSessionPage() throws Exception {
         ConversationSessionDTO item = new ConversationSessionDTO();
         item.setSessionId("cvs_test_001");
-        item.setUserId("uk_default");
+        item.setUserId("single_user");
         item.setTitle("MySQL");
         item.setStatus("ACTIVE");
         item.setLastMessagePreview("InnoDB 是默认事务引擎。");
@@ -84,7 +84,7 @@ class ConversationApiControllerTest {
         ConversationSessionListDTO page = new ConversationSessionListDTO();
         page.setItems(List.of(item));
         page.setNextCursor("cursor_001");
-        when(conversationService.listSessions(eq("uk_default"), eq(20), eq(null))).thenReturn(page);
+        when(conversationService.listSessions(eq(20), eq(null))).thenReturn(page);
 
         mockMvc.perform(get("/api/conversations")
                         .param("limit", "20"))
@@ -96,13 +96,12 @@ class ConversationApiControllerTest {
     }
 
     @Test
-    void listSessions_shouldUseStableUserKeyInsteadOfAccessToken() throws Exception {
+    void listSessions_shouldNotDependOnUserHeaders() throws Exception {
         ConversationSessionListDTO page = new ConversationSessionListDTO();
-        when(conversationService.listSessions(eq("uk_5f62b684efaf59ed"), eq(20), eq(null))).thenReturn(page);
+        when(conversationService.listSessions(eq(20), eq(null))).thenReturn(page);
 
         mockMvc.perform(get("/api/conversations")
                         .header("X-Access-Token", "short-lived-token")
-                        .header("X-User-Key", "browser-001")
                         .param("limit", "20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
@@ -122,7 +121,7 @@ class ConversationApiControllerTest {
     void listMessages_shouldPassQueryParameters() throws Exception {
         ConversationTurnListDTO list = new ConversationTurnListDTO();
         list.setSessionId("cvs_test_001");
-        when(conversationService.listMessages(eq("uk_default"), eq("cvs_test_001"), eq(15), eq("turn_001"))).thenReturn(list);
+        when(conversationService.listMessages(eq("cvs_test_001"), eq(15), eq("turn_001"))).thenReturn(list);
 
         mockMvc.perform(get("/api/conversations/cvs_test_001/messages")
                         .param("limit", "15")
@@ -174,7 +173,7 @@ class ConversationApiControllerTest {
         request.setTopK(60);
         request.setLimit(20);
         request.setStrategy("KB_RRF_RERANK");
-        when(conversationService.createMessage(eq("uk_default"), eq("cvs_test_001"), eq(request))).thenReturn(response);
+        when(conversationService.createMessage(eq("cvs_test_001"), eq(request))).thenReturn(response);
 
         mockMvc.perform(post("/api/conversations/cvs_test_001/messages")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -201,7 +200,7 @@ class ConversationApiControllerTest {
     void listMessages_shouldReturnTurns() throws Exception {
         ConversationTurnListDTO list = new ConversationTurnListDTO();
         list.setSessionId("cvs_test_001");
-        when(conversationService.listMessages(eq("uk_default"), eq("cvs_test_001"), eq(20), eq(null))).thenReturn(list);
+        when(conversationService.listMessages(eq("cvs_test_001"), eq(20), eq(null))).thenReturn(list);
 
         mockMvc.perform(get("/api/conversations/cvs_test_001/messages")
                         .param("limit", "20"))
@@ -217,9 +216,9 @@ class ConversationApiControllerTest {
         ConversationSessionDTO session = new ConversationSessionDTO();
         session.setSessionId("cvs_test_001");
         session.setTitle("新标题");
-        session.setUserId("uk_default");
+        session.setUserId("single_user");
         session.setStatus("ACTIVE");
-        when(conversationService.renameSession(eq("uk_default"), eq("cvs_test_001"), eq(request))).thenReturn(session);
+        when(conversationService.renameSession(eq("cvs_test_001"), eq(request))).thenReturn(session);
 
         mockMvc.perform(patch("/api/conversations/cvs_test_001")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -235,6 +234,6 @@ class ConversationApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
-        verify(conversationService).deleteSession(eq("uk_default"), eq("cvs_test_001"));
+        verify(conversationService).deleteSession(eq("cvs_test_001"));
     }
 }

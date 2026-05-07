@@ -153,10 +153,10 @@
 3. 每轮消息展示：`query`、`answer`、`createdAt`。
 4. 支持从后端读取最近会话列表，刷新页面后左侧历史可在 TTL 内恢复。
 5. P1：支持会话删除；重命名可手动或沿用自动标题。
-6. 会话历史必须具备用户维度：列表、删除、重命名只能作用于当前用户可访问的会话。
+6. 本期按个人项目单用户模式实现，会话历史默认归属唯一系统用户。
 7. 存储策略：
-- 二期优先沿用现有 Redis 会话存储，补充 `userId -> sessionId` 索引与删除/重命名能力。
-- `ConversationSession` 预留 `userId` 字段；当前无 SSO 时使用稳定 `X-User-Key` 的不可逆 hash 作为轻量 user key，`X-Access-Token` 仅用于认证。
+- 二期优先沿用现有 Redis 会话存储，补充默认用户的 `userId -> sessionId` 索引与删除/重命名能力。
+- `ConversationSession` 预留 `userId` 字段；本期固定为 `single_user`，只保留未来接入 SSO 的扩展点。
 - 不为了删除/重命名单独引入 DB。
 - 若要求长期保存、审计查询或超过 Redis TTL 的稳定历史，再单独立项引入 DB。
 
@@ -164,7 +164,7 @@
 1. 新建会话后可立即发送消息。
 2. 刷新页面后可在会话 TTL 内恢复最近会话列表与历史消息。
 3. 左侧历史不依赖浏览器本地缓存作为唯一数据源。
-4. 用户 A 不可看到或操作用户 B 的会话。
+4. 单用户模式下会话列表、删除、重命名均作用于 `single_user` 会话空间；多人隔离不属于本期范围。
 
 ### FR-2 回答 + Top3 卡片
 
@@ -404,9 +404,9 @@ anchor 规范：
 1. 用于左侧会话历史列表。
 2. 列表按 `updatedAt desc` 排序。
 3. 前端可以做本地缓存优化，但不能把本地缓存作为唯一历史来源。
-4. 二期优先沿用 Redis 存储，需要补充当前用户的 session 索引。
-5. 如果当前认证上下文暂未提供稳定 `userId`，需要先定义匿名/默认用户策略，避免所有用户共享同一会话历史。
-6. 当前无 SSO 时，使用稳定 `X-User-Key` 的不可逆 hash 作为轻量 user key；未来接 SSO 后替换为真实 `userId`。
+4. 二期优先沿用 Redis 存储，需要补充默认用户的 session 索引。
+5. 本期不实现多用户隔离，所有会话归属 `single_user`。
+6. 未来接入 SSO 后，由认证上下文提供真实 `userId` 并替换默认用户策略。
 
 P1 可选接口：
 1. `PATCH /api/conversations/{sessionId}`：重命名会话。
@@ -445,7 +445,7 @@ P1 可选接口：
 4. 预览接口必须接入轻量鉴权：
 - 请求头使用现有 `X-Access-Token` 或等价 token
 - 后端校验 token 后才签发 `previewUrl`
-- token 可用于计算 `userKey/tokenHash`，参与会话归属和 preview cache key
+- token 可用于计算 preview cache 的 `tokenHash`，但不参与会话归属
 5. 签名 URL 泄露处理：
 - 直接 OSS 签名 URL 一旦泄露，后端无法中途撤销单个 URL
 - 必须使用短 TTL（默认 5-15 分钟）
@@ -467,7 +467,7 @@ P1 可选接口：
 6. Top3 协议以 asset 卡片为准；每张卡片必须保留 `primaryHit.segmentId` 作为定位与证据回溯入口。
 7. 正式前端所有后端请求统一走 API Client，避免鉴权、错误处理和 baseURL 分散。
 8. Top3 选择优先保证 asset 多样性，同时不丢失 segment 级命中信息。
-9. 会话历史二期优先补 Redis 用户索引和操作能力，不把 DB 作为删除/重命名的前置依赖。
+9. 会话历史二期优先补 Redis 默认用户索引和操作能力，不把 DB 作为删除/重命名的前置依赖。
 10. `surroundingChunks` 只返回受控上下文，不承担全文预览职责。
 11. `ConversationTurn` 需要新增 `resultCardsJson` 字段；`resultCards` 必须随 turn 持久化，历史消息直接读取已保存的 `resultCards`。
 12. `retrievalTraceJson` 用于开发者调试和审计，不作为历史卡片重建的唯一数据源。
@@ -608,7 +608,7 @@ P1 可选接口：
 - 应对：Top3 先按 asset 聚合，同一 asset 的多个命中进入 `additionalHits`，不额外占用卡片位。
 
 8. 风险：为会话删除/重命名引入 DB 导致二期范围扩大。
-- 应对：二期先基于 Redis 增加用户索引和操作能力；长期历史另立 DB 持久化专项。
+- 应对：二期先基于 Redis 增加默认用户索引和操作能力；长期历史另立 DB 持久化专项。
 
 9. 风险：`surroundingChunks` 响应过大或泄露无权限内容。
 - 应对：默认只返回前后各 1 个 chunk，单 chunk 限长，并在权限校验后返回。

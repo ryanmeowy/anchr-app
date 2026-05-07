@@ -15,23 +15,15 @@ public interface ConversationService {
 
     ConversationSessionDTO createSession(ConversationCreateRequestDTO request);
 
-    ConversationSessionDTO createSession(String userId, ConversationCreateRequestDTO request);
-
     ConversationSessionDTO getSession(String sessionId);
 
-    ConversationSessionDTO getSession(String userId, String sessionId);
+    ConversationSessionListDTO listSessions(Integer limit, String cursor);
 
-    ConversationSessionListDTO listSessions(String userId, Integer limit, String cursor);
+    ConversationSessionDTO renameSession(String sessionId, ConversationRenameRequestDTO request);
 
-    ConversationSessionDTO renameSession(String userId, String sessionId, ConversationRenameRequestDTO request);
-
-    void deleteSession(String userId, String sessionId);
+    void deleteSession(String sessionId);
 
     ConversationMessageResponseDTO createMessage(String sessionId, ConversationMessageRequestDTO request);
 
-    ConversationMessageResponseDTO createMessage(String userId, String sessionId, ConversationMessageRequestDTO request);
-
     ConversationTurnListDTO listMessages(String sessionId, Integer limit, String beforeTurnId);
-
-    ConversationTurnListDTO listMessages(String userId, String sessionId, Integer limit, String beforeTurnId);
 }

@@ -62,7 +62,7 @@ public class ConversationServiceImpl implements ConversationService {
     private static final int ANSWER_CITATION_LIMIT = 5;
     private static final int AUTO_TITLE_MAX_LENGTH = 128;
     private static final int LAST_MESSAGE_PREVIEW_MAX_LENGTH = 80;
-    private static final String DEFAULT_USER_ID = "uk_default";
+    private static final String SINGLE_USER_ID = "single_user";
 
     private final ConversationRepository conversationRepository;
     private final QueryRewriteService queryRewriteService;
@@ -76,16 +76,11 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public ConversationSessionDTO createSession(ConversationCreateRequestDTO request) {
-        return createSession(DEFAULT_USER_ID, request);
-    }
-
-    @Override
-    public ConversationSessionDTO createSession(String userId, ConversationCreateRequestDTO request) {
         long now = System.currentTimeMillis();
         String title = safeTrim(request.getTitle());
         ConversationSession session = ConversationSession.createActive(
                 newSessionId(),
-                normalizeUserId(userId),
+                SINGLE_USER_ID,
                 title,
                 now,
                 resolveExpiresAt(now)
@@ -102,18 +97,11 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
-    public ConversationSessionDTO getSession(String userId, String sessionId) {
-        ConversationSession session = loadSessionOrThrow(normalizeUserId(userId), sessionId);
-        return toSessionDto(session);
-    }
-
-    @Override
-    public ConversationSessionListDTO listSessions(String userId, Integer limit, String cursor) {
-        String normalizedUserId = normalizeUserId(userId);
+    public ConversationSessionListDTO listSessions(Integer limit, String cursor) {
         int boundedLimit = normalizeSessionListLimit(limit);
         int offset = decodeSessionListCursor(cursor);
         List<ConversationSession> sessions = conversationRepository.findRecentSessions(
-                normalizedUserId,
+                SINGLE_USER_ID,
                 offset + boundedLimit + 1
         );
         List<ConversationSession> page = sessions.stream()
@@ -130,8 +118,8 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
-    public ConversationSessionDTO renameSession(String userId, String sessionId, ConversationRenameRequestDTO request) {
-        ConversationSession session = loadSessionOrThrow(normalizeUserId(userId), sessionId);
+    public ConversationSessionDTO renameSession(String sessionId, ConversationRenameRequestDTO request) {
+        ConversationSession session = loadSessionOrThrow(sessionId);
         long now = System.currentTimeMillis();
         session.setTitle(request.getTitle().trim());
         session.touch(now, resolveExpiresAt(now));
@@ -140,20 +128,14 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     @Override
-    public void deleteSession(String userId, String sessionId) {
-        loadSessionOrThrow(normalizeUserId(userId), sessionId);
+    public void deleteSession(String sessionId) {
+        loadSessionOrThrow(sessionId);
         conversationRepository.deleteSession(sessionId);
     }
 
     @Override
     public ConversationMessageResponseDTO createMessage(String sessionId, ConversationMessageRequestDTO request) {
-        return createMessage(DEFAULT_USER_ID, sessionId, request);
-    }
-
-    @Override
-    public ConversationMessageResponseDTO createMessage(String userId, String sessionId, ConversationMessageRequestDTO request) {
-        String normalizedUserId = normalizeUserId(userId);
-        ConversationSession session = loadSessionOrThrow(normalizedUserId, sessionId);
+        ConversationSession session = loadSessionOrThrow(sessionId);
         long now = System.currentTimeMillis();
         boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
@@ -281,12 +263,7 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public ConversationTurnListDTO listMessages(String sessionId, Integer limit, String beforeTurnId) {
-        return listMessages(DEFAULT_USER_ID, sessionId, limit, beforeTurnId);
-    }
-
-    @Override
-    public ConversationTurnListDTO listMessages(String userId, String sessionId, Integer limit, String beforeTurnId) {
-        ConversationSession session = loadSessionOrThrow(normalizeUserId(userId), sessionId);
+        ConversationSession session = loadSessionOrThrow(sessionId);
         int boundedLimit = normalizeLimit(limit);
         List<ConversationTurn> candidates = conversationRepository.findRecentTurns(session.getSessionId(), MAX_TURN_LIMIT);
         if (candidates.isEmpty()) {
@@ -322,14 +299,6 @@ public class ConversationServiceImpl implements ConversationService {
     private ConversationSession loadSessionOrThrow(String sessionId) {
         return conversationRepository.findSession(sessionId)
                 .orElseThrow(() -> new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND));
-    }
-
-    private ConversationSession loadSessionOrThrow(String userId, String sessionId) {
-        ConversationSession session = loadSessionOrThrow(sessionId);
-        if (!userId.equals(normalizeUserId(session.getUserId()))) {
-            throw new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND);
-        }
-        return session;
     }
 
     private ConversationSessionDTO toSessionDto(ConversationSession session) {
@@ -392,13 +361,6 @@ public class ConversationServiceImpl implements ConversationService {
             return DEFAULT_SESSION_LIST_LIMIT;
         }
         return Math.max(1, Math.min(limit, MAX_SESSION_LIST_LIMIT));
-    }
-
-    private String normalizeUserId(String userId) {
-        if (!StringUtils.hasText(userId)) {
-            return DEFAULT_USER_ID;
-        }
-        return userId.trim();
     }
 
     private long resolveExpiresAt(long now) {

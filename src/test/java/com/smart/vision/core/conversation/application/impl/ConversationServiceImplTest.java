@@ -43,7 +43,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -334,10 +333,9 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void listSessions_shouldReturnCurrentUserSessionsWithCursorAndPreview() {
-        ConversationSessionDTO first = service.createSession("user_a", new ConversationCreateRequestDTO());
-        ConversationSessionDTO second = service.createSession("user_a", new ConversationCreateRequestDTO());
-        service.createSession("user_b", new ConversationCreateRequestDTO());
+    void listSessions_shouldReturnSingleUserSessionsWithCursorAndPreview() {
+        ConversationSessionDTO first = service.createSession(new ConversationCreateRequestDTO());
+        ConversationSessionDTO second = service.createSession(new ConversationCreateRequestDTO());
         repository.findSession(first.getSessionId()).orElseThrow().setUpdatedAt(1000L);
         repository.findSession(second.getSessionId()).orElseThrow().setUpdatedAt(2000L);
 
@@ -349,14 +347,14 @@ class ConversationServiceImplTest {
         firstTurn.setCreatedAt(System.currentTimeMillis());
         repository.saveTurn(firstTurn);
 
-        ConversationSessionListDTO firstPage = service.listSessions("user_a", 1, null);
+        ConversationSessionListDTO firstPage = service.listSessions(1, null);
 
         assertThat(firstPage.getItems()).hasSize(1);
-        assertThat(firstPage.getItems().getFirst().getUserId()).isEqualTo("user_a");
+        assertThat(firstPage.getItems().getFirst().getUserId()).isEqualTo("single_user");
         assertThat(firstPage.getItems().getFirst().getSessionId()).isEqualTo(second.getSessionId());
         assertThat(firstPage.getNextCursor()).isNotBlank();
 
-        ConversationSessionListDTO secondPage = service.listSessions("user_a", 1, firstPage.getNextCursor());
+        ConversationSessionListDTO secondPage = service.listSessions(1, firstPage.getNextCursor());
 
         assertThat(secondPage.getItems()).hasSize(1);
         assertThat(secondPage.getItems().getFirst().getSessionId()).isEqualTo(first.getSessionId());
@@ -365,20 +363,18 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void renameAndDeleteSession_shouldBeIsolatedByUser() {
+    void renameAndDeleteSession_shouldOperateInSingleUserSpace() {
         ConversationCreateRequestDTO createRequest = new ConversationCreateRequestDTO();
         createRequest.setTitle("原标题");
-        ConversationSessionDTO session = service.createSession("user_a", createRequest);
+        ConversationSessionDTO session = service.createSession(createRequest);
         ConversationRenameRequestDTO renameRequest = new ConversationRenameRequestDTO();
         renameRequest.setTitle("新标题");
 
-        ConversationSessionDTO renamed = service.renameSession("user_a", session.getSessionId(), renameRequest);
+        ConversationSessionDTO renamed = service.renameSession(session.getSessionId(), renameRequest);
 
         assertThat(renamed.getTitle()).isEqualTo("新标题");
-        assertThatThrownBy(() -> service.renameSession("user_b", session.getSessionId(), renameRequest))
-                .hasMessageContaining("Conversation session not found");
 
-        service.deleteSession("user_a", session.getSessionId());
+        service.deleteSession(session.getSessionId());
 
         assertThat(repository.findSession(session.getSessionId())).isEmpty();
     }
