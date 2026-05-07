@@ -353,10 +353,16 @@
 3. `fileName`
 4. `previewUrl`（短期签名）
 5. `previewType`（`PDF/TXT/MD/IMAGE`）
-6. `anchor`（页码/chunk/bbox）
+6. `anchor`（`pageNo/chunkOrder/bbox/imageWidth/imageHeight`）
 7. `expiresAt`
 8. `snippet`
 9. `surroundingChunks`
+
+anchor 规范：
+1. PDF 主定位字段为 `pageNo`。
+2. TXT/MD 主定位字段为 `chunkOrder`，snippet 和 `surroundingChunks` 用作定位兜底。
+3. IMAGE 主定位字段为 `bbox + imageWidth + imageHeight`，bbox 使用原图像素坐标，`unit` 固定为 `PIXEL`。
+4. anchor 缺失或无效时只能降级展示，不做伪定位。
 
 `surroundingChunks` 建议结构：
 1. `segmentId`
