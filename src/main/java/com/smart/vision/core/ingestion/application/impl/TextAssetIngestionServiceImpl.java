@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.ingestion.application.TextAssetIngestionService;
 import com.smart.vision.core.ingestion.application.assembler.BatchTaskAssembler;
 import com.smart.vision.core.ingestion.domain.model.BatchTask;
@@ -266,7 +265,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
             BatchTaskStatusDTO dto = objectMapper.readValue(raw, BatchTaskStatusDTO.class);
             return batchTaskAssembler.toTaskDomain(dto);
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
         }
     }
 
@@ -274,7 +273,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
         try {
             return objectMapper.writeValueAsString(task);
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
         }
     }
 
@@ -287,7 +286,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
                     TimeUnit.HOURS
             );
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
         }
     }
 
@@ -299,7 +298,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
         try {
             return objectMapper.readValue(raw, TextAssetMetadata.class);
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
         }
     }
 

@@ -7,7 +7,7 @@ import com.aliyuncs.auth.sts.AssumeRoleResponse;
 import com.aliyuncs.profile.DefaultProfile;
 import com.smart.vision.core.auth.domain.port.CredentialIssuePort;
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.integration.storage.service.aliyun.config.AliyunObjectStorageConfig;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -55,7 +55,7 @@ public class AliyunCredentialIssueService implements CredentialIssuePort {
                     credentials.getSecurityToken()
             );
         } catch (Exception e) {
-            throw new InfraException(ApiError.AUTH_STS_FETCH_FAILED, "Failed to issue upload credential.", e);
+            throw new BusinessException(ApiError.AUTH_STS_FETCH_FAILED, "Failed to issue upload credential.", e);
         }
     }
 }

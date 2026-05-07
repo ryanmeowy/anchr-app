@@ -5,7 +5,7 @@ import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import com.smart.vision.core.common.config.KbSegmentConfig;
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.domain.model.Segment;
 import com.smart.vision.core.search.infrastructure.persistence.es.document.KbSegmentDocument;
 import lombok.RequiredArgsConstructor;
@@ -57,13 +57,13 @@ public class KbSegmentBulkWriter {
                         .filter(StringUtils::hasText)
                         .findFirst()
                         .orElse("kb_segment bulk save failed");
-                throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE, reason);
+                throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE, reason);
             }
-        } catch (InfraException e) {
+        } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             log.error("Failed to persist segments to index [{}]", indexName, e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE, "Failed to persist segments", e);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE, "Failed to persist segments", e);
         }
     }
 

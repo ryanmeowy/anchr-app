@@ -4,7 +4,7 @@ import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.smart.vision.core.integration.storage.service.aliyun.config.AliyunObjectStorageConfig;
 import com.smart.vision.core.search.domain.port.SearchObjectStoragePort;
@@ -43,7 +43,7 @@ public class AliyunObjectStorageService
             return fileName;
         } catch (Exception e) {
             log.error("Failed to upload file to OSS: {}", e.getMessage(), e);
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Failed to upload file to object storage.", e);
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Failed to upload file to object storage.", e);
         }
     }
 

@@ -20,7 +20,6 @@ import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.common.model.GraphTriple;
 import com.smart.vision.core.integration.multimodal.domain.model.PromptEnum;
 import lombok.RequiredArgsConstructor;
@@ -263,7 +262,7 @@ public class AliyunGenManager {
 
     private <T> List<T> parseMdJson(String content, Class<T> clazz) {
         if (StringUtils.isBlank(content)) {
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Model returned empty content.");
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Model returned empty content.");
         }
         try {
             Matcher matcher = MD_JSON_PATTERN.matcher(content);
@@ -272,20 +271,20 @@ public class AliyunGenManager {
                 Type type = TypeToken.getParameterized(List.class, clazz).getType();
                 List<T> parsed = gson.fromJson(jsonArray, type);
                 if (parsed == null || parsed.isEmpty()) {
-                    throw new InfraException(ApiError.INTERNAL_ERROR, "Parsed JSON array is empty.");
+                    throw new BusinessException(ApiError.INTERNAL_ERROR, "Parsed JSON array is empty.");
                 }
                 return parsed;
             }
             List<T> parsed = gson.fromJson(content, TypeToken.getParameterized(List.class, clazz).getType());
             if (parsed == null || parsed.isEmpty()) {
-                throw new InfraException(ApiError.INTERNAL_ERROR, "Parsed JSON payload is empty.");
+                throw new BusinessException(ApiError.INTERNAL_ERROR, "Parsed JSON payload is empty.");
             }
             return parsed;
-        } catch (InfraException e) {
+        } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             log.warn("md json parsing failed, original content: {}", content);
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Failed to parse model json payload.", e);
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Failed to parse model json payload.", e);
         }
     }
 

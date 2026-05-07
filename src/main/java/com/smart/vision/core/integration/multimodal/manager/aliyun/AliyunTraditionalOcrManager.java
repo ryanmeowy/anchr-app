@@ -6,7 +6,6 @@ import com.aliyun.ocr_api20210707.models.RecognizeAdvancedResponse;
 import com.aliyun.ocr_api20210707.models.RecognizeAdvancedResponseBody;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.ingestion.domain.model.OcrStructuredResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,18 +46,18 @@ public class AliyunTraditionalOcrManager {
             throw e;
         } catch (Exception e) {
             log.warn("Aliyun traditional OCR failed", e);
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Aliyun traditional OCR failed", e);
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Aliyun traditional OCR failed", e);
         }
     }
 
     private void validateResponse(RecognizeAdvancedResponseBody body) {
         if (body == null) {
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Aliyun OCR response body is empty");
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Aliyun OCR response body is empty");
         }
         String code = body.getCode();
         if (StringUtils.hasText(code) && !"200".equals(code)) {
             String message = StringUtils.hasText(body.getMessage()) ? body.getMessage() : "Aliyun OCR returned error";
-            throw new InfraException(ApiError.INTERNAL_ERROR, message);
+            throw new BusinessException(ApiError.INTERNAL_ERROR, message);
         }
     }
 }

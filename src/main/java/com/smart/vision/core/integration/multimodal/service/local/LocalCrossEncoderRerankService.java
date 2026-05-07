@@ -3,7 +3,6 @@ package com.smart.vision.core.integration.multimodal.service.local;
 import cn.hutool.core.collection.CollectionUtil;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.grpc.VisionProto;
 import com.smart.vision.core.grpc.VisionServiceGrpc;
 import com.smart.vision.core.search.domain.port.SearchRerankPort;
@@ -52,7 +51,7 @@ public class LocalCrossEncoderRerankService implements SearchRerankPort {
 
     private List<RerankItem> rerankByGrpc(String query, List<String> documents, int topN) {
         if (visionStub == null) {
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Local rerank grpc client is unavailable.");
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Local rerank grpc client is unavailable.");
         }
         long startNs = System.nanoTime();
         try {
@@ -68,7 +67,7 @@ public class LocalCrossEncoderRerankService implements SearchRerankPort {
             log.debug("gRPC rerank success: deadlineMs={}, elapsedMs={}", rerankDeadlineMs, elapsedMs);
 
             if (response == null || CollectionUtil.isEmpty(response.getResultsList())) {
-                throw new InfraException(ApiError.INTERNAL_ERROR, "Local rerank returned empty results.");
+                throw new BusinessException(ApiError.INTERNAL_ERROR, "Local rerank returned empty results.");
             }
             return response.getResultsList().stream()
                     .map(item -> new RerankItem(item.getIndex(), Math.max(0d, item.getRelevanceScore())))
@@ -80,10 +79,10 @@ public class LocalCrossEncoderRerankService implements SearchRerankPort {
             long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
             log.warn("gRPC rerank failed: statusCode={}, deadlineMs={}, elapsedMs={}",
                     e.getStatus().getCode(), rerankDeadlineMs, elapsedMs, e);
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Local rerank grpc call failed.", e);
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Local rerank grpc call failed.", e);
         } catch (Exception e) {
             log.warn("gRPC rerank failed: {}", e.getMessage());
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Local rerank failed.", e);
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Local rerank failed.", e);
         }
     }
 }

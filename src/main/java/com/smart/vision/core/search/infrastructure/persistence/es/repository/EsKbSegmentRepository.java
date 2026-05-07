@@ -8,7 +8,7 @@ import co.elastic.clients.elasticsearch.core.search.Hit;
 import com.smart.vision.core.common.config.KbSegmentConfig;
 import com.smart.vision.core.common.constant.EmbeddingConstant;
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.domain.model.KbSegmentHit;
 import com.smart.vision.core.search.domain.model.KbAssetTypeEnum;
 import com.smart.vision.core.search.domain.model.Segment;
@@ -48,7 +48,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
             return convertHits(response);
         } catch (Exception e) {
             log.error("kb text search failed", e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 
@@ -63,7 +63,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
             return convertHits(response);
         } catch (Exception e) {
             log.error("kb vector search failed", e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 
@@ -86,7 +86,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
             return Optional.of(toSegment(doc));
         } catch (Exception e) {
             log.error("kb segment get failed, segmentId={}", segmentId, e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 

@@ -13,7 +13,6 @@ import com.alibaba.dashscope.exception.UploadFileException;
 import com.google.common.collect.Lists;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.common.util.VectorUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -83,13 +82,13 @@ public class BailianEmbeddingManager {
         MultiModalEmbeddingResult result = embedder.call(param);
 
         if (result.getOutput() == null || CollectionUtils.isEmpty(result.getOutput().getEmbeddings())) {
-            throw new InfraException(ApiError.EMBEDDING_RESULT_EMPTY, "Aliyun returned empty embedding result.");
+            throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY, "Aliyun returned empty embedding result.");
         }
 
         List<Double> rawEmbedding = result.getOutput().getEmbeddings().stream()
                 .findFirst()
                 .map(MultiModalEmbeddingResultItem::getEmbedding)
-                .orElseThrow(() -> new InfraException(ApiError.EMBEDDING_RESULT_EMPTY, "Aliyun returned empty embedding vector."));
+                .orElseThrow(() -> new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY, "Aliyun returned empty embedding vector."));
 
         return rawEmbedding.stream()
                 .map(Double::floatValue)

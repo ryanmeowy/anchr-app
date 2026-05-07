@@ -4,7 +4,6 @@ package com.smart.vision.core.integration.multimodal.service.local;
 import com.google.common.collect.Lists;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.common.model.GraphTriple;
 import com.smart.vision.core.conversation.domain.port.ConversationRewritePort;
 import com.smart.vision.core.grpc.VisionProto;
@@ -75,7 +74,7 @@ public class LocalGenService implements SearchContentPort, IngestionContentPort,
             }
             String result = sb.toString().trim();
             if (result.isEmpty()) {
-                throw new InfraException(ApiError.INTERNAL_ERROR, "Local summary result is empty.");
+                throw new BusinessException(ApiError.INTERNAL_ERROR, "Local summary result is empty.");
             }
             return result.lines().collect(Collectors.joining(System.lineSeparator())).trim();
         } catch (StatusRuntimeException e) {

@@ -1,7 +1,7 @@
 package com.smart.vision.core.ingestion.infrastructure.parser;
 
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.ingestion.domain.model.TextAssetMetadata;
 import com.smart.vision.core.ingestion.domain.model.TextParseResult;
 import com.smart.vision.core.ingestion.domain.model.TextParseUnit;
@@ -52,7 +52,7 @@ public class PdfTextParser implements TextParserPort {
             }
             return new TextParseResult(units, name());
         } catch (IOException e) {
-            throw new InfraException(ApiError.TEXT_PARSE_FAILED, "Failed to parse PDF asset", e);
+            throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "Failed to parse PDF asset", e);
         }
     }
 

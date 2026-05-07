@@ -10,7 +10,6 @@ import com.alibaba.dashscope.rerank.TextReRankParam;
 import com.alibaba.dashscope.rerank.TextReRankResult;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.search.domain.port.SearchRerankPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +51,7 @@ public class AliyunCrossEncoderRerankService implements SearchRerankPort {
                     .build();
             TextReRankResult result = new TextReRank().call(param);
             if (result.getOutput() == null || CollectionUtil.isEmpty(result.getOutput().getResults())) {
-                throw new InfraException(ApiError.INTERNAL_ERROR, "Aliyun rerank returned empty results.");
+                throw new BusinessException(ApiError.INTERNAL_ERROR, "Aliyun rerank returned empty results.");
             }
             return result.getOutput().getResults().stream()
                     .filter(item -> item != null && item.getIndex() != null)

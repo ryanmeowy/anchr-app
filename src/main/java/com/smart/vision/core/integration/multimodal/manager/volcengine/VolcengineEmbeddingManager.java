@@ -2,7 +2,6 @@ package com.smart.vision.core.integration.multimodal.manager.volcengine;
 
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.volcengine.ark.runtime.model.multimodalembeddings.MultimodalEmbeddingInput;
 import com.volcengine.ark.runtime.model.multimodalembeddings.MultimodalEmbeddingRequest;
 import com.volcengine.ark.runtime.model.multimodalembeddings.MultimodalEmbeddingResult;
@@ -68,11 +67,11 @@ public class VolcengineEmbeddingManager {
 
         if (null == res || null == res.getData()) {
             log.info("embedding failed, request:{}, response:{}", inputs, res);
-            throw new InfraException(ApiError.EMBEDDING_FAILED);
+            throw new BusinessException(ApiError.EMBEDDING_FAILED);
         }
 
         if (CollectionUtils.isEmpty(res.getData().getEmbedding())) {
-            throw new InfraException(ApiError.EMBEDDING_RESULT_EMPTY, "Volcengine returned empty embedding.");
+            throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY, "Volcengine returned empty embedding.");
         }
         List<Double> rawEmbeddingList = res.getData().getEmbedding();
 

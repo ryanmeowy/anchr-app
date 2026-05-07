@@ -4,7 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.ingestion.domain.model.OcrBoundingBox;
 import com.smart.vision.core.ingestion.domain.model.OcrParagraph;
 import com.smart.vision.core.ingestion.domain.model.OcrStructuredResult;
@@ -41,7 +41,7 @@ public class AliyunAdvancedOcrResultParser {
                     .paragraphs(readParagraphs(root.path("prism_paragraphsInfo"), words))
                     .build();
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Failed to parse Aliyun OCR response", e);
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Failed to parse Aliyun OCR response", e);
         }
     }
 
@@ -56,7 +56,7 @@ public class AliyunAdvancedOcrResultParser {
         int start = trimmed.indexOf('{');
         int end = trimmed.lastIndexOf('}');
         if (start < 0 || end < start) {
-            throw new InfraException(ApiError.INTERNAL_ERROR, "Aliyun OCR response data is not JSON");
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Aliyun OCR response data is not JSON");
         }
         return trimmed.substring(start, end + 1);
     }

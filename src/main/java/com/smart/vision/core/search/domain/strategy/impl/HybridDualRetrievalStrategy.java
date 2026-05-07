@@ -7,8 +7,8 @@ import com.smart.vision.core.search.domain.model.StrategyTypeEnum;
 import com.smart.vision.core.search.domain.port.SearchRerankPort;
 import com.smart.vision.core.search.domain.port.SearchRerankPort.RerankItem;
 import com.smart.vision.core.search.domain.ranking.DualRouteRrfFusionService;
+import com.smart.vision.core.search.domain.repository.ImageSearchRepository;
 import com.smart.vision.core.search.domain.strategy.RetrievalStrategy;
-import com.smart.vision.core.search.infrastructure.persistence.es.repository.ImageRepository;
 import com.smart.vision.core.search.interfaces.rest.dto.SearchQueryDTO;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -40,7 +40,7 @@ import static com.smart.vision.core.search.domain.util.ScoreUtil.mapScoreToPerce
 @RequiredArgsConstructor
 public class HybridDualRetrievalStrategy implements RetrievalStrategy {
 
-    private final ImageRepository imageRepository;
+    private final ImageSearchRepository imageSearchRepository;
     private final DualRouteRrfFusionService dualRouteRrfFusionService;
     private final SearchRerankPort searchRerankPort;
     private final MeterRegistry meterRegistry;
@@ -87,9 +87,9 @@ public class HybridDualRetrievalStrategy implements RetrievalStrategy {
 
         List<ImageSearchResultDTO> vectorHits = CollectionUtil.isEmpty(queryVector)
                 ? List.of()
-                : imageRepository.vectorSearch(queryVector, recallSize);
+                : imageSearchRepository.vectorSearch(queryVector, recallSize);
         List<ImageSearchResultDTO> textHits = StringUtils.hasText(query.getKeyword())
-                ? imageRepository.textSearch(query.getKeyword(), recallSize, enableOcr)
+                ? imageSearchRepository.textSearch(query.getKeyword(), recallSize, enableOcr)
                 : List.of();
 
         List<ImageSearchResultDTO> candidates = dualRouteRrfFusionService.fuse(

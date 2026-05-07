@@ -1,7 +1,7 @@
 package com.smart.vision.core.ingestion.infrastructure.parser;
 
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.ingestion.domain.model.TextAssetMetadata;
 import com.smart.vision.core.ingestion.domain.port.IngestionObjectStoragePort;
 import lombok.RequiredArgsConstructor;
@@ -27,12 +27,12 @@ public class TextAssetContentLoader {
 
     public byte[] load(TextAssetMetadata metadata) {
         if (metadata == null || !StringUtils.hasText(metadata.getObjectKey())) {
-            throw new InfraException(ApiError.TEXT_PARSE_FAILED, "Text asset object key is missing");
+            throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "Text asset object key is missing");
         }
 
         String downloadUrl = objectStoragePort.buildDownloadUrl(metadata.getObjectKey());
         if (!StringUtils.hasText(downloadUrl)) {
-            throw new InfraException(ApiError.TEXT_PARSE_FAILED, "Failed to build download url for text asset");
+            throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "Failed to build download url for text asset");
         }
 
         try {
@@ -43,7 +43,7 @@ public class TextAssetContentLoader {
                 return inputStream.readAllBytes();
             }
         } catch (IOException e) {
-            throw new InfraException(ApiError.TEXT_PARSE_FAILED, "Failed to load text asset content", e);
+            throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "Failed to load text asset content", e);
         }
     }
 }

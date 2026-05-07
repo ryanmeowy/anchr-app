@@ -2,7 +2,7 @@ package com.smart.vision.core.search.application.impl;
 
 import com.smart.vision.core.common.config.VectorConfig;
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.application.SearchService;
 import com.smart.vision.core.search.application.support.HotSearchManager;
 import com.smart.vision.core.search.application.support.SearchCursorCodec;
@@ -204,7 +204,7 @@ public class SearchServiceImpl implements SearchService {
             return dtoList;
         } catch (Exception e) {
             log.error("Failed to search by image", e);
-            throw new InfraException(ApiError.IMAGE_SEARCH_FAILED);
+            throw new BusinessException(ApiError.IMAGE_SEARCH_FAILED);
         }
     }
 
