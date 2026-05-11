@@ -30,6 +30,11 @@ public class VolcengineObjectStorageService
     }
 
     @Override
+    public String buildPreviewUrl(String objectKey) {
+        throw new UnsupportedOperationException("Unrealized");
+    }
+
+    @Override
     public String buildDownloadUrl(String objectKey) {
         throw new UnsupportedOperationException("Unrealized");
     }

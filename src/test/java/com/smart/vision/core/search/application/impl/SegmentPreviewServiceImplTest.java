@@ -5,10 +5,12 @@ import com.smart.vision.core.search.domain.model.Bbox;
 import com.smart.vision.core.search.domain.model.KbAssetTypeEnum;
 import com.smart.vision.core.search.domain.model.Segment;
 import com.smart.vision.core.search.domain.model.SegmentType;
+import com.smart.vision.core.search.domain.port.SearchObjectStoragePort;
 import com.smart.vision.core.search.domain.repository.KbSegmentRepository;
 import com.smart.vision.core.search.interfaces.rest.dto.PreviewSegmentDTO;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,15 +23,18 @@ class SegmentPreviewServiceImplTest {
     @Test
     void getSegmentPreview_shouldExposeImageOcrAnchor() {
         KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
-        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(kbSegmentRepository);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(kbSegmentRepository, objectStoragePort);
         Segment segment = buildImageOcrSegment();
         when(kbSegmentRepository.findBySegmentId("asset-1:ocr:0")).thenReturn(Optional.of(segment));
+        when(objectStoragePort.buildPreviewUrl("image-a.png")).thenReturn("https://preview.example.com/image-a.png");
 
         PreviewSegmentDTO preview = service.getSegmentPreview("asset-1:ocr:0");
 
         assertThat(preview.getSegmentId()).isEqualTo("asset-1:ocr:0");
         assertThat(preview.getPreviewType()).isEqualTo("IMAGE");
-        assertThat(preview.getPreviewUrl()).isEqualTo("oss://image-a.png");
+        assertThat(preview.getPreviewUrl()).isEqualTo("https://preview.example.com/image-a.png");
+        assertThat(preview.getExpiresAt()).isNotNull();
         assertThat(preview.getFileName()).isEqualTo("image-a.png");
         assertThat(preview.getSnippet()).isEqualTo("设备故障代码 E102");
         assertThat(preview.getAnchor().getBbox().getX()).isEqualTo(120);
@@ -42,9 +47,10 @@ class SegmentPreviewServiceImplTest {
     }
 
     @Test
-    void getSegmentPreview_shouldReturnCurrentChunkWithContentLimit() {
+    void getSegmentPreview_shouldReturnNeighborChunksWithContentLimit() {
         KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
-        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(kbSegmentRepository);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(kbSegmentRepository, objectStoragePort);
         Segment segment = Segment.builder()
                 .segmentId("asset-2:text:3")
                 .assetId("asset-2")
@@ -56,23 +62,48 @@ class SegmentPreviewServiceImplTest {
                 .pageNo(2)
                 .chunkOrder(3)
                 .build();
+        Segment previous = Segment.builder()
+                .segmentId("asset-2:text:2")
+                .assetId("asset-2")
+                .assetType(KbAssetTypeEnum.TEXT)
+                .segmentType(SegmentType.TEXT_CHUNK)
+                .contentText("上一段内容")
+                .pageNo(2)
+                .chunkOrder(2)
+                .build();
+        Segment next = Segment.builder()
+                .segmentId("asset-2:text:4")
+                .assetId("asset-2")
+                .assetType(KbAssetTypeEnum.TEXT)
+                .segmentType(SegmentType.TEXT_CHUNK)
+                .contentText("下一段内容")
+                .pageNo(2)
+                .chunkOrder(4)
+                .build();
         when(kbSegmentRepository.findBySegmentId("asset-2:text:3")).thenReturn(Optional.of(segment));
+        when(kbSegmentRepository.findNeighborChunks("asset-2", 2, 3, 1))
+                .thenReturn(List.of(previous, segment, next));
+        when(objectStoragePort.buildPreviewUrl("docs/manual.md")).thenReturn("https://preview.example.com/docs/manual.md");
 
         PreviewSegmentDTO preview = service.getSegmentPreview("asset-2:text:3");
 
         assertThat(preview.getFileName()).isEqualTo("manual.md");
+        assertThat(preview.getPreviewUrl()).isEqualTo("https://preview.example.com/docs/manual.md");
         assertThat(preview.getAnchor().getChunkOrder()).isEqualTo(3);
-        assertThat(preview.getSurroundingChunks()).hasSize(1);
-        assertThat(preview.getSurroundingChunks().getFirst().getSegmentId()).isEqualTo("asset-2:text:3");
-        assertThat(preview.getSurroundingChunks().getFirst().getChunkOrder()).isEqualTo(3);
-        assertThat(preview.getSurroundingChunks().getFirst().getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
+        assertThat(preview.getSurroundingChunks()).hasSize(3);
+        assertThat(preview.getSurroundingChunks()).extracting("relation")
+                .containsExactly("previous", "current", "next");
+        assertThat(preview.getSurroundingChunks().get(1).getSegmentId()).isEqualTo("asset-2:text:3");
+        assertThat(preview.getSurroundingChunks().get(1).getChunkOrder()).isEqualTo(3);
+        assertThat(preview.getSurroundingChunks().get(1).getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
                 .isLessThanOrEqualTo(4096);
     }
 
     @Test
     void getSegmentPreview_shouldThrowWhenSegmentNotFound() {
         KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
-        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(kbSegmentRepository);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(kbSegmentRepository, objectStoragePort);
         when(kbSegmentRepository.findBySegmentId("missing")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getSegmentPreview("missing"))

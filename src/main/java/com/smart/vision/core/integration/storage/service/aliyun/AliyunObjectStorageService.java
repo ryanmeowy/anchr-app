@@ -61,6 +61,11 @@ public class AliyunObjectStorageService
     }
 
     @Override
+    public String buildPreviewUrl(String objectKey) {
+        return buildPresignedUrl(objectKey, SHORT_TERM_VALIDITY.getValidity());
+    }
+
+    @Override
     public String buildDownloadUrl(String objectKey) {
         return buildPresignedUrl(objectKey, SHORT_TERM_VALIDITY.getValidity());
     }

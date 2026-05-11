@@ -16,4 +16,6 @@ public interface KbSegmentRepository {
     List<KbSegmentHit> vectorSearch(List<Float> queryVector, int topK);
 
     Optional<Segment> findBySegmentId(String segmentId);
+
+    List<Segment> findNeighborChunks(String assetId, Integer pageNo, Integer chunkOrder, int window);
 }

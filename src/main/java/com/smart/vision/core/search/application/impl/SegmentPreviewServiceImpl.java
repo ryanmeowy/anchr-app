@@ -5,6 +5,7 @@ import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.application.SegmentPreviewService;
 import com.smart.vision.core.search.domain.model.Bbox;
 import com.smart.vision.core.search.domain.model.Segment;
+import com.smart.vision.core.search.domain.port.SearchObjectStoragePort;
 import com.smart.vision.core.search.domain.repository.KbSegmentRepository;
 import com.smart.vision.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.PreviewSegmentDTO;
@@ -15,6 +16,7 @@ import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Default segment preview service.
@@ -24,9 +26,14 @@ import java.util.List;
 public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     private static final int SURROUNDING_CHUNK_MAX_BYTES = 4096;
+    private static final int SURROUNDING_CHUNK_WINDOW = 1;
+    private static final long PREVIEW_URL_TTL_MILLIS = 5 * 60 * 1_000L;
     private static final String RELATION_CURRENT = "current";
+    private static final String RELATION_PREVIOUS = "previous";
+    private static final String RELATION_NEXT = "next";
 
     private final KbSegmentRepository kbSegmentRepository;
+    private final SearchObjectStoragePort objectStoragePort;
 
     @Override
     public PreviewSegmentDTO getSegmentPreview(String segmentId) {
@@ -39,6 +46,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     }
 
     private PreviewSegmentDTO toPreview(Segment segment) {
+        PreviewAccess previewAccess = buildPreviewAccess(segment);
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
@@ -46,14 +54,15 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .segmentType(toCode(segment.getSegmentType()))
                 .fileName(resolveFileName(segment))
                 .previewType(resolvePreviewType(segment))
-                .previewUrl(segment.getSourceRef())
+                .previewUrl(previewAccess.url())
+                .expiresAt(previewAccess.expiresAt())
                 .sourceRef(segment.getSourceRef())
                 .thumbnail(segment.getThumbnail())
                 .title(segment.getTitle())
                 .snippet(resolveSnippet(segment))
                 .ocrSummary(segment.getOcrSummary())
                 .anchor(toAnchor(segment))
-                .surroundingChunks(buildCurrentChunk(segment))
+                .surroundingChunks(buildSurroundingChunks(segment))
                 .build();
     }
 
@@ -90,6 +99,22 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
+    private List<SurroundingChunkDTO> buildSurroundingChunks(Segment segment) {
+        if (!StringUtils.hasText(segment.getAssetId()) || segment.getChunkOrder() == null) {
+            return buildCurrentChunk(segment);
+        }
+        List<SurroundingChunkDTO> chunks = kbSegmentRepository.findNeighborChunks(
+                        segment.getAssetId(),
+                        segment.getPageNo(),
+                        segment.getChunkOrder(),
+                        SURROUNDING_CHUNK_WINDOW)
+                .stream()
+                .map(candidate -> toSurroundingChunk(segment, candidate))
+                .filter(Objects::nonNull)
+                .toList();
+        return chunks.isEmpty() ? buildCurrentChunk(segment) : chunks;
+    }
+
     private List<SurroundingChunkDTO> buildCurrentChunk(Segment segment) {
         String content = resolveSnippet(segment);
         if (!StringUtils.hasText(content)) {
@@ -102,6 +127,63 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .content(truncateUtf8(content.trim(), SURROUNDING_CHUNK_MAX_BYTES))
                 .relation(RELATION_CURRENT)
                 .build());
+    }
+
+    private SurroundingChunkDTO toSurroundingChunk(Segment current, Segment candidate) {
+        String content = resolveSnippet(candidate);
+        if (!StringUtils.hasText(content)) {
+            return null;
+        }
+        return SurroundingChunkDTO.builder()
+                .segmentId(candidate.getSegmentId())
+                .chunkOrder(candidate.getChunkOrder())
+                .pageNo(candidate.getPageNo())
+                .content(truncateUtf8(content.trim(), SURROUNDING_CHUNK_MAX_BYTES))
+                .relation(resolveRelation(current, candidate))
+                .build();
+    }
+
+    private String resolveRelation(Segment current, Segment candidate) {
+        if (Objects.equals(current.getSegmentId(), candidate.getSegmentId())
+                || Objects.equals(current.getChunkOrder(), candidate.getChunkOrder())) {
+            return RELATION_CURRENT;
+        }
+        if (candidate.getChunkOrder() != null && current.getChunkOrder() != null
+                && candidate.getChunkOrder() < current.getChunkOrder()) {
+            return RELATION_PREVIOUS;
+        }
+        return RELATION_NEXT;
+    }
+
+    private PreviewAccess buildPreviewAccess(Segment segment) {
+        String sourceRef = segment.getSourceRef();
+        if (!StringUtils.hasText(sourceRef)) {
+            return new PreviewAccess(null, null);
+        }
+        String normalizedSourceRef = sourceRef.trim();
+        if (isDirectUrl(normalizedSourceRef)) {
+            return new PreviewAccess(normalizedSourceRef, null);
+        }
+        String objectKey = resolveObjectKey(normalizedSourceRef);
+        if (!StringUtils.hasText(objectKey)) {
+            return new PreviewAccess(null, null);
+        }
+        String previewUrl = objectStoragePort.buildPreviewUrl(objectKey);
+        return new PreviewAccess(previewUrl, System.currentTimeMillis() + PREVIEW_URL_TTL_MILLIS);
+    }
+
+    private boolean isDirectUrl(String sourceRef) {
+        return sourceRef.startsWith("http://") || sourceRef.startsWith("https://");
+    }
+
+    private String resolveObjectKey(String sourceRef) {
+        int queryIndex = sourceRef.indexOf('?');
+        String path = queryIndex >= 0 ? sourceRef.substring(0, queryIndex) : sourceRef;
+        String objectKey = path.startsWith("oss://") ? path.substring("oss://".length()) : path;
+        while (objectKey.startsWith("/")) {
+            objectKey = objectKey.substring(1);
+        }
+        return objectKey;
     }
 
     private String resolvePreviewType(Segment segment) {
@@ -157,5 +239,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     private String toCode(Enum<?> value) {
         return value == null ? null : value.name();
+    }
+
+    private record PreviewAccess(String url, Long expiresAt) {
     }
 }

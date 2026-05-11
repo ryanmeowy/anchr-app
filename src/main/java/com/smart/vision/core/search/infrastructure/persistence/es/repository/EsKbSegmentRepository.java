@@ -1,6 +1,7 @@
 package com.smart.vision.core.search.infrastructure.persistence.es.repository;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
@@ -9,8 +10,8 @@ import com.smart.vision.core.common.config.KbSegmentConfig;
 import com.smart.vision.core.common.constant.EmbeddingConstant;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.search.domain.model.KbSegmentHit;
 import com.smart.vision.core.search.domain.model.KbAssetTypeEnum;
+import com.smart.vision.core.search.domain.model.KbSegmentHit;
 import com.smart.vision.core.search.domain.model.Segment;
 import com.smart.vision.core.search.domain.model.SegmentType;
 import com.smart.vision.core.search.domain.repository.KbSegmentRepository;
@@ -90,6 +91,21 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         }
     }
 
+    @Override
+    public List<Segment> findNeighborChunks(String assetId, Integer pageNo, Integer chunkOrder, int window) {
+        if (!StringUtils.hasText(assetId) || chunkOrder == null || window <= 0) {
+            return List.of();
+        }
+        try {
+            SearchRequest request = buildNeighborChunksRequest(assetId.trim(), pageNo, chunkOrder, window);
+            SearchResponse<KbSegmentDocument> response = esClient.search(request, KbSegmentDocument.class);
+            return convertSegmentHits(response);
+        } catch (Exception e) {
+            log.error("kb neighbor chunks search failed, assetId={}, chunkOrder={}", assetId, chunkOrder, e);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+        }
+    }
+
     private SearchRequest buildTextSearchRequest(String query, int limit) {
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())
@@ -125,6 +141,29 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         );
     }
 
+    private SearchRequest buildNeighborChunksRequest(String assetId, Integer pageNo, int chunkOrder, int window) {
+        int from = Math.max(0, chunkOrder - window);
+        int to = chunkOrder + window;
+        return SearchRequest.of(s -> s
+                .index(kbSegmentConfig.getReadTargetName())
+                .size(window * 2 + 1)
+                .source(src -> src.filter(f -> f.excludes("embedding")))
+                .query(q -> q.bool(b -> {
+                    b.filter(f -> f.term(t -> t.field("assetId").value(assetId)));
+                    b.filter(f -> f.range(r -> r.number(n -> n
+                            .field("chunkOrder")
+                            .gte((double) from)
+                            .lte((double) to))));
+                    if (pageNo != null) {
+                        b.filter(f -> f.term(t -> t.field("pageNo").value(pageNo)));
+                    }
+                    return b;
+                }))
+                .sort(sort -> sort.field(f -> f.field("chunkOrder").order(SortOrder.Asc)))
+                .sort(sort -> sort.field(f -> f.field("segmentId").order(SortOrder.Asc)))
+        );
+    }
+
     private List<KbSegmentHit> convertHits(SearchResponse<KbSegmentDocument> response) {
         if (response == null || response.hits() == null || response.hits().hits() == null) {
             return List.of();
@@ -149,6 +188,27 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
                 .highlights(extractHighlightMap(hit))
                 .highlightFields(hit.highlight() == null ? List.of() : List.copyOf(hit.highlight().keySet()))
                 .build();
+    }
+
+    private List<Segment> convertSegmentHits(SearchResponse<KbSegmentDocument> response) {
+        if (response == null || response.hits() == null || response.hits().hits() == null) {
+            return List.of();
+        }
+        return response.hits().hits().stream()
+                .map(this::convertSegmentHit)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    private Segment convertSegmentHit(Hit<KbSegmentDocument> hit) {
+        if (hit == null || hit.source() == null) {
+            return null;
+        }
+        KbSegmentDocument doc = hit.source();
+        if (!StringUtils.hasText(doc.getSegmentId()) && StringUtils.hasText(hit.id())) {
+            doc.setSegmentId(hit.id());
+        }
+        return toSegment(doc);
     }
 
     private Segment toSegment(KbSegmentDocument doc) {

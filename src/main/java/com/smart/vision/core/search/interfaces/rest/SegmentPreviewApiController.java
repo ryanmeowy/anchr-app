@@ -1,5 +1,6 @@
 package com.smart.vision.core.search.interfaces.rest;
 
+import com.smart.vision.core.auth.RequireAuth;
 import com.smart.vision.core.common.model.Result;
 import com.smart.vision.core.search.application.SegmentPreviewService;
 import com.smart.vision.core.search.interfaces.rest.dto.PreviewSegmentDTO;
@@ -20,6 +21,7 @@ public class SegmentPreviewApiController {
 
     private final SegmentPreviewService segmentPreviewService;
 
+    @RequireAuth
     @GetMapping("/segments/{segmentId}")
     public Result<PreviewSegmentDTO> getSegmentPreview(@PathVariable @NotBlank String segmentId) {
         return Result.success(segmentPreviewService.getSegmentPreview(segmentId));
