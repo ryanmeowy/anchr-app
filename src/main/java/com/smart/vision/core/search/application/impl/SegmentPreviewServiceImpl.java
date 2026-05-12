@@ -3,6 +3,7 @@ package com.smart.vision.core.search.application.impl;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.application.SegmentPreviewService;
+import com.smart.vision.core.search.application.support.PreviewAccessCache;
 import com.smart.vision.core.search.domain.model.Bbox;
 import com.smart.vision.core.search.domain.model.Segment;
 import com.smart.vision.core.search.domain.port.SearchObjectStoragePort;
@@ -17,6 +18,7 @@ import org.springframework.util.StringUtils;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Default segment preview service.
@@ -34,19 +36,20 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     private final KbSegmentRepository kbSegmentRepository;
     private final SearchObjectStoragePort objectStoragePort;
+    private final PreviewAccessCache previewAccessCache;
 
     @Override
-    public PreviewSegmentDTO getSegmentPreview(String segmentId) {
+    public PreviewSegmentDTO getSegmentPreview(String segmentId, String accessToken) {
         if (!StringUtils.hasText(segmentId)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "segmentId cannot be blank.");
         }
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND, "Segment not found."));
-        return toPreview(segment);
+        return toPreview(segment, accessToken);
     }
 
-    private PreviewSegmentDTO toPreview(Segment segment) {
-        PreviewAccess previewAccess = buildPreviewAccess(segment);
+    private PreviewSegmentDTO toPreview(Segment segment, String accessToken) {
+        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessToken);
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
@@ -155,21 +158,35 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return RELATION_NEXT;
     }
 
-    private PreviewAccess buildPreviewAccess(Segment segment) {
+    private PreviewAccessCache.PreviewAccess buildPreviewAccess(Segment segment, String accessToken) {
         String sourceRef = segment.getSourceRef();
         if (!StringUtils.hasText(sourceRef)) {
-            return new PreviewAccess(null, null);
+            return new PreviewAccessCache.PreviewAccess(null, null);
         }
         String normalizedSourceRef = sourceRef.trim();
         if (isDirectUrl(normalizedSourceRef)) {
-            return new PreviewAccess(normalizedSourceRef, null);
+            return new PreviewAccessCache.PreviewAccess(normalizedSourceRef, null);
+        }
+        String segmentId = segment.getSegmentId();
+        if (StringUtils.hasText(segmentId)) {
+            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(segmentId, accessToken);
+            if (cached.isPresent()) {
+                return cached.get();
+            }
         }
         String objectKey = resolveObjectKey(normalizedSourceRef);
         if (!StringUtils.hasText(objectKey)) {
-            return new PreviewAccess(null, null);
+            return new PreviewAccessCache.PreviewAccess(null, null);
         }
         String previewUrl = objectStoragePort.buildPreviewUrl(objectKey);
-        return new PreviewAccess(previewUrl, System.currentTimeMillis() + PREVIEW_URL_TTL_MILLIS);
+        PreviewAccessCache.PreviewAccess previewAccess = new PreviewAccessCache.PreviewAccess(
+                previewUrl,
+                System.currentTimeMillis() + PREVIEW_URL_TTL_MILLIS
+        );
+        if (StringUtils.hasText(segmentId)) {
+            previewAccessCache.save(segmentId, accessToken, previewAccess);
+        }
+        return previewAccess;
     }
 
     private boolean isDirectUrl(String sourceRef) {
@@ -239,8 +256,5 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     private String toCode(Enum<?> value) {
         return value == null ? null : value.name();
-    }
-
-    private record PreviewAccess(String url, Long expiresAt) {
     }
 }

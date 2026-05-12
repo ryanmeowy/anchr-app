@@ -7,5 +7,5 @@ import com.smart.vision.core.search.interfaces.rest.dto.PreviewSegmentDTO;
  */
 public interface SegmentPreviewService {
 
-    PreviewSegmentDTO getSegmentPreview(String segmentId);
+    PreviewSegmentDTO getSegmentPreview(String segmentId, String accessToken);
 }

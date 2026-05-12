@@ -61,9 +61,10 @@ class SegmentPreviewApiControllerTest {
                         .relation("current")
                         .build()))
                 .build();
-        when(segmentPreviewService.getSegmentPreview(eq("seg-001"))).thenReturn(preview);
+        when(segmentPreviewService.getSegmentPreview(eq("seg-001"), eq("token-a"))).thenReturn(preview);
 
-        mockMvc.perform(get("/api/v1/preview/segments/seg-001"))
+        mockMvc.perform(get("/api/v1/preview/segments/seg-001")
+                        .header("X-Access-Token", "token-a"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.segmentId").value("seg-001"))

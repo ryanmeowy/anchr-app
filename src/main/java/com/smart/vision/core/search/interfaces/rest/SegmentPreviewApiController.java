@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -23,7 +24,9 @@ public class SegmentPreviewApiController {
 
     @RequireAuth
     @GetMapping("/segments/{segmentId}")
-    public Result<PreviewSegmentDTO> getSegmentPreview(@PathVariable @NotBlank String segmentId) {
-        return Result.success(segmentPreviewService.getSegmentPreview(segmentId));
+    public Result<PreviewSegmentDTO> getSegmentPreview(
+            @PathVariable @NotBlank String segmentId,
+            @RequestHeader(value = "X-Access-Token", required = false) String accessToken) {
+        return Result.success(segmentPreviewService.getSegmentPreview(segmentId, accessToken));
     }
 }
