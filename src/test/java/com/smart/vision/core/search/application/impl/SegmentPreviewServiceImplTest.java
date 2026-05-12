@@ -99,6 +99,7 @@ class SegmentPreviewServiceImplTest {
         PreviewSegmentDTO preview = service.getSegmentPreview("asset-2:text:3", "token-a");
 
         assertThat(preview.getFileName()).isEqualTo("manual.md");
+        assertThat(preview.getPreviewType()).isEqualTo("MD");
         assertThat(preview.getPreviewUrl()).isEqualTo("https://preview.example.com/docs/manual.md");
         assertThat(preview.getAnchor().getChunkOrder()).isEqualTo(3);
         assertThat(preview.getSurroundingChunks()).hasSize(3);
@@ -108,6 +109,29 @@ class SegmentPreviewServiceImplTest {
         assertThat(preview.getSurroundingChunks().get(1).getChunkOrder()).isEqualTo(3);
         assertThat(preview.getSurroundingChunks().get(1).getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
                 .isLessThanOrEqualTo(4096);
+    }
+
+    @Test
+    void getSegmentPreview_shouldInferPdfAndTxtPreviewTypes() {
+        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
+                kbSegmentRepository,
+                objectStoragePort,
+                new PreviewAccessCache()
+        );
+        Segment pdfSegment = textSegment("asset-3:text:1", "oss://docs/mysql.pdf");
+        Segment txtSegment = textSegment("asset-4:text:1", "oss://docs/readme.txt");
+        when(kbSegmentRepository.findBySegmentId("asset-3:text:1")).thenReturn(Optional.of(pdfSegment));
+        when(kbSegmentRepository.findBySegmentId("asset-4:text:1")).thenReturn(Optional.of(txtSegment));
+        when(objectStoragePort.buildPreviewUrl("docs/mysql.pdf")).thenReturn("https://preview.example.com/mysql.pdf");
+        when(objectStoragePort.buildPreviewUrl("docs/readme.txt")).thenReturn("https://preview.example.com/readme.txt");
+
+        PreviewSegmentDTO pdfPreview = service.getSegmentPreview("asset-3:text:1", "token-a");
+        PreviewSegmentDTO txtPreview = service.getSegmentPreview("asset-4:text:1", "token-a");
+
+        assertThat(pdfPreview.getPreviewType()).isEqualTo("PDF");
+        assertThat(txtPreview.getPreviewType()).isEqualTo("TXT");
     }
 
     @Test
@@ -148,6 +172,39 @@ class SegmentPreviewServiceImplTest {
                 .hasMessage("Segment not found.");
     }
 
+    @Test
+    void getSegmentPreview_shouldThrowWhenTokenMissing() {
+        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
+                kbSegmentRepository,
+                objectStoragePort,
+                new PreviewAccessCache()
+        );
+
+        assertThatThrownBy(() -> service.getSegmentPreview("asset-1:ocr:0", " "))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("X-Access-Token is required.");
+    }
+
+    @Test
+    void getSegmentPreview_shouldThrowClearErrorWhenPreviewUrlSigningFails() {
+        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
+                kbSegmentRepository,
+                objectStoragePort,
+                new PreviewAccessCache()
+        );
+        Segment segment = textSegment("asset-5:text:1", "oss://docs/fail.pdf");
+        when(kbSegmentRepository.findBySegmentId("asset-5:text:1")).thenReturn(Optional.of(segment));
+        when(objectStoragePort.buildPreviewUrl("docs/fail.pdf")).thenThrow(new IllegalStateException("oss down"));
+
+        assertThatThrownBy(() -> service.getSegmentPreview("asset-5:text:1", "token-a"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Failed to sign preview URL");
+    }
+
     private Segment buildImageOcrSegment() {
         return Segment.builder()
                 .segmentId("asset-1:ocr:0")
@@ -168,6 +225,20 @@ class SegmentPreviewServiceImplTest {
                         .build())
                 .imageWidth(1920)
                 .imageHeight(1080)
+                .build();
+    }
+
+    private Segment textSegment(String segmentId, String sourceRef) {
+        return Segment.builder()
+                .segmentId(segmentId)
+                .assetId(segmentId.split(":")[0])
+                .assetType(KbAssetTypeEnum.TEXT)
+                .segmentType(SegmentType.TEXT_CHUNK)
+                .title("text asset")
+                .contentText("text content")
+                .sourceRef(sourceRef)
+                .pageNo(1)
+                .chunkOrder(1)
                 .build();
     }
 }

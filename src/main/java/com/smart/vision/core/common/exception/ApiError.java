@@ -36,6 +36,7 @@ public enum ApiError {
     INGEST_TASK_PAYLOAD_INVALID(500, "Failed to parse task payload"),
     INGEST_TASK_PAYLOAD_SERIALIZE_FAILED(500, "Failed to serialize task payload"),
     SEARCH_BACKEND_UNAVAILABLE(500, "Search backend unavailable"),
+    PREVIEW_URL_SIGN_FAILED(500, "Failed to sign preview URL"),
     IMAGE_SEARCH_FAILED(500, "Image search failed, please try again later."),
     INTERNAL_ERROR(500, "Internal error, please try again later."),
     INVALID_API_KEY(500, "Invalid API KEY");

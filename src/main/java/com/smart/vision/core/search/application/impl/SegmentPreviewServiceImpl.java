@@ -43,6 +43,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         if (!StringUtils.hasText(segmentId)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "segmentId cannot be blank.");
         }
+        if (!StringUtils.hasText(accessToken)) {
+            throw new BusinessException(ApiError.UNAUTHORIZED, "X-Access-Token is required.");
+        }
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND, "Segment not found."));
         return toPreview(segment, accessToken);
@@ -178,7 +181,10 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         if (!StringUtils.hasText(objectKey)) {
             return new PreviewAccessCache.PreviewAccess(null, null);
         }
-        String previewUrl = objectStoragePort.buildPreviewUrl(objectKey);
+        String previewUrl = signPreviewUrl(objectKey);
+        if (!StringUtils.hasText(previewUrl)) {
+            throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);
+        }
         PreviewAccessCache.PreviewAccess previewAccess = new PreviewAccessCache.PreviewAccess(
                 previewUrl,
                 System.currentTimeMillis() + PREVIEW_URL_TTL_MILLIS
@@ -187,6 +193,14 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
             previewAccessCache.save(segmentId, accessToken, previewAccess);
         }
         return previewAccess;
+    }
+
+    private String signPreviewUrl(String objectKey) {
+        try {
+            return objectStoragePort.buildPreviewUrl(objectKey);
+        } catch (Exception e) {
+            throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED, e);
+        }
     }
 
     private boolean isDirectUrl(String sourceRef) {
@@ -204,10 +218,45 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     }
 
     private String resolvePreviewType(Segment segment) {
-        if (segment.getAssetType() != null) {
-            return segment.getAssetType().name();
+        String extension = resolveExtension(resolveFileName(segment));
+        if (StringUtils.hasText(extension)) {
+            String type = previewTypeFromExtension(extension);
+            if (type != null) {
+                return type;
+            }
         }
-        return toCode(segment.getSegmentType());
+        if (segment.getAssetType() != null) {
+            return switch (segment.getAssetType()) {
+                case IMAGE -> "IMAGE";
+                case TEXT -> "TXT";
+            };
+        }
+        if (segment.getSegmentType() != null && segment.getSegmentType().name().startsWith("IMAGE_")) {
+            return "IMAGE";
+        }
+        return "TXT";
+    }
+
+    private String resolveExtension(String fileName) {
+        if (!StringUtils.hasText(fileName)) {
+            return null;
+        }
+        String normalized = fileName.trim();
+        int dotIndex = normalized.lastIndexOf('.');
+        if (dotIndex < 0 || dotIndex == normalized.length() - 1) {
+            return null;
+        }
+        return normalized.substring(dotIndex + 1).toLowerCase();
+    }
+
+    private String previewTypeFromExtension(String extension) {
+        return switch (extension) {
+            case "pdf" -> "PDF";
+            case "txt" -> "TXT";
+            case "md", "markdown" -> "MD";
+            case "png", "jpg", "jpeg", "webp", "gif", "bmp" -> "IMAGE";
+            default -> null;
+        };
     }
 
     private String resolveSnippet(Segment segment) {

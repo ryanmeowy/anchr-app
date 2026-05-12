@@ -72,4 +72,12 @@ class SegmentPreviewApiControllerTest {
                 .andExpect(jsonPath("$.data.anchor.pageNo").value(3))
                 .andExpect(jsonPath("$.data.surroundingChunks[0].relation").value("current"));
     }
+
+    @Test
+    void getSegmentPreview_shouldRejectWhenTokenMissing() throws Exception {
+        mockMvc.perform(get("/api/v1/preview/segments/seg-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.message").value("X-Access-Token is required."));
+    }
 }
