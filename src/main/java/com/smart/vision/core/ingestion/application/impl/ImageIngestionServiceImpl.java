@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.ingestion.application.ImageIngestionService;
 import com.smart.vision.core.ingestion.application.assembler.BatchTaskAssembler;
 import com.smart.vision.core.ingestion.domain.model.BatchTask;
@@ -17,14 +16,16 @@ import com.smart.vision.core.ingestion.domain.model.ImageHashAcquireOutcomeType;
 import com.smart.vision.core.ingestion.domain.model.ImageHashStatePolicy;
 import com.smart.vision.core.ingestion.domain.model.ImageHashStatus;
 import com.smart.vision.core.common.model.GraphTriple;
-import com.smart.vision.core.ingestion.domain.port.ImageHashStateRepository;
+import com.smart.vision.core.ingestion.domain.repository.ImageHashStateRepository;
 import com.smart.vision.core.ingestion.domain.port.IngestionContentPort;
 import com.smart.vision.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.smart.vision.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.smart.vision.core.ingestion.domain.port.IngestionOcrPort;
 import com.smart.vision.core.common.util.IdGen;
+import com.smart.vision.core.ingestion.domain.model.OcrStructuredResult;
 import com.smart.vision.core.ingestion.infrastructure.persistence.es.document.IngestionImageDocument;
 import com.smart.vision.core.ingestion.infrastructure.persistence.es.EsBatchTemplate;
+import com.smart.vision.core.ingestion.infrastructure.persistence.es.ImageSegmentIndexWriter;
 import com.smart.vision.core.ingestion.interfaces.rest.dto.BatchProcessDTO;
 import com.smart.vision.core.ingestion.interfaces.rest.dto.BatchTaskStatusDTO;
 import com.smart.vision.core.ingestion.interfaces.rest.dto.BatchUploadResultDTO;
@@ -76,6 +77,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
     private final IngestionEmbeddingPort embeddingPort;
     private final IngestionOcrPort ocrPort;
     private final IngestionContentPort contentPort;
+    private final ImageSegmentIndexWriter imageSegmentIndexWriter;
     private final ImageHashStateRepository imageHashStateRepository;
     private final BatchTaskAssembler batchTaskAssembler;
     private final StringRedisTemplate redisTemplate;
@@ -115,9 +117,9 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
         if (!successDocs.isEmpty()) {
             try {
                 BulkSaveResult bulkResult = esBatchTemplate.bulkSave(successDocs);
-                savedCount = bulkResult.getSuccessCount();
-
-                Set<String> failedIdSet = bulkResult.getFailedIds();
+                Set<String> failedIdSet = bulkResult.getFailedIds() == null
+                        ? Collections.emptySet()
+                        : bulkResult.getFailedIds();
                 for (IngestionImageDocument doc : successDocs) {
                     if (failedIdSet.contains(String.valueOf(doc.getId()))) {
                         markHashStatus(doc.getFileHash(), ImageHashStatus.FAILED, HASH_FAILED_TTL_MINUTES, TimeUnit.MINUTES);
@@ -126,8 +128,21 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
                                 .filename(doc.getRawFilename())
                                 .errorMessage("Database writes failed")
                                 .build());
-                    } else {
+                        continue;
+                    }
+
+                    try {
+                        imageSegmentIndexWriter.write(doc);
                         markHashStatus(doc.getFileHash(), ImageHashStatus.SUCCESS, HASH_SUCCESS_TTL_DAYS, TimeUnit.DAYS);
+                        savedCount++;
+                    } catch (Exception e) {
+                        log.error("kb_segment writes failed, docId={}", doc.getId(), e);
+                        markHashStatus(doc.getFileHash(), ImageHashStatus.FAILED, HASH_FAILED_TTL_MINUTES, TimeUnit.MINUTES);
+                        failures.add(BatchUploadResultDTO.BatchFailureItem.builder()
+                                .objectKey(doc.getImagePath())
+                                .filename(doc.getRawFilename())
+                                .errorMessage("kb_segment writes failed")
+                                .build());
                     }
                 }
             } catch (Exception e) {
@@ -224,7 +239,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
         try {
             String tempUrl = objectStoragePort.buildAiImageInput(item.getKey());
             List<Float> vector = embeddingPort.embedImage(tempUrl);
-            String ocrText = ocrPort.extractText(tempUrl);
+            OcrStructuredResult structuredOcr = ocrPort.extractStructuredText(tempUrl);
             List<String> tags = contentPort.generateTags(tempUrl);
             List<GraphTriple> graphTriples = contentPort.generateGraph(tempUrl);
 
@@ -234,7 +249,8 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
             doc.setRawFilename(item.getFileName());
             doc.setFileName(genFileName(tempUrl));
             doc.setImageEmbedding(vector);
-            doc.setOcrContent(ocrText);
+            doc.setOcrContent(structuredOcr.getFullText());
+            doc.setStructuredOcr(structuredOcr);
             doc.setCreateTime(System.currentTimeMillis());
             doc.setTags(tags);
             doc.setFileHash(item.getFileHash());
@@ -364,10 +380,11 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
                 return false;
             }
 
+            imageSegmentIndexWriter.write(doc);
             markHashStatus(doc.getFileHash(), ImageHashStatus.SUCCESS, HASH_SUCCESS_TTL_DAYS, TimeUnit.DAYS);
             return true;
         } catch (Exception e) {
-            log.error("ES writes failed in async task", e);
+            log.error("image index writes failed in async task", e);
             markHashStatus(doc.getFileHash(), ImageHashStatus.FAILED, HASH_FAILED_TTL_MINUTES, TimeUnit.MINUTES);
             return false;
         }
@@ -409,7 +426,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
             BatchTaskStatusDTO dto = objectMapper.readValue(raw, BatchTaskStatusDTO.class);
             return batchTaskAssembler.toTaskDomain(dto);
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
         }
     }
 
@@ -417,7 +434,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
         try {
             return objectMapper.writeValueAsString(task);
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
         }
     }
 

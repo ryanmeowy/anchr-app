@@ -48,14 +48,14 @@ public class VectorConfig {
         if (readAlias == null || readAlias.isBlank()) {
             return getPhysicalIndexName();
         }
-        return appendVectorProfile(readAlias);
+        return readAlias;
     }
 
     public String getWriteTargetName() {
         if (writeAlias == null || writeAlias.isBlank()) {
             return getPhysicalIndexName();
         }
-        return appendVectorProfile(writeAlias);
+        return writeAlias;
     }
 
     public String getVectorProfile() {

@@ -11,12 +11,6 @@ public class BusinessException extends RuntimeException {
     private final ApiError error;
     private final int code;
 
-    public BusinessException(int code, String message) {
-        super(message);
-        this.error = null;
-        this.code = code;
-    }
-
     public BusinessException(ApiError error) {
         super(error.getMessage());
         this.error = error;

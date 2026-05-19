@@ -26,6 +26,7 @@ public enum ApiError {
     TEXT_ASSET_META_NOT_FOUND(404, "Text asset metadata not found"),
     TEXT_PARSER_UNAVAILABLE(500, "No available text parser"),
     TEXT_PARSE_FAILED(500, "Text parse failed"),
+    CONVERSATION_SESSION_NOT_FOUND(404, "Conversation session not found"),
     INGEST_TASK_NOT_FOUND(404, "Task not found"),
     INGEST_TASK_ITEM_NOT_FOUND(404, "Task item not found"),
     INGEST_RETRY_ONLY_FAILED(409, "Only FAILED item can be retried"),
@@ -35,6 +36,7 @@ public enum ApiError {
     INGEST_TASK_PAYLOAD_INVALID(500, "Failed to parse task payload"),
     INGEST_TASK_PAYLOAD_SERIALIZE_FAILED(500, "Failed to serialize task payload"),
     SEARCH_BACKEND_UNAVAILABLE(500, "Search backend unavailable"),
+    PREVIEW_URL_SIGN_FAILED(500, "Failed to sign preview URL"),
     IMAGE_SEARCH_FAILED(500, "Image search failed, please try again later."),
     INTERNAL_ERROR(500, "Internal error, please try again later."),
     INVALID_API_KEY(500, "Invalid API KEY");

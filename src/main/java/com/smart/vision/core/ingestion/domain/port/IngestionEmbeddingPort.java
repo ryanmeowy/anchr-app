@@ -14,4 +14,12 @@ public interface IngestionEmbeddingPort {
      * @return image embedding
      */
     List<Float> embedImage(String imageInput);
+
+    /**
+     * Embed plain text input to vector.
+     *
+     * @param text text content
+     * @return text embedding
+     */
+    List<Float> embedText(String text);
 }

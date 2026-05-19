@@ -5,7 +5,7 @@ import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import com.smart.vision.core.search.infrastructure.persistence.es.SearchResultConvertor;
 import com.smart.vision.core.common.exception.ApiError;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.domain.model.HybridSearchParamDTO;
 import com.smart.vision.core.search.domain.model.ImageSearchResultDTO;
 import com.smart.vision.core.search.infrastructure.persistence.es.document.ImageDocument;
@@ -40,7 +40,7 @@ public class ImageRepositoryImpl implements ImageRepositoryCustom {
             return converter.convert2Doc(response);
         } catch (Exception e) {
             log.error("Hybrid search execution failed", e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 
@@ -54,7 +54,7 @@ public class ImageRepositoryImpl implements ImageRepositoryCustom {
             return converter.convert2Doc(response);
         } catch (Exception e) {
             log.error("Hybrid native RRF search execution failed", e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 
@@ -66,7 +66,7 @@ public class ImageRepositoryImpl implements ImageRepositoryCustom {
             return converter.convert2Doc(response);
         } catch (Exception e) {
             log.error("Execution of finding similar failed", e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 
@@ -78,7 +78,7 @@ public class ImageRepositoryImpl implements ImageRepositoryCustom {
             return converter.convert2Doc(response);
         } catch (Exception e) {
             log.error("Execution of vector-only search failed", e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 
@@ -90,7 +90,7 @@ public class ImageRepositoryImpl implements ImageRepositoryCustom {
             return converter.convert2Doc(response);
         } catch (Exception e) {
             log.error("Execution of text-only search failed", e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 
@@ -106,7 +106,7 @@ public class ImageRepositoryImpl implements ImageRepositoryCustom {
             return response.hits().hits().getFirst().source();
         } catch (Exception e) {
             log.error("Duplicate check failed", e);
-            throw new InfraException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
 }

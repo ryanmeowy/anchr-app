@@ -3,12 +3,13 @@ package com.smart.vision.core.ingestion.application.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.ingestion.application.assembler.BatchTaskAssembler;
-import com.smart.vision.core.ingestion.domain.port.ImageHashStateRepository;
+import com.smart.vision.core.ingestion.domain.repository.ImageHashStateRepository;
 import com.smart.vision.core.ingestion.domain.port.IngestionContentPort;
 import com.smart.vision.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.smart.vision.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.smart.vision.core.ingestion.domain.port.IngestionOcrPort;
 import com.smart.vision.core.ingestion.infrastructure.persistence.es.EsBatchTemplate;
+import com.smart.vision.core.ingestion.infrastructure.persistence.es.ImageSegmentIndexWriter;
 import com.smart.vision.core.common.util.IdGen;
 import com.smart.vision.core.ingestion.interfaces.rest.dto.BatchTaskStatusDTO;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +49,8 @@ class ImageIngestionServiceImplRetryFlowTest {
     @Mock
     private ImageHashStateRepository imageHashStateRepository;
     @Mock
+    private ImageSegmentIndexWriter imageSegmentIndexWriter;
+    @Mock
     private StringRedisTemplate redisTemplate;
     @Mock
     private IdGen idGen;
@@ -70,6 +73,7 @@ class ImageIngestionServiceImplRetryFlowTest {
                 embeddingPort,
                 ocrPort,
                 contentPort,
+                imageSegmentIndexWriter,
                 imageHashStateRepository,
                 new BatchTaskAssembler(),
                 redisTemplate,

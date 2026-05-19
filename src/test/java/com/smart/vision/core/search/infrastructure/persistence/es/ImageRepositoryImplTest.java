@@ -4,7 +4,7 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.HitsMetadata;
-import com.smart.vision.core.common.exception.InfraException;
+import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.domain.model.HybridSearchParamDTO;
 import com.smart.vision.core.search.infrastructure.persistence.es.SearchResultConvertor;
 import com.smart.vision.core.search.infrastructure.persistence.es.document.ImageDocument;
@@ -49,7 +49,7 @@ class ImageRepositoryImplTest {
         when(esClient.search(eq(request), eq(ImageDocument.class))).thenThrow(new RuntimeException("es down"));
 
         assertThatThrownBy(() -> repository.hybridSearch(HybridSearchParamDTO.builder().build()))
-                .isInstanceOf(InfraException.class)
+                .isInstanceOf(BusinessException.class)
                 .hasMessage("Search backend unavailable");
     }
 
@@ -60,7 +60,7 @@ class ImageRepositoryImplTest {
         when(esClient.search(eq(request), eq(ImageDocument.class))).thenThrow(new RuntimeException("es down"));
 
         assertThatThrownBy(() -> repository.textSearch("cat", 10, true))
-                .isInstanceOf(InfraException.class)
+                .isInstanceOf(BusinessException.class)
                 .hasMessage("Search backend unavailable");
     }
 

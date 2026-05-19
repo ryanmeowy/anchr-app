@@ -5,6 +5,8 @@ from pages import render_hot_words_page
 from pages import render_auth_admin_page
 from pages import render_image_analyze_page
 from pages import render_image_batch_process_page
+from pages import render_conversation_search_page
+from pages import render_kb_search_page
 from pages import render_image_search_page
 from pages import render_similar_search_page
 from pages import render_text_search_page
@@ -98,6 +100,8 @@ def render_sidebar() -> str:
             "Pages",
             [
                 "Text Search",
+                "KB Search",
+                "Conversation Search",
                 "Search By Image",
                 "Similar Search",
                 "Hot Words",
@@ -123,6 +127,12 @@ def main() -> None:
 
     if current_page == "Text Search":
         render_text_search_page(st.session_state.base_url)
+        return
+    if current_page == "KB Search":
+        render_kb_search_page(st.session_state.base_url)
+        return
+    if current_page == "Conversation Search":
+        render_conversation_search_page(st.session_state.base_url)
         return
     if current_page == "Search By Image":
         render_image_search_page(st.session_state.base_url)

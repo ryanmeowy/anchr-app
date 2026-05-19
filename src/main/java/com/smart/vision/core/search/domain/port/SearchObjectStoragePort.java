@@ -29,4 +29,9 @@ public interface SearchObjectStoragePort {
      * Build display URL for image browsing.
      */
     String buildDisplayImageUrl(String objectKey);
+
+    /**
+     * Build short-lived URL for preview loading.
+     */
+    String buildPreviewUrl(String objectKey);
 }

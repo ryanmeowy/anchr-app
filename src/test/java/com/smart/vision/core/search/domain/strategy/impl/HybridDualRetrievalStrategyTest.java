@@ -1,11 +1,11 @@
 package com.smart.vision.core.search.domain.strategy.impl;
 
+import com.smart.vision.core.search.config.AppSearchProperties;
 import com.smart.vision.core.search.domain.model.ImageSearchResultDTO;
 import com.smart.vision.core.search.domain.port.SearchRerankPort;
 import com.smart.vision.core.search.domain.ranking.DualRouteRrfFusionService;
-import com.smart.vision.core.search.config.AppSearchProperties;
+import com.smart.vision.core.search.domain.repository.ImageSearchRepository;
 import com.smart.vision.core.search.infrastructure.persistence.es.document.ImageDocument;
-import com.smart.vision.core.search.infrastructure.persistence.es.repository.ImageRepository;
 import com.smart.vision.core.search.interfaces.rest.dto.SearchQueryDTO;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,10 +19,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -31,7 +29,7 @@ import static org.mockito.Mockito.when;
 class HybridDualRetrievalStrategyTest {
 
     @Mock
-    private ImageRepository imageRepository;
+    private ImageSearchRepository imageSearchRepository;
     @Mock
     private SearchRerankPort searchRerankPort;
 
@@ -40,7 +38,7 @@ class HybridDualRetrievalStrategyTest {
     @BeforeEach
     void setUp() {
         strategy = new HybridDualRetrievalStrategy(
-                imageRepository,
+                imageSearchRepository,
                 new DualRouteRrfFusionService(),
                 searchRerankPort,
                 new SimpleMeterRegistry(),
@@ -71,14 +69,13 @@ class HybridDualRetrievalStrategyTest {
                 hit(4L, 0.86d, Map.of("tags", "<em>cat</em>"), List.of("tags"))
         );
 
-        when(imageRepository.vectorSearch(anyList(), eq(12))).thenReturn(vectorHits);
-        when(imageRepository.textSearch(eq("cat"), eq(12), eq(true))).thenReturn(textHits);
+        when(imageSearchRepository.vectorSearch(anyList(), eq(12))).thenReturn(vectorHits);
+        when(imageSearchRepository.textSearch(eq("cat"), eq(12), eq(true))).thenReturn(textHits);
 
         List<ImageSearchResultDTO> results = strategy.search(query, List.of(0.1f, 0.2f));
 
-        verify(imageRepository, times(1)).vectorSearch(anyList(), eq(12));
-        verify(imageRepository, times(1)).textSearch(eq("cat"), eq(12), eq(true));
-        verify(imageRepository, never()).hybridSearch(any());
+        verify(imageSearchRepository, times(1)).vectorSearch(anyList(), eq(12));
+        verify(imageSearchRepository, times(1)).textSearch(eq("cat"), eq(12), eq(true));
 
         assertThat(results).hasSize(3);
         assertThat(results).extracting(item -> item.getDocument().getId())

@@ -5,7 +5,7 @@ import com.smart.vision.core.auth.application.OssService;
 import com.smart.vision.core.common.model.Result;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.security.RequireAuth;
+import com.smart.vision.core.auth.RequireAuth;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

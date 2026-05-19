@@ -17,8 +17,22 @@ REQUEST_TIMEOUT_SECONDS = 20
 ACTION_STALE_TIMEOUT_SECONDS = 45
 SUCCESS_CODE = 200
 MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
+BATCH_INGESTION_CONFIG: dict[str, dict[str, Any]] = {
+    "image": {
+        "label": "Image",
+        "extensions": ["png", "jpg", "jpeg", "webp"],
+        "batch_tasks_path": "/api/v1/image/batch-tasks",
+    },
+    "text": {
+        "label": "Text",
+        "extensions": ["pdf", "txt", "md", "markdown"],
+        "batch_tasks_path": "/api/v1/ingestion/text-assets/batch-tasks",
+    },
+}
 RESULT_STATE_KEYS = {
     "text": "result_state_text",
+    "kb": "result_state_kb",
+    "conversation": "result_state_conversation",
     "image": "result_state_image",
     "similar": "result_state_similar",
 }
@@ -26,6 +40,7 @@ LAYOUT_OPTIONS = ["Large (2 per row)", "Compact (3 per row)"]
 OCR_PREVIEW_MAX_CHARS = 100
 SPO_PREVIEW_MAX_ITEMS = 3
 SPO_PREVIEW_MAX_CHARS = 140
+KB_PREVIEW_CACHE_KEY = "kb_segment_preview_cache"
 
 
 def render_text_search_page(base_url: str) -> None:
@@ -231,6 +246,720 @@ def render_text_search_page(base_url: str) -> None:
                     st.rerun()
 
 
+def render_kb_search_page(base_url: str) -> None:
+    st.subheader("KB Search")
+    st.caption("Endpoint: POST /api/v1/search/kb")
+
+    state = _get_result_state("kb")
+    query_store_key = "kb_search_query_store"
+    query_widget_key = "kb_search_query_widget"
+    topk_store_key = "kb_search_topk_store"
+    topk_widget_key = "kb_search_topk_widget"
+    limit_store_key = "kb_search_limit_store"
+    limit_widget_key = "kb_search_limit_widget"
+
+    if query_store_key not in st.session_state:
+        st.session_state[query_store_key] = ""
+    if query_widget_key not in st.session_state:
+        st.session_state[query_widget_key] = st.session_state[query_store_key]
+    if topk_store_key not in st.session_state:
+        st.session_state[topk_store_key] = 20
+    if topk_widget_key not in st.session_state:
+        st.session_state[topk_widget_key] = int(st.session_state[topk_store_key])
+    if limit_store_key not in st.session_state:
+        st.session_state[limit_store_key] = 10
+    if limit_widget_key not in st.session_state:
+        st.session_state[limit_widget_key] = int(st.session_state[limit_store_key])
+
+    with st.container(border=True):
+        query = st.text_input(
+            "Query",
+            placeholder="e.g. innodb buffer pool",
+            key=query_widget_key,
+        )
+        col1, col2 = st.columns(2)
+        top_k = col1.number_input("TopK", min_value=1, max_value=200, key=topk_widget_key)
+        limit = col2.number_input("Limit", min_value=1, max_value=200, key=limit_widget_key)
+        payload = {
+            "query": query.strip(),
+            "topK": int(top_k),
+            "limit": int(limit),
+        }
+        submitted = st.button(
+            "Run KB Search",
+            type="primary",
+            key="kb_search_run_btn",
+            disabled=_is_action_busy("kb_search_run", payload),
+        )
+        mock_col1, mock_col2 = st.columns(2)
+        load_bbox_mock = mock_col1.button("Load Mock BBox Result", key="kb_mock_bbox_btn")
+        load_degraded_mock = mock_col2.button("Load Mock Degraded Result", key="kb_mock_degraded_btn")
+
+    st.session_state[query_store_key] = query
+    st.session_state[topk_store_key] = int(top_k)
+    st.session_state[limit_store_key] = int(limit)
+
+    if submitted:
+        if not query.strip():
+            st.warning("Query is required.")
+            return
+        _queue_action("kb_search_run", payload)
+        st.rerun()
+
+    if load_bbox_mock:
+        _load_kb_mock_state(state, degraded=False)
+        st.rerun()
+    if load_degraded_mock:
+        _load_kb_mock_state(state, degraded=True)
+        st.rerun()
+
+    if _consume_queued_action("kb_search_run", payload):
+        try:
+            with st.spinner("Searching KB..."):
+                response_payload = _request_json(
+                    method="POST",
+                    url=f"{_normalize_base_url(base_url)}/api/v1/search/kb",
+                    json=payload,
+                )
+            if response_payload is None:
+                return
+            data, headers, status_code = response_payload
+            state["results"] = data
+            state["headers"] = headers
+            state["status_code"] = status_code
+            state["payload_text"] = _pretty_json(payload)
+            state["has_searched"] = True
+        finally:
+            _complete_action("kb_search_run")
+            st.rerun()
+
+    if state["has_searched"]:
+        _render_response_meta(state["status_code"], state["headers"])
+        if state["payload_text"]:
+            st.code(state["payload_text"], language="json")
+        _render_kb_search_results(state["results"], base_url=base_url)
+
+
+def render_conversation_search_page(base_url: str) -> None:
+    st.subheader("Conversation Search")
+    st.caption("Endpoints: POST /api/conversations, POST /api/conversations/{sessionId}/messages, GET /api/conversations/{sessionId}/messages")
+
+    state = _get_result_state("conversation")
+    if "messages" not in state or not isinstance(state["messages"], list):
+        state["messages"] = []
+    if "mock_enabled" not in state:
+        state["mock_enabled"] = False
+
+    token_store_key = "conversation_token_store"
+    token_widget_key = "conversation_token_widget"
+    title_store_key = "conversation_title_store"
+    title_widget_key = "conversation_title_widget"
+    session_id_store_key = "conversation_session_id_store"
+    session_id_widget_key = "conversation_session_id_widget"
+    query_store_key = "conversation_query_store"
+    query_widget_key = "conversation_query_widget"
+    topk_store_key = "conversation_topk_store"
+    topk_widget_key = "conversation_topk_widget"
+    limit_store_key = "conversation_limit_store"
+    limit_widget_key = "conversation_limit_widget"
+    strategy_store_key = "conversation_strategy_store"
+    strategy_widget_key = "conversation_strategy_widget"
+    history_limit_store_key = "conversation_history_limit_store"
+    history_limit_widget_key = "conversation_history_limit_widget"
+    session_cache_key = "conversation_session_cache"
+
+    if token_store_key not in st.session_state:
+        st.session_state[token_store_key] = ""
+    if token_widget_key not in st.session_state:
+        st.session_state[token_widget_key] = st.session_state[token_store_key]
+    if title_store_key not in st.session_state:
+        st.session_state[title_store_key] = ""
+    if title_widget_key not in st.session_state:
+        st.session_state[title_widget_key] = st.session_state[title_store_key]
+    if session_id_store_key not in st.session_state:
+        st.session_state[session_id_store_key] = ""
+    if session_id_widget_key not in st.session_state:
+        st.session_state[session_id_widget_key] = st.session_state[session_id_store_key]
+    if query_store_key not in st.session_state:
+        st.session_state[query_store_key] = ""
+    if query_widget_key not in st.session_state:
+        st.session_state[query_widget_key] = st.session_state[query_store_key]
+    if topk_store_key not in st.session_state:
+        st.session_state[topk_store_key] = 60
+    if topk_widget_key not in st.session_state:
+        st.session_state[topk_widget_key] = int(st.session_state[topk_store_key])
+    if limit_store_key not in st.session_state:
+        st.session_state[limit_store_key] = 20
+    if limit_widget_key not in st.session_state:
+        st.session_state[limit_widget_key] = int(st.session_state[limit_store_key])
+    if strategy_store_key not in st.session_state:
+        st.session_state[strategy_store_key] = "KB_RRF_RERANK"
+    if strategy_widget_key not in st.session_state:
+        st.session_state[strategy_widget_key] = st.session_state[strategy_store_key]
+    if history_limit_store_key not in st.session_state:
+        st.session_state[history_limit_store_key] = 20
+    if history_limit_widget_key not in st.session_state:
+        st.session_state[history_limit_widget_key] = int(st.session_state[history_limit_store_key])
+    if session_cache_key not in st.session_state or not isinstance(st.session_state[session_cache_key], dict):
+        st.session_state[session_cache_key] = {}
+
+    session_cache: dict[str, dict[str, Any]] = st.session_state[session_cache_key]
+    known_session_ids = list(session_cache.keys())
+
+    with st.container(border=True):
+        state["mock_enabled"] = st.toggle(
+            "Mock conversation preview (no backend)",
+            value=bool(state.get("mock_enabled", False)),
+            key="conversation_mock_enabled_toggle",
+        )
+        if state["mock_enabled"]:
+            preview_col1, preview_col2, preview_col3 = st.columns([1.1, 1.1, 1.1])
+            if preview_col1.button("Load Mock Conversation", type="secondary", key="conversation_mock_load_btn"):
+                state["messages"] = _build_conversation_mock_messages()
+                state["has_searched"] = True
+                state["status_code"] = 200
+                state["headers"] = {}
+                state["payload_text"] = _pretty_json({"mock": True, "action": "load_conversation"})
+                st.rerun()
+            if preview_col2.button("Append Mock Turn", key="conversation_mock_append_btn"):
+                state["messages"] = _append_conversation_mock_turn(state.get("messages", []))
+                state["has_searched"] = True
+                state["status_code"] = 200
+                state["headers"] = {}
+                state["payload_text"] = _pretty_json({"mock": True, "action": "append_turn"})
+                st.rerun()
+            if preview_col3.button("Clear Mock Conversation", key="conversation_mock_clear_btn"):
+                state["messages"] = []
+                state["has_searched"] = False
+                state["payload_text"] = ""
+                st.rerun()
+
+        token = st.text_input("X-Access-Token", type="password", key=token_widget_key)
+        title_col, create_col = st.columns([4, 1.2])
+        new_title = title_col.text_input(
+            "New Session Title (optional)",
+            placeholder="e.g. MySQL 架构问答",
+            key=title_widget_key,
+        )
+        create_payload = {"title": new_title.strip(), "hasToken": bool(token.strip())}
+        create_clicked = create_col.button(
+            "Create Session",
+            type="primary",
+            disabled=_is_action_busy("conversation_create", create_payload),
+        )
+
+    selected_session_id = ""
+    if known_session_ids:
+        selected_session_id = st.selectbox(
+            "Known Sessions",
+            options=[""] + known_session_ids,
+            format_func=lambda sid: _format_conversation_session_option(sid, session_cache),
+            key="conversation_known_session_select",
+        )
+        if selected_session_id:
+            st.session_state[session_id_widget_key] = selected_session_id
+
+    session_id = st.text_input(
+        "Session ID",
+        placeholder="paste session id here",
+        key=session_id_widget_key,
+    ).strip()
+
+    with st.container(border=True):
+        col1, col2, col3 = st.columns([2, 2, 2])
+        top_k = col1.number_input("TopK", min_value=1, max_value=200, key=topk_widget_key)
+        limit = col2.number_input("Limit", min_value=1, max_value=200, key=limit_widget_key)
+        strategy = col3.selectbox(
+            "Strategy",
+            options=["KB_RRF_RERANK", "KB_RRF"],
+            key=strategy_widget_key,
+        )
+        history_limit = st.number_input("History Limit", min_value=1, max_value=100, key=history_limit_widget_key)
+        query = st.text_area(
+            "Message",
+            placeholder="e.g. 那 InnoDB 呢",
+            height=110,
+            key=query_widget_key,
+        )
+        load_payload = {"sessionId": session_id, "limit": int(history_limit), "hasToken": bool(token.strip())}
+        send_payload = {
+            "sessionId": session_id,
+            "query": query.strip(),
+            "topK": int(top_k),
+            "limit": int(limit),
+            "strategy": strategy,
+            "hasToken": bool(token.strip()),
+        }
+        action_col1, action_col2 = st.columns([1.2, 1.2])
+        load_clicked = action_col1.button(
+            "Load Messages",
+            disabled=_is_action_busy("conversation_load_messages", load_payload),
+        )
+        send_clicked = action_col2.button(
+            "Send Message",
+            type="primary",
+            disabled=_is_action_busy("conversation_send_message", send_payload),
+        )
+
+    st.session_state[token_store_key] = token
+    st.session_state[title_store_key] = new_title
+    st.session_state[session_id_store_key] = session_id
+    st.session_state[query_store_key] = query
+    st.session_state[topk_store_key] = int(top_k)
+    st.session_state[limit_store_key] = int(limit)
+    st.session_state[strategy_store_key] = strategy
+    st.session_state[history_limit_store_key] = int(history_limit)
+
+    if create_clicked:
+        if not token.strip():
+            st.warning("X-Access-Token is required.")
+            return
+        _queue_action("conversation_create", create_payload)
+        st.rerun()
+    if load_clicked:
+        if not token.strip():
+            st.warning("X-Access-Token is required.")
+            return
+        if not session_id:
+            st.warning("Session ID is required.")
+            return
+        _queue_action("conversation_load_messages", load_payload)
+        st.rerun()
+    if send_clicked:
+        if not token.strip():
+            st.warning("X-Access-Token is required.")
+            return
+        if not session_id:
+            st.warning("Session ID is required.")
+            return
+        if not query.strip():
+            st.warning("Message is required.")
+            return
+        _queue_action("conversation_send_message", send_payload)
+        st.rerun()
+
+    base = _normalize_base_url(base_url)
+    auth_headers = {"X-Access-Token": token.strip()} if token.strip() else {}
+
+    if _consume_queued_action("conversation_create", create_payload):
+        try:
+            with st.spinner("Creating session..."):
+                response_payload = _request_object_json(
+                    method="POST",
+                    url=f"{base}/api/conversations",
+                    json={"title": new_title.strip()} if new_title.strip() else {},
+                    headers=auth_headers,
+                )
+            if response_payload is None:
+                return
+            data, headers, status_code = response_payload
+            if not isinstance(data, dict):
+                st.error("Unexpected response: session data is not an object.")
+                return
+            created_session_id = _safe_str(data.get("sessionId"))
+            if created_session_id:
+                session_cache[created_session_id] = data
+                st.session_state[session_id_widget_key] = created_session_id
+                st.session_state[session_id_store_key] = created_session_id
+                state["messages"] = []
+            state["results"] = data
+            state["headers"] = headers
+            state["status_code"] = status_code
+            state["payload_text"] = _pretty_json({"title": new_title.strip()})
+            state["has_searched"] = True
+        finally:
+            _complete_action("conversation_create")
+            st.rerun()
+
+    if _consume_queued_action("conversation_load_messages", load_payload):
+        try:
+            with st.spinner("Loading messages..."):
+                response_payload = _request_object_json(
+                    method="GET",
+                    url=f"{base}/api/conversations/{session_id}/messages",
+                    params={"limit": int(history_limit)},
+                    headers=auth_headers,
+                )
+            if response_payload is None:
+                return
+            data, headers, status_code = response_payload
+            turns = data.get("turns") if isinstance(data, dict) else []
+            state["messages"] = turns if isinstance(turns, list) else []
+            state["results"] = data if isinstance(data, dict) else {}
+            state["headers"] = headers
+            state["status_code"] = status_code
+            state["payload_text"] = _pretty_json({"sessionId": session_id, "limit": int(history_limit)})
+            state["has_searched"] = True
+        finally:
+            _complete_action("conversation_load_messages")
+            st.rerun()
+
+    if _consume_queued_action("conversation_send_message", send_payload):
+        try:
+            with st.spinner("Sending message..."):
+                response_payload = _request_object_json(
+                    method="POST",
+                    url=f"{base}/api/conversations/{session_id}/messages",
+                    json={
+                        "query": query.strip(),
+                        "topK": int(top_k),
+                        "limit": int(limit),
+                        "strategy": strategy,
+                    },
+                    headers=auth_headers,
+                )
+            if response_payload is None:
+                return
+            data, headers, status_code = response_payload
+            state["results"] = data if isinstance(data, dict) else {}
+            state["headers"] = headers
+            state["status_code"] = status_code
+            state["payload_text"] = _pretty_json(
+                {
+                    "sessionId": session_id,
+                    "query": query.strip(),
+                    "topK": int(top_k),
+                    "limit": int(limit),
+                    "strategy": strategy,
+                }
+            )
+            state["has_searched"] = True
+            st.session_state[query_widget_key] = ""
+            st.session_state[query_store_key] = ""
+            with st.spinner("Refreshing messages..."):
+                history_response = _request_object_json(
+                    method="GET",
+                    url=f"{base}/api/conversations/{session_id}/messages",
+                    params={"limit": int(history_limit)},
+                    headers=auth_headers,
+                )
+            if history_response is not None:
+                history_data, _, _ = history_response
+                turns = history_data.get("turns") if isinstance(history_data, dict) else []
+                state["messages"] = turns if isinstance(turns, list) else []
+        finally:
+            _complete_action("conversation_send_message")
+            st.rerun()
+
+    if state.get("has_searched"):
+        _render_response_meta(state.get("status_code", 200), state.get("headers", {}))
+        if state.get("payload_text"):
+            st.code(state["payload_text"], language="json")
+        _render_conversation_latest_trace(state.get("results"))
+
+    if session_id:
+        st.caption(f"Current Session: {session_id}")
+    _render_conversation_messages(state.get("messages", []))
+
+
+def _format_conversation_session_option(session_id: str, cache: dict[str, dict[str, Any]]) -> str:
+    if not session_id:
+        return ""
+    session = cache.get(session_id)
+    if not isinstance(session, dict):
+        return session_id
+    title = _safe_str(session.get("title"))
+    if title:
+        return f"{title} ({session_id})"
+    return session_id
+
+
+def _render_conversation_messages(messages: Any) -> None:
+    st.markdown("### Conversation Messages")
+    _inject_conversation_chat_styles()
+    if not isinstance(messages, list) or not messages:
+        st.info("No messages loaded.")
+        return
+    normalized = [item for item in messages if isinstance(item, dict)]
+    if not normalized:
+        st.info("No messages loaded.")
+        return
+    for idx, message in enumerate(normalized, start=1):
+        query = _safe_str(message.get("query"))
+        rewritten_query = _safe_str(message.get("rewrittenQuery"))
+        answer = _safe_str(message.get("answer"))
+        created_at = message.get("createdAt")
+        turn_id = _safe_str(message.get("turnId"))
+        citations = message.get("citations")
+        retrieval_trace = message.get("retrievalTrace")
+        suggested_questions = message.get("suggestedQuestions")
+        st.markdown(
+            f"<div class='conversation-turn-sep'>Turn {idx}"
+            f"{' · ' + turn_id if turn_id else ''}"
+            f"{' · ' + str(created_at) if isinstance(created_at, int) else ''}</div>",
+            unsafe_allow_html=True,
+        )
+        with st.chat_message("user"):
+            st.markdown(query or "-")
+            if rewritten_query and rewritten_query != query:
+                st.caption(f"Rewritten: {rewritten_query}")
+        with st.chat_message("assistant"):
+            st.markdown(answer or "-")
+            _render_conversation_citations(citations)
+            _render_conversation_retrieval_trace(retrieval_trace, compact=True)
+            _render_conversation_suggested_questions(suggested_questions)
+
+
+def _render_conversation_latest_trace(results: Any) -> None:
+    if not isinstance(results, dict):
+        return
+    trace = results.get("retrievalTrace")
+    if not isinstance(trace, dict):
+        return
+    st.markdown("### Latest Retrieval Trace")
+    _render_conversation_retrieval_trace(trace, compact=False)
+
+
+def _render_conversation_retrieval_trace(trace: Any, compact: bool) -> None:
+    if not isinstance(trace, dict):
+        return
+    top_k = trace.get("topK")
+    limit = trace.get("limit")
+    strategy = _safe_str(trace.get("strategy"))
+    strategy_effective = _safe_str(trace.get("strategyEffective"))
+    rewrite_reason = _safe_str(trace.get("rewriteReason"))
+    rewrite_confidence = trace.get("rewriteConfidence")
+    rewrite_fallback = trace.get("rewriteFallback")
+    retrieved_count = trace.get("retrievedCount")
+    grouped_counts = trace.get("groupedResultCounts")
+    top_segment_ids = trace.get("topSegmentIds")
+    top_hit_sources = trace.get("topHitSources")
+    answer_fallback = trace.get("answerFallback")
+    answer_fallback_reason = _safe_str(trace.get("answerFallbackReason"))
+
+    if compact:
+        st.caption(
+            "Trace: "
+            f"topK={top_k if isinstance(top_k, int) else '-'}, "
+            f"limit={limit if isinstance(limit, int) else '-'}, "
+            f"strategy={strategy or '-'}"
+        )
+    else:
+        st.caption(
+            "TopK Summary: "
+            f"topK={top_k if isinstance(top_k, int) else '-'}, "
+            f"limit={limit if isinstance(limit, int) else '-'}, "
+            f"strategy={strategy or '-'}, "
+            f"effective={strategy_effective or '-'}, "
+            f"retrieved={retrieved_count if isinstance(retrieved_count, int) else '-'}"
+        )
+
+    if rewrite_reason:
+        rewrite_caption = f"Rewrite Reason: {rewrite_reason}"
+        if isinstance(rewrite_confidence, (int, float)):
+            rewrite_caption += f" | confidence={rewrite_confidence:.2f}"
+        if isinstance(rewrite_fallback, bool):
+            rewrite_caption += f" | fallback={str(rewrite_fallback).lower()}"
+        st.caption(rewrite_caption)
+
+    if isinstance(grouped_counts, dict) and grouped_counts:
+        grouped_text = ", ".join(
+            f"{_safe_str(group_key) or '-'}={count if isinstance(count, int) else '-'}"
+            for group_key, count in grouped_counts.items()
+        )
+        st.caption(f"Grouped: {grouped_text}")
+
+    if isinstance(top_hit_sources, list) and top_hit_sources:
+        sources = [source for source in (_safe_str(item) for item in top_hit_sources) if source]
+        if sources:
+            st.caption(f"Explain Hit Sources: {', '.join(sources)}")
+
+    if isinstance(top_segment_ids, list) and top_segment_ids:
+        segments = [segment for segment in (_safe_str(item) for item in top_segment_ids) if segment]
+        if segments:
+            st.caption(f"Top Segment IDs: {', '.join(segments)}")
+
+    if isinstance(answer_fallback, bool):
+        fallback_text = f"Answer Fallback: {str(answer_fallback).lower()}"
+        if answer_fallback_reason:
+            fallback_text += f" ({answer_fallback_reason})"
+        st.caption(fallback_text)
+
+
+def _render_conversation_suggested_questions(suggested_questions: Any) -> None:
+    if not isinstance(suggested_questions, list) or not suggested_questions:
+        return
+    normalized = [item for item in (_safe_str(question) for question in suggested_questions) if item]
+    if not normalized:
+        return
+    st.markdown("**Suggested Questions**")
+    for idx, question in enumerate(normalized, start=1):
+        st.caption(f"{idx}. {question}")
+
+
+def _render_conversation_citations(citations: Any) -> None:
+    st.markdown("**Citations**")
+    if not isinstance(citations, list) or not citations:
+        st.caption("No citations.")
+        return
+    for idx, citation in enumerate(citations, start=1):
+        if not isinstance(citation, dict):
+            continue
+        file_name = _safe_str(citation.get("fileName")) or "-"
+        snippet = _safe_str(citation.get("snippet")) or "-"
+        page_no = citation.get("pageNo")
+        hit_type = _safe_str(citation.get("hitType")) or "-"
+        asset_id = _safe_str(citation.get("assetId")) or "-"
+        segment_id = _safe_str(citation.get("segmentId")) or "-"
+        page_text = str(page_no) if isinstance(page_no, int) else "-"
+        with st.container(border=True):
+            st.caption(f"[{idx}] file={file_name} page={page_text} hitType={hit_type}")
+            st.write(snippet)
+            st.caption(f"assetId={asset_id} | segmentId={segment_id}")
+
+
+def _build_conversation_mock_messages() -> list[dict[str, Any]]:
+    now_ms = int(time.time() * 1000)
+    return [
+        {
+            "turnId": "turn_mock_0001",
+            "sessionId": "cvs_mock_demo",
+            "query": "mysql 架构是什么",
+            "rewrittenQuery": "mysql 架构 核心组件 关系",
+            "answer": "MySQL 架构通常包含连接层、SQL 层和存储引擎层。[1]",
+            "retrievalTrace": {
+                "topK": 60,
+                "limit": 20,
+                "strategy": "KB_RRF_RERANK",
+                "strategyEffective": "KB_RRF_RERANK",
+                "rewriteReason": "rewrite_by_model",
+                "rewriteConfidence": 0.92,
+                "rewriteFallback": False,
+                "retrievedCount": 2,
+                "groupedResultCounts": {"TEXT": 1, "IMAGE": 1},
+                "topSegmentIds": ["seg_mock_001", "seg_mock_002"],
+                "topHitSources": ["VECTOR", "CONTENT", "TAG"],
+                "answerFallback": False,
+                "answerFallbackReason": None,
+            },
+            "suggestedQuestions": [
+                "《mysql-notes.pdf》里还有哪些和“mysql”直接相关的内容？",
+                "有没有“mysql”对应的结构图或示意图可对照理解？",
+            ],
+            "citations": [
+                {
+                    "fileName": "mysql-notes.pdf",
+                    "pageNo": 3,
+                    "snippet": "MySQL architecture consists of connection layer, SQL layer and storage engines.",
+                    "hitType": "TEXT_CHUNK",
+                    "assetId": "asset_mock_001",
+                    "segmentId": "seg_mock_001",
+                }
+            ],
+            "createdAt": now_ms - 120000,
+        },
+        {
+            "turnId": "turn_mock_0002",
+            "sessionId": "cvs_mock_demo",
+            "query": "那 InnoDB 呢",
+            "rewrittenQuery": "mysql 架构 InnoDB 作用 事务 行锁",
+            "answer": "InnoDB 是默认事务型存储引擎，支持事务、行级锁和崩溃恢复。[1][2]",
+            "retrievalTrace": {
+                "topK": 60,
+                "limit": 20,
+                "strategy": "KB_RRF_RERANK",
+                "strategyEffective": "KB_RRF_RERANK",
+                "rewriteReason": "rewrite_by_model",
+                "rewriteConfidence": 0.95,
+                "rewriteFallback": False,
+                "retrievedCount": 3,
+                "groupedResultCounts": {"TEXT": 2, "IMAGE": 1},
+                "topSegmentIds": ["seg_mock_010", "seg_mock_020", "seg_mock_021"],
+                "topHitSources": ["VECTOR", "CONTENT", "CAPTION"],
+                "answerFallback": False,
+                "answerFallbackReason": None,
+            },
+            "suggestedQuestions": [
+                "在《mysql-engine-guide.md》第12页，关于“InnoDB”还有哪些关键点？",
+                "“InnoDB”和“buffer pool”之间的关系是什么？",
+            ],
+            "citations": [
+                {
+                    "fileName": "mysql-engine-guide.md",
+                    "pageNo": 12,
+                    "snippet": "InnoDB supports ACID transactions and row-level locking.",
+                    "hitType": "TEXT_CHUNK",
+                    "assetId": "asset_mock_002",
+                    "segmentId": "seg_mock_010",
+                },
+                {
+                    "fileName": "innodb-arch.png",
+                    "pageNo": None,
+                    "snippet": "InnoDB 内部包含 buffer pool、redo log、undo log 等核心模块。",
+                    "hitType": "CAPTION",
+                    "assetId": "asset_mock_003",
+                    "segmentId": "seg_mock_020",
+                },
+            ],
+            "createdAt": now_ms - 30000,
+        },
+    ]
+
+
+def _append_conversation_mock_turn(messages: Any) -> list[dict[str, Any]]:
+    normalized = [item for item in messages if isinstance(item, dict)] if isinstance(messages, list) else []
+    if not normalized:
+        return _build_conversation_mock_messages()
+    now_ms = int(time.time() * 1000)
+    next_index = len(normalized) + 1
+    next_turn = {
+        "turnId": f"turn_mock_{next_index:04d}",
+        "sessionId": _safe_str(normalized[-1].get("sessionId")) or "cvs_mock_demo",
+        "query": "补充说明下索引和检索链路",
+        "rewrittenQuery": "mysql 检索链路 向量检索 召回 排序",
+        "answer": "检索链路可拆成召回、重排和答案生成三个阶段，引用证据用于可追溯性。[1]",
+        "retrievalTrace": {
+            "topK": 60,
+            "limit": 20,
+            "strategy": "KB_RRF_RERANK",
+            "strategyEffective": "KB_RRF_RERANK",
+            "rewriteReason": "rewrite_by_model",
+            "rewriteConfidence": 0.90,
+            "rewriteFallback": False,
+            "retrievedCount": 1,
+            "groupedResultCounts": {"TEXT": 1},
+            "topSegmentIds": ["seg_mock_030"],
+            "topHitSources": ["VECTOR", "CONTENT"],
+            "answerFallback": False,
+            "answerFallbackReason": None,
+        },
+        "suggestedQuestions": [
+            "《retrieval-pipeline.md》里还有哪些和“检索链路”直接相关的内容？",
+            "“向量检索”和“重排”之间的关系是什么？",
+        ],
+        "citations": [
+            {
+                "fileName": "retrieval-pipeline.md",
+                "pageNo": 5,
+                "snippet": "Typical retrieval pipeline: recall, rerank, generation.",
+                "hitType": "TEXT_CHUNK",
+                "assetId": "asset_mock_004",
+                "segmentId": "seg_mock_030",
+            }
+        ],
+        "createdAt": now_ms,
+    }
+    return normalized + [next_turn]
+
+
+def _inject_conversation_chat_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .conversation-turn-sep {
+          margin-top: 10px;
+          margin-bottom: 6px;
+          font-size: 12px;
+          color: #6b7c93;
+          font-weight: 600;
+          letter-spacing: 0.01em;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_image_search_page(base_url: str) -> None:
     st.subheader("Search By Image")
     st.caption("Endpoint: POST /api/v1/vision/search-by-image")
@@ -300,6 +1029,384 @@ def render_image_search_page(base_url: str) -> None:
         if state["payload_text"]:
             st.code(state["payload_text"], language="bash")
         _render_search_results(state["results"], layout_key="image")
+
+
+def _render_kb_search_results(results: list[Any], *, base_url: str) -> None:
+    st.markdown("### KB Results")
+    _inject_bbox_preview_styles()
+    if not results:
+        st.info("No results found.")
+        return
+    normalized = [item for item in results if isinstance(item, dict)]
+    if not normalized:
+        st.error("Unexpected response shape: result items are not objects.")
+        return
+
+    def _format_anchor(anchor_payload: Any) -> str:
+        if not isinstance(anchor_payload, dict):
+            return "-"
+        parts: list[str] = []
+        page_no = anchor_payload.get("pageNo")
+        chunk_order = anchor_payload.get("chunkOrder")
+        bbox = anchor_payload.get("bbox")
+        if isinstance(page_no, int):
+            parts.append(f"pageNo={page_no}")
+        if isinstance(chunk_order, int):
+            parts.append(f"chunkOrder={chunk_order}")
+        if isinstance(bbox, dict) and bbox:
+            parts.append(f"bbox={bbox}")
+        image_width = anchor_payload.get("imageWidth")
+        image_height = anchor_payload.get("imageHeight")
+        if isinstance(image_width, int) and isinstance(image_height, int):
+            parts.append(f"image={image_width}x{image_height}")
+        return ", ".join(parts) if parts else "-"
+
+    for idx, item in enumerate(normalized, start=1):
+        result_type = _safe_str(item.get("resultType")) or "-"
+        asset_type = _safe_str(item.get("assetType")) or "-"
+        snippet = _safe_str(item.get("snippet")) or "-"
+        score = item.get("score")
+        source_ref = _safe_str(item.get("sourceRef"))
+        segment_id = _safe_str(item.get("segmentId"))
+        asset_id = _safe_str(item.get("assetId"))
+        thumbnail = _safe_str(item.get("thumbnail"))
+        ocr_summary = _safe_str(item.get("ocrSummary"))
+        total_hits = int(item.get("totalHits")) if isinstance(item.get("totalHits"), int) else 1
+        explain = item.get("explain") if isinstance(item.get("explain"), dict) else {}
+        hit_sources = explain.get("hitSources") if isinstance(explain.get("hitSources"), list) else []
+        hit_sources_text = ", ".join(_safe_str(source).upper() for source in hit_sources if _safe_str(source))
+
+        top_chunks = item.get("topChunks") if isinstance(item.get("topChunks"), list) else []
+        top_chunk_items = [chunk for chunk in top_chunks if isinstance(chunk, dict)]
+        if not top_chunk_items:
+            top_chunk_items = [
+                {
+                    "segmentId": segment_id,
+                    "segmentType": result_type,
+                    "snippet": snippet,
+                    "score": score,
+                    "pageNo": item.get("pageNo"),
+                    "anchor": item.get("anchor"),
+                    "sourceRef": source_ref,
+                    "thumbnail": thumbnail,
+                    "ocrSummary": ocr_summary,
+                }
+            ]
+
+        with st.container(border=True):
+            left, right = st.columns([5, 1])
+            left.markdown(f"**{idx}. {asset_type} · {result_type}**")
+            right.markdown(f"**{float(score):.4f}**" if isinstance(score, (int, float)) else "**-**")
+
+            summary_cols = st.columns([2, 3]) if asset_type.upper() == "IMAGE" and thumbnail else st.columns([1, 4])
+            if asset_type.upper() == "IMAGE" and thumbnail:
+                summary_cols[0].image(thumbnail, width=220)
+                summary_cols[1].write(ocr_summary or snippet or "-")
+            else:
+                summary_cols[1].write(snippet or "-")
+
+            st.caption(f"totalHits: {max(total_hits, len(top_chunk_items))}")
+            if hit_sources_text:
+                st.caption(f"hitSources: {hit_sources_text}")
+            id_parts = []
+            if segment_id:
+                id_parts.append(f"segmentId={segment_id}")
+            if asset_id:
+                id_parts.append(f"assetId={asset_id}")
+            if id_parts:
+                st.caption(" | ".join(id_parts))
+            if source_ref:
+                st.caption(f"sourceRef: {source_ref}")
+            _render_segment_preview_controls(
+                base_url=base_url,
+                segment_id=segment_id,
+                button_label="Preview Primary Hit",
+                key_suffix=f"kb-primary-{idx}",
+            )
+
+            with st.expander(f"Top Chunks ({len(top_chunk_items)})"):
+                for chunk_idx, chunk in enumerate(top_chunk_items, start=1):
+                    chunk_score = chunk.get("score")
+                    chunk_segment_id = _safe_str(chunk.get("segmentId")) or "-"
+                    chunk_segment_type = _safe_str(chunk.get("segmentType")) or "-"
+                    chunk_snippet = _safe_str(chunk.get("snippet")) or "-"
+                    chunk_anchor_text = _format_anchor(chunk.get("anchor"))
+                    chunk_source_ref = _safe_str(chunk.get("sourceRef"))
+                    chunk_header = (
+                        f"{chunk_idx}. {chunk_segment_type} · {chunk_segment_id}"
+                        f" · score={float(chunk_score):.4f}"
+                    ) if isinstance(chunk_score, (int, float)) else f"{chunk_idx}. {chunk_segment_type} · {chunk_segment_id}"
+                    st.markdown(chunk_header)
+                    st.write(chunk_snippet)
+                    st.caption(f"anchor: {chunk_anchor_text}")
+                    if chunk_source_ref:
+                        st.caption(f"sourceRef: {chunk_source_ref}")
+                    _render_segment_preview_controls(
+                        base_url=base_url,
+                        segment_id=chunk_segment_id,
+                        button_label="Preview Chunk",
+                        key_suffix=f"kb-chunk-{idx}-{chunk_idx}",
+                    )
+
+
+def _load_kb_mock_state(state: dict[str, Any], *, degraded: bool) -> None:
+    preview = _build_mock_segment_preview(degraded=degraded)
+    segment_id = _safe_str(preview.get("segmentId"))
+    _get_segment_preview_cache()[segment_id] = preview
+    anchor = preview.get("anchor") if isinstance(preview.get("anchor"), dict) else {}
+    result = {
+        "segmentType": "IMAGE_OCR_BLOCK",
+        "content": _safe_str(preview.get("snippet")),
+        "resultType": "IMAGE_OCR_BLOCK",
+        "assetType": "IMAGE",
+        "snippet": _safe_str(preview.get("snippet")),
+        "score": 0.8731,
+        "segmentId": segment_id,
+        "assetId": _safe_str(preview.get("assetId")),
+        "sourceRef": _safe_str(preview.get("sourceRef")),
+        "thumbnail": _safe_str(preview.get("previewUrl")),
+        "ocrSummary": _safe_str(preview.get("ocrSummary")),
+        "anchor": anchor,
+        "totalHits": 1,
+        "topChunks": [
+            {
+                "segmentId": segment_id,
+                "segmentType": "IMAGE_OCR_BLOCK",
+                "snippet": _safe_str(preview.get("snippet")),
+                "score": 0.8731,
+                "anchor": anchor,
+                "sourceRef": _safe_str(preview.get("sourceRef")),
+                "thumbnail": _safe_str(preview.get("previewUrl")),
+                "ocrSummary": _safe_str(preview.get("ocrSummary")),
+            }
+        ],
+        "explain": {
+            "hitSources": ["OCR"],
+            "strategyEffective": "MOCK",
+            "matchedBy": {"ocr": True},
+            "imageSignals": {"ocr": True},
+        },
+    }
+    state["results"] = [result]
+    state["headers"] = {}
+    state["status_code"] = 200
+    state["payload_text"] = _pretty_json({"mock": True, "degraded": degraded})
+    state["has_searched"] = True
+
+
+def _build_mock_segment_preview(*, degraded: bool) -> dict[str, Any]:
+    segment_id = "mock:image:ocr:degraded" if degraded else "mock:image:ocr:bbox"
+    image_url = _mock_bbox_image_data_uri()
+    anchor = {
+        "bbox": {
+            "x": 70,
+            "y": 62,
+            "width": 330,
+            "height": 86,
+            "unit": "PIXEL",
+        },
+        "imageWidth": 640,
+        "imageHeight": 360,
+    }
+    if degraded:
+        anchor = {
+            "bbox": {
+                "x": 520,
+                "y": 300,
+                "width": 180,
+                "height": 90,
+                "unit": "PIXEL",
+            },
+            "imageWidth": 640,
+            "imageHeight": 360,
+        }
+    snippet = "设备故障代码 E102，检查电源模块与温控传感器。"
+    return {
+        "segmentId": segment_id,
+        "assetId": "mock-asset-image-001",
+        "assetType": "IMAGE",
+        "segmentType": "IMAGE_OCR_BLOCK",
+        "previewType": "IMAGE",
+        "previewUrl": image_url,
+        "sourceRef": image_url,
+        "thumbnail": image_url,
+        "title": "mock-control-panel.png",
+        "snippet": snippet,
+        "ocrSummary": snippet,
+        "anchor": anchor,
+    }
+
+
+def _mock_bbox_image_data_uri() -> str:
+    svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+      <rect width="640" height="360" fill="#f7f9fc"/>
+      <rect x="42" y="38" width="556" height="284" rx="8" fill="#ffffff" stroke="#c9d3e2" stroke-width="2"/>
+      <text x="70" y="88" font-family="Arial, sans-serif" font-size="28" fill="#26384f">设备故障代码 E102</text>
+      <text x="70" y="132" font-family="Arial, sans-serif" font-size="20" fill="#26384f">检查电源模块与温控传感器</text>
+      <line x1="70" y1="170" x2="570" y2="170" stroke="#d7dee9" stroke-width="2"/>
+      <rect x="72" y="205" width="138" height="58" rx="6" fill="#eef5ff" stroke="#7aa7df"/>
+      <rect x="250" y="205" width="138" height="58" rx="6" fill="#fff7e8" stroke="#e0ad52"/>
+      <rect x="428" y="205" width="138" height="58" rx="6" fill="#eefaf1" stroke="#73b884"/>
+      <text x="104" y="241" font-family="Arial, sans-serif" font-size="18" fill="#26384f">电源</text>
+      <text x="282" y="241" font-family="Arial, sans-serif" font-size="18" fill="#26384f">温控</text>
+      <text x="460" y="241" font-family="Arial, sans-serif" font-size="18" fill="#26384f">网络</text>
+    </svg>
+    """
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+def _render_segment_preview_controls(
+    *,
+    base_url: str,
+    segment_id: str,
+    button_label: str,
+    key_suffix: str,
+) -> None:
+    if not segment_id or segment_id == "-":
+        return
+    cache = _get_segment_preview_cache()
+    button_key = f"preview_btn_{key_suffix}_{_stable_key(segment_id)}"
+    if st.button(button_label, key=button_key):
+        preview = _request_segment_preview(base_url=base_url, segment_id=segment_id)
+        if preview is not None:
+            cache[segment_id] = preview
+    preview_payload = cache.get(segment_id)
+    if isinstance(preview_payload, dict):
+        _render_segment_preview(preview_payload)
+
+
+def _get_segment_preview_cache() -> dict[str, Any]:
+    cache = st.session_state.get(KB_PREVIEW_CACHE_KEY)
+    if not isinstance(cache, dict):
+        cache = {}
+        st.session_state[KB_PREVIEW_CACHE_KEY] = cache
+    return cache
+
+
+def _request_segment_preview(*, base_url: str, segment_id: str) -> dict[str, Any] | None:
+    if segment_id == "mock:image:ocr:bbox":
+        return _build_mock_segment_preview(degraded=False)
+    if segment_id == "mock:image:ocr:degraded":
+        return _build_mock_segment_preview(degraded=True)
+    response_payload = _request_object_json(
+        method="GET",
+        url=f"{_normalize_base_url(base_url)}/api/v1/preview/segments/{segment_id}",
+    )
+    if response_payload is None:
+        return None
+    data, _, _ = response_payload
+    if not isinstance(data, dict):
+        st.error("Unexpected preview response shape: data is not an object.")
+        return None
+    return data
+
+
+def _render_segment_preview(preview: dict[str, Any]) -> None:
+    image_url = _safe_str(preview.get("previewUrl")) or _safe_str(preview.get("sourceRef")) or _safe_str(preview.get("thumbnail"))
+    snippet = _safe_str(preview.get("snippet")) or _safe_str(preview.get("ocrSummary")) or "-"
+    anchor = preview.get("anchor") if isinstance(preview.get("anchor"), dict) else {}
+    bbox_state = _resolve_preview_bbox_state(anchor)
+
+    with st.container(border=True):
+        st.caption(
+            f"Preview: segmentId={_safe_str(preview.get('segmentId')) or '-'} "
+            f"| type={_safe_str(preview.get('previewType')) or '-'}"
+        )
+        if image_url:
+            _render_image_preview_with_bbox(image_url, bbox_state)
+        else:
+            st.info("Preview image is unavailable.")
+        st.write(snippet)
+        if not bbox_state.get("valid"):
+            st.caption("Hit region is unavailable for this preview.")
+
+
+def _resolve_preview_bbox_state(anchor: dict[str, Any]) -> dict[str, Any]:
+    bbox = anchor.get("bbox")
+    image_width = anchor.get("imageWidth")
+    image_height = anchor.get("imageHeight")
+    if not isinstance(bbox, dict):
+        return {"valid": False}
+    if not isinstance(image_width, int) or not isinstance(image_height, int):
+        return {"valid": False}
+    if image_width <= 0 or image_height <= 0:
+        return {"valid": False}
+    x = bbox.get("x")
+    y = bbox.get("y")
+    width = bbox.get("width")
+    height = bbox.get("height")
+    unit = _safe_str(bbox.get("unit")).upper()
+    if not all(isinstance(value, int) for value in [x, y, width, height]):
+        return {"valid": False}
+    if x < 0 or y < 0 or width <= 0 or height <= 0:
+        return {"valid": False}
+    if x + width > image_width or y + height > image_height:
+        return {"valid": False}
+    if unit and unit != "PIXEL":
+        return {"valid": False}
+    return {
+        "valid": True,
+        "left": x / image_width * 100,
+        "top": y / image_height * 100,
+        "width": width / image_width * 100,
+        "height": height / image_height * 100,
+    }
+
+
+def _render_image_preview_with_bbox(image_url: str, bbox_state: dict[str, Any]) -> None:
+    safe_url = html.escape(image_url, quote=True)
+    overlay = ""
+    if bbox_state.get("valid"):
+        overlay = (
+            "<div class='bbox-preview-box' "
+            f"style='left:{bbox_state['left']:.4f}%;"
+            f"top:{bbox_state['top']:.4f}%;"
+            f"width:{bbox_state['width']:.4f}%;"
+            f"height:{bbox_state['height']:.4f}%;'></div>"
+        )
+    st.markdown(
+        "<div class='bbox-preview-frame'>"
+        f"<img src=\"{safe_url}\" class='bbox-preview-image' />"
+        f"{overlay}"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _inject_bbox_preview_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .bbox-preview-frame {
+          position: relative;
+          width: min(100%, 760px);
+          background: rgba(13, 18, 28, 0.72);
+          overflow: hidden;
+          border-radius: 8px;
+          border: 1px solid rgba(120, 130, 150, 0.35);
+        }
+        .bbox-preview-image {
+          width: 100%;
+          height: auto;
+          display: block;
+        }
+        .bbox-preview-box {
+          position: absolute;
+          border: 2px solid #ff4d4f;
+          background: rgba(255, 77, 79, 0.14);
+          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75);
+          pointer-events: none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _stable_key(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
 
 def render_image_analyze_page(base_url: str) -> None:
@@ -952,21 +2059,44 @@ def render_auth_admin_page(base_url: str) -> None:
 
 def render_image_batch_process_page(base_url: str) -> None:
     st.subheader("Batch Process")
-    st.caption("Endpoint: POST /api/v1/image/batch-tasks")
+
+    mode_store_key = "batch_ingestion_mode_store"
+    mode_widget_key = "batch_ingestion_mode_widget"
+    if mode_store_key not in st.session_state:
+        st.session_state[mode_store_key] = "image"
+    if mode_widget_key not in st.session_state:
+        st.session_state[mode_widget_key] = st.session_state[mode_store_key]
+
+    ingestion_mode = st.selectbox(
+        "Ingestion Type",
+        options=list(BATCH_INGESTION_CONFIG.keys()),
+        format_func=lambda mode: str(BATCH_INGESTION_CONFIG.get(mode, BATCH_INGESTION_CONFIG["image"]).get("label", mode)),
+        key=mode_widget_key,
+    )
+    st.session_state[mode_store_key] = ingestion_mode
+    mode_cfg = _get_batch_mode_config(ingestion_mode)
+    batch_tasks_path = str(mode_cfg.get("batch_tasks_path", "/api/v1/image/batch-tasks"))
+    accepted_extensions = list(mode_cfg.get("extensions", ["png", "jpg", "jpeg", "webp"]))
+
+    st.caption(f"Endpoint: POST {batch_tasks_path}")
     st.info(
         "Integrated flow: fetch STS -> upload to OSS -> submit async task. "
-        "Each image has independent status and can be retried manually when failed."
+        "Each item has independent status and can be retried manually when failed."
     )
-    st.caption("Image limit: up to 10MB per file.")
+    st.caption("File limit: up to 10MB per file.")
+    st.caption("Accepted extensions: " + ", ".join(f".{ext}" for ext in accepted_extensions))
 
     if "batch_task_ids" not in st.session_state:
         st.session_state.batch_task_ids = []
     task_cache_key = "batch_task_cache"
     active_task_ids_key = "batch_active_task_ids"
+    task_mode_map_key = "batch_task_mode_map"
     if task_cache_key not in st.session_state or not isinstance(st.session_state[task_cache_key], dict):
         st.session_state[task_cache_key] = {}
     if active_task_ids_key not in st.session_state or not isinstance(st.session_state[active_task_ids_key], list):
         st.session_state[active_task_ids_key] = []
+    if task_mode_map_key not in st.session_state or not isinstance(st.session_state[task_mode_map_key], dict):
+        st.session_state[task_mode_map_key] = {}
     active_statuses = {"PENDING", "RUNNING"}
 
     env_cfg = _load_env_config()
@@ -1021,7 +2151,7 @@ def render_image_batch_process_page(base_url: str) -> None:
     )
     files = st.file_uploader(
         "Select local files for integrated upload",
-        type=["png", "jpg", "jpeg", "webp"],
+        type=accepted_extensions,
         accept_multiple_files=True,
         key="batch_files_widget",
     )
@@ -1091,6 +2221,7 @@ def render_image_batch_process_page(base_url: str) -> None:
                     bucket_name=bucket_name.strip(),
                     endpoint=oss_endpoint.strip(),
                     sts=sts,
+                    include_mime_type=ingestion_mode == "text",
                 )
             if not items:
                 return
@@ -1103,6 +2234,7 @@ def render_image_batch_process_page(base_url: str) -> None:
                     base_url=_normalize_base_url(base_url),
                     access_token=token.strip(),
                     items=items,
+                    batch_tasks_path=batch_tasks_path,
                 )
             if envelope is None:
                 return
@@ -1118,6 +2250,11 @@ def render_image_batch_process_page(base_url: str) -> None:
                 if isinstance(task, dict):
                     task_cache[task_id] = task
                 st.session_state[task_cache_key] = task_cache
+                task_mode_map = st.session_state.get(task_mode_map_key)
+                if not isinstance(task_mode_map, dict):
+                    task_mode_map = {}
+                task_mode_map[task_id] = ingestion_mode
+                st.session_state[task_mode_map_key] = task_mode_map
                 active_task_ids = st.session_state.get(active_task_ids_key)
                 if not isinstance(active_task_ids, list):
                     active_task_ids = []
@@ -1151,13 +2288,16 @@ def render_image_batch_process_page(base_url: str) -> None:
         st.session_state[auto_refresh_store_key] = bool(auto_refresh)
 
         if not token.strip():
-            st.warning("Input X-Access-Token to load task status and retry failed images.")
+            st.warning("Input X-Access-Token to load task status and retry failed items.")
             return
 
         base = _normalize_base_url(base_url)
         task_cache = st.session_state.get(task_cache_key)
         if not isinstance(task_cache, dict):
             task_cache = {}
+        task_mode_map = st.session_state.get(task_mode_map_key)
+        if not isinstance(task_mode_map, dict):
+            task_mode_map = {}
         active_task_ids = st.session_state.get(active_task_ids_key)
         if not isinstance(active_task_ids, list):
             active_task_ids = []
@@ -1175,7 +2315,15 @@ def render_image_batch_process_page(base_url: str) -> None:
                     query_task_ids.append(task_id)
 
         for task_id in query_task_ids:
-            task_payload = _get_batch_task_status(base_url=base, access_token=token.strip(), task_id=task_id)
+            task_mode = str(task_mode_map.get(task_id, ingestion_mode))
+            task_mode_cfg = _get_batch_mode_config(task_mode)
+            task_batch_path = str(task_mode_cfg.get("batch_tasks_path", "/api/v1/image/batch-tasks"))
+            task_payload = _get_batch_task_status(
+                base_url=base,
+                access_token=token.strip(),
+                task_id=task_id,
+                batch_tasks_path=task_batch_path,
+            )
             if task_payload is None:
                 continue
             task_data = task_payload.get("data")
@@ -1205,10 +2353,14 @@ def render_image_batch_process_page(base_url: str) -> None:
                     if not isinstance(task_data, dict):
                         st.caption(f"Task `{task_id}` is active. Waiting for status update...")
                         continue
+                    task_mode = str(task_mode_map.get(task_id, ingestion_mode))
+                    task_mode_cfg = _get_batch_mode_config(task_mode)
                     _render_single_batch_task(
                         task_data=task_data,
                         base_url=base,
                         access_token=token.strip(),
+                        batch_tasks_path=str(task_mode_cfg.get("batch_tasks_path", "/api/v1/image/batch-tasks")),
+                        ingestion_label=str(task_mode_cfg.get("label", "Image")),
                     )
             else:
                 st.caption("No active tasks.")
@@ -1220,10 +2372,14 @@ def render_image_batch_process_page(base_url: str) -> None:
                 if not isinstance(task_data, dict):
                     st.caption(f"Task `{task_id}` has no cached status yet. Click `Refresh Task Status`.")
                     continue
+                task_mode = str(task_mode_map.get(task_id, ingestion_mode))
+                task_mode_cfg = _get_batch_mode_config(task_mode)
                 _render_single_batch_task(
                     task_data=task_data,
                     base_url=base,
                     access_token=token.strip(),
+                    batch_tasks_path=str(task_mode_cfg.get("batch_tasks_path", "/api/v1/image/batch-tasks")),
+                    ingestion_label=str(task_mode_cfg.get("label", "Image")),
                 )
         else:
             st.caption("No completed tasks yet.")
@@ -1235,7 +2391,14 @@ def render_image_batch_process_page(base_url: str) -> None:
         st.rerun()
 
 
-def _render_single_batch_task(*, task_data: dict[str, Any], base_url: str, access_token: str) -> None:
+def _render_single_batch_task(
+    *,
+    task_data: dict[str, Any],
+    base_url: str,
+    access_token: str,
+    batch_tasks_path: str,
+    ingestion_label: str,
+) -> None:
     task_id = str(task_data.get("taskId", ""))
     status = str(task_data.get("status", "UNKNOWN"))
     total = int(task_data.get("total", 0) or 0)
@@ -1248,6 +2411,7 @@ def _render_single_batch_task(*, task_data: dict[str, Any], base_url: str, acces
 
     with st.container(border=True):
         st.markdown(f"**Task:** `{task_id}`")
+        st.caption(f"Ingestion Type: {ingestion_label}")
         st.caption(
             f"Status: {status} | total={total} success={success_count} "
             f"failed={failure_count} running={running_count} pending={pending_count}"
@@ -1296,6 +2460,7 @@ def _render_single_batch_task(*, task_data: dict[str, Any], base_url: str, acces
                             base_url=base_url,
                             access_token=access_token,
                             task_id=task_id,
+                            batch_tasks_path=batch_tasks_path,
                         )
                     if retried_all is not None:
                         _mark_batch_task_active(task_id)
@@ -1343,6 +2508,7 @@ def _render_single_batch_task(*, task_data: dict[str, Any], base_url: str, acces
                                 access_token=access_token,
                                 task_id=task_id,
                                 item_id=item_id,
+                                batch_tasks_path=batch_tasks_path,
                             )
                         if retried is not None:
                             _mark_batch_task_active(task_id)
@@ -1504,6 +2670,7 @@ def _upload_files_to_oss(
     bucket_name: str,
     endpoint: str,
     sts: dict[str, str],
+    include_mime_type: bool = False,
 ) -> list[dict[str, str]]:
     try:
         import oss2
@@ -1526,27 +2693,34 @@ def _upload_files_to_oss(
             st.error(f"OSS upload failed for {file.name}: {exc}")
             return []
 
-        items.append(
-            {
-                "key": object_key,
-                "fileName": file.name,
-                "fileHash": md5_hex,
-            }
-        )
+        item = {
+            "key": object_key,
+            "fileName": file.name,
+            "fileHash": md5_hex,
+        }
+        if include_mime_type and file.type:
+            item["mimeType"] = str(file.type)
+        items.append(item)
 
     return items
 
 
-def _submit_batch_task(*, base_url: str, access_token: str, items: list[dict[str, str]]) -> dict[str, Any] | None:
+def _submit_batch_task(
+    *,
+    base_url: str,
+    access_token: str,
+    items: list[dict[str, str]],
+    batch_tasks_path: str,
+) -> dict[str, Any] | None:
     try:
         response = requests.post(
-            f"{base_url}/api/v1/image/batch-tasks",
+            f"{base_url}{batch_tasks_path}",
             headers={"X-Access-Token": access_token, "Content-Type": "application/json"},
             json=items,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
     except requests.exceptions.RequestException as exc:
-        st.error(f"Failed to call /image/batch-tasks: {exc}")
+        st.error(f"Failed to call {batch_tasks_path}: {exc}")
         return None
 
     st.caption(f"HTTP {response.status_code}")
@@ -1569,10 +2743,16 @@ def _submit_batch_task(*, base_url: str, access_token: str, items: list[dict[str
     return envelope
 
 
-def _get_batch_task_status(*, base_url: str, access_token: str, task_id: str) -> dict[str, Any] | None:
+def _get_batch_task_status(
+    *,
+    base_url: str,
+    access_token: str,
+    task_id: str,
+    batch_tasks_path: str,
+) -> dict[str, Any] | None:
     try:
         response = requests.get(
-            f"{base_url}/api/v1/image/batch-tasks/{task_id}",
+            f"{base_url}{batch_tasks_path}/{task_id}",
             headers={"X-Access-Token": access_token},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
@@ -1595,10 +2775,17 @@ def _get_batch_task_status(*, base_url: str, access_token: str, task_id: str) ->
     return envelope
 
 
-def _retry_batch_task_item(*, base_url: str, access_token: str, task_id: str, item_id: str) -> dict[str, Any] | None:
+def _retry_batch_task_item(
+    *,
+    base_url: str,
+    access_token: str,
+    task_id: str,
+    item_id: str,
+    batch_tasks_path: str,
+) -> dict[str, Any] | None:
     try:
         response = requests.post(
-            f"{base_url}/api/v1/image/batch-tasks/{task_id}/items/{item_id}/retry",
+            f"{base_url}{batch_tasks_path}/{task_id}/items/{item_id}/retry",
             headers={"X-Access-Token": access_token},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
@@ -1622,10 +2809,16 @@ def _retry_batch_task_item(*, base_url: str, access_token: str, task_id: str, it
     return envelope
 
 
-def _retry_all_failed_batch_task_items(*, base_url: str, access_token: str, task_id: str) -> dict[str, Any] | None:
+def _retry_all_failed_batch_task_items(
+    *,
+    base_url: str,
+    access_token: str,
+    task_id: str,
+    batch_tasks_path: str,
+) -> dict[str, Any] | None:
     try:
         response = requests.post(
-            f"{base_url}/api/v1/image/batch-tasks/{task_id}/retry-failed",
+            f"{base_url}{batch_tasks_path}/{task_id}/retry-failed",
             headers={"X-Access-Token": access_token},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
@@ -1647,6 +2840,10 @@ def _retry_all_failed_batch_task_items(*, base_url: str, access_token: str, task
         return None
 
     return envelope
+
+
+def _get_batch_mode_config(mode: str) -> dict[str, Any]:
+    return BATCH_INGESTION_CONFIG.get(mode, BATCH_INGESTION_CONFIG["image"])
 
 
 def _request_json(
@@ -1711,6 +2908,61 @@ def _request_json(
         return None
 
     return data, headers, status_code
+
+
+def _request_object_json(
+    method: str,
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    json: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[Any, dict[str, str], int] | None:
+    try:
+        response = requests.request(
+            method=method,
+            url=url,
+            params=params,
+            json=json,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.exceptions.Timeout:
+        st.error("Request timed out. Please check backend status and retry.")
+        return None
+    except requests.exceptions.RequestException as exc:
+        st.error(f"Request failed: {exc}")
+        return None
+
+    status_code = response.status_code
+    debug_headers = {
+        "X-Strategy-Requested": response.headers.get("X-Strategy-Requested", ""),
+        "X-Strategy-Effective": response.headers.get("X-Strategy-Effective", ""),
+        "X-Strategy-Fallback": response.headers.get("X-Strategy-Fallback", ""),
+        "X-Strategy-Fallback-Reason": response.headers.get("X-Strategy-Fallback-Reason", ""),
+    }
+
+    if status_code >= 400:
+        st.error(f"HTTP {status_code}: {response.text[:600]}")
+        return None
+
+    try:
+        envelope = response.json()
+    except ValueError:
+        st.error("Backend returned non-JSON response.")
+        return None
+
+    if not isinstance(envelope, dict):
+        st.error("Unexpected response shape: top-level JSON is not an object.")
+        return None
+
+    biz_code = envelope.get("code")
+    message = envelope.get("message", "")
+    data = envelope.get("data")
+    if biz_code != SUCCESS_CODE:
+        st.error(f"Business error {biz_code}: {message or 'Unknown error'}")
+        return None
+    return data, debug_headers, status_code
 
 
 def _request_search_page(

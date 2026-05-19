@@ -1,5 +1,6 @@
 package com.smart.vision.core.search.infrastructure.persistence.es.repository;
 
+import com.smart.vision.core.search.domain.repository.ImageSearchRepository;
 import com.smart.vision.core.search.infrastructure.persistence.es.document.ImageDocument;
 import org.springframework.data.elasticsearch.repository.ElasticsearchRepository;
 import org.springframework.stereotype.Repository;
@@ -13,5 +14,5 @@ import org.springframework.stereotype.Repository;
  * @since 2025/12/15
  */
 @Repository
-public interface ImageRepository extends ElasticsearchRepository<ImageDocument, String>, ImageRepositoryCustom {
+public interface ImageRepository extends ElasticsearchRepository<ImageDocument, String>, ImageRepositoryCustom, ImageSearchRepository {
 }

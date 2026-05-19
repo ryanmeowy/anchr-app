@@ -9,7 +9,6 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,7 +34,7 @@ public class PlainTextParser implements TextParserPort {
     @Override
     public TextParseResult parse(TextAssetMetadata metadata) {
         byte[] content = contentLoader.load(metadata);
-        String text = new String(content, StandardCharsets.UTF_8);
+        String text = TextParserSupport.decodeTextBytes(content);
         List<String> paragraphs = TextParserSupport.splitParagraphs(text);
 
         List<TextParseUnit> units = new ArrayList<>();

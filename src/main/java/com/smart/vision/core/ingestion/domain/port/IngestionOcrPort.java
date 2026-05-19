@@ -1,5 +1,7 @@
 package com.smart.vision.core.ingestion.domain.port;
 
+import com.smart.vision.core.ingestion.domain.model.OcrStructuredResult;
+
 /**
  * Domain port for OCR extraction in ingestion.
  */
@@ -12,4 +14,6 @@ public interface IngestionOcrPort {
      * @return OCR text
      */
     String extractText(String imageInput);
+
+    OcrStructuredResult extractStructuredText(String imageInput);
 }

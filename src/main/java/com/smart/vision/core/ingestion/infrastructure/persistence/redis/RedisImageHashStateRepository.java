@@ -1,7 +1,7 @@
 package com.smart.vision.core.ingestion.infrastructure.persistence.redis;
 
 import com.smart.vision.core.ingestion.domain.model.ImageHashStatus;
-import com.smart.vision.core.ingestion.domain.port.ImageHashStateRepository;
+import com.smart.vision.core.ingestion.domain.repository.ImageHashStateRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;

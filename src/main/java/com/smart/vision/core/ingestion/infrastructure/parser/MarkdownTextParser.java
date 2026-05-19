@@ -9,7 +9,6 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,7 +31,7 @@ public class MarkdownTextParser implements TextParserPort {
     @Override
     public TextParseResult parse(TextAssetMetadata metadata) {
         byte[] content = contentLoader.load(metadata);
-        String markdown = new String(content, StandardCharsets.UTF_8);
+        String markdown = TextParserSupport.decodeTextBytes(content);
         String normalized = normalizeMarkdown(markdown);
         List<String> paragraphs = TextParserSupport.splitParagraphs(normalized);
 

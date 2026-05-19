@@ -1,10 +1,10 @@
 package com.smart.vision.core.search.domain.strategy.impl;
 
 import com.smart.vision.core.search.domain.model.ImageSearchResultDTO;
-import com.smart.vision.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.smart.vision.core.search.domain.model.StrategyTypeEnum;
-import com.smart.vision.core.search.infrastructure.persistence.es.repository.ImageRepository;
+import com.smart.vision.core.search.domain.repository.ImageSearchRepository;
 import com.smart.vision.core.search.domain.strategy.RetrievalStrategy;
+import com.smart.vision.core.search.interfaces.rest.dto.SearchQueryDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -17,7 +17,7 @@ import static com.smart.vision.core.common.constant.SearchConstant.IMAGE_TO_IMAG
 @RequiredArgsConstructor
 public class ImageToImageRetrievalStrategy implements RetrievalStrategy {
 
-    private final ImageRepository imageRepository;
+    private final ImageSearchRepository imageSearchRepository;
 
     /**
      * Execute search operation using the specific strategy implementation
@@ -31,7 +31,7 @@ public class ImageToImageRetrievalStrategy implements RetrievalStrategy {
     @Override
     public List<ImageSearchResultDTO> search(SearchQueryDTO query, List<Float> queryVector) {
         Integer topK = null == query ? IMAGE_TO_IMAGE_TOP_K : null == query.getTopK() ? IMAGE_TO_IMAGE_TOP_K : query.getTopK();
-        return imageRepository.searchSimilar(queryVector, topK, "0");
+        return imageSearchRepository.searchSimilar(queryVector, topK, "0");
     }
 
     /**

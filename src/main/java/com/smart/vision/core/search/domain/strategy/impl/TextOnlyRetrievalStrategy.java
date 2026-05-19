@@ -1,10 +1,10 @@
 package com.smart.vision.core.search.domain.strategy.impl;
 
 import com.smart.vision.core.search.domain.model.ImageSearchResultDTO;
-import com.smart.vision.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.smart.vision.core.search.domain.model.StrategyTypeEnum;
-import com.smart.vision.core.search.infrastructure.persistence.es.repository.ImageRepository;
+import com.smart.vision.core.search.domain.repository.ImageSearchRepository;
 import com.smart.vision.core.search.domain.strategy.RetrievalStrategy;
+import com.smart.vision.core.search.interfaces.rest.dto.SearchQueryDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -19,7 +19,7 @@ import static com.smart.vision.core.common.constant.SearchConstant.DEFAULT_RESUL
 @RequiredArgsConstructor
 public class TextOnlyRetrievalStrategy implements RetrievalStrategy {
 
-    private final ImageRepository imageRepository;
+    private final ImageSearchRepository imageSearchRepository;
 
     @Override
     public List<ImageSearchResultDTO> search(SearchQueryDTO query, List<Float> queryVector) {
@@ -28,7 +28,7 @@ public class TextOnlyRetrievalStrategy implements RetrievalStrategy {
         }
         Integer limit = query.getLimit() == null ? DEFAULT_RESULT_LIMIT : query.getLimit();
         Boolean enableOcr = query.getEnableOcr() == null ? Boolean.TRUE : query.getEnableOcr();
-        return imageRepository.textSearch(query.getKeyword(), limit, enableOcr);
+        return imageSearchRepository.textSearch(query.getKeyword(), limit, enableOcr);
     }
 
     @Override
@@ -36,4 +36,3 @@ public class TextOnlyRetrievalStrategy implements RetrievalStrategy {
         return StrategyTypeEnum.TEXT_ONLY;
     }
 }
-

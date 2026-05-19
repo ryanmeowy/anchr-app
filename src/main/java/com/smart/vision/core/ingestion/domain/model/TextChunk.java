@@ -4,6 +4,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * Text chunk generated from parsed text units.
  */
@@ -19,4 +21,5 @@ public class TextChunk {
     private String chunkText;
     private Integer chunkOrder;
     private String sourceRef;
+    private List<Float> embedding;
 }

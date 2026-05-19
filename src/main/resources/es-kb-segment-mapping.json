@@ -39,6 +39,32 @@
     "chunkOrder": {
       "type": "integer"
     },
+    "bbox": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "unit": {
+          "type": "keyword"
+        }
+      }
+    },
+    "imageWidth": {
+      "type": "integer"
+    },
+    "imageHeight": {
+      "type": "integer"
+    },
     "embedding": {
       "type": "dense_vector",
       "dims": "@DIMS@",
@@ -51,6 +77,17 @@
       }
     },
     "sourceRef": {
+      "type": "keyword"
+    },
+    "thumbnail": {
+      "type": "keyword"
+    },
+    "ocrSummary": {
+      "type": "text",
+      "analyzer": "my_ik_analyzer",
+      "search_analyzer": "my_ik_search_analyzer"
+    },
+    "tags": {
       "type": "keyword"
     },
     "createdAt": {

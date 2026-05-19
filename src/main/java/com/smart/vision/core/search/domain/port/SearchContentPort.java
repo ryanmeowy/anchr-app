@@ -1,6 +1,6 @@
 package com.smart.vision.core.search.domain.port;
 
-import com.smart.vision.core.search.interfaces.rest.dto.GraphTripleDTO;
+import com.smart.vision.core.common.model.GraphTriple;
 
 import java.util.List;
 
@@ -22,5 +22,5 @@ public interface SearchContentPort {
     /**
      * Generate graph triples for image input.
      */
-    List<GraphTripleDTO> generateGraph(String imageInput);
+    List<GraphTriple> generateGraph(String imageInput);
 }

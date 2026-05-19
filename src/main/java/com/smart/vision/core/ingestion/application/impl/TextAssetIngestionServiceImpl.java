@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
-import com.smart.vision.core.common.exception.InfraException;
 import com.smart.vision.core.ingestion.application.TextAssetIngestionService;
 import com.smart.vision.core.ingestion.application.assembler.BatchTaskAssembler;
 import com.smart.vision.core.ingestion.domain.model.BatchTask;
@@ -15,7 +14,8 @@ import com.smart.vision.core.ingestion.domain.model.TextAssetMetadata;
 import com.smart.vision.core.ingestion.domain.model.TextChunk;
 import com.smart.vision.core.ingestion.domain.model.TextAssetType;
 import com.smart.vision.core.ingestion.domain.model.TextParseResult;
-import com.smart.vision.core.ingestion.domain.port.TextSegmentRepository;
+import com.smart.vision.core.ingestion.domain.port.IngestionEmbeddingPort;
+import com.smart.vision.core.ingestion.domain.repository.TextSegmentRepository;
 import com.smart.vision.core.common.util.IdGen;
 import com.smart.vision.core.ingestion.infrastructure.parser.TextChunkSplitter;
 import com.smart.vision.core.ingestion.infrastructure.parser.TextParserRouter;
@@ -31,6 +31,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
@@ -52,6 +53,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
     private final Executor ingestionTaskExecutor;
     private final TextParserRouter textParserRouter;
     private final TextChunkSplitter textChunkSplitter;
+    private final IngestionEmbeddingPort embeddingPort;
     private final TextSegmentRepository textSegmentRepository;
     private final BatchTaskAssembler batchTaskAssembler;
     private final StringRedisTemplate redisTemplate;
@@ -162,21 +164,21 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
                 return;
             }
 
-            java.util.List<BatchTaskItem> pendingItems = task.pendingItems();
+            List<BatchTaskItem> pendingItems = task.pendingItems();
             if (pendingItems.isEmpty()) {
                 task.refreshSummary(System.currentTimeMillis());
                 saveTask(task);
                 return;
             }
 
-            java.util.List<java.util.concurrent.CompletableFuture<Void>> futures = pendingItems.stream()
-                    .map(item -> java.util.concurrent.CompletableFuture.runAsync(
+            List<CompletableFuture<Void>> futures = pendingItems.stream()
+                    .map(item -> CompletableFuture.runAsync(
                             () -> processTaskItem(task, item.getItemId()),
                             ingestionTaskExecutor
                     ))
                     .toList();
 
-            java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             synchronized (task) {
                 task.refreshSummary(System.currentTimeMillis());
                 saveTask(task);
@@ -209,6 +211,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
             }
 
             List<TextChunk> chunks = textChunkSplitter.split(metadata, parseResult);
+            enrichChunkEmbeddings(chunks);
             textSegmentRepository.save(metadata.getAssetId(), chunks);
 
             metadata.setUpdatedAt(System.currentTimeMillis());
@@ -263,7 +266,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
             BatchTaskStatusDTO dto = objectMapper.readValue(raw, BatchTaskStatusDTO.class);
             return batchTaskAssembler.toTaskDomain(dto);
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
         }
     }
 
@@ -271,7 +274,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
         try {
             return objectMapper.writeValueAsString(task);
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
         }
     }
 
@@ -284,7 +287,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
                     TimeUnit.HOURS
             );
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_SERIALIZE_FAILED, e);
         }
     }
 
@@ -296,7 +299,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
         try {
             return objectMapper.readValue(raw, TextAssetMetadata.class);
         } catch (JsonProcessingException e) {
-            throw new InfraException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
+            throw new BusinessException(ApiError.INGEST_TASK_PAYLOAD_INVALID, e);
         }
     }
 
@@ -305,5 +308,21 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
             return "text-asset-" + System.currentTimeMillis();
         }
         return fileName.trim();
+    }
+
+    private void enrichChunkEmbeddings(List<TextChunk> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return;
+        }
+        for (TextChunk chunk : chunks) {
+            if (chunk == null || !StringUtils.hasText(chunk.getChunkText())) {
+                continue;
+            }
+            List<Float> embedding = embeddingPort.embedText(chunk.getChunkText());
+            if (embedding == null || embedding.isEmpty()) {
+                throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
+            }
+            chunk.setEmbedding(embedding);
+        }
     }
 }
