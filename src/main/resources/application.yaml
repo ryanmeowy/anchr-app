@@ -1,6 +1,4 @@
 spring:
-  profiles:
-    active: ${SPRING_PROFILES_ACTIVE}
   application:
     name: smart-vision
   data:
@@ -17,10 +15,10 @@ spring:
 
 app:
   capability-provider:
-    rerank: aliyun
-    gen: aliyun
-    ocr: aliyun
-    object-storage: aliyun
+    rerank: ${APP_CAPABILITY_PROVIDER_RERANK:aliyun}
+    gen: ${APP_CAPABILITY_PROVIDER_GEN:aliyun}
+    ocr: ${APP_CAPABILITY_PROVIDER_OCR:aliyun}
+    object-storage: ${APP_CAPABILITY_PROVIDER_OBJECT_STORAGE:aliyun}
   security:
     admin-secret: ${APP_ADMIN_SECRET}
     encrypt-key: ${APP_ENCRYPT_KEY}
@@ -31,6 +29,18 @@ app:
     dimension: ${APP_EMBEDDING_DIMENSION:1024}
     preprocess-version: ${APP_EMBEDDING_PREPROCESS_VERSION:v1}
     image-input-mode: ${APP_EMBEDDING_IMAGE_INPUT_MODE:url}
+  vector:
+    index-name: ${APP_VECTOR_INDEX_NAME:smart_gallery}
+    indexVersion: ${APP_VECTOR_INDEX_VERSION:v3}
+    read-alias: ${APP_VECTOR_READ_ALIAS:smart_gallery_read}
+    write-alias: ${APP_VECTOR_WRITE_ALIAS:smart_gallery_write}
+    dimension: ${APP_VECTOR_DIMENSION:${APP_EMBEDDING_DIMENSION:1024}}
+  kb-segment:
+    index-name: ${APP_KB_SEGMENT_INDEX_NAME:kb_segment}
+    indexVersion: ${APP_KB_SEGMENT_INDEX_VERSION:v2}
+    read-alias: ${APP_KB_SEGMENT_READ_ALIAS:kb_segment_read}
+    write-alias: ${APP_KB_SEGMENT_WRITE_ALIAS:kb_segment_write}
+    dimension: ${APP_KB_SEGMENT_DIMENSION:${APP_EMBEDDING_DIMENSION:1024}}
   search:
     quality-absolute-min-score: 0.72
     vector-min-score: 0.6
@@ -72,3 +82,32 @@ management:
     web:
       exposure:
         include: health,info,metrics
+
+grpc:
+  client:
+    vision-python-service:
+      address: ${VISION_PYTHON_SERVICE_ADDRESS:static://127.0.0.1:50051}
+      negotiation-type: ${VISION_PYTHON_SERVICE_NEGOTIATION_TYPE:plaintext}
+  deadline:
+    embed-image-ms: ${GRPC_DEADLINE_EMBED_IMAGE_MS:5000}
+    embed-text-ms: ${GRPC_DEADLINE_EMBED_TEXT_MS:5000}
+    ocr-ms: ${GRPC_DEADLINE_OCR_MS:8000}
+    generate-filename-ms: ${GRPC_DEADLINE_GENERATE_FILENAME_MS:3000}
+    generate-tags-ms: ${GRPC_DEADLINE_GENERATE_TAGS_MS:8000}
+    generate-graph-ms: ${GRPC_DEADLINE_GENERATE_GRAPH_MS:10000}
+    parse-graph-ms: ${GRPC_DEADLINE_PARSE_GRAPH_MS:8000}
+    stream-caption-ms: ${GRPC_DEADLINE_STREAM_CAPTION_MS:20000}
+    rerank-ms: ${GRPC_DEADLINE_RERANK_MS:5000}
+
+aliyun:
+  oss:
+    endpoint: ${OSS_ENDPOINT:}
+    public-endpoint: ${OSS_PUBLIC_ENDPOINT:}
+    access-key-id: ${ALIYUN_ACCESS_KEY_ID:}
+    access-key-secret: ${ALIYUN_ACCESS_KEY_SECRET:}
+    bucket-name: ${ALIYUN_OSS_BUCKET_NAME:}
+    role-arn: ${ALIYUN_OSS_ROLE_ARN:}
+  ocr:
+    access-key-id: ${ALIYUN_ACCESS_KEY_ID:}
+    access-key-secret: ${ALIYUN_ACCESS_KEY_SECRET:}
+    endpoint: ${OCR_ENDPOINT:}
