@@ -23,6 +23,8 @@ import static org.mockito.Mockito.when;
 
 class SegmentPreviewServiceImplTest {
 
+    private static final long PREVIEW_URL_TTL_MILLIS = 5 * 60 * 1_000L;
+
     @Test
     void getSegmentPreview_shouldExposeImageOcrAnchor() {
         KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
@@ -51,6 +53,26 @@ class SegmentPreviewServiceImplTest {
         assertThat(preview.getSurroundingChunks()).hasSize(1);
         assertThat(preview.getSurroundingChunks().getFirst().getRelation()).isEqualTo("current");
         assertThat(preview.getSurroundingChunks().getFirst().getContent()).isEqualTo("设备故障代码 E102");
+    }
+
+    @Test
+    void getSegmentPreview_shouldSetExpectedExpiryForSignedUrl() {
+        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
+                kbSegmentRepository,
+                objectStoragePort,
+                new PreviewAccessCache()
+        );
+        Segment segment = textSegment("asset-6:text:1", "oss://docs/expiry.pdf");
+        when(kbSegmentRepository.findBySegmentId("asset-6:text:1")).thenReturn(Optional.of(segment));
+        when(objectStoragePort.buildPreviewUrl("docs/expiry.pdf")).thenReturn("https://preview.example.com/expiry.pdf");
+
+        long before = System.currentTimeMillis();
+        PreviewSegmentDTO preview = service.getSegmentPreview("asset-6:text:1", "token-a");
+        long after = System.currentTimeMillis();
+
+        assertThat(preview.getExpiresAt()).isBetween(before + PREVIEW_URL_TTL_MILLIS, after + PREVIEW_URL_TTL_MILLIS);
     }
 
     @Test
@@ -135,6 +157,37 @@ class SegmentPreviewServiceImplTest {
     }
 
     @Test
+    void getSegmentPreview_shouldInferMarkdownAndImageFallbackPreviewTypes() {
+        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
+                kbSegmentRepository,
+                objectStoragePort,
+                new PreviewAccessCache()
+        );
+        Segment markdownSegment = textSegment("asset-7:text:1", "oss://docs/runbook.markdown");
+        Segment imageSegment = Segment.builder()
+                .segmentId("asset-8:image:1")
+                .assetId("asset-8")
+                .assetType(KbAssetTypeEnum.IMAGE)
+                .segmentType(SegmentType.IMAGE_CAPTION)
+                .title("scan-without-extension")
+                .contentText("image caption")
+                .sourceRef("oss://images/scan-without-extension")
+                .build();
+        when(kbSegmentRepository.findBySegmentId("asset-7:text:1")).thenReturn(Optional.of(markdownSegment));
+        when(kbSegmentRepository.findBySegmentId("asset-8:image:1")).thenReturn(Optional.of(imageSegment));
+        when(objectStoragePort.buildPreviewUrl("docs/runbook.markdown")).thenReturn("https://preview.example.com/runbook.markdown");
+        when(objectStoragePort.buildPreviewUrl("images/scan-without-extension")).thenReturn("https://preview.example.com/scan");
+
+        PreviewSegmentDTO markdownPreview = service.getSegmentPreview("asset-7:text:1", "token-a");
+        PreviewSegmentDTO imagePreview = service.getSegmentPreview("asset-8:image:1", "token-a");
+
+        assertThat(markdownPreview.getPreviewType()).isEqualTo("MD");
+        assertThat(imagePreview.getPreviewType()).isEqualTo("IMAGE");
+    }
+
+    @Test
     void getSegmentPreview_shouldReusePreviewUrlForSameTokenHash() {
         KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
@@ -154,6 +207,100 @@ class SegmentPreviewServiceImplTest {
         assertThat(secondPreview.getPreviewUrl()).isEqualTo(firstPreview.getPreviewUrl());
         assertThat(secondPreview.getExpiresAt()).isEqualTo(firstPreview.getExpiresAt());
         verify(objectStoragePort, times(1)).buildPreviewUrl("image-a.png");
+    }
+
+    @Test
+    void getSegmentPreview_shouldSignAgainWhenPreviewCacheMissesAfterTtl() {
+        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
+                kbSegmentRepository,
+                objectStoragePort,
+                new PreviewAccessCache() {
+                    @Override
+                    public Optional<PreviewAccess> find(String segmentId, String accessToken) {
+                        return Optional.empty();
+                    }
+                }
+        );
+        Segment segment = textSegment("asset-9:text:1", "oss://docs/cache.pdf");
+        when(kbSegmentRepository.findBySegmentId("asset-9:text:1")).thenReturn(Optional.of(segment));
+        when(objectStoragePort.buildPreviewUrl("docs/cache.pdf"))
+                .thenReturn("https://preview.example.com/cache-1.pdf")
+                .thenReturn("https://preview.example.com/cache-2.pdf");
+
+        PreviewSegmentDTO firstPreview = service.getSegmentPreview("asset-9:text:1", "token-a");
+        PreviewSegmentDTO secondPreview = service.getSegmentPreview("asset-9:text:1", "token-a");
+
+        assertThat(firstPreview.getPreviewUrl()).isEqualTo("https://preview.example.com/cache-1.pdf");
+        assertThat(secondPreview.getPreviewUrl()).isEqualTo("https://preview.example.com/cache-2.pdf");
+        verify(objectStoragePort, times(2)).buildPreviewUrl("docs/cache.pdf");
+    }
+
+    @Test
+    void getSegmentPreview_shouldReturnEmptySurroundingChunksWhenContentMissing() {
+        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
+                kbSegmentRepository,
+                objectStoragePort,
+                new PreviewAccessCache()
+        );
+        Segment segment = Segment.builder()
+                .segmentId("asset-10:text:1")
+                .assetId("asset-10")
+                .assetType(KbAssetTypeEnum.TEXT)
+                .segmentType(SegmentType.TEXT_CHUNK)
+                .sourceRef("https://preview.example.com/direct.txt")
+                .chunkOrder(1)
+                .build();
+        when(kbSegmentRepository.findBySegmentId("asset-10:text:1")).thenReturn(Optional.of(segment));
+        when(kbSegmentRepository.findNeighborChunks("asset-10", null, 1, 1)).thenReturn(List.of());
+
+        PreviewSegmentDTO preview = service.getSegmentPreview("asset-10:text:1", "token-a");
+
+        assertThat(preview.getPreviewUrl()).isEqualTo("https://preview.example.com/direct.txt");
+        assertThat(preview.getExpiresAt()).isNull();
+        assertThat(preview.getSurroundingChunks()).isEmpty();
+    }
+
+    @Test
+    void getSegmentPreview_shouldReturnImagePreviewWhenBboxInvalid() {
+        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
+                kbSegmentRepository,
+                objectStoragePort,
+                new PreviewAccessCache()
+        );
+        Segment segment = Segment.builder()
+                .segmentId("asset-11:ocr:0")
+                .assetId("asset-11")
+                .assetType(KbAssetTypeEnum.IMAGE)
+                .segmentType(SegmentType.IMAGE_OCR_BLOCK)
+                .title("invalid-bbox.png")
+                .ocrText("仍然返回 OCR 命中文本")
+                .sourceRef("oss://invalid-bbox.png")
+                .bbox(Bbox.builder()
+                        .x(1200)
+                        .y(900)
+                        .width(-10)
+                        .height(0)
+                        .unit("PERCENT")
+                        .build())
+                .imageWidth(1000)
+                .imageHeight(800)
+                .build();
+        when(kbSegmentRepository.findBySegmentId("asset-11:ocr:0")).thenReturn(Optional.of(segment));
+        when(objectStoragePort.buildPreviewUrl("invalid-bbox.png")).thenReturn("https://preview.example.com/invalid-bbox.png");
+
+        PreviewSegmentDTO preview = service.getSegmentPreview("asset-11:ocr:0", "token-a");
+
+        assertThat(preview.getPreviewType()).isEqualTo("IMAGE");
+        assertThat(preview.getPreviewUrl()).isEqualTo("https://preview.example.com/invalid-bbox.png");
+        assertThat(preview.getSnippet()).isEqualTo("仍然返回 OCR 命中文本");
+        assertThat(preview.getAnchor().getBbox().getWidth()).isEqualTo(-10);
+        assertThat(preview.getAnchor().getBbox().getUnit()).isEqualTo("PERCENT");
     }
 
     @Test
