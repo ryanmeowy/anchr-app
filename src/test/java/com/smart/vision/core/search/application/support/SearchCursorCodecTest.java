@@ -49,7 +49,10 @@ class SearchCursorCodecTest {
                 System.currentTimeMillis() + 60_000
         );
         String cursor = codec.encode(payload);
-        String tampered = cursor.substring(0, cursor.length() - 1) + (cursor.endsWith("A") ? "B" : "A");
+        int separator = cursor.indexOf('.');
+        String signature = cursor.substring(separator + 1);
+        String tamperedSignature = (signature.startsWith("A") ? "B" : "A") + signature.substring(1);
+        String tampered = cursor.substring(0, separator + 1) + tamperedSignature;
 
         assertThatThrownBy(() -> codec.decode(tampered))
                 .isInstanceOf(IllegalArgumentException.class)

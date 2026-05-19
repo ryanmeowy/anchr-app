@@ -27,8 +27,8 @@ public class VectorConfig {
      * Physical index name = indexName + "_" + indexVersion (when indexVersion is not blank).
      */
     private String indexVersion;
-    @Value("${app.capability-provider.embedding:unknown}")
-    private String embeddingProvider;
+    @Value("${app.embedding.backend:unknown}")
+    private String embeddingBackend;
     @Value("${app.embedding.model:unknown}")
     private String embeddingModel;
     @Value("${app.embedding.preprocess-version:v1}")
@@ -60,7 +60,7 @@ public class VectorConfig {
 
     public String getVectorProfile() {
         int dims = dimension == null ? 0 : dimension;
-        return sanitize(embeddingProvider) + "-" + sanitize(embeddingModel) + "-" + dims + "-" + sanitize(preprocessVersion);
+        return sanitize(embeddingBackend) + "-" + sanitize(embeddingModel) + "-" + dims + "-" + sanitize(preprocessVersion);
     }
 
     private String appendVectorProfile(String baseName) {

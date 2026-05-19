@@ -1,8 +1,7 @@
 package com.smart.vision.core.integration.multimodal.service.cloud.volcengine;
 
 import com.smart.vision.core.integration.multimodal.manager.volcengine.VolcengineEmbeddingManager;
-import com.smart.vision.core.ingestion.domain.port.IngestionEmbeddingPort;
-import com.smart.vision.core.search.domain.port.SearchEmbeddingPort;
+import com.smart.vision.core.integration.multimodal.embedding.EmbeddingBackend;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,10 +13,16 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "embedding", havingValue = "volcengine")
-public class VolcengineEmbeddingService implements SearchEmbeddingPort, IngestionEmbeddingPort {
+@ConditionalOnProperty(prefix = "app.embedding", name = "backend", havingValue = "volcengine")
+public class VolcengineEmbeddingService implements EmbeddingBackend {
 
     private final VolcengineEmbeddingManager volcengineEmbeddingManager;
+
+    @Override
+    public String backendName() {
+        return "volcengine";
+    }
+
     /**
      * Get multimodal vector (image)
      *

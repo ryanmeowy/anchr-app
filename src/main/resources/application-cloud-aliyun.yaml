@@ -15,17 +15,13 @@ aliyun:
 app:
   vector:
     index-name: smart_gallery_cloud
-    indexVersion: v2
+    indexVersion: v3
     read-alias: smart_gallery_cloud_read
     write-alias: smart_gallery_cloud_write
     dimension: 1024
   kb-segment:
     index-name: kb_segment_cloud
-    indexVersion: v1
+    indexVersion: v2
     read-alias: kb_segment_cloud_read
     write-alias: kb_segment_cloud_write
     dimension: 1024
-  embedding:
-    image-input-mode: url
-    model: multimodal-embedding-v1
-    preprocess-version: v1

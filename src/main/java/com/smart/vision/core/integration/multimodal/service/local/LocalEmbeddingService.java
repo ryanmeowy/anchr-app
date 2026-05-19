@@ -3,8 +3,7 @@ package com.smart.vision.core.integration.multimodal.service.local;
 import com.google.protobuf.ByteString;
 import com.smart.vision.core.grpc.VisionProto;
 import com.smart.vision.core.grpc.VisionServiceGrpc;
-import com.smart.vision.core.ingestion.domain.port.IngestionEmbeddingPort;
-import com.smart.vision.core.search.domain.port.SearchEmbeddingPort;
+import com.smart.vision.core.integration.multimodal.embedding.EmbeddingBackend;
 import io.grpc.StatusRuntimeException;
 import lombok.extern.slf4j.Slf4j;
 import net.devh.boot.grpc.client.inject.GrpcClient;
@@ -17,8 +16,8 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "embedding", havingValue = "local")
-public class LocalEmbeddingService implements SearchEmbeddingPort, IngestionEmbeddingPort {
+@ConditionalOnProperty(prefix = "app.embedding", name = "backend", havingValue = "local")
+public class LocalEmbeddingService implements EmbeddingBackend {
 
     @SuppressWarnings("unused")
     @GrpcClient("vision-python-service")
@@ -29,6 +28,11 @@ public class LocalEmbeddingService implements SearchEmbeddingPort, IngestionEmbe
 
     @Value("${grpc.deadline.embed-text-ms:5000}")
     private long embedTextDeadlineMs;
+
+    @Override
+    public String backendName() {
+        return "local";
+    }
 
     /**
      * Get multimodal vector (image)

@@ -21,7 +21,7 @@ import static com.smart.vision.core.integration.constant.VolcengineConstant.ARK_
 public class VolcengineEmbeddingBeanConfig {
 
     @Bean(destroyMethod = "shutdown")
-    @ConditionalOnProperty(prefix = "app.capability-provider", name = "embedding", havingValue = "volcengine")
+    @ConditionalOnProperty(prefix = "app.embedding", name = "backend", havingValue = "volcengine")
     public ArkService arkService() {
         return ArkService.builder()
                 .dispatcher(new Dispatcher())
@@ -35,4 +35,3 @@ public class VolcengineEmbeddingBeanConfig {
                 .orElseThrow(() -> new BusinessException(ApiError.INVALID_API_KEY));
     }
 }
-

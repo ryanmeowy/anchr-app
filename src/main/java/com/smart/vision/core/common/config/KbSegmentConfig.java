@@ -19,13 +19,13 @@ public class KbSegmentConfig {
     private String readAlias;
     private String writeAlias;
     private String indexVersion;
-    @Value("${app.capability-provider.embedding:unknown}")
-    private String embeddingProvider;
+    @Value("${app.embedding.backend:unknown}")
+    private String embeddingBackend;
     @Value("${app.embedding.model:unknown}")
     private String embeddingModel;
     @Value("${app.embedding.preprocess-version:v1}")
     private String preprocessVersion;
-    @Value("${app.vector.dimension:0}")
+    @Value("${app.embedding.dimension:0}")
     private Integer fallbackVectorDimension;
 
     public String getPhysicalIndexName() {
@@ -61,7 +61,7 @@ public class KbSegmentConfig {
 
     public String getVectorProfile() {
         int dims = getResolvedDimension() == null ? 0 : getResolvedDimension();
-        return sanitize(embeddingProvider) + "-" + sanitize(embeddingModel) + "-" + dims + "-" + sanitize(preprocessVersion);
+        return sanitize(embeddingBackend) + "-" + sanitize(embeddingModel) + "-" + dims + "-" + sanitize(preprocessVersion);
     }
 
     private String appendVectorProfile(String baseName) {

@@ -17,7 +17,6 @@ spring:
 
 app:
   capability-provider:
-    embedding: aliyun
     rerank: aliyun
     gen: aliyun
     ocr: aliyun
@@ -27,7 +26,11 @@ app:
     encrypt-key: ${APP_ENCRYPT_KEY}
     encrypt-iv: ${APP_ENCRYPT_IV}
   embedding:
-    image-input-mode: auto
+    backend: ${APP_EMBEDDING_BACKEND:aliyun}
+    model: ${APP_EMBEDDING_MODEL:multimodal-embedding-v1}
+    dimension: ${APP_EMBEDDING_DIMENSION:1024}
+    preprocess-version: ${APP_EMBEDDING_PREPROCESS_VERSION:v1}
+    image-input-mode: ${APP_EMBEDDING_IMAGE_INPUT_MODE:url}
   search:
     quality-absolute-min-score: 0.72
     vector-min-score: 0.6

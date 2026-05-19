@@ -1,19 +1,17 @@
 app:
   vector:
     index-name: smart_gallery_local
-    indexVersion: v2
+    indexVersion: v3
     read-alias: smart_gallery_local_read
     write-alias: smart_gallery_local_write
-    dimension: 512
+    dimension: 1024
     model-type: LOCAL
   kb-segment:
     index-name: kb_segment_local
-    indexVersion: v1
+    indexVersion: v2
     read-alias: kb_segment_local_read
     write-alias: kb_segment_local_write
-    dimension: 512
-  embedding:
-    image-input-mode: auto
+    dimension: 1024
 
 grpc:
   client:
