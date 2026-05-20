@@ -9,7 +9,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 
 /**
- * Smart search service interface that provides intelligent image search capabilities
+ * search service interface that provides intelligent image search capabilities
  * Supports multiple search strategies including hybrid search, vector-only search,
  * text-only search, and image-to-image search;
  *

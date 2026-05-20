@@ -91,7 +91,7 @@ class ImageSegmentIndexWriterTest {
         assertThat(segments.get(1).getBbox().getX()).isEqualTo(10);
         assertThat(segments.get(1).getImageWidth()).isEqualTo(200);
         assertThat(segments.get(2).getSegmentId()).isEqualTo("12:ocr:1");
-        assertThat(meterRegistry.counter("smartvision.ingestion.bbox.write_success").count()).isEqualTo(2d);
+        assertThat(meterRegistry.counter("ingestion.bbox.write_success").count()).isEqualTo(2d);
     }
 
     @Test

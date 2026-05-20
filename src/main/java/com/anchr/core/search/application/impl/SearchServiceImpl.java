@@ -55,7 +55,7 @@ import static com.anchr.core.common.constant.EmbeddingConstant.SIMILARITY_TOP_K;
 import static com.anchr.core.search.domain.util.ScoreUtil.mapScoreForSimilar;
 
 /**
- * Smart search service implementation
+ * search service implementation
  *
  * @author Ryan
  * @since 2025/12/15

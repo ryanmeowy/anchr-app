@@ -68,7 +68,7 @@ public class StrategyFactory {
             if (retrievalStrategy == null) {
                 return fallbackWithObservability(requested, HYBRID.name(), "strategy_not_registered");
             }
-            meterRegistry.counter("smartvision.strategy.selection",
+            meterRegistry.counter("strategy.selection",
                     "requested", requested,
                     "effective", strategyType.getCode(),
                     "fallback", "false",
@@ -87,12 +87,12 @@ public class StrategyFactory {
     }
 
     private RetrievalStrategy fallbackWithObservability(String requested, String effective, String reason) {
-        meterRegistry.counter("smartvision.strategy.selection",
+        meterRegistry.counter("strategy.selection",
                 "requested", requested,
                 "effective", effective,
                 "fallback", "true",
                 "reason", reason).increment();
-        meterRegistry.counter("smartvision.strategy.fallback",
+        meterRegistry.counter("strategy.fallback",
                 "requested", requested,
                 "effective", effective,
                 "reason", reason).increment();

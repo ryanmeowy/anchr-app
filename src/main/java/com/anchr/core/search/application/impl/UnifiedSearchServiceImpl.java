@@ -446,14 +446,14 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 : candidates.subList(windowSize, candidates.size());
         List<String> docs = rerankWindow.stream().map(this::buildRerankDocument).toList();
 
-        meterRegistry.counter("smartvision.kb.search.rerank.calls").increment();
+        meterRegistry.counter("kb.search.rerank.calls").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
         List<RerankItem> rerankResults = searchRerankPort.rerank(keyword, docs, rerankWindow.size());
-        sample.stop(Timer.builder("smartvision.kb.search.rerank.latency")
+        sample.stop(Timer.builder("kb.search.rerank.latency")
                 .description("KB unified rerank latency")
                 .register(meterRegistry));
         if (rerankResults == null || rerankResults.isEmpty()) {
-            meterRegistry.counter("smartvision.kb.search.rerank.fallback", "reason", "empty_result").increment();
+            meterRegistry.counter("kb.search.rerank.fallback", "reason", "empty_result").increment();
             return candidates;
         }
 

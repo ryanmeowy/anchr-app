@@ -23,10 +23,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ImageSegmentIndexWriter {
 
-    private static final String BBOX_WRITE_SUCCESS_METRIC = "smartvision.ingestion.bbox.write_success";
-    private static final String BBOX_MISSING_METRIC = "smartvision.ingestion.bbox.missing";
-    private static final String BBOX_OUT_OF_BOUNDS_METRIC = "smartvision.ingestion.bbox.out_of_bounds";
-    private static final String IMAGE_SIZE_MISSING_METRIC = "smartvision.ingestion.bbox.image_size_missing";
+    private static final String BBOX_WRITE_SUCCESS_METRIC = "ingestion.bbox.write_success";
+    private static final String BBOX_MISSING_METRIC = "ingestion.bbox.missing";
+    private static final String BBOX_OUT_OF_BOUNDS_METRIC = "ingestion.bbox.out_of_bounds";
+    private static final String IMAGE_SIZE_MISSING_METRIC = "ingestion.bbox.image_size_missing";
 
     private final KbSegmentBulkWriter kbSegmentBulkWriter;
     private final MeterRegistry meterRegistry;

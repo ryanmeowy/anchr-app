@@ -23,8 +23,8 @@ public class OcrStructuredResultPostProcessor {
 
     private static final int MAX_PARAGRAPHS = 30;
     private static final double TEXT_DRIFT_THRESHOLD = 0.7d;
-    private static final String TEXT_DRIFT_METRIC = "smartvision.ingestion.ocr.text_drift";
-    private static final String PARAGRAPH_CAPPED_METRIC = "smartvision.ingestion.ocr.paragraph_capped";
+    private static final String TEXT_DRIFT_METRIC = "ingestion.ocr.text_drift";
+    private static final String PARAGRAPH_CAPPED_METRIC = "ingestion.ocr.paragraph_capped";
 
     private final OcrParagraphEnhancementPort enhancementPort;
     private final MeterRegistry meterRegistry;

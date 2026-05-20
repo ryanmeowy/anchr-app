@@ -405,19 +405,19 @@ public class EsCliQueryService {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             T value = supplier.get();
-            meterRegistry.counter("smartvision.escli.requests", "endpoint", endpoint, "outcome", "success").increment();
+            meterRegistry.counter("escli.requests", "endpoint", endpoint, "outcome", "success").increment();
             return value;
         } catch (BusinessException e) {
-            meterRegistry.counter("smartvision.escli.requests", "endpoint", endpoint, "outcome", "business_error").increment();
+            meterRegistry.counter("escli.requests", "endpoint", endpoint, "outcome", "business_error").increment();
             auditFailure(endpoint, e.getMessage());
             throw e;
         } catch (Exception e) {
-            meterRegistry.counter("smartvision.escli.requests", "endpoint", endpoint, "outcome", "error").increment();
+            meterRegistry.counter("escli.requests", "endpoint", endpoint, "outcome", "error").increment();
             BusinessException mapped = mapException(endpoint, e);
             auditFailure(endpoint, mapped.getMessage());
             throw mapped;
         } finally {
-            sample.stop(Timer.builder("smartvision.escli.latency")
+            sample.stop(Timer.builder("escli.latency")
                     .description("Latency for ES CLI backend APIs")
                     .tag("endpoint", endpoint)
                     .register(meterRegistry));

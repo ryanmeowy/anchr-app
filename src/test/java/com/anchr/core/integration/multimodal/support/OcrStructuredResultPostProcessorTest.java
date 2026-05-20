@@ -39,7 +39,7 @@ class OcrStructuredResultPostProcessorTest {
 
         assertThat(result.getFullText()).isEqualTo("E102");
         assertThat(result.getParagraphs().getFirst().getText()).isEqualTo("E102");
-        assertThat(meterRegistry.counter("smartvision.ingestion.ocr.text_drift").count()).isEqualTo(1d);
+        assertThat(meterRegistry.counter("ingestion.ocr.text_drift").count()).isEqualTo(1d);
     }
 
     @Test
@@ -53,7 +53,7 @@ class OcrStructuredResultPostProcessorTest {
                 .build());
 
         assertThat(result.getParagraphs()).hasSize(16);
-        assertThat(meterRegistry.counter("smartvision.ingestion.ocr.paragraph_capped").count()).isEqualTo(1d);
+        assertThat(meterRegistry.counter("ingestion.ocr.paragraph_capped").count()).isEqualTo(1d);
     }
 
     private List<OcrParagraph> buildParagraphs(int count) {

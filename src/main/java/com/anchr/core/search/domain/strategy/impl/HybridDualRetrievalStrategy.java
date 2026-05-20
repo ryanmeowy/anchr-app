@@ -138,14 +138,14 @@ public class HybridDualRetrievalStrategy implements RetrievalStrategy {
                 .map(item -> buildRerankText(item, enableOcr))
                 .collect(Collectors.toList());
         Timer.Sample sample = Timer.start(meterRegistry);
-        meterRegistry.counter("smartvision.search.rerank.calls").increment();
+        meterRegistry.counter("search.rerank.calls").increment();
 
         List<RerankItem> rerankResults = searchRerankPort.rerank(keyword, docs, docs.size());
-        sample.stop(Timer.builder("smartvision.search.rerank.latency")
+        sample.stop(Timer.builder("search.rerank.latency")
                 .description("Cross-encoder rerank latency")
                 .register(meterRegistry));
         if (CollectionUtil.isEmpty(rerankResults)) {
-            meterRegistry.counter("smartvision.search.rerank.fallback", "reason", "empty_result").increment();
+            meterRegistry.counter("search.rerank.fallback", "reason", "empty_result").increment();
             return window.stream().limit(limit).collect(Collectors.toList());
         }
 
@@ -305,19 +305,19 @@ public class HybridDualRetrievalStrategy implements RetrievalStrategy {
     }
 
     private void recordWindowMetrics(int windowSize, int candidateSize) {
-        DistributionSummary.builder("smartvision.search.rerank.window.size")
+        DistributionSummary.builder("search.rerank.window.size")
                 .description("Rerank window size")
                 .register(meterRegistry)
                 .record(windowSize);
 
         double ratio = candidateSize <= 0 ? 0d : ((double) windowSize) / candidateSize;
-        DistributionSummary.builder("smartvision.search.rerank.window.ratio")
+        DistributionSummary.builder("search.rerank.window.ratio")
                 .description("Rerank window size / candidate size ratio")
                 .register(meterRegistry)
                 .record(ratio);
 
         meterRegistry.counter(
-                        "smartvision.search.rerank.window.hit",
+                        "search.rerank.window.hit",
                         "window_size", String.valueOf(windowSize),
                         "candidate_size", String.valueOf(candidateSize))
                 .increment();
