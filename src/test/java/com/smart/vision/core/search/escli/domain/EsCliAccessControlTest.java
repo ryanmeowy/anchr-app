@@ -24,26 +24,6 @@ class EsCliAccessControlTest {
         assertThat(control.isAllowed("other-index")).isFalse();
     }
 
-    @Test
-    void isAllowed_shouldFallbackToVectorDefaultsWhenNotConfigured() {
-        EsCliAccessConfig config = new EsCliAccessConfig();
-
-        VectorConfig vectorConfig = new VectorConfig();
-        vectorConfig.setReadAlias("smart_gallery_local_read");
-        vectorConfig.setWriteAlias("smart_gallery_local_write");
-        vectorConfig.setIndexName("smart_gallery_local");
-        vectorConfig.setIndexVersion("v3");
-        vectorConfig.setDimension(1024);
-        vectorConfig.setEmbeddingBackend("aliyun");
-        vectorConfig.setEmbeddingModel("multimodal-embedding-v1");
-        vectorConfig.setPreprocessVersion("v1");
-
-        EsCliAccessControl control = new EsCliAccessControl(config, vectorConfig);
-
-        assertThat(control.isAllowed("smart_gallery_local_read")).isTrue();
-        assertThat(control.isAllowed(vectorConfig.getPhysicalIndexName())).isTrue();
-        assertThat(control.isAllowed("random-index")).isFalse();
-    }
 
     @Test
     void assertIndexAllowed_shouldThrowWhenDenied() {

@@ -1,6 +1,5 @@
 package com.smart.vision.core.search.application.impl;
 
-import com.smart.vision.core.common.config.VectorConfig;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.search.application.SearchService;
@@ -26,9 +25,9 @@ import com.smart.vision.core.search.interfaces.rest.dto.SearchPageDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.SearchPageQueryDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.smart.vision.core.search.interfaces.rest.dto.SearchResultDTO;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import jakarta.annotation.PostConstruct;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -78,7 +77,6 @@ public class SearchServiceImpl implements SearchService {
     private final SearchObjectStoragePort objectStoragePort;
     private final SearchSessionManager searchSessionManager;
     private final SearchCursorCodec searchCursorCodec;
-    private final VectorConfig vectorConfig;
     private final AppSearchProperties appSearchProperties;
 
     @PostConstruct
@@ -174,15 +172,14 @@ public class SearchServiceImpl implements SearchService {
     }
 
     private String buildVectorCacheKey(String text) {
-        String profile = vectorConfig.getVectorProfile();
-        return String.format("%s%s:%s", VECTOR_CACHE_PREFIX, profile, DigestUtils.md5DigestAsHex(text.trim().toLowerCase().getBytes()));
+        return String.format("%s%s", VECTOR_CACHE_PREFIX, DigestUtils.md5DigestAsHex(text.trim().toLowerCase().getBytes()));
     }
 
     @Override
     public List<SearchResultDTO> searchByImage(MultipartFile file, int limit) {
         try (InputStream is = file.getInputStream()) {
             String md5 = DigestUtils.md5DigestAsHex(is);
-            String cacheKey = String.format("%s%s:%s", IMAGE_MD5_CACHE_PREFIX, vectorConfig.getVectorProfile(), md5);
+            String cacheKey = String.format("%s%s", IMAGE_MD5_CACHE_PREFIX, md5);
             List<Float> vector = redisTemplate.opsForValue().get(cacheKey);
             if (vector != null) {
                 log.info("Cache hit, MD5: {}", md5);

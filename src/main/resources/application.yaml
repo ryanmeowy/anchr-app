@@ -31,13 +31,13 @@ app:
     image-input-mode: ${APP_EMBEDDING_IMAGE_INPUT_MODE:url}
   vector:
     index-name: ${APP_VECTOR_INDEX_NAME:smart_gallery}
-    indexVersion: ${APP_VECTOR_INDEX_VERSION:v3}
+    indexVersion: ${APP_VECTOR_INDEX_VERSION:v1}
     read-alias: ${APP_VECTOR_READ_ALIAS:smart_gallery_read}
     write-alias: ${APP_VECTOR_WRITE_ALIAS:smart_gallery_write}
     dimension: ${APP_VECTOR_DIMENSION:${APP_EMBEDDING_DIMENSION:1024}}
   kb-segment:
     index-name: ${APP_KB_SEGMENT_INDEX_NAME:kb_segment}
-    indexVersion: ${APP_KB_SEGMENT_INDEX_VERSION:v2}
+    indexVersion: ${APP_KB_SEGMENT_INDEX_VERSION:v1}
     read-alias: ${APP_KB_SEGMENT_READ_ALIAS:kb_segment_read}
     write-alias: ${APP_KB_SEGMENT_WRITE_ALIAS:kb_segment_write}
     dimension: ${APP_KB_SEGMENT_DIMENSION:${APP_EMBEDDING_DIMENSION:1024}}
