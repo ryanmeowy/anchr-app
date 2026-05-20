@@ -40,6 +40,7 @@
         <aspectjrt.version>1.9.21</aspectjrt.version>
         <aspectjweaver.version>1.9.21</aspectjweaver.version>
         <pdfbox.version>3.0.5</pdfbox.version>
+        <redisson.version>3.39.0</redisson.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -172,6 +173,12 @@
             <groupId>org.aspectj</groupId>
             <artifactId>aspectjweaver</artifactId>
             <version>${aspectjweaver.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>${redisson.version}</version>
         </dependency>
         <!--↑↑ tools ↑↑-->
 

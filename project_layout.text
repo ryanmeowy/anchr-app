@@ -1,4 +1,4 @@
-src/main/java/com/smart/vision/core
+src/main/java/com/anchr/core
 ├── auth                           # 认证子域（STS、令牌接口）
 │   ├── application
 │   ├── infrastructure/aliyun

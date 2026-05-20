@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package ai.inference;
 
-option java_package = "com.smart.vision.core.grpc";
+option java_package = "com.anchr.core.grpc";
 option java_outer_classname = "VisionProto";
 
 service VisionService {
