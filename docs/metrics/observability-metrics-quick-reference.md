@@ -2,7 +2,7 @@
 
 ## 1. 适用范围
 
-本文用于 `smart-vision` 项目本地/测试环境快速查看 `MeterRegistry` 指标。
+本文用于 `anchr` 项目本地/测试环境快速查看 `MeterRegistry` 指标。
 
 ## 2. 开启方式
 

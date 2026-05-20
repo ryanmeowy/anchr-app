@@ -8,10 +8,10 @@ import org.springframework.scheduling.annotation.EnableAsync;
 @EnableAsync
 @EnableRetry
 @SpringBootApplication
-public class SmartVisionApplication {
+public class AnchrApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(SmartVisionApplication.class, args);
+        SpringApplication.run(AnchrApplication.class, args);
     }
 
 }

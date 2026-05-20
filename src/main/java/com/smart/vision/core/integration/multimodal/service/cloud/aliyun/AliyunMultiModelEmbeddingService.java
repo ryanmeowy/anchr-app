@@ -2,10 +2,9 @@ package com.smart.vision.core.integration.multimodal.service.cloud.aliyun;
 
 import com.alibaba.dashscope.exception.ApiException;
 import com.alibaba.dashscope.exception.NoApiKeyException;
-import com.smart.vision.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.smart.vision.core.integration.multimodal.manager.aliyun.BailianEmbeddingManager;
 import com.smart.vision.core.integration.multimodal.domain.model.AliyunErrorCode;
-import com.smart.vision.core.search.domain.port.SearchEmbeddingPort;
+import com.smart.vision.core.integration.multimodal.embedding.EmbeddingBackend;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,10 +16,15 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "embedding", havingValue = "aliyun")
-public class AliyunMultiModelEmbeddingService implements SearchEmbeddingPort, IngestionEmbeddingPort {
+@ConditionalOnProperty(prefix = "app.embedding", name = "backend", havingValue = "aliyun")
+public class AliyunMultiModelEmbeddingService implements EmbeddingBackend {
 
     private final BailianEmbeddingManager bailianManager;
+
+    @Override
+    public String backendName() {
+        return "aliyun";
+    }
 
     /**
      * Get multimodal vector (image)

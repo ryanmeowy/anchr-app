@@ -76,7 +76,7 @@
 ```json
 {
   "status": "green",
-  "clusterName": "smart-vision-es",
+  "clusterName": "anchr-es",
   "numberOfNodes": 3,
   "activePrimaryShards": 24,
   "activeShards": 48,

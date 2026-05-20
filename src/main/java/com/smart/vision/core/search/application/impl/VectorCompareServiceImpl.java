@@ -1,13 +1,12 @@
 package com.smart.vision.core.search.application.impl;
 
-import com.smart.vision.core.common.config.VectorConfig;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
+import com.smart.vision.core.common.util.VectorUtil;
+import com.smart.vision.core.search.application.VectorCompareService;
 import com.smart.vision.core.search.domain.port.SearchEmbeddingPort;
 import com.smart.vision.core.search.domain.port.SearchObjectStoragePort;
 import com.smart.vision.core.search.interfaces.rest.dto.VectorCompareResultDTO;
-import com.smart.vision.core.search.application.VectorCompareService;
-import com.smart.vision.core.common.util.VectorUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,7 +51,6 @@ public class VectorCompareServiceImpl implements VectorCompareService {
     private final SearchEmbeddingPort embeddingPort;
     private final RedisTemplate<String, List<Float>> redisTemplate;
     private final SearchObjectStoragePort objectStoragePort;
-    private final VectorConfig vectorConfig;
 
     @Override
     public VectorCompareResultDTO compare(String leftType,
@@ -187,13 +185,12 @@ public class VectorCompareServiceImpl implements VectorCompareService {
     }
 
     private String buildTextCacheKey(String text) {
-        String profile = vectorConfig.getVectorProfile();
         String textHash = DigestUtils.md5DigestAsHex(text.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
-        return String.format("%s%s:%s", COMPARE_TEXT_CACHE_PREFIX, profile, textHash);
+        return String.format("%s%s", COMPARE_TEXT_CACHE_PREFIX, textHash);
     }
 
     private String buildImageCacheKey(String md5) {
-        return String.format("%s%s:%s", COMPARE_IMAGE_CACHE_PREFIX, vectorConfig.getVectorProfile(), md5);
+        return String.format("%s%s", COMPARE_IMAGE_CACHE_PREFIX, md5);
     }
 
     private boolean shouldUseBytesInput() {

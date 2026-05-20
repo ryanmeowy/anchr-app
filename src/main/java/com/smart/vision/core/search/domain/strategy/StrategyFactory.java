@@ -33,7 +33,10 @@ public class StrategyFactory {
             if (null == strategy || null == strategy.getType()) {
                 continue;
             }
-            this.strategies.put(strategy.getType(), strategy);
+            RetrievalStrategy previous = this.strategies.putIfAbsent(strategy.getType(), strategy);
+            if (previous != null) {
+                throw new IllegalStateException("Duplicate strategy type registration detected: " + strategy.getType());
+            }
             log.info("Search strategy registered: {}", strategy.getType().getDesc());
         }
         validateRequiredStrategies();

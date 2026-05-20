@@ -12,7 +12,7 @@
 - [x] 将厂商配置类从 `common` 迁移到 `integration/<capability>/<vendor>/config`。
 - [x] 将厂商常量从 `common` 迁移到 `integration`，`common` 禁止出现厂商词。
 - [x] 主配置 `application.yaml` 仅保留能力选择器与平台通用配置。
-- [x] 厂商参数仅放在 `application-cloud-<vendor>.yaml` 中，避免回流主配置。
+- [x] 索引、向量模型与能力选择器统一放在 `application.yaml`，通过环境变量自由组合能力 provider。
 - [x] 删除所有“空实现返回空字符串/空列表”的逻辑，改为明确异常。
 
 ## Phase 1：能力统一收敛到 integration

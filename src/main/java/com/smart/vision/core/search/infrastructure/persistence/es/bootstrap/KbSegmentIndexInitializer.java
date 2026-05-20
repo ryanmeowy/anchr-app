@@ -60,7 +60,7 @@ public class KbSegmentIndexInitializer {
     }
 
     private int resolveDimension() {
-        Integer resolved = kbSegmentConfig.getResolvedDimension();
+        Integer resolved = kbSegmentConfig.getDimension();
         if (resolved != null && resolved > 0) {
             return resolved;
         }

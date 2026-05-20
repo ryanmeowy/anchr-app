@@ -17,16 +17,16 @@
 
 | ID | 标题 | 优先级 | 依赖 | 预估 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| UEP-01 | 明确全局 embedding backend 与配置契约 | P0 | 无 | 0.5 天 | TODO |
-| UEP-02 | 新增 `EmbeddingProperties` | P0 | UEP-01 | 0.5 天 | TODO |
-| UEP-03 | 新增 `EmbeddingBackend` 接口与 backend 选择机制 | P0 | UEP-02 | 0.5-1 天 | TODO |
-| UEP-04 | 新增 `UnifiedEmbeddingProvider` | P0 | UEP-03 | 0.5-1 天 | TODO |
-| UEP-05 | 改造阿里云 embedding 实现为 backend | P0 | UEP-03, UEP-04 | 0.5-1 天 | TODO |
-| UEP-06 | 改造火山引擎 embedding 实现为 backend | P0 | UEP-03, UEP-04 | 0.5-1 天 | TODO |
-| UEP-07 | 改造本地 embedding 实现为 backend | P0 | UEP-03, UEP-04 | 0.5-1 天 | TODO |
-| UEP-08 | 移除 embedding 对 `app.capability-provider.embedding` 的依赖 | P0 | UEP-05, UEP-06, UEP-07 | 0.5 天 | TODO |
-| UEP-09 | 调整 vector profile 使用 `app.embedding.backend` | P0 | UEP-02 | 0.5 天 | TODO |
-| UEP-10 | 统一 local/cloud 配置与索引版本 | P0 | UEP-08, UEP-09 | 0.5-1 天 | TODO |
+| UEP-01 | 明确全局 embedding backend 与配置契约 | P0 | 无 | 0.5 天 | DONE |
+| UEP-02 | 新增 `EmbeddingProperties` | P0 | UEP-01 | 0.5 天 | DONE |
+| UEP-03 | 新增 `EmbeddingBackend` 接口与 backend 选择机制 | P0 | UEP-02 | 0.5-1 天 | DONE |
+| UEP-04 | 新增 `UnifiedEmbeddingProvider` | P0 | UEP-03 | 0.5-1 天 | DONE |
+| UEP-05 | 改造阿里云 embedding 实现为 backend | P0 | UEP-03, UEP-04 | 0.5-1 天 | DONE |
+| UEP-06 | 改造火山引擎 embedding 实现为 backend | P0 | UEP-03, UEP-04 | 0.5-1 天 | DONE |
+| UEP-07 | 改造本地 embedding 实现为 backend | P0 | UEP-03, UEP-04 | 0.5-1 天 | DONE |
+| UEP-08 | 移除 embedding 对 `app.capability-provider.embedding` 的依赖 | P0 | UEP-05, UEP-06, UEP-07 | 0.5 天 | DONE |
+| UEP-09 | 调整 vector profile 使用 `app.embedding.backend` | P0 | UEP-02 | 0.5 天 | DONE |
+| UEP-10 | 统一 local/cloud 配置与索引版本 | P0 | UEP-08, UEP-09 | 0.5-1 天 | DONE |
 | UEP-11 | 增加启动校验与单元测试 | P0 | UEP-04, UEP-09 | 1 天 | TODO |
 | UEP-12 | 扩展 ES CLI 默认 allowlist 覆盖双索引 | P1 | UEP-10 | 0.5 天 | TODO |
 | UEP-13 | 小批量双链路验证与阈值校准 | P1 | UEP-10, UEP-11 | 1-2 天 | TODO |
@@ -477,16 +477,16 @@ mvn -q -Dtest=ImageIngestionServiceImplRetryFlowTest,ImageSegmentIndexWriterTest
 
 ## 最终验收 Checklist
 
-- [ ] `app.embedding.backend` 是唯一 embedding backend 选择入口。
-- [ ] `app.capability-provider.embedding` 已移除或不再生效。
-- [ ] Spring 容器只有一个 `SearchEmbeddingPort` Bean。
-- [ ] Spring 容器只有一个 `IngestionEmbeddingPort` Bean。
-- [ ] 阿里云、火山、本地实现均为 `EmbeddingBackend`。
-- [ ] `VectorConfig` profile 使用 `app.embedding.backend`。
-- [ ] `KbSegmentConfig` profile 使用 `app.embedding.backend`。
-- [ ] local/cloud profile 不会隐式改变 embedding backend。
-- [ ] `app.vector.dimension`、`app.kb-segment.dimension`、`app.embedding.dimension` 一致。
-- [ ] 新索引版本已规划。
+- [x] `app.embedding.backend` 是唯一 embedding backend 选择入口。
+- [x] `app.capability-provider.embedding` 已移除或不再生效。
+- [x] Spring 容器只有一个 `SearchEmbeddingPort` Bean。
+- [x] Spring 容器只有一个 `IngestionEmbeddingPort` Bean。
+- [x] 阿里云、火山、本地实现均为 `EmbeddingBackend`。
+- [x] `VectorConfig` profile 使用 `app.embedding.backend`。
+- [x] `KbSegmentConfig` profile 使用 `app.embedding.backend`。
+- [x] local/cloud profile 不会隐式改变 embedding backend。
+- [x] `app.vector.dimension`、`app.kb-segment.dimension`、`app.embedding.dimension` 一致。
+- [x] 新索引版本已规划。
 - [ ] 双索引链路小批量验证通过。
 - [ ] 阈值校准完成或有明确调整建议。
 - [ ] 全量回填 runbook 已准备。

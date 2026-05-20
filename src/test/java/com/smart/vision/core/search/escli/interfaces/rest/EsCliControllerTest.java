@@ -44,7 +44,7 @@ class EsCliControllerTest {
     void clusterHealth_shouldReturnResultEnvelope() throws Exception {
         when(service.getClusterHealth()).thenReturn(EsClusterHealthDTO.builder()
                 .status("green")
-                .clusterName("smart-vision-es")
+                .clusterName("anchr-es")
                 .numberOfNodes(3)
                 .activePrimaryShards(24)
                 .activeShards(48)
@@ -57,7 +57,7 @@ class EsCliControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.status").value("green"))
-                .andExpect(jsonPath("$.data.clusterName").value("smart-vision-es"));
+                .andExpect(jsonPath("$.data.clusterName").value("anchr-es"));
     }
 
     @Test

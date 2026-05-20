@@ -1,5 +1,6 @@
 package com.smart.vision.core.integration.multimodal.manager.volcengine;
 
+import com.smart.vision.core.common.config.EmbeddingProperties;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
 import com.volcengine.ark.runtime.model.multimodalembeddings.MultimodalEmbeddingInput;
@@ -8,7 +9,7 @@ import com.volcengine.ark.runtime.model.multimodalembeddings.MultimodalEmbedding
 import com.volcengine.ark.runtime.service.ArkService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
@@ -18,15 +19,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import static com.smart.vision.core.integration.constant.VolcengineConstant.VOLCENGINE_EMBEDDING_MODEL_NAME;
-
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "gen", havingValue = "volcengine")
 public class VolcengineEmbeddingManager {
 
-    private final ArkService arkService;
+    private final ObjectProvider<ArkService> arkServiceProvider;
+    private final EmbeddingProperties embeddingProperties;
 
     @Retryable(
             retryFor = {Exception.class},
@@ -59,11 +58,11 @@ public class VolcengineEmbeddingManager {
 
     private List<Float> callSdk(List<MultimodalEmbeddingInput> inputs) {
         MultimodalEmbeddingRequest multiModalEmbeddingRequest = MultimodalEmbeddingRequest.builder()
-                .model(VOLCENGINE_EMBEDDING_MODEL_NAME)
+                .model(embeddingProperties.getModel())
                 .input(inputs)
                 .build();
 
-        MultimodalEmbeddingResult res = arkService.createMultiModalEmbeddings(multiModalEmbeddingRequest);
+        MultimodalEmbeddingResult res = arkServiceProvider.getObject().createMultiModalEmbeddings(multiModalEmbeddingRequest);
 
         if (null == res || null == res.getData()) {
             log.info("embedding failed, request:{}, response:{}", inputs, res);

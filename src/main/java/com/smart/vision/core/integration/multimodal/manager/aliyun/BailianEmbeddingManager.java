@@ -11,12 +11,12 @@ import com.alibaba.dashscope.exception.ApiException;
 import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.alibaba.dashscope.exception.UploadFileException;
 import com.google.common.collect.Lists;
+import com.smart.vision.core.common.config.EmbeddingProperties;
 import com.smart.vision.core.common.exception.ApiError;
 import com.smart.vision.core.common.exception.BusinessException;
 import com.smart.vision.core.common.util.VectorUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
@@ -27,7 +27,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static com.smart.vision.core.integration.constant.AliyunConstant.BAILIAN_API_KEY_ENV_NAME;
-import static com.smart.vision.core.integration.constant.AliyunConstant.EMBEDDING_MODEL_NAME;
 
 /**
  * Bailian embedding manager for handling multimodal embeddings
@@ -40,8 +39,9 @@ import static com.smart.vision.core.integration.constant.AliyunConstant.EMBEDDIN
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "embedding", havingValue = "aliyun")
 public class BailianEmbeddingManager {
+
+    private final EmbeddingProperties embeddingProperties;
 
     /**
      * call Aliyun to generate vectors,
@@ -74,7 +74,7 @@ public class BailianEmbeddingManager {
     private List<Float> callSdk(List<MultiModalEmbeddingItemBase> inputItem) throws NoApiKeyException, UploadFileException {
         MultiModalEmbeddingParam param = MultiModalEmbeddingParam.builder()
                 .apiKey(resolveApiKey())
-                .model(EMBEDDING_MODEL_NAME)
+                .model(embeddingProperties.getModel())
                 .contents(inputItem)
                 .build();
 
