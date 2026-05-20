@@ -133,7 +133,7 @@ Phase2 的图片预览目标不是仅打开原图，而是支持用户从 Top3 �
 **segment 拆分规则：**
 
 - 正常路径按传统 OCR API 返回的 paragraph 层级拆分，每个 paragraph → 1 个 `IMAGE_OCR_BLOCK` segment，不自行拆分或合并。
-- 安全上限：若 OCR API 返回的 paragraph 数超过 30（如排版极度密集的图片），合并相邻 paragraph 直到 ≤ 30。此为兜底保护，正常图片不应触发，并记录 `smartvision.ingestion.ocr.paragraph_capped`。
+- 安全上限：若 OCR API 返回的 paragraph 数超过 30（如排版极度密集的图片），合并相邻 paragraph 直到 ≤ 30。此为兜底保护，正常图片不应触发，并记录 `ingestion.ocr.paragraph_capped`。
 - 该 segment 的 bbox 取 paragraph 内所有 words 的外接矩形（`x=min(word.x)`, `y=min(word.y)`, `width=max(word.x+word.w)-x`, `height=max(word.y+word.h)-y`）。
 - 每个 segment 携带：
   - `segmentId`: `{assetId}:ocr:{paragraphIndex}`
@@ -216,12 +216,12 @@ OCR paragraph segment 不含 embedding 字段（embedding 仅在 caption segment
 
 | 指标名 | 类型 | 说明 |
 |--------|------|------|
-| `smartvision.ingestion.bbox.write_success` | Counter | bbox 成功写入的 OCR paragraph 数 |
-| `smartvision.ingestion.bbox.missing` | Counter | bbox 为空的 OCR paragraph 数 |
-| `smartvision.ingestion.bbox.out_of_bounds` | Counter | bbox 越界的 OCR paragraph 数 |
-| `smartvision.ingestion.bbox.image_size_missing` | Counter | imageWidth/Height 缺失的图片数 |
-| `smartvision.ingestion.ocr.text_drift` | Counter | LLM 增强文本与原 OCR 文本相似度低于阈值的 paragraph 数 |
-| `smartvision.ingestion.ocr.paragraph_capped` | Counter | paragraph 数超过安全上限并触发合并兜底的图片数 |
+| `ingestion.bbox.write_success` | Counter | bbox 成功写入的 OCR paragraph 数 |
+| `ingestion.bbox.missing` | Counter | bbox 为空的 OCR paragraph 数 |
+| `ingestion.bbox.out_of_bounds` | Counter | bbox 越界的 OCR paragraph 数 |
+| `ingestion.bbox.image_size_missing` | Counter | imageWidth/Height 缺失的图片数 |
+| `ingestion.ocr.text_drift` | Counter | LLM 增强文本与原 OCR 文本相似度低于阈值的 paragraph 数 |
+| `ingestion.ocr.paragraph_capped` | Counter | paragraph 数超过安全上限并触发合并兜底的图片数 |
 
 ## 8. 接口影响
 

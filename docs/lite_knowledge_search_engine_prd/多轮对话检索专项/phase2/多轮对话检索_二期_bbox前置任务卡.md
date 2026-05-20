@@ -143,4 +143,4 @@ B2-01 bbox 协议定稿
 | LLM 增强文本与传统 OCR paragraph 文本大幅漂移 | bbox 位置与展示文本不一致 | 逐 paragraph 计算文本相似度（如 Levenshtein ratio < 0.7 时保留原文）；记录 `text_drift` 指标 |
 | ES bbox mapping 为 breaking change | 旧索引不可兼容 | 新版本索引 + alias 切换；旧索引保留可回滚；无历史数据无需迁移 |
 | 传统 OCR 与 LLM OCR 分属不同 API（阿里云文档 OCR vs DashScope） | 配置复杂度增加 | 统一在 `application-cloud-aliyun.yaml` 中管理；PoC 阶段确认两套 API 可共存 |
-| OCR API 对密集排版图片返回 paragraph 数超过 30（低概率） | 索引写入压力增大 | 一线规则沿用 API 原生 paragraph 不做拆分合并；超过 30 时激活兜底：合并相邻 paragraph 直到 ≤ 30，记录 `smartvision.ingestion.ocr.paragraph_capped` |
+| OCR API 对密集排版图片返回 paragraph 数超过 30（低概率） | 索引写入压力增大 | 一线规则沿用 API 原生 paragraph 不做拆分合并；超过 30 时激活兜底：合并相邻 paragraph 直到 ≤ 30，记录 `ingestion.ocr.paragraph_capped` |
