@@ -9,6 +9,7 @@ import com.anchr.core.ingestion.application.assembler.BatchTaskAssembler;
 import com.anchr.core.ingestion.domain.model.BatchTask;
 import com.anchr.core.ingestion.domain.model.BatchTaskItem;
 import com.anchr.core.ingestion.domain.model.BatchTaskItemStatus;
+import com.anchr.core.ingestion.domain.model.BatchTaskItemError;
 import com.anchr.core.ingestion.domain.model.BulkSaveResult;
 import com.anchr.core.ingestion.domain.model.AssetType;
 import com.anchr.core.ingestion.domain.model.ImageHashAcquireOutcome;
@@ -31,6 +32,8 @@ import com.anchr.core.ingestion.interfaces.rest.dto.BatchTaskStatusDTO;
 import com.anchr.core.ingestion.interfaces.rest.dto.BatchUploadResultDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -66,7 +69,6 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
     private static final String BATCH_TASK_CACHE_PREFIX = "img:batch:task:";
     private static final String BATCH_TASK_LOCK_PREFIX = "img:batch:task:lock:";
     private static final long BATCH_TASK_TTL_HOURS = 24L;
-    private static final long BATCH_TASK_LOCK_TTL_SECONDS = 600L;
 
     private final EsBatchTemplate esBatchTemplate;
     @Qualifier("embedTaskExecutor")
@@ -81,6 +83,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
     private final ImageHashStateRepository imageHashStateRepository;
     private final BatchTaskAssembler batchTaskAssembler;
     private final StringRedisTemplate redisTemplate;
+    private final RedissonClient redissonClient;
     private final IdGen idGen;
     private final ObjectMapper objectMapper;
 
@@ -105,7 +108,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
                         failures.add(BatchUploadResultDTO.BatchFailureItem.builder()
                                 .objectKey(item.getKey())
                                 .filename(item.getFileName())
-                                .errorMessage(e.getMessage())
+                                .errorMessage(BatchTaskItemError.PROCESS_FAILED.resolveMessage(e.getMessage()))
                                 .build());
                     }
                 }, embedTaskExecutor))
@@ -126,7 +129,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
                         failures.add(BatchUploadResultDTO.BatchFailureItem.builder()
                                 .objectKey(doc.getImagePath())
                                 .filename(doc.getRawFilename())
-                                .errorMessage("Database writes failed")
+                                .errorMessage(BatchTaskItemError.DATABASE_WRITE_FAILED.getMessage())
                                 .build());
                         continue;
                     }
@@ -141,7 +144,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
                         failures.add(BatchUploadResultDTO.BatchFailureItem.builder()
                                 .objectKey(doc.getImagePath())
                                 .filename(doc.getRawFilename())
-                                .errorMessage("kb_segment writes failed")
+                                .errorMessage(BatchTaskItemError.KB_SEGMENT_WRITE_FAILED.getMessage())
                                 .build());
                     }
                 }
@@ -152,7 +155,7 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
                     failures.add(BatchUploadResultDTO.BatchFailureItem.builder()
                             .objectKey(doc.getImagePath())
                             .filename(doc.getRawFilename())
-                            .errorMessage("Database writes failed")
+                            .errorMessage(BatchTaskItemError.DATABASE_WRITE_FAILED.getMessage())
                             .build());
                 }
             }
@@ -201,30 +204,56 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
 
     @Override
     public BatchTaskStatusDTO retryBatchTaskItem(String taskId, String itemId) {
-        BatchTask task = loadTask(taskId);
-        if (task == null) {
-            throw new BusinessException(ApiError.INGEST_TASK_NOT_FOUND);
+        BatchTaskStatusDTO result;
+        RLock taskLock = redissonClient.getLock(BATCH_TASK_LOCK_PREFIX + taskId);
+        if (!taskLock.tryLock()) {
+            throw new BusinessException(ApiError.INGEST_TASK_RUNNING);
         }
 
-        task.retryItem(itemId, System.currentTimeMillis());
-        saveTask(task);
+        try {
+            BatchTask task = loadTask(taskId);
+            if (task == null) {
+                throw new BusinessException(ApiError.INGEST_TASK_NOT_FOUND);
+            }
 
-        ingestionTaskExecutor.execute(() -> processTask(task.getTaskId()));
-        return batchTaskAssembler.toTaskDto(task);
+            task.retryItem(itemId, System.currentTimeMillis());
+            saveTask(task);
+            result = batchTaskAssembler.toTaskDto(task);
+        } finally {
+            if (taskLock.isHeldByCurrentThread()) {
+                taskLock.unlock();
+            }
+        }
+
+        ingestionTaskExecutor.execute(() -> processTask(taskId));
+        return result;
     }
 
     @Override
     public BatchTaskStatusDTO retryAllFailedBatchTaskItems(String taskId) {
-        BatchTask task = loadTask(taskId);
-        if (task == null) {
-            throw new BusinessException(ApiError.INGEST_TASK_NOT_FOUND);
+        BatchTaskStatusDTO result;
+        RLock taskLock = redissonClient.getLock(BATCH_TASK_LOCK_PREFIX + taskId);
+        if (!taskLock.tryLock()) {
+            throw new BusinessException(ApiError.INGEST_TASK_RUNNING);
         }
 
-        task.retryAllFailed(System.currentTimeMillis());
-        saveTask(task);
+        try {
+            BatchTask task = loadTask(taskId);
+            if (task == null) {
+                throw new BusinessException(ApiError.INGEST_TASK_NOT_FOUND);
+            }
 
-        ingestionTaskExecutor.execute(() -> processTask(task.getTaskId()));
-        return batchTaskAssembler.toTaskDto(task);
+            task.retryAllFailed(System.currentTimeMillis());
+            saveTask(task);
+            result = batchTaskAssembler.toTaskDto(task);
+        } finally {
+            if (taskLock.isHeldByCurrentThread()) {
+                taskLock.unlock();
+            }
+        }
+
+        ingestionTaskExecutor.execute(() -> processTask(taskId));
+        return result;
     }
 
     /**
@@ -300,8 +329,8 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
     }
 
     private void processTask(String taskId) {
-        String lockValue = UUID.randomUUID().toString();
-        if (!acquireTaskLock(taskId, lockValue)) {
+        RLock taskLock = redissonClient.getLock(BATCH_TASK_LOCK_PREFIX + taskId);
+        if (!taskLock.tryLock()) {
             return;
         }
 
@@ -334,7 +363,9 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
                 saveTask(task);
             }
         } finally {
-            releaseTaskLock(taskId, lockValue);
+            if (taskLock.isHeldByCurrentThread()) {
+                taskLock.unlock();
+            }
         }
     }
 
@@ -357,14 +388,14 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
                 if (saved) {
                     task.markItemSuccess(itemId, System.currentTimeMillis());
                 } else {
-                    task.markItemFailed(itemId, "Database writes failed", System.currentTimeMillis());
+                    task.markItemFailed(itemId, BatchTaskItemError.DATABASE_WRITE_FAILED, System.currentTimeMillis());
                 }
                 saveTask(task);
             }
         } catch (Exception e) {
             log.warn("task [{}] item [{}] failed: {}", taskId, fileName, e.getMessage());
             synchronized (task) {
-                task.markItemFailed(itemId, e.getMessage(), System.currentTimeMillis());
+                task.markItemFailed(itemId, BatchTaskItemError.PROCESS_FAILED.resolveMessage(e.getMessage()), System.currentTimeMillis());
                 saveTask(task);
             }
         }
@@ -390,23 +421,6 @@ public class ImageIngestionServiceImpl implements ImageIngestionService {
         }
     }
 
-    private boolean acquireTaskLock(String taskId, String lockValue) {
-        Boolean locked = redisTemplate.opsForValue().setIfAbsent(
-                BATCH_TASK_LOCK_PREFIX + taskId,
-                lockValue,
-                BATCH_TASK_LOCK_TTL_SECONDS,
-                TimeUnit.SECONDS
-        );
-        return Boolean.TRUE.equals(locked);
-    }
-
-    private void releaseTaskLock(String taskId, String lockValue) {
-        String lockKey = BATCH_TASK_LOCK_PREFIX + taskId;
-        String current = redisTemplate.opsForValue().get(lockKey);
-        if (Objects.equals(current, lockValue)) {
-            redisTemplate.delete(lockKey);
-        }
-    }
 
     private void saveTask(BatchTask task) {
         redisTemplate.opsForValue().set(

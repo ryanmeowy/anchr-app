@@ -98,6 +98,11 @@ public class BatchTask {
         refreshSummary(now);
     }
 
+    public void markItemFailed(String itemId, BatchTaskItemError error, long now) {
+        findItemOrThrow(itemId).markFailed(error, now);
+        refreshSummary(now);
+    }
+
     public void markItemFailed(String itemId, String message, long now) {
         findItemOrThrow(itemId).markFailed(message, now);
         refreshSummary(now);

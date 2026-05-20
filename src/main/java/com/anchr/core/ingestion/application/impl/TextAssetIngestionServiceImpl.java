@@ -9,6 +9,7 @@ import com.anchr.core.ingestion.application.assembler.BatchTaskAssembler;
 import com.anchr.core.ingestion.domain.model.BatchTask;
 import com.anchr.core.ingestion.domain.model.BatchTaskItem;
 import com.anchr.core.ingestion.domain.model.BatchTaskItemStatus;
+import com.anchr.core.ingestion.domain.model.BatchTaskItemError;
 import com.anchr.core.ingestion.domain.model.AssetType;
 import com.anchr.core.ingestion.domain.model.TextAssetMetadata;
 import com.anchr.core.ingestion.domain.model.TextChunk;
@@ -23,9 +24,12 @@ import com.anchr.core.ingestion.interfaces.rest.dto.BatchTaskStatusDTO;
 import com.anchr.core.ingestion.interfaces.rest.dto.TextBatchProcessDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -47,7 +51,6 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
     private static final String TEXT_TASK_LOCK_PREFIX = "kb:text:task:lock:";
     private static final String TEXT_ASSET_META_CACHE_PREFIX = "kb:text:asset:";
     private static final long TEXT_TASK_TTL_HOURS = 24L;
-    private static final long TEXT_TASK_LOCK_TTL_SECONDS = 600L;
 
     @Qualifier("ingestionTaskExecutor")
     private final Executor ingestionTaskExecutor;
@@ -57,12 +60,13 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
     private final TextSegmentRepository textSegmentRepository;
     private final BatchTaskAssembler batchTaskAssembler;
     private final StringRedisTemplate redisTemplate;
+    private final RedissonClient redissonClient;
     private final IdGen idGen;
     private final ObjectMapper objectMapper;
 
     @Override
     public BatchTaskStatusDTO submitBatchTask(List<TextBatchProcessDTO> items) {
-        if (items == null || items.isEmpty()) {
+        if (CollectionUtils.isEmpty(items)) {
             throw new BusinessException(ApiError.TEXT_BATCH_ITEMS_REQUIRED);
         }
 
@@ -71,26 +75,21 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
 
         for (TextBatchProcessDTO item : items) {
             String fileName = normalizeFileName(item.getFileName());
-            if (!TextAssetType.isSupported(fileName, item.getMimeType())) {
-                throw new BusinessException(ApiError.TEXT_FILE_TYPE_NOT_SUPPORTED);
-            }
-        }
-
-        for (TextBatchProcessDTO item : items) {
-            String fileName = normalizeFileName(item.getFileName());
-
             String assetId = String.valueOf(idGen.nextId());
+            boolean supported = TextAssetType.isSupported(fileName, item.getMimeType());
 
-            TextAssetMetadata metadata = new TextAssetMetadata();
-            metadata.setAssetId(assetId);
-            metadata.setTitle(StringUtils.hasText(item.getTitle()) ? item.getTitle().trim() : fileName);
-            metadata.setFileName(fileName);
-            metadata.setMimeType(item.getMimeType());
-            metadata.setObjectKey(item.getKey());
-            metadata.setFileHash(item.getFileHash());
-            metadata.setCreatedAt(now);
-            metadata.setUpdatedAt(now);
-            saveAssetMetadata(metadata);
+            if (supported) {
+                TextAssetMetadata metadata = new TextAssetMetadata();
+                metadata.setAssetId(assetId);
+                metadata.setTitle(StringUtils.hasText(item.getTitle()) ? item.getTitle().trim() : fileName);
+                metadata.setFileName(fileName);
+                metadata.setMimeType(item.getMimeType());
+                metadata.setObjectKey(item.getKey());
+                metadata.setFileHash(item.getFileHash());
+                metadata.setCreatedAt(now);
+                metadata.setUpdatedAt(now);
+                saveAssetMetadata(metadata);
+            }
 
             BatchTaskItem taskItem = new BatchTaskItem();
             taskItem.setItemId(assetId);
@@ -98,8 +97,8 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
             taskItem.setKey(item.getKey());
             taskItem.setFileName(fileName);
             taskItem.setFileHash(item.getFileHash());
-            taskItem.setStatus(BatchTaskItemStatus.PENDING);
-            taskItem.setErrorMessage(null);
+            taskItem.setStatus(supported ? BatchTaskItemStatus.PENDING : BatchTaskItemStatus.FAILED);
+            taskItem.setErrorMessage(supported ? null : BatchTaskItemError.UNSUPPORTED_FILE_TYPE.getMessage());
             taskItem.setRetryCount(0);
             taskItem.setUpdatedAt(now);
             taskItems.add(taskItem);
@@ -107,7 +106,9 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
 
         BatchTask task = BatchTask.createPending(UUID.randomUUID().toString(), taskItems, now);
         saveTask(task);
-        ingestionTaskExecutor.execute(() -> processTask(task.getTaskId()));
+        if (task.hasPendingItems()) {
+            ingestionTaskExecutor.execute(() -> processTask(task.getTaskId()));
+        }
         return batchTaskAssembler.toTaskDto(task);
     }
 
@@ -122,33 +123,61 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
 
     @Override
     public BatchTaskStatusDTO retryBatchTaskItem(String taskId, String itemId) {
-        BatchTask task = loadTask(taskId);
-        if (task == null) {
-            throw new BusinessException(ApiError.TEXT_TASK_NOT_FOUND);
+        BatchTaskStatusDTO result;
+        RLock taskLock = redissonClient.getLock(TEXT_TASK_LOCK_PREFIX + taskId);
+        if (!taskLock.tryLock()) {
+            throw new BusinessException(ApiError.INGEST_TASK_RUNNING);
         }
 
-        task.retryItem(itemId, System.currentTimeMillis());
-        saveTask(task);
-        ingestionTaskExecutor.execute(() -> processTask(task.getTaskId()));
-        return batchTaskAssembler.toTaskDto(task);
+        try {
+            BatchTask task = loadTask(taskId);
+            if (task == null) {
+                throw new BusinessException(ApiError.TEXT_TASK_NOT_FOUND);
+            }
+
+            task.retryItem(itemId, System.currentTimeMillis());
+            saveTask(task);
+            result = batchTaskAssembler.toTaskDto(task);
+        } finally {
+            if (taskLock.isHeldByCurrentThread()) {
+                taskLock.unlock();
+            }
+        }
+
+        ingestionTaskExecutor.execute(() -> processTask(taskId));
+        return result;
     }
 
     @Override
     public BatchTaskStatusDTO retryAllFailedBatchTaskItems(String taskId) {
-        BatchTask task = loadTask(taskId);
-        if (task == null) {
-            throw new BusinessException(ApiError.TEXT_TASK_NOT_FOUND);
+        BatchTaskStatusDTO result;
+        RLock taskLock = redissonClient.getLock(TEXT_TASK_LOCK_PREFIX + taskId);
+        if (!taskLock.tryLock()) {
+            throw new BusinessException(ApiError.INGEST_TASK_RUNNING);
         }
 
-        task.retryAllFailed(System.currentTimeMillis());
-        saveTask(task);
-        ingestionTaskExecutor.execute(() -> processTask(task.getTaskId()));
-        return batchTaskAssembler.toTaskDto(task);
+        try {
+            BatchTask task = loadTask(taskId);
+            if (task == null) {
+                throw new BusinessException(ApiError.TEXT_TASK_NOT_FOUND);
+            }
+
+            task.retryAllFailed(System.currentTimeMillis());
+            saveTask(task);
+            result = batchTaskAssembler.toTaskDto(task);
+        } finally {
+            if (taskLock.isHeldByCurrentThread()) {
+                taskLock.unlock();
+            }
+        }
+
+        ingestionTaskExecutor.execute(() -> processTask(taskId));
+        return result;
     }
 
     private void processTask(String taskId) {
-        String lockValue = UUID.randomUUID().toString();
-        if (!acquireTaskLock(taskId, lockValue)) {
+        RLock taskLock = redissonClient.getLock(TEXT_TASK_LOCK_PREFIX + taskId);
+        if (!taskLock.tryLock()) {
             return;
         }
 
@@ -184,7 +213,9 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
                 saveTask(task);
             }
         } finally {
-            releaseTaskLock(taskId, lockValue);
+            if (taskLock.isHeldByCurrentThread()) {
+                taskLock.unlock();
+            }
         }
     }
 
@@ -224,29 +255,12 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
         } catch (Exception e) {
             log.warn("text task item failed [{}]: {}", itemId, e.getMessage());
             synchronized (task) {
-                task.markItemFailed(itemId, e.getMessage(), System.currentTimeMillis());
+                task.markItemFailed(itemId, BatchTaskItemError.PROCESS_FAILED.resolveMessage(e.getMessage()), System.currentTimeMillis());
                 saveTask(task);
             }
         }
     }
 
-    private boolean acquireTaskLock(String taskId, String lockValue) {
-        Boolean locked = redisTemplate.opsForValue().setIfAbsent(
-                TEXT_TASK_LOCK_PREFIX + taskId,
-                lockValue,
-                TEXT_TASK_LOCK_TTL_SECONDS,
-                TimeUnit.SECONDS
-        );
-        return Boolean.TRUE.equals(locked);
-    }
-
-    private void releaseTaskLock(String taskId, String lockValue) {
-        String lockKey = TEXT_TASK_LOCK_PREFIX + taskId;
-        String current = redisTemplate.opsForValue().get(lockKey);
-        if (java.util.Objects.equals(current, lockValue)) {
-            redisTemplate.delete(lockKey);
-        }
-    }
 
     private void saveTask(BatchTask task) {
         redisTemplate.opsForValue().set(

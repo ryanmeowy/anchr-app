@@ -13,6 +13,8 @@ import com.anchr.core.ingestion.infrastructure.persistence.es.ImageSegmentIndexW
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.interfaces.rest.dto.BatchTaskStatusDTO;
 import org.junit.jupiter.api.BeforeEach;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -53,6 +55,10 @@ class ImageIngestionServiceImplRetryFlowTest {
     @Mock
     private StringRedisTemplate redisTemplate;
     @Mock
+    private RedissonClient redissonClient;
+    @Mock
+    private RLock taskLock;
+    @Mock
     private IdGen idGen;
     @Mock
     private ValueOperations<String, String> valueOps;
@@ -77,18 +83,21 @@ class ImageIngestionServiceImplRetryFlowTest {
                 imageHashStateRepository,
                 new BatchTaskAssembler(),
                 redisTemplate,
+                redissonClient,
                 idGen,
                 objectMapper
         );
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
     }
 
     @Test
     void retryBatchTaskItem_shouldResetFailedItemToPendingAndIncreaseRetryCount() throws Exception {
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         BatchTaskStatusDTO task = buildTask("task-1", "item-1", "FAILED");
         String taskKey = "img:batch:task:" + task.getTaskId();
         when(valueOps.get(taskKey)).thenReturn(objectMapper.writeValueAsString(task));
-        when(valueOps.setIfAbsent(anyString(), anyString(), eq(600L), eq(TimeUnit.SECONDS))).thenReturn(false);
+        when(redissonClient.getLock(anyString())).thenReturn(taskLock);
+        when(taskLock.tryLock()).thenReturn(true, false);
+        when(taskLock.isHeldByCurrentThread()).thenReturn(true);
 
         BatchTaskStatusDTO updated = service.retryBatchTaskItem("task-1", "item-1");
 
@@ -106,15 +115,31 @@ class ImageIngestionServiceImplRetryFlowTest {
 
     @Test
     void retryAllFailedBatchTaskItems_shouldThrowWhenNoFailedItems() throws Exception {
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
         BatchTaskStatusDTO task = buildTask("task-2", "item-1", "SUCCESS");
         String taskKey = "img:batch:task:" + task.getTaskId();
         when(valueOps.get(taskKey)).thenReturn(objectMapper.writeValueAsString(task));
+        when(redissonClient.getLock(anyString())).thenReturn(taskLock);
+        when(taskLock.tryLock()).thenReturn(true);
+        when(taskLock.isHeldByCurrentThread()).thenReturn(true);
 
         assertThatThrownBy(() -> service.retryAllFailedBatchTaskItems("task-2"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("No FAILED items to retry");
 
         verify(valueOps, never()).set(eq(taskKey), anyString(), eq(24L), eq(TimeUnit.HOURS));
+    }
+
+    @Test
+    void retryBatchTaskItem_shouldThrowWhenTaskLockIsHeld() {
+        when(redissonClient.getLock(anyString())).thenReturn(taskLock);
+        when(taskLock.tryLock()).thenReturn(false);
+
+        assertThatThrownBy(() -> service.retryBatchTaskItem("task-3", "item-1"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Task is running, retry after current round completes.");
+
+        verify(valueOps, never()).set(anyString(), anyString(), eq(24L), eq(TimeUnit.HOURS));
     }
 
     private BatchTaskStatusDTO buildTask(String taskId, String itemId, String itemStatus) {

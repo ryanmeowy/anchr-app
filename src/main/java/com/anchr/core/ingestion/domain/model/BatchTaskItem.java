@@ -34,6 +34,10 @@ public class BatchTaskItem {
         this.updatedAt = now;
     }
 
+    public void markFailed(BatchTaskItemError error, long now) {
+        markFailed(error.getMessage(), now);
+    }
+
     public void markFailed(String message, long now) {
         this.status = BatchTaskItemStatus.FAILED;
         this.errorMessage = message;
