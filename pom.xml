@@ -8,11 +8,11 @@
         <version>3.5.8</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>com.smart.vision</groupId>
-    <artifactId>smart-vision</artifactId>
+    <groupId>com.anchr</groupId>
+    <artifactId>anchr-app</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>smart-vision</name>
-    <description>smart-vision</description>
+    <name>anchr</name>
+    <description>Knowledge base search engine</description>
     <url/>
     <licenses>
         <license/>

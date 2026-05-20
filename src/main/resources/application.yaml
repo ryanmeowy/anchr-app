@@ -1,6 +1,6 @@
 spring:
   application:
-    name: smart-vision
+    name: anchr
   data:
     redis:
       host: ${REDIS_HOST}

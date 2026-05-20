@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * Search strategy interface that defines the contract for different retrieval approaches
- * in the smart vision system. Each implementation represents a specific search strategy
+ * in the Anchr system. Each implementation represents a specific search strategy
  * such as hybrid search, vector-only search, text-only search, or image-to-image search.
  *
  * @author Ryan

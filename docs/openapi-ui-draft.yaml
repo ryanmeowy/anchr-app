@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Smart Vision API (UI Draft)
+  title: Anchr API (UI Draft)
   version: 0.1.0
   description: |
     OpenAPI-style draft for frontend integration.
@@ -12,7 +12,7 @@ servers:
     description: Local development
 
 tags:
-  - name: Vision
+  - name: Search
     description: Search and retrieval
   - name: Image
     description: Image ingestion
@@ -22,9 +22,9 @@ tags:
 paths:
   /api/v1/vision/search:
     post:
-      tags: [Vision]
+      tags: [Search]
       summary: Text search
-      operationId: visionSearch
+      operationId: search
       requestBody:
         required: true
         content:
@@ -72,9 +72,9 @@ paths:
 
   /api/v1/vision/search-page:
     post:
-      tags: [Vision]
+      tags: [Search]
       summary: Paged text search
-      operationId: visionSearchPage
+      operationId: searchPage
       requestBody:
         required: true
         content:
@@ -133,9 +133,9 @@ paths:
 
   /api/v1/vision/similar:
     get:
-      tags: [Vision]
+      tags: [Search]
       summary: Similar search by image document id
-      operationId: visionSimilar
+      operationId: similarSearch
       parameters:
         - in: query
           name: id
@@ -151,9 +151,9 @@ paths:
 
   /api/v1/vision/hot-words:
     get:
-      tags: [Vision]
+      tags: [Search]
       summary: Get hot search words
-      operationId: visionHotWords
+      operationId: hotWords
       responses:
         '200':
           description: Success
@@ -164,9 +164,9 @@ paths:
 
   /api/v1/vision/search-by-image:
     post:
-      tags: [Vision]
+      tags: [Search]
       summary: Search by uploaded image
-      operationId: visionSearchByImage
+      operationId: searchByImage
       parameters:
         - in: query
           name: limit
@@ -205,9 +205,9 @@ paths:
 
   /api/v1/vision/analyze/stream:
     post:
-      tags: [Vision]
+      tags: [Search]
       summary: Stream image analysis result
-      operationId: visionAnalyzeByImageStream
+      operationId: analyzeByImageStream
       requestBody:
         required: true
         content:
@@ -238,9 +238,9 @@ paths:
 
   /api/v1/vision/vector-compare:
     post:
-      tags: [Vision]
+      tags: [Search]
       summary: Compare two multimodal inputs by vector similarity
-      operationId: visionVectorCompare
+      operationId: vectorCompare
       requestBody:
         required: true
         content:
