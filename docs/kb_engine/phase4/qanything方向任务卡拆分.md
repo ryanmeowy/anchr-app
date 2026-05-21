@@ -203,11 +203,16 @@ P0 验收必须覆盖：
 
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
-| Q4-10 | TODO | 导入能力声明接口 | Q4-02 | `GET /api/v1/ingestion/capabilities` | 返回支持格式、大小限制、单批次数量、去重策略、入库阶段枚举 |
-| Q4-11 | TODO | 统一知识库入库任务接口 | Q4-05, Q4-10 | `POST/GET /api/v1/kbs/{kbId}/ingestion-tasks`、任务详情 | 前端不感知文本/图片两套 batch task；上传后能在知识库下看到任务 |
-| Q4-12 | TODO | 入库任务项状态与进度持久化 | Q4-11 | task item 状态流转、stage、progress、失败原因 | 单个文件可展示 UPLOAD/PARSE/CHUNK/EMBED/INDEX/ASKABLE 阶段和失败原因 |
-| Q4-13 | TODO | 失败项重试与失败批量重试 | Q4-12 | item retry、retry failed 接口 | 失败项可重试；无失败项时接口安全返回当前任务状态 |
-| Q4-14 | TODO | reparse / reembed 闭环 P1 | Q4-12, Q4-07 | `POST /documents/{assetId}/reparse`、`reembed` | 操作会生成新任务；完成后文档 parse/index/segment 状态更新 |
+| Q4-10 | IMPLEMENTED | 导入能力声明接口 | Q4-02 | `GET /api/v1/ingestion/capabilities` | 返回支持格式、大小限制、单批次数量、去重策略、入库阶段枚举 |
+| Q4-11 | IMPLEMENTED | 统一知识库入库任务接口 | Q4-05, Q4-10 | `POST/GET /api/v1/kbs/{kbId}/ingestion-tasks`、任务详情 | 前端不感知文本/图片两套 batch task；上传后能在知识库下看到任务 |
+| Q4-12 | IMPLEMENTED | 入库任务项状态与进度持久化 | Q4-11 | task item 状态流转、stage、progress、失败原因 | 单个文件可展示 UPLOAD/PARSE/CHUNK/EMBED/INDEX/ASKABLE 阶段和失败原因 |
+| Q4-13 | IMPLEMENTED | 失败项重试与失败批量重试 | Q4-12 | item retry、retry failed 接口 | 失败项可重试；无失败项时接口安全返回当前任务状态 |
+| Q4-14 | IMPLEMENTED | reparse / reembed 闭环 P1 | Q4-12, Q4-07 | `POST /documents/{assetId}/reparse`、`reembed` | 操作会生成新任务；完成后文档 parse/index/segment 状态更新 |
+
+实施说明：
+- Q4-11/Q4-12 已落统一任务 facade 与业务 DB 持久化：创建任务会写入 `ingestion_task`、`ingestion_task_item`，并创建或复用 `document_asset`。
+- 当前 facade 先完成产品主数据闭环；旧文本/图片 Redis batch task 的实际执行器尚未改造成直接推进业务 DB 阶段状态，后续处理器接入时按该任务表更新 `PARSE/CHUNK/EMBED/INDEX/ASKABLE`。
+- Q4-14 已提供 reparse/reembed 任务入口，并将文档 parse/index 状态回退为待处理；真正重解析/重向量化执行在处理器接入后推进。
 
 ## E3：检索、问答与预览闭环
 

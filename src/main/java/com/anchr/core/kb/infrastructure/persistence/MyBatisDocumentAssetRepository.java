@@ -21,6 +21,11 @@ public class MyBatisDocumentAssetRepository implements DocumentAssetRepository {
     private final DocumentAssetMapper mapper;
 
     @Override
+    public void save(DocumentAsset documentAsset) {
+        mapper.insert(toRecord(documentAsset));
+    }
+
+    @Override
     public Optional<DocumentAsset> findActiveById(String workspaceId, String kbId, String assetId) {
         return mapper.findActiveById(workspaceId, kbId, assetId).map(this::toDomain);
     }
@@ -40,6 +45,13 @@ public class MyBatisDocumentAssetRepository implements DocumentAssetRepository {
     @Override
     public Optional<DocumentAsset> findActiveByHash(String workspaceId, String kbId, String fileHash) {
         return mapper.findActiveByHash(workspaceId, kbId, fileHash).map(this::toDomain);
+    }
+
+    @Override
+    public boolean updateStatuses(String workspaceId, String kbId, String assetId,
+                                  String parseStatus, String indexStatus,
+                                  String updatedBy, LocalDateTime updatedAt) {
+        return mapper.updateStatuses(workspaceId, kbId, assetId, parseStatus, indexStatus, updatedBy, updatedAt) > 0;
     }
 
     @Override
@@ -75,6 +87,35 @@ public class MyBatisDocumentAssetRepository implements DocumentAssetRepository {
                 .updatedAt(record.getUpdatedAt())
                 .deletedAt(record.getDeletedAt())
                 .build();
+    }
+
+    private DocumentAssetRecord toRecord(DocumentAsset documentAsset) {
+        DocumentAssetRecord record = new DocumentAssetRecord();
+        record.setId(documentAsset.getId());
+        record.setWorkspaceId(documentAsset.getWorkspaceId());
+        record.setKbId(documentAsset.getKbId());
+        record.setFileName(documentAsset.getFileName());
+        record.setTitle(documentAsset.getTitle());
+        record.setFileType(documentAsset.getFileType());
+        record.setMimeType(documentAsset.getMimeType());
+        record.setSizeBytes(documentAsset.getSizeBytes());
+        record.setFileHash(documentAsset.getFileHash());
+        record.setObjectKey(documentAsset.getObjectKey());
+        record.setPreviewObjectKey(documentAsset.getPreviewObjectKey());
+        record.setThumbnailKey(documentAsset.getThumbnailKey());
+        record.setSourceUrl(documentAsset.getSourceUrl());
+        record.setParseStatus(documentAsset.getParseStatus().name());
+        record.setIndexStatus(documentAsset.getIndexStatus().name());
+        record.setSegmentCount(documentAsset.getSegmentCount());
+        record.setEmbeddingProfile(documentAsset.getEmbeddingProfile());
+        record.setErrorCode(documentAsset.getErrorCode());
+        record.setErrorMessage(documentAsset.getErrorMessage());
+        record.setCreatedBy(documentAsset.getCreatedBy());
+        record.setUpdatedBy(documentAsset.getUpdatedBy());
+        record.setCreatedAt(documentAsset.getCreatedAt());
+        record.setUpdatedAt(documentAsset.getUpdatedAt());
+        record.setDeletedAt(documentAsset.getDeletedAt());
+        return record;
     }
 
     private DocumentParseStatus parseStatus(String status) {

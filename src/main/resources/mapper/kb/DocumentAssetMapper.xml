@@ -38,6 +38,17 @@
         error_code, error_message, created_by, updated_by, created_at, updated_at, deleted_at
     </sql>
 
+    <insert id="insert" parameterType="com.anchr.core.kb.infrastructure.persistence.DocumentAssetRecord">
+        insert into document_asset (
+            <include refid="DocumentAssetColumns"/>
+        ) values (
+            #{id}, #{workspaceId}, #{kbId}, #{fileName}, #{title}, #{fileType}, #{mimeType},
+            #{sizeBytes}, #{fileHash}, #{objectKey}, #{previewObjectKey}, #{thumbnailKey},
+            #{sourceUrl}, #{parseStatus}, #{indexStatus}, #{segmentCount}, #{embeddingProfile},
+            #{errorCode}, #{errorMessage}, #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{deletedAt}
+        )
+    </insert>
+
     <select id="findActiveById" resultMap="DocumentAssetRecordMap">
         select
             <include refid="DocumentAssetColumns"/>
@@ -78,6 +89,18 @@
         order by created_at desc, id desc
         limit 1
     </select>
+
+    <update id="updateStatuses">
+        update document_asset
+        set parse_status = #{parseStatus},
+            index_status = #{indexStatus},
+            updated_by = #{updatedBy},
+            updated_at = #{updatedAt}
+        where id = #{assetId}
+          and workspace_id = #{workspaceId}
+          and kb_id = #{kbId}
+          and deleted_at is null
+    </update>
 
     <update id="markDeleted">
         update document_asset

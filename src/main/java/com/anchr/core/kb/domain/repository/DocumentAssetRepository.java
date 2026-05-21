@@ -11,6 +11,8 @@ import java.util.Optional;
  */
 public interface DocumentAssetRepository {
 
+    void save(DocumentAsset documentAsset);
+
     Optional<DocumentAsset> findActiveById(String workspaceId, String kbId, String assetId);
 
     List<DocumentAsset> listActive(String workspaceId, String kbId, int limit, int offset);
@@ -18,6 +20,9 @@ public interface DocumentAssetRepository {
     long countActive(String workspaceId, String kbId);
 
     Optional<DocumentAsset> findActiveByHash(String workspaceId, String kbId, String fileHash);
+
+    boolean updateStatuses(String workspaceId, String kbId, String assetId,
+                           String parseStatus, String indexStatus, String updatedBy, LocalDateTime updatedAt);
 
     boolean markDeleted(String workspaceId, String kbId, String assetId, String updatedBy, LocalDateTime updatedAt);
 }

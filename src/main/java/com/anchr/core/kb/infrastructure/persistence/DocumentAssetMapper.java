@@ -13,6 +13,8 @@ import java.util.Optional;
 @Mapper
 public interface DocumentAssetMapper {
 
+    int insert(DocumentAssetRecord record);
+
     Optional<DocumentAssetRecord> findActiveById(@Param("workspaceId") String workspaceId,
                                                  @Param("kbId") String kbId,
                                                  @Param("assetId") String assetId);
@@ -28,6 +30,14 @@ public interface DocumentAssetMapper {
     Optional<DocumentAssetRecord> findActiveByHash(@Param("workspaceId") String workspaceId,
                                                    @Param("kbId") String kbId,
                                                    @Param("fileHash") String fileHash);
+
+    int updateStatuses(@Param("workspaceId") String workspaceId,
+                       @Param("kbId") String kbId,
+                       @Param("assetId") String assetId,
+                       @Param("parseStatus") String parseStatus,
+                       @Param("indexStatus") String indexStatus,
+                       @Param("updatedBy") String updatedBy,
+                       @Param("updatedAt") LocalDateTime updatedAt);
 
     int markDeleted(@Param("workspaceId") String workspaceId,
                     @Param("kbId") String kbId,

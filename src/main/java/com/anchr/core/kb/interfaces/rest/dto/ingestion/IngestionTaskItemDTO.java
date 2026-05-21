@@ -1,0 +1,47 @@
+package com.anchr.core.kb.interfaces.rest.dto.ingestion;
+
+import com.anchr.core.kb.domain.model.ingestion.IngestionTaskItem;
+import lombok.Builder;
+import lombok.Value;
+
+import java.time.LocalDateTime;
+
+/**
+ * Ingestion task item response DTO.
+ */
+@Value
+@Builder
+public class IngestionTaskItemDTO {
+
+    String itemId;
+    String assetId;
+    String fileName;
+    String fileHash;
+    String sourceUrl;
+    String stage;
+    String status;
+    int progress;
+    String dedupeResult;
+    String errorCode;
+    String errorMessage;
+    LocalDateTime updatedAt;
+    LocalDateTime finishedAt;
+
+    public static IngestionTaskItemDTO from(IngestionTaskItem item) {
+        return IngestionTaskItemDTO.builder()
+                .itemId(item.getId())
+                .assetId(item.getAssetId())
+                .fileName(item.getFileName())
+                .fileHash(item.getFileHash())
+                .sourceUrl(item.getSourceUrl())
+                .stage(item.getStage().name())
+                .status(item.getStatus().name())
+                .progress(item.getProgress())
+                .dedupeResult(item.getDedupeResult() == null ? null : item.getDedupeResult().name())
+                .errorCode(item.getErrorCode())
+                .errorMessage(item.getErrorMessage())
+                .updatedAt(item.getUpdatedAt())
+                .finishedAt(item.getFinishedAt())
+                .build();
+    }
+}
