@@ -18,4 +18,6 @@ public interface KbSegmentRepository {
     Optional<Segment> findBySegmentId(String segmentId);
 
     List<Segment> findNeighborChunks(String assetId, Integer pageNo, Integer chunkOrder, int window);
+
+    void deleteByAssetId(String assetId);
 }

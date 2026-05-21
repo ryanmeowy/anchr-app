@@ -20,6 +20,15 @@
         <result property="deletedAt" column="deleted_at"/>
     </resultMap>
 
+    <resultMap id="KnowledgeBaseStatsRecordMap" type="com.anchr.core.kb.infrastructure.persistence.KnowledgeBaseStatsRecord">
+        <id property="kbId" column="kb_id"/>
+        <result property="documentCount" column="document_count"/>
+        <result property="segmentCount" column="segment_count"/>
+        <result property="lastIngestedAt" column="last_ingested_at"/>
+        <result property="lastIngestionStatus" column="last_ingestion_status"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
     <sql id="KnowledgeBaseColumns">
         id, workspace_id, name, description, status,
         document_count, segment_count, last_ingested_at,
@@ -43,15 +52,102 @@
         where id = #{id}
           and workspace_id = #{workspaceId}
           and deleted_at is null
+          and status = 'ACTIVE'
     </select>
 
-    <update id="updateName">
+    <select id="findById" resultMap="KnowledgeBaseRecordMap">
+        select
+            <include refid="KnowledgeBaseColumns"/>
+        from knowledge_base
+        where id = #{id}
+          and workspace_id = #{workspaceId}
+          and deleted_at is null
+    </select>
+
+    <select id="listActive" resultMap="KnowledgeBaseRecordMap">
+        select
+            <include refid="KnowledgeBaseColumns"/>
+        from knowledge_base
+        where workspace_id = #{workspaceId}
+          and status = 'ACTIVE'
+          and deleted_at is null
+        order by updated_at desc, id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countActive" resultType="long">
+        select count(1)
+        from knowledge_base
+        where workspace_id = #{workspaceId}
+          and status = 'ACTIVE'
+          and deleted_at is null
+    </select>
+
+    <update id="updateProfile">
         update knowledge_base
         set name = #{name},
+            description = #{description},
+            updated_by = #{updatedBy},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and workspace_id = #{workspaceId}
+          and status = 'ACTIVE'
+          and deleted_at is null
+    </update>
+
+    <update id="archive">
+        update knowledge_base
+        set status = 'ARCHIVED',
+            updated_by = #{updatedBy},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and workspace_id = #{workspaceId}
+          and status = 'ACTIVE'
+          and deleted_at is null
+    </update>
+
+    <update id="refreshDocumentStats">
+        update knowledge_base
+        set document_count = (
+                select count(1)
+                from document_asset da
+                where da.workspace_id = #{workspaceId}
+                  and da.kb_id = #{id}
+                  and da.deleted_at is null
+            ),
+            segment_count = (
+                select coalesce(sum(da.segment_count), 0)
+                from document_asset da
+                where da.workspace_id = #{workspaceId}
+                  and da.kb_id = #{id}
+                  and da.deleted_at is null
+            ),
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{id}
           and workspace_id = #{workspaceId}
           and deleted_at is null
     </update>
+
+    <select id="findStats" resultMap="KnowledgeBaseStatsRecordMap">
+        select
+            kb.id as kb_id,
+            kb.document_count,
+            kb.segment_count,
+            kb.last_ingested_at,
+            (
+                select it.status
+                from ingestion_task it
+                where it.workspace_id = kb.workspace_id
+                  and it.kb_id = kb.id
+                order by it.created_at desc, it.id desc
+                limit 1
+            ) as last_ingestion_status,
+            kb.updated_at
+        from knowledge_base kb
+        where kb.id = #{id}
+          and kb.workspace_id = #{workspaceId}
+          and kb.deleted_at is null
+          and kb.status = 'ACTIVE'
+    </select>
 </mapper>

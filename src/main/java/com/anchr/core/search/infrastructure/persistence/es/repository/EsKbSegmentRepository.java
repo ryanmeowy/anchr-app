@@ -2,6 +2,7 @@ package com.anchr.core.search.infrastructure.persistence.es.repository;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
@@ -102,6 +103,22 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
             return convertSegmentHits(response);
         } catch (Exception e) {
             log.error("kb neighbor chunks search failed, assetId={}, chunkOrder={}", assetId, chunkOrder, e);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+        }
+    }
+
+    @Override
+    public void deleteByAssetId(String assetId) {
+        if (!StringUtils.hasText(assetId)) {
+            return;
+        }
+        try {
+            DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
+                    .index(kbSegmentConfig.getWriteTargetName())
+                    .query(q -> q.term(t -> t.field("assetId").value(assetId.trim()))));
+            esClient.deleteByQuery(request);
+        } catch (Exception e) {
+            log.error("kb segment delete by asset failed, assetId={}", assetId, e);
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }

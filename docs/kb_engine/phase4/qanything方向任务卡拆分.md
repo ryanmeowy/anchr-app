@@ -189,11 +189,15 @@ P0 验收必须覆盖：
 
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
-| Q4-05 | TODO | KnowledgeBase CRUD 基础版 | Q4-02, Q4-03 | `POST/GET/PATCH/DELETE /api/v1/kbs` | 可创建、列表、详情、重命名、归档/删除知识库；归档后默认列表不展示 |
-| Q4-06 | TODO | KnowledgeBase 统计接口 | Q4-05 | `GET /api/v1/kbs/{kbId}/stats` | 返回文档数、segment 数、最近入库状态、最近更新时间；计算中有稳定空值 |
-| Q4-07 | TODO | DocumentAsset 列表与详情 | Q4-02, Q4-05 | `GET /api/v1/kbs/{kbId}/documents`、详情接口 | 文档列表支持分页；展示文件名、类型、大小、状态、失败原因、segment 数 |
-| Q4-08 | TODO | 文档去重字段与 fileHash 策略 | Q4-07 | SHA-256 计算策略、`file_hash` 写入逻辑、去重判断 | `fileHash` 由后端基于内容计算；同知识库重复文件可识别，不依赖 OSS etag |
-| Q4-09 | TODO | 文档删除基础能力 P1 | Q4-07, Q4-18, Q4-20 | `DELETE /api/v1/kbs/{kbId}/documents/{assetId}` | 删除后文档列表不可见，搜索和问答不再命中该文档；失败时状态可排查 |
+| Q4-05 | IMPLEMENTED | KnowledgeBase CRUD 基础版 | Q4-02, Q4-03 | `POST/GET/PATCH/DELETE /api/v1/kbs` | 可创建、列表、详情、重命名、归档/删除知识库；归档后默认列表不展示 |
+| Q4-06 | IMPLEMENTED | KnowledgeBase 统计接口 | Q4-05 | `GET /api/v1/kbs/{kbId}/stats` | 返回文档数、segment 数、最近入库状态、最近更新时间；计算中有稳定空值 |
+| Q4-07 | IMPLEMENTED | DocumentAsset 列表与详情 | Q4-02, Q4-05 | `GET /api/v1/kbs/{kbId}/documents`、详情接口 | 文档列表支持分页；展示文件名、类型、大小、状态、失败原因、segment 数 |
+| Q4-08 | IMPLEMENTED | 文档去重字段与 fileHash 策略 | Q4-07 | SHA-256 计算策略、`file_hash` 写入逻辑、去重判断 | `fileHash` 由后端基于内容计算；同知识库重复文件可识别，不依赖 OSS etag |
+| Q4-09 | IMPLEMENTED | 文档删除基础能力 P1 | Q4-07, Q4-18, Q4-20 | `DELETE /api/v1/kbs/{kbId}/documents/{assetId}` | 删除后文档列表不可见，搜索和问答不再命中该文档；失败时状态可排查 |
+
+实施说明：
+- Q4-08 已落后端 SHA-256 计算服务与同知识库 `file_hash` 查询能力；导入链路的写入接入在 Q4-11/Q4-12 统一入库任务中承接。
+- Q4-09 当前执行 DB 软删除并同步清理 ES segment；OSS 原始文件/预览文件清理依赖 Q4-18/Q4-20 的文件生命周期接入。
 
 ## E2：入库任务与导入能力收口
 
