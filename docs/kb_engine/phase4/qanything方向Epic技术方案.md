@@ -102,7 +102,7 @@ P0 启动前必须先完成：
 1. `pom.xml` 增加 MySQL driver、Flyway、MyBatis 依赖。
 2. `application.yaml` 增加 `spring.datasource`、`mybatis`、`spring.flyway` 配置。
 3. `docker-compose.yml` 增加 MySQL 服务和持久化 volume。
-4. `V4_001__create_phase4_core_tables.sql` 建立 P0 四张核心表。
+4. `V1__create_core_business_tables.sql` 建立 P0 四张核心表。
 5. 启动健康检查能确认 MySQL 连接和 Flyway migration 已执行。
 
 ### 2.4 接口契约
@@ -809,7 +809,7 @@ GET  /api/v1/home/summary
 | 用户上下文 | `RequestUserContext`、`UserContextHolder` | P0 固定 `workspaceId=default`、`userId=system` |
 | 鉴权 | `AuthTokenFilter` 或扩展现有 `@RequireAuth` | 统一读取 token 并注入上下文 |
 | 错误处理 | `GlobalApiExceptionHandler` | 将业务异常、校验异常、系统异常映射为统一结构 |
-| DB migration | `db/migration/V4_*.sql` | 使用 Flyway；P0 建核心表，P1/P2 追加表 |
+| DB migration | `db/migration/V*.sql` | 使用 Flyway；P0 建核心表，P1/P2 追加表 |
 | DB access | `MyBatis Mapper` | 使用 MyBatis 读写 MySQL；P0 不引入 JPA |
 
 #### 错误码建议

@@ -179,11 +179,11 @@ P0 验收必须覆盖：
 
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
-| Q4-00 | TODO | 产品化接口与路由基线确认 | 无 | API 路由清单、页面路由清单、核心 DTO 字段清单 | 6 个页面对应的后端接口范围固定；`kbId/kbIds/assetId/segmentId/taskId` 命名统一 |
-| Q4-01 | TODO | MySQL + Flyway + MyBatis 基线 | Q4-00, PRE-01 | MySQL 连接配置、Flyway migration 机制、MyBatis mapper 基线、启动健康检查 | 服务重启后知识库、文档、任务数据不丢失；本地开发空库可自动初始化 schema |
-| Q4-02 | TODO | 核心表结构落地 | Q4-01, PRE-03 | `knowledge_base/document_asset/ingestion_task/ingestion_task_item` migration | 表字段符合 `qanything方向DB表结构设计.md`；包含 workspace 和 created/updated 预留字段 |
-| Q4-03 | TODO | 管理员 token / 本地单用户认证 | Q4-01 | 鉴权过滤器、固定用户上下文、401 错误结构 | 未带 token 返回 401；业务写入能填充固定 `createdBy/workspaceId` |
-| Q4-04 | TODO | 统一 API 错误码与状态契约 | Q4-03 | API error schema、全局异常处理、traceId | 前端能区分 unauthorized、not found、validation、task failed、server error、timeout |
+| Q4-00 | DONE | 产品化接口与路由基线确认 | 无 | API 路由清单、页面路由清单、核心 DTO 字段清单 | 6 个页面对应的后端接口范围固定；`kbId/kbIds/assetId/segmentId/taskId` 命名统一 |
+| Q4-01 | IMPLEMENTED | MySQL + Flyway + MyBatis 基线 | Q4-00, PRE-01 | MySQL 连接配置、Flyway migration 机制、MyBatis mapper 基线、启动健康检查 | 服务重启后知识库、文档、任务数据不丢失；本地开发空库可自动初始化 schema |
+| Q4-02 | IMPLEMENTED | 核心表结构落地 | Q4-01, PRE-03 | `knowledge_base/document_asset/ingestion_task/ingestion_task_item` migration | 表字段符合 `qanything方向DB表结构设计.md`；包含 workspace 和 created/updated 预留字段 |
+| Q4-03 | IMPLEMENTED | 管理员 token / 本地单用户认证 | Q4-01 | 鉴权过滤器、固定用户上下文、401 错误结构 | 未带 token 返回 401；业务写入能填充固定 `createdBy/workspaceId` |
+| Q4-04 | IMPLEMENTED | 统一 API 错误码与状态契约 | Q4-03 | API error schema、全局异常处理、traceId | 前端能区分 unauthorized、not found、validation、task failed、server error、timeout |
 
 ## E1：知识库与文档资产产品模型
 
