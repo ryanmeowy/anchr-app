@@ -8,10 +8,24 @@ spring:
       password: ${REDIS_PASSWORD}
       database: 0
       timeout: 3000ms
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:anchr}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USER:anchr}
+    password: ${MYSQL_PASSWORD:anchr}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
   servlet:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
+
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
 
 app:
   capability-provider:

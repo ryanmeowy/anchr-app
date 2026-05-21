@@ -5,6 +5,7 @@ import com.anchr.core.common.exception.ApiError;
 import lombok.Data;
 
 import java.io.Serializable;
+import java.util.Map;
 
 /**
  * Unified API response result encapsulation
@@ -20,9 +21,15 @@ public class Result<T> implements Serializable {
 
     private String message;
 
+    private String errorCode;
+
     private T data;
 
     private long timestamp;
+
+    private String traceId;
+
+    private Map<String, Object> details;
 
     /**
      * Correlation id for troubleshooting error responses.
@@ -49,21 +56,37 @@ public class Result<T> implements Serializable {
         Result<T> result = new Result<>();
         result.setCode(code);
         result.setMessage(message);
+        result.setErrorCode(String.valueOf(code));
+        result.setDetails(Map.of());
         return result;
     }
 
     public static <T> Result<T> error(ApiError error) {
-        return error(error.getCode(), error.getMessage());
+        Result<T> result = error(error.getCode(), error.getMessage());
+        result.setErrorCode(error.name());
+        return result;
     }
 
     public static <T> Result<T> error(int code, String message, String errorId) {
         Result<T> result = error(code, message);
         result.setErrorId(errorId);
+        result.setTraceId(errorId);
         return result;
     }
 
     public static <T> Result<T> error(ApiError error, String errorId) {
-        return error(error.getCode(), error.getMessage(), errorId);
+        Result<T> result = error(error);
+        result.setErrorId(errorId);
+        result.setTraceId(errorId);
+        return result;
+    }
+
+    public static <T> Result<T> error(ApiError error, String message, String traceId) {
+        Result<T> result = error(error.getCode(), message);
+        result.setErrorCode(error.name());
+        result.setErrorId(traceId);
+        result.setTraceId(traceId);
+        return result;
     }
 
     public static <T> Result<T> error(String message) {

@@ -54,12 +54,38 @@ services:
         limits:
           memory: 350M
 
+  mysql:
+    image: mysql:8.4
+    container_name: mysql
+    environment:
+      - TZ=Asia/Shanghai
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-anchr}
+      - MYSQL_USER=${MYSQL_USER:-anchr}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-anchr}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root}
+    ports:
+      - "3306:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --max-connections=80
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - es_network
+    deploy:
+      resources:
+        limits:
+          memory: 450M
+
 volumes:
   es_data:
     driver: local
   es_logs:
     driver: local
   redis_data:
+    driver: local
+  mysql_data:
     driver: local
 
 networks:

@@ -19,7 +19,7 @@
 
 ### 2.1 Must
 
-1. P0 必须完成业务 DB 接入，知识库、文档资产、入库任务状态不能只存在 ES/Redis/内存中。
+1. P0 必须完成业务 DB 接入，固定使用 `MySQL + Flyway + MyBatis`，知识库、文档资产、入库任务状态不能只存在 ES/Redis/内存中。
 2. P0 必须提供 `KnowledgeBase`、`DocumentAsset`、`IngestionTask` 三类产品对象。
 3. P0 搜索和问答必须支持 `kbIds` 范围，避免跨知识库污染结果。
 4. P0 预览必须能通过 `segmentId` 稳定打开证据，不依赖入库期短 TTL 缓存。
@@ -37,6 +37,127 @@
 5. P0 不做配置热切换和配置版本回滚。
 6. P0 不把大段全文 chunk 存进 DB，segment/chunk 仍以 ES 为主。
 7. P0 不做复杂审计，只保留后续 `activity_event/audit_log` 边界。
+
+### 2.3 Phase 4 启动前置任务
+
+以下任务是进入 Phase 4 P0 主开发前必须先完成或明确验收口径的启动门槛。
+
+状态说明：
+
+- `DONE`：文档口径或方案已冻结。
+- `IMPLEMENTED`：代码/配置已落地，仍需在具备 MySQL/Docker 的运行环境做启动级验收。
+
+| 前置ID | 状态 | 前置任务 | 说明 | 验收标准 |
+|---|---|---|---|---|
+| PRE-01 | DONE | 固定 DB 技术栈 | Phase 4 P0 使用 `MySQL + Flyway + MyBatis`，不做 PostgreSQL/SQLite 兼容层 | PRD、Epic、任务卡中 DB 选型一致 |
+| PRE-02 | IMPLEMENTED | MySQL 基础设施接入 | 增加 MySQL driver、数据源配置、docker-compose MySQL 服务和 volume | 本地 `docker compose` 可启动 MySQL；后端能连通数据库 |
+| PRE-03 | IMPLEMENTED | Flyway migration 基线 | 新增 `src/main/resources/db/migration`，建立 P0 核心表 migration | 空库启动后自动生成 `knowledge_base/document_asset/ingestion_task/ingestion_task_item` |
+| PRE-04 | IMPLEMENTED | MyBatis 基线 | 增加 MyBatis 配置、mapper 扫描和基础 repository 约定 | 能通过 mapper 完成一张核心表的插入、查询、更新测试 |
+| PRE-05 | IMPLEMENTED | 固定用户上下文 | P0 继续使用管理员 token / 单用户，注入 `workspaceId=default`、`userId=system` | 业务写入表时能自动填充 `workspace_id/created_by/updated_by` |
+| PRE-06 | IMPLEMENTED | 统一错误契约 | Phase 4 API 返回稳定 code/message/traceId/details | 前端可区分 401、404、400、409、500 |
+| PRE-07 | DONE | `kbId` 索引改造方案 | 明确 `kb_segment` 增加 `kbId` 的 mapping、新索引或 reindex 策略 | 文本/图片 segment 写入时都能带 `kbId` |
+| PRE-08 | DONE | 搜索与对话范围策略 | 明确无 `kbIds` 时的默认行为，以及 ES filter 的实现位置 | 指定知识库搜索/问答不会命中其他知识库内容 |
+| PRE-09 | DONE | 统一入库 facade 方案 | 明确如何复用现有文本/图片任务，同时把任务状态同步落 DB | 前端只调用 `/api/v1/kbs/{kbId}/ingestion-tasks` |
+| PRE-10 | DONE | P0 验收链路冻结 | 固定从创建知识库到引用预览的最小验收链路 | 验收文档覆盖创建知识库、导入、文档状态、搜索、问答、预览、首页聚合 |
+
+#### PRE-07 `kbId` 索引改造执行约束
+
+`kbId` 必须作为 `kb_segment` 的一等字段进入 ES mapping 和 Java domain model，不能只存在 DB 的 `document_asset` 中。
+
+落点：
+
+- `Segment` 增加 `kbId`。
+- `KbSegmentDocument` 增加 `kbId` keyword 字段。
+- `es-kb-segment-mapping.json` 增加 `kbId` keyword mapping。
+- `TextSegmentIndexWriter` 和 `ImageSegmentIndexWriter` 写入 segment 时必须携带 `kbId`。
+- `KbSegmentBulkWriter` 写 ES 文档时透传 `kbId`。
+- 预览、neighbors 查询仍以 `segmentId/assetId` 为主，但后续权限校验必须能从 segment 反查 `kbId`。
+
+索引策略：
+
+- P0 使用新索引版本承载 `kbId` 字段，不在旧索引原地混跑。
+- 本地开发允许重建 `kb_segment` 索引。
+- 若已有历史数据，必须通过 backfill 或重新入库补齐 `kbId`；无法确认所属知识库的数据不得进入带 `kbIds` 的搜索结果。
+
+验收：
+
+- 任意文本或图片入库成功后，ES segment 文档中存在非空 `kbId`。
+- 指定 `kbIds=[kb_a]` 搜索时，不返回 `kb_b` 的 segment。
+
+#### PRE-08 搜索与对话范围策略
+
+`kbIds` 过滤必须进入 ES 查询层，不能在 Java 返回结果后过滤。
+
+请求策略：
+
+- 搜索接口新增 `kbIds`。
+- 对话消息接口新增 `kbIds`，并在 turn 快照中保存 `kbScope`。
+- P0 前端应始终传当前知识库 ID。
+- 后端收到空 `kbIds` 时，P0 默认查询当前用户可见的全部 ACTIVE 知识库；如果当前用户无可用知识库，返回空结果而不是退化为全库无边界查询。
+
+实现约束：
+
+- BM25 查询使用 bool filter：`terms kbId`。
+- vector knn 查询也必须带 filter，确保召回阶段即完成知识库隔离。
+- RRF、rerank、asset 聚合只处理已通过 `kbIds` filter 的候选。
+
+验收：
+
+- 搜索和对话问答都不能引用未选择知识库的内容。
+- `retrievalTrace` 中记录 `kbScope`，便于排查范围问题。
+
+#### PRE-09 统一入库 facade 方案
+
+前端只面向知识库维度提交入库任务，不直接调用文本/图片两套旧接口。
+
+统一入口：
+
+```text
+GET  /api/v1/ingestion/capabilities
+POST /api/v1/kbs/{kbId}/ingestion-tasks
+GET  /api/v1/kbs/{kbId}/ingestion-tasks
+GET  /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}
+POST /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}/retry-failed
+```
+
+执行策略：
+
+- facade 先创建 `ingestion_task` 和 `ingestion_task_item` DB 记录。
+- 为每个文件创建或复用 `document_asset`。
+- 根据文件类型路由到现有 `TextAssetIngestionService` 或 `ImageIngestionService` 的内部处理能力。
+- 每个阶段同步更新 DB：`UPLOAD -> PARSE -> CHUNK -> EMBED -> INDEX -> ASKABLE`。
+- Redis 可继续用于任务锁和执行中瞬时状态，但 DB 是状态查询的权威来源。
+
+验收：
+
+- 服务重启后仍能查询入库任务、任务项和文档状态。
+- 文本和图片都能通过统一任务接口进入处理链路。
+
+#### PRE-10 P0 验收链路
+
+P0 后端验收按固定顺序执行：
+
+```text
+1. 获取管理员 token
+2. 创建知识库
+3. 查询导入能力
+4. 上传/导入 PDF/TXT/MD/IMAGE 到指定知识库
+5. 查询入库任务状态
+6. 查询文档列表和文档状态
+7. 在指定知识库内关键词检索
+8. 创建会话并在指定知识库内问答
+9. 点击 resultCard/citation 的 segmentId 打开预览
+10. 查询首页聚合
+```
+
+P0 验收必须覆盖：
+
+- 401 未授权。
+- 知识库不存在。
+- 入库任务失败。
+- 指定知识库无结果。
+- preview URL 过期后重新请求。
+- `kbIds` 隔离：同一 query 在不同知识库下返回不同结果，且不串库。
 
 ## 3. Epic 拆分
 
@@ -59,8 +180,8 @@
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
 | Q4-00 | TODO | 产品化接口与路由基线确认 | 无 | API 路由清单、页面路由清单、核心 DTO 字段清单 | 6 个页面对应的后端接口范围固定；`kbId/kbIds/assetId/segmentId/taskId` 命名统一 |
-| Q4-01 | TODO | 业务 DB 接入与 migration 基线 | Q4-00 | DB 连接配置、migration 机制、启动健康检查 | 服务重启后知识库、文档、任务数据不丢失；本地开发可初始化 schema |
-| Q4-02 | TODO | 核心表结构落地 | Q4-01 | `knowledge_base/document_asset/ingestion_task/ingestion_task_item` migration | 表字段符合 `qanything方向DB表结构设计.md`；包含 workspace 和 created/updated 预留字段 |
+| Q4-01 | TODO | MySQL + Flyway + MyBatis 基线 | Q4-00, PRE-01 | MySQL 连接配置、Flyway migration 机制、MyBatis mapper 基线、启动健康检查 | 服务重启后知识库、文档、任务数据不丢失；本地开发空库可自动初始化 schema |
+| Q4-02 | TODO | 核心表结构落地 | Q4-01, PRE-03 | `knowledge_base/document_asset/ingestion_task/ingestion_task_item` migration | 表字段符合 `qanything方向DB表结构设计.md`；包含 workspace 和 created/updated 预留字段 |
 | Q4-03 | TODO | 管理员 token / 本地单用户认证 | Q4-01 | 鉴权过滤器、固定用户上下文、401 错误结构 | 未带 token 返回 401；业务写入能填充固定 `createdBy/workspaceId` |
 | Q4-04 | TODO | 统一 API 错误码与状态契约 | Q4-03 | API error schema、全局异常处理、traceId | 前端能区分 unauthorized、not found、validation、task failed、server error、timeout |
 

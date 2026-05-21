@@ -48,7 +48,16 @@
 - Redis 适合缓存、锁、短期 token 和临时状态，不适合长期保存产品对象。
 - 仅靠当前任务状态和 ES 文档无法支撑文档管理、删除、reparse、reembed、统计、审计等能力。
 
-建议优先使用 PostgreSQL 或 MySQL。若第一阶段强调本地单机部署和低门槛，可支持 SQLite 作为开发/个人版存储；正式部署仍建议使用 PostgreSQL/MySQL。
+Phase 4 P0 固定使用 `MySQL + Flyway + MyBatis` 作为业务 DB 技术栈。
+
+选型理由：
+
+- MySQL 基础资源占用更低，适合当前本地开发和单机部署目标。
+- Phase 4 P0 的主数据模型以常规业务表为主，MySQL 足以支撑知识库、文档资产、入库任务和会话快照。
+- Flyway 用于管理建表、加字段、建索引等 schema 变更，避免不同环境数据库结构不一致。
+- MyBatis 保留 SQL 可控性，适合当前项目已有领域对象和 DTO 边界，不强行引入 JPA 映射复杂度。
+
+本阶段不引入 PostgreSQL / SQLite 双适配，避免在 P0 分散实现和验收精力。
 
 ### 3.2 存储职责边界
 
@@ -928,7 +937,7 @@ settings_test_connection
 
 ### P0：前端可用闭环
 
-- 接入业务 DB。
+- 接入 MySQL + Flyway + MyBatis 业务 DB 基线。
 - 新增知识库、文档资产、入库任务核心表。
 - KnowledgeBase CRUD 基础版。
 - DocumentAsset 列表和状态。
@@ -968,7 +977,7 @@ settings_test_connection
 
 ### Phase 1：知识库产品模型
 
-- 接入 PostgreSQL/MySQL 或开发期 SQLite。
+- 接入 MySQL + Flyway + MyBatis。
 - 新增 KnowledgeBase / DocumentAsset / IngestionTask 产品模型。
 - 搜索和问答支持 `kbId` 范围。
 - 文档列表支持状态、失败原因、删除、重试。

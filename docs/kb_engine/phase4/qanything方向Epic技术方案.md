@@ -16,16 +16,33 @@ Phase 4 的核心变化是把当前“检索与问答引擎”补齐为可独立
 | REST API | 产品接口、鉴权、错误契约 | `/api/v1/kbs`、`/api/v1/search`、`/api/conversations` |
 | Application | 业务编排、状态流转、任务聚合 | KnowledgeBase、DocumentAsset、IngestionTask、Conversation |
 | Domain | 状态机、领域对象、策略 | 文档状态、任务阶段、去重策略、权限上下文 |
-| Infrastructure | DB、ES、Redis、OSS、Provider 适配 | MySQL/PostgreSQL、Elasticsearch、Redis、对象存储 |
+| Infrastructure | DB、ES、Redis、OSS、Provider 适配 | MySQL、Elasticsearch、Redis、对象存储 |
 
 ### 1.2 存储边界
 
 | 存储 | 用途 |
 |---|---|
-| DB | 产品主数据、文档状态、任务状态、会话快照、设置、活动记录 |
+| MySQL | 产品主数据、文档状态、任务状态、会话快照、设置、活动记录 |
 | ES | `kb_segment`、BM25、向量、bbox、snippet、anchor |
 | OSS | 原始文件、预览文件、缩略图 |
 | Redis | 短期 token、任务锁、previewUrl 缓存、热点缓存 |
+
+### 1.2.1 Phase 4 P0 固定技术栈
+
+Phase 4 P0 不再在数据库方案上保留多选，固定使用：
+
+```text
+MySQL + Flyway + MyBatis
+```
+
+实现口径：
+
+- MySQL 只承载产品主数据和状态，不承载大段全文和向量召回。
+- Flyway 负责 `src/main/resources/db/migration` 下的 schema migration，P0 建核心表，P1/P2 追加表。
+- MyBatis 负责业务表读写，SQL 保持显式、可审查、便于调试。
+- ES 继续负责 `kb_segment`、BM25、向量检索、anchor/bbox/snippet 字段。
+- Redis 继续负责短期 token、锁、preview URL 缓存和热点缓存。
+- P0 不做 PostgreSQL / SQLite 兼容层，不做数据库方言抽象。
 
 ### 1.3 现有能力复用
 
@@ -51,7 +68,8 @@ Phase 4 的核心变化是把当前“检索与问答引擎”补齐为可独立
 
 | 能力 | 方案 |
 |---|---|
-| DB migration | 建议引入 Flyway 或 Liquibase。若项目暂不引入 migration 工具，先建立 `docs/sql` 草案和启动校验 |
+| DB migration | 固定使用 Flyway，migration 文件放在 `src/main/resources/db/migration` |
+| DB access | 固定使用 MyBatis，P0 不引入 JPA |
 | ID 生成 | 应用层统一生成字符串 ID，建议使用 `kb_`、`doc_`、`task_`、`item_`、`turn_` 前缀 |
 | 用户上下文 | P0 固定 `workspaceId=default`、`userId=system`，从 token filter 注入 request context |
 | 错误契约 | 统一 `code/message/traceId/details`，业务异常集中映射 |
@@ -68,7 +86,7 @@ common/infrastructure/db
 
 ### 2.3 数据方案
 
-P0 migration 优先建：
+P0 MySQL migration 优先建：
 
 ```text
 knowledge_base
@@ -78,6 +96,14 @@ ingestion_task_item
 ```
 
 表结构以 `qanything方向DB表结构设计.md` 为准。
+
+P0 启动前必须先完成：
+
+1. `pom.xml` 增加 MySQL driver、Flyway、MyBatis 依赖。
+2. `application.yaml` 增加 `spring.datasource`、`mybatis`、`spring.flyway` 配置。
+3. `docker-compose.yml` 增加 MySQL 服务和持久化 volume。
+4. `V4_001__create_phase4_core_tables.sql` 建立 P0 四张核心表。
+5. 启动健康检查能确认 MySQL 连接和 Flyway migration 已执行。
 
 ### 2.4 接口契约
 
@@ -105,7 +131,7 @@ ingestion_task_item
 
 - 不建议 P0 同时接入 SSO，否则会拖慢产品主链路。
 - 不建议使用 ES 反推产品主数据，删除、重试、状态统计会失控。
-- 如果短期不接 migration 工具，也要保证 SQL 草案和实体字段一一对应。
+- P0 必须接入 Flyway，不再使用手工 SQL 作为主流程；临时 SQL 只能作为排查或数据修复手段。
 
 ## 3. E1：知识库与文档资产产品模型
 
@@ -744,9 +770,12 @@ SSO_LOGIN_FAILED
 P0 完成后必须满足：
 
 ```text
+MySQL + Flyway + MyBatis baseline
 KnowledgeBase DB model
 DocumentAsset DB model
 IngestionTask DB model
+IngestionTaskItem DB model
+kbId in kb_segment mapping
 kbIds search filter
 kbIds conversation filter
 segment preview
@@ -780,7 +809,8 @@ GET  /api/v1/home/summary
 | 用户上下文 | `RequestUserContext`、`UserContextHolder` | P0 固定 `workspaceId=default`、`userId=system` |
 | 鉴权 | `AuthTokenFilter` 或扩展现有 `@RequireAuth` | 统一读取 token 并注入上下文 |
 | 错误处理 | `GlobalApiExceptionHandler` | 将业务异常、校验异常、系统异常映射为统一结构 |
-| DB migration | `db/migration/V4_*.sql` | P0 建核心表，P1/P2 追加表 |
+| DB migration | `db/migration/V4_*.sql` | 使用 Flyway；P0 建核心表，P1/P2 追加表 |
+| DB access | `MyBatis Mapper` | 使用 MyBatis 读写 MySQL；P0 不引入 JPA |
 
 #### 错误码建议
 

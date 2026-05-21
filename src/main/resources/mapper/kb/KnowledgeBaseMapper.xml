@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.kb.infrastructure.persistence.KnowledgeBaseMapper">
+
+    <resultMap id="KnowledgeBaseRecordMap" type="com.anchr.core.kb.infrastructure.persistence.KnowledgeBaseRecord">
+        <id property="id" column="id"/>
+        <result property="workspaceId" column="workspace_id"/>
+        <result property="name" column="name"/>
+        <result property="description" column="description"/>
+        <result property="status" column="status"/>
+        <result property="documentCount" column="document_count"/>
+        <result property="segmentCount" column="segment_count"/>
+        <result property="lastIngestedAt" column="last_ingested_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="updatedBy" column="updated_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="deletedAt" column="deleted_at"/>
+    </resultMap>
+
+    <sql id="KnowledgeBaseColumns">
+        id, workspace_id, name, description, status,
+        document_count, segment_count, last_ingested_at,
+        created_by, updated_by, created_at, updated_at, deleted_at
+    </sql>
+
+    <insert id="insert" parameterType="com.anchr.core.kb.infrastructure.persistence.KnowledgeBaseRecord">
+        insert into knowledge_base (
+            <include refid="KnowledgeBaseColumns"/>
+        ) values (
+            #{id}, #{workspaceId}, #{name}, #{description}, #{status},
+            #{documentCount}, #{segmentCount}, #{lastIngestedAt},
+            #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{deletedAt}
+        )
+    </insert>
+
+    <select id="findActiveById" resultMap="KnowledgeBaseRecordMap">
+        select
+            <include refid="KnowledgeBaseColumns"/>
+        from knowledge_base
+        where id = #{id}
+          and workspace_id = #{workspaceId}
+          and deleted_at is null
+    </select>
+
+    <update id="updateName">
+        update knowledge_base
+        set name = #{name},
+            updated_by = #{updatedBy},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and workspace_id = #{workspaceId}
+          and deleted_at is null
+    </update>
+</mapper>
