@@ -110,7 +110,11 @@ workspace
 workspace_member
 ```
 
-### 3.4 账号与 SSO 策略
+### 3.4 DB 表结构设计
+
+详细表结构已迁移至：[qanything方向DB表结构设计.md](./qanything方向DB表结构设计.md)。
+
+### 3.5 账号与 SSO 策略
 
 第一版不建议直接接入 SSO，除非当前目标就是公司内部多人正式使用。
 
@@ -128,7 +132,7 @@ P2：SSO / OIDC / 企业微信 / 飞书 / LDAP
 - SSO 会引入用户体系、组织、权限、回调、安全配置和部署复杂度，容易拖慢主线。
 - QAnything 方向第一阶段的重点是“资料丢进去就能问”，不是企业 IAM。
 
-### 3.5 权限模型预留
+### 3.6 权限模型预留
 
 即使第一版不接 SSO，数据模型也应预留未来多用户和企业认证能力。
 
@@ -288,6 +292,7 @@ POST /api/v1/image/batch-tasks/{taskId}/retry-failed
 | 入库任务 | 无按知识库聚合的任务列表；文本/图片任务接口未统一 |
 | 搜索 | 无 `kbId` 范围；筛选、分页、facets 不完整 |
 | 对话 | 无多知识库范围；无 SSE；回答模式未产品化 |
+| Ask First 体验 | 无首页聚合、最近问题、最近引用、搜索页生成答案、引用解释等体验型 API |
 | 设置 | 无配置读取、连接测试、模型配置、OCR/对象存储配置 API |
 | 文档格式 | 当前主要支持 PDF/TXT/MD/IMAGE，DOCX/XLSX/CSV/PPTX/URL 仍需扩展 |
 
@@ -399,6 +404,11 @@ Segment 是检索和回答的最小证据单元。
   - segment 数
   - 最近入库任务状态
   - 最近更新时间
+- 展示 Ask First 首页需要的聚合信息：
+  - 常用或收藏知识库
+  - 最近提问
+  - 最近引用来源
+  - 导入进度摘要
 - 点击知识库进入文档管理或问答。
 
 #### 后端需求
@@ -410,7 +420,23 @@ GET    /api/v1/kbs/{kbId}
 PATCH  /api/v1/kbs/{kbId}
 DELETE /api/v1/kbs/{kbId}
 GET    /api/v1/kbs/{kbId}/stats
+
+GET    /api/v1/home/summary
+GET    /api/v1/activity/recent-questions
+GET    /api/v1/activity/recent-citations
 ```
+
+`GET /api/v1/home/summary` 用于 Ask First 风格首页聚合，建议返回：
+
+```text
+favoriteKbs
+recentQuestions
+recentCitations
+recentIngestionTasks
+helpLinks
+```
+
+第一版如果不做收藏能力，`favoriteKbs` 可以按最近使用或更新时间返回。
 
 #### 验收标准
 
@@ -418,6 +444,7 @@ GET    /api/v1/kbs/{kbId}/stats
 - 用户可以切换当前知识库。
 - 删除或归档后，该知识库不再出现在默认可用列表中。
 - 统计字段为空或计算中时，前端有明确占位态。
+- 首页聚合接口缺少部分数据时，前端可以降级为空状态，不影响核心问答入口。
 
 ### 7.2 文档管理页
 
@@ -429,6 +456,8 @@ GET    /api/v1/kbs/{kbId}/stats
 
 - 批量上传文档。
 - URL 导入入口。
+- 展示支持格式、单文件大小上限和单批次数量上限。
+- 导入时支持选择去重策略。
 - 查看文档列表。
 - 查看文档详情。
 - 查看失败原因。
@@ -452,6 +481,38 @@ POST   /api/v1/kbs/{kbId}/ingestion-tasks
 GET    /api/v1/kbs/{kbId}/ingestion-tasks
 GET    /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}
 POST   /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}/retry-failed
+
+GET    /api/v1/ingestion/capabilities
+```
+
+`GET /api/v1/ingestion/capabilities` 用于前端导入页渲染能力边界，建议返回：
+
+```text
+supportedFormats
+maxFileSizeBytes
+maxFilesPerBatch
+dedupeStrategies
+ingestionStages
+```
+
+`ingestionStages` 至少包含：
+
+```text
+UPLOAD
+PARSE
+CHUNK
+EMBED
+INDEX
+ASKABLE
+```
+
+导入任务项建议补充：
+
+```text
+stage
+progress
+dedupeResult
+assetId
 ```
 
 #### 兼容策略
@@ -470,6 +531,8 @@ POST   /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}/retry-failed
 - 失败文档能看到明确错误原因。
 - 删除文档后，搜索和问答不再命中该文档。
 - `reparse` / `reembed` 操作会生成新的任务或状态流转。
+- 导入页能展示当前支持格式和限制，超过限制时前端可在提交前拦截。
+- 同一文件重复导入时，用户能看到跳过、覆盖或新版本等去重结果。
 
 ### 7.3 对话问答页
 
@@ -571,14 +634,29 @@ event: error
 - 按文件类型筛选。
 - 按时间筛选。
 - 按命中类型筛选。
+- 支持“生成答案”模式，用于 Ask First 风格搜索页在结果上方给出综合回答。
 - 展示结果列表。
 - 展示 result score、source、snippet、pageNo、bbox 状态。
 - 点击结果进入预览页。
+- “联网搜索”开关默认隐藏或置灰，除非后端明确接入外部搜索 provider。
 
 #### 已有接口
 
 ```text
 POST /api/v1/search/kb
+```
+
+若搜索页需要直接生成答案，建议二选一：
+
+```text
+POST /api/v1/search/kb-answer
+```
+
+或在现有搜索接口请求中增加：
+
+```text
+withAnswer
+answerMode
 ```
 
 #### 待补字段
@@ -592,6 +670,8 @@ dateRange
 hitTypes
 cursor
 sort
+withAnswer
+answerMode
 ```
 
 响应侧：
@@ -600,6 +680,9 @@ sort
 nextCursor
 facets
 total
+answer
+citations
+answerTrace
 ```
 
 #### 验收标准
@@ -608,6 +691,8 @@ total
 - 每条结果都能展示来源信息。
 - 有 `segmentId` 的结果可以进入预览。
 - 图片命中有 bbox 时显示“可定位”状态。
+- 开启生成答案时，答案必须绑定引用证据；无法生成时降级展示检索结果。
+- 联网搜索未接入前不展示真实可用状态，避免前端承诺不存在的能力。
 - 无结果、请求失败、超时都有明确状态。
 
 ### 7.5 预览页
@@ -623,6 +708,7 @@ total
 - 支持 TXT/MD snippet 定位。
 - 支持 IMAGE bbox 绘制。
 - 支持 surrounding chunks 展示。
+- 支持解释“为什么引用这段”。
 - 支持 preview URL 过期后自动重新请求一次。
 - 支持复制引用。
 - 支持返回来源页面。
@@ -644,12 +730,24 @@ POST /api/v1/preview/segments/{segmentId}/refresh
 
 也可以先复用现有 GET 接口作为 refresh。
 
+Ask First 引用解释建议在预览响应中补充：
+
+```text
+sourceQuestion
+answerClaim
+citationIndex
+citationReason
+```
+
+其中 `citationReason` 用于解释该片段与答案结论的关系。第一版可以由检索命中类型、重排分数、关键词覆盖和 LLM 引用映射生成，无法稳定生成时返回空，由前端隐藏该区域。
+
 #### 验收标准
 
 - `previewUrl` 不在前端持久化，不写入日志。
 - 401/403/过期场景自动重新请求一次。
 - bbox 缺失、越界或尺寸异常时不画框，展示 OCR/命中文本降级。
 - PDF 跳页失败时给出明确提示。
+- 引用解释缺失时不影响原文预览和引用复制。
 
 ### 7.6 设置页
 
@@ -665,6 +763,7 @@ POST /api/v1/preview/segments/{segmentId}/refresh
 - 测试对象存储连接。
 - 查看检索参数。
 - 修改可热更新的检索参数。
+- 支持 light/dark/system 外观偏好。
 - 对需要重启或重建索引的配置给出明确提示。
 
 #### 后端需求
@@ -675,6 +774,8 @@ GET   /api/v1/settings/providers
 GET   /api/v1/settings/search
 PATCH /api/v1/settings/search
 POST  /api/v1/settings/test-connection
+GET   /api/v1/settings/preferences
+PATCH /api/v1/settings/preferences
 ```
 
 第一阶段不建议支持所有配置热切换。策略：
@@ -690,12 +791,62 @@ POST  /api/v1/settings/test-connection
 | object storage provider | 第一版重启生效 |
 | Redis / ES 连接 | 不建议页面热切 |
 
-#### 验收标准
+[外观偏好第一版可优先保存在浏览器本地。只有需要跨设备同步时，才接入 `settings/preferences` 或用户偏好表。
+
+]()#### 验收标准
 
 - 用户能看到当前使用的 provider。
 - 连接测试失败时能看到明确原因。
 - 修改会影响旧数据的配置时，前端必须提示 reparse/reembed/reindex。
 - 不允许在页面上明文展示完整 API Key。
+
+### 7.7 Ask First 专属体验能力
+
+#### 目标
+
+Ask First 方向强调“先问、再看证据、再回到资料”，页面不应只像管理后台。后端需要提供少量体验型聚合 API，避免前端在多个基础接口之间拼装首页、最近活动和引用上下文。
+
+#### 需要补齐的能力
+
+| 能力 | 建议接口 | 优先级 | 说明 |
+|---|---|---|---|
+| 首页聚合 | `GET /api/v1/home/summary` | P0 | 返回常用知识库、最近问题、最近引用、导入进度摘要 |
+| 最近问题 | `GET /api/v1/activity/recent-questions` | P1 | 支撑 Ask 首页和会话入口，可先由 conversation history 派生 |
+| 最近引用 | `GET /api/v1/activity/recent-citations` | P1 | 支撑“最近查过的证据”，需要记录 citation click 或 answer citation 快照 |
+| 搜索生成答案 | `POST /api/v1/search/kb-answer` | P1 | 支撑搜索页顶部综合答案，也可并入 `/api/v1/search/kb` |
+| 导入能力声明 | `GET /api/v1/ingestion/capabilities` | P0 | 返回支持格式、大小限制、批次数量、去重策略、阶段枚举 |
+| 引用解释 | 预览响应补充字段 | P1 | 返回 `sourceQuestion`、`answerClaim`、`citationReason` |
+| 联网搜索 | `POST /api/v1/search/web` | P2 | 未接入 provider 前前端不展示或置灰 |
+
+#### 数据记录要求
+
+为支撑最近活动和引用上下文，建议在 DB 中补充或复用以下记录：
+
+```text
+conversation_turn
+conversation_citation
+activity_event
+user_preference（可选）
+```
+
+`activity_event` 可作为轻量事件表，记录：
+
+```text
+QUESTION_ASKED
+CITATION_OPENED
+DOCUMENT_IMPORTED
+SEARCH_EXECUTED
+```
+
+第一版如果不想新增独立事件表，可以先从 `conversation_turn`、`ingestion_task`、`document_asset` 中派生首页聚合数据；但引用点击、最近引用这类行为数据后续仍建议落表。
+
+#### 验收标准
+
+- Ask 首页可以通过一个聚合接口完成首屏渲染。
+- 最近问题和最近引用为空时，有稳定空状态，不阻断提问。
+- 搜索页生成答案失败时，仍返回可用检索结果。
+- 导入页展示的格式、大小、数量限制来自后端，不在前端硬编码。
+- 引用解释属于增强信息，缺失时前端隐藏，不影响预览主流程。
 
 ## 8. 文档格式能力
 
@@ -784,6 +935,8 @@ settings_test_connection
 - 文档上传到指定知识库。
 - 搜索和问答支持 `kbIds`。
 - 预览页稳定接入。
+- Ask 首页聚合接口基础版。
+- 导入能力声明接口。
 - 统一 API Client、鉴权、错误态。
 - 管理员 token / 本地单用户认证。
 
@@ -794,6 +947,9 @@ settings_test_connection
 - reparse / reembed。
 - SSE 流式问答。
 - 回答模式。
+- 最近问题、最近引用。
+- 搜索页生成答案。
+- 预览页引用解释。
 - 设置页连接测试。
 - URL 导入。
 - 本地账号密码 + 用户表。
@@ -805,6 +961,7 @@ settings_test_connection
 - 配置版本回滚。
 - 审计日志。
 - 多用户/权限模型。
+- 联网搜索 provider。
 - SSO / OIDC / 企业微信 / 飞书 / LDAP。
 
 ## 11. 推荐实施顺序
@@ -815,6 +972,7 @@ settings_test_connection
 - 新增 KnowledgeBase / DocumentAsset / IngestionTask 产品模型。
 - 搜索和问答支持 `kbId` 范围。
 - 文档列表支持状态、失败原因、删除、重试。
+- 补齐首页聚合和导入能力声明接口。
 - 暂不接 SSO，使用管理员 token / 本地单用户。
 
 ### Phase 2：React/Next.js 正式版闭环
@@ -823,6 +981,7 @@ settings_test_connection
 - 接入 API Client。
 - 对话、搜索、预览完成真实联调。
 - 文档管理接入任务和文档列表。
+- Ask First 首页、搜索生成答案、引用解释按能力状态做降级接入。
 
 ### Phase 3：文档格式扩展
 
@@ -851,7 +1010,11 @@ settings_test_connection
 - OIDC / 企业微信 / 飞书 / LDAP SSO。
 - 审计日志。
 
-## 12. 总体验收标准
+## 12. 任务卡拆分
+
+详细任务卡已迁移至：[qanything方向任务卡拆分.md](./qanything方向任务卡拆分.md)。
+
+## 13. 总体验收标准
 
 - 用户可以创建知识库并上传一批文件。
 - 用户可以看到文档入库状态和失败原因。
