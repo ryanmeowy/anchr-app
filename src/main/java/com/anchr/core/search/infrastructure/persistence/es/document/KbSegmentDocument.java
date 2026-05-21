@@ -21,6 +21,9 @@ public class KbSegmentDocument {
     private String segmentId;
 
     @Field(type = FieldType.Keyword)
+    private String kbId;
+
+    @Field(type = FieldType.Keyword)
     private String assetId;
 
     @Field(type = FieldType.Keyword)

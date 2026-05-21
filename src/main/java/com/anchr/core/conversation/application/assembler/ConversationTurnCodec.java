@@ -35,6 +35,14 @@ public class ConversationTurnCodec {
         }
     }
 
+    public String serializeKbScope(List<String> kbScope) {
+        try {
+            return objectMapper.writeValueAsString(kbScope == null ? List.of() : kbScope);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize kb scope.", e);
+        }
+    }
+
     public List<ConversationTurnDTO.CitationDTO> parseCitations(String citationsJson) {
         if (!StringUtils.hasText(citationsJson)) {
             return List.of();
@@ -57,6 +65,19 @@ public class ConversationTurnCodec {
             CollectionType listType = objectMapper.getTypeFactory()
                     .constructCollectionType(List.class, ResultCardDTO.class);
             return objectMapper.readValue(resultCardsJson, listType);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    public List<String> parseKbScope(String kbScopeJson) {
+        if (!StringUtils.hasText(kbScopeJson)) {
+            return List.of();
+        }
+        try {
+            CollectionType listType = objectMapper.getTypeFactory()
+                    .constructCollectionType(List.class, String.class);
+            return objectMapper.readValue(kbScopeJson, listType);
         } catch (Exception e) {
             return List.of();
         }

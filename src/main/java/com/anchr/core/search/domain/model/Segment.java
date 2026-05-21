@@ -13,6 +13,7 @@ import java.util.List;
 public class Segment {
 
     String segmentId;
+    String kbId;
     String assetId;
     KbAssetTypeEnum assetType;
     SegmentType segmentType;

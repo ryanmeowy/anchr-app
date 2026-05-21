@@ -9,6 +9,7 @@ import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.KbSegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
 import com.anchr.core.search.interfaces.rest.dto.SurroundingChunkDTO;
 import lombok.RequiredArgsConstructor;
@@ -47,8 +48,30 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
             throw new BusinessException(ApiError.UNAUTHORIZED, "X-Access-Token is required.");
         }
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
-                .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND, "Segment not found."));
+                .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
         return toPreview(segment, accessToken);
+    }
+
+    @Override
+    public PreviewSegmentDTO refreshSegmentPreview(String segmentId, String accessToken) {
+        if (StringUtils.hasText(segmentId)) {
+            previewAccessCache.evict(segmentId.trim(), accessToken);
+        }
+        return getSegmentPreview(segmentId, accessToken);
+    }
+
+    @Override
+    public PreviewNeighborsDTO getSegmentNeighbors(String segmentId, int before, int after) {
+        if (!StringUtils.hasText(segmentId)) {
+            throw new BusinessException(ApiError.INVALID_REQUEST, "segmentId cannot be blank.");
+        }
+        Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
+                .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
+        int window = Math.max(1, Math.min(Math.max(before, after), 10));
+        return PreviewNeighborsDTO.builder()
+                .segmentId(segment.getSegmentId())
+                .items(buildSurroundingChunks(segment, window))
+                .build();
     }
 
     private PreviewSegmentDTO toPreview(Segment segment, String accessToken) {
@@ -56,6 +79,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
+                .kbId(segment.getKbId())
                 .assetType(toCode(segment.getAssetType()))
                 .segmentType(toCode(segment.getSegmentType()))
                 .fileName(resolveFileName(segment))
@@ -68,7 +92,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .snippet(resolveSnippet(segment))
                 .ocrSummary(segment.getOcrSummary())
                 .anchor(toAnchor(segment))
-                .surroundingChunks(buildSurroundingChunks(segment))
+                .surroundingChunks(buildSurroundingChunks(segment, SURROUNDING_CHUNK_WINDOW))
+                .citationContext(buildCitationContext(segment))
                 .build();
     }
 
@@ -96,6 +121,10 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         if (source == null) {
             return null;
         }
+        if (source.getX() == null || source.getY() == null || source.getWidth() == null || source.getHeight() == null
+                || source.getX() < 0 || source.getY() < 0 || source.getWidth() <= 0 || source.getHeight() <= 0) {
+            return null;
+        }
         return PreviewAnchorDTO.BboxDTO.builder()
                 .x(source.getX())
                 .y(source.getY())
@@ -105,7 +134,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
-    private List<SurroundingChunkDTO> buildSurroundingChunks(Segment segment) {
+    private List<SurroundingChunkDTO> buildSurroundingChunks(Segment segment, int window) {
         if (!StringUtils.hasText(segment.getAssetId()) || segment.getChunkOrder() == null) {
             return buildCurrentChunk(segment);
         }
@@ -113,12 +142,21 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                         segment.getAssetId(),
                         segment.getPageNo(),
                         segment.getChunkOrder(),
-                        SURROUNDING_CHUNK_WINDOW)
+                        window)
                 .stream()
                 .map(candidate -> toSurroundingChunk(segment, candidate))
                 .filter(Objects::nonNull)
                 .toList();
         return chunks.isEmpty() ? buildCurrentChunk(segment) : chunks;
+    }
+
+    private PreviewSegmentDTO.CitationContextDTO buildCitationContext(Segment segment) {
+        if (segment == null || !StringUtils.hasText(resolveSnippet(segment))) {
+            return null;
+        }
+        return PreviewSegmentDTO.CitationContextDTO.builder()
+                .citationReason("该片段命中当前检索或问答引用，可作为原文证据查看。")
+                .build();
     }
 
     private List<SurroundingChunkDTO> buildCurrentChunk(Segment segment) {

@@ -16,6 +16,8 @@ public class ConversationTurn {
     private String query;
     private String rewrittenQuery;
     private String answer;
+    private String kbScopeJson;
+    private String answerMode;
     private String citationsJson;
     private String resultCardsJson;
     private String retrievalTraceJson;

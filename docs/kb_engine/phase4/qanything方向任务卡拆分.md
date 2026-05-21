@@ -218,14 +218,21 @@ P0 验收必须覆盖：
 
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
-| Q4-15 | TODO | 搜索请求支持 `kbIds` | Q4-05, Q4-07 | `KbSearchQueryDTO.kbIds`、ES filter | 指定知识库搜索不会命中其他知识库文档；无 `kbIds` 策略明确 |
-| Q4-16 | TODO | 搜索筛选、分页与 facets P1 | Q4-15 | `assetTypes/dateRange/hitTypes/cursor/sort/facets` | 搜索页可筛选文件类型、时间、命中类型；分页结果稳定 |
-| Q4-17 | TODO | 搜索页生成答案 P1 | Q4-15, Q4-20 | `POST /api/v1/search/kb-answer` 或 `withAnswer=true` | 答案必须绑定引用；生成失败时仍返回检索结果 |
-| Q4-18 | TODO | 对话问答支持 `kbIds` | Q4-15 | conversation message 请求字段、检索链路 kb filter | 指定知识库问答不会引用其他知识库文档；回答返回 `kbScope` |
-| Q4-19 | TODO | SSE 流式问答 P1 | Q4-18, Q4-04 | `POST /api/conversations/{sessionId}/messages/stream` | 支持 trace、delta、citations、done、error 事件；失败有明确 error event |
-| Q4-20 | TODO | 预览接口稳定接入 | Q4-07, Q4-15 | `GET /api/v1/preview/segments/{segmentId}` 增强与错误码 | PDF/TXT/MD/IMAGE 可按 segment 定位；`previewUrl` 不持久化、不打印日志 |
-| Q4-21 | TODO | 预览 refresh 与 neighbors 增强 P1 | Q4-20 | refresh 策略、neighbors 接口或 GET 复用 | URL 过期自动重新请求一次；surrounding chunks 可用于上下文展示 |
-| Q4-22 | TODO | 预览页引用解释 P1 | Q4-17, Q4-20 | `sourceQuestion/answerClaim/citationIndex/citationReason` | 能解释引用和答案结论关系；缺失时前端可隐藏增强区域 |
+| Q4-15 | IMPLEMENTED | 搜索请求支持 `kbIds` | Q4-05, Q4-07 | `KbSearchQueryDTO.kbIds`、ES filter | 指定知识库搜索不会命中其他知识库文档；无 `kbIds` 策略明确 |
+| Q4-16 | IMPLEMENTED | 搜索筛选、分页与 facets P1 | Q4-15 | `assetTypes/dateRange/hitTypes/cursor/sort/facets` | 搜索页可筛选文件类型、时间、命中类型；分页结果稳定 |
+| Q4-17 | IMPLEMENTED | 搜索页生成答案 P1 | Q4-15, Q4-20 | `POST /api/v1/search/kb-answer` 或 `withAnswer=true` | 答案必须绑定引用；生成失败时仍返回检索结果 |
+| Q4-18 | IMPLEMENTED | 对话问答支持 `kbIds` | Q4-15 | conversation message 请求字段、检索链路 kb filter | 指定知识库问答不会引用其他知识库文档；回答返回 `kbScope` |
+| Q4-19 | IMPLEMENTED | SSE 流式问答 P1 | Q4-18, Q4-04 | `POST /api/conversations/{sessionId}/messages/stream` | 支持 trace、delta、citations、done、error 事件；失败有明确 error event |
+| Q4-20 | IMPLEMENTED | 预览接口稳定接入 | Q4-07, Q4-15 | `GET /api/v1/preview/segments/{segmentId}` 增强与错误码 | PDF/TXT/MD/IMAGE 可按 segment 定位；`previewUrl` 不持久化、不打印日志 |
+| Q4-21 | IMPLEMENTED | 预览 refresh 与 neighbors 增强 P1 | Q4-20 | refresh 策略、neighbors 接口或 GET 复用 | URL 过期自动重新请求一次；surrounding chunks 可用于上下文展示 |
+| Q4-22 | IMPLEMENTED | 预览页引用解释 P1 | Q4-17, Q4-20 | `sourceQuestion/answerClaim/citationIndex/citationReason` | 能解释引用和答案结论关系；缺失时前端可隐藏增强区域 |
+
+实施说明：
+- Q4-15 已将 `kbId` 加入 ES segment domain、document、mapping 与查询 filter；空 `kbIds` 会解析为当前用户可见 ACTIVE KB，若无可见 KB 返回空结果。
+- Q4-16 当前分页基于稳定 cursor offset 和本轮召回聚合结果生成，facets 基于返回候选聚合统计；深分页和全量精确 facets 后续可用 ES aggregation 增强。
+- Q4-17 先落 extractive answer：答案由检索证据片段生成并绑定 citation；无法生成时返回空 answer 和 fallback reason。
+- Q4-19 当前 SSE 复用同步消息链路，将完整回答分块输出 `delta`，并发送 `trace/citations/done/error`。
+- Q4-22 当前返回基础 `citationReason`；`sourceQuestion/answerClaim/citationIndex` 需要后续 conversation citation 快照或 activity 记录接入后补齐。
 
 ## E4：Ask First 首页与体验聚合
 

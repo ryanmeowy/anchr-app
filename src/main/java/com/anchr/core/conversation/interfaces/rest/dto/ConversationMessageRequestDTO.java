@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * Request DTO for conversation message.
  */
@@ -26,5 +28,17 @@ public class ConversationMessageRequestDTO {
 
     @Size(max = 32, message = "strategy length cannot exceed 32")
     private String strategy;
-}
 
+    @Size(max = 100, message = "kbIds cannot exceed 100")
+    private List<String> kbIds;
+
+    @Size(max = 32, message = "answerMode length cannot exceed 32")
+    private String answerMode;
+
+    @Size(max = 10, message = "preferredModalities cannot exceed 10")
+    private List<String> preferredModalities;
+
+    private Boolean debug;
+
+    private Boolean stream;
+}

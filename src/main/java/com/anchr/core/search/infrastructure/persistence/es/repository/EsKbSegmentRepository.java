@@ -11,6 +11,7 @@ import com.anchr.core.common.config.KbSegmentConfig;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.search.domain.model.KbSearchFilter;
 import com.anchr.core.search.domain.model.KbAssetTypeEnum;
 import com.anchr.core.search.domain.model.KbSegmentHit;
 import com.anchr.core.search.domain.model.Segment;
@@ -41,11 +42,16 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
 
     @Override
     public List<KbSegmentHit> textSearch(String query, int limit) {
+        return textSearch(query, limit, null);
+    }
+
+    @Override
+    public List<KbSegmentHit> textSearch(String query, int limit, KbSearchFilter filter) {
         if (!StringUtils.hasText(query) || limit <= 0) {
             return List.of();
         }
         try {
-            SearchRequest request = buildTextSearchRequest(query.trim(), limit);
+            SearchRequest request = buildTextSearchRequest(query.trim(), limit, filter);
             SearchResponse<KbSegmentDocument> response = esClient.search(request, KbSegmentDocument.class);
             return convertHits(response);
         } catch (Exception e) {
@@ -56,11 +62,16 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
 
     @Override
     public List<KbSegmentHit> vectorSearch(List<Float> queryVector, int topK) {
+        return vectorSearch(queryVector, topK, null);
+    }
+
+    @Override
+    public List<KbSegmentHit> vectorSearch(List<Float> queryVector, int topK, KbSearchFilter filter) {
         if (CollectionUtils.isEmpty(queryVector) || topK <= 0) {
             return List.of();
         }
         try {
-            SearchRequest request = buildVectorSearchRequest(queryVector, topK);
+            SearchRequest request = buildVectorSearchRequest(queryVector, topK, filter);
             SearchResponse<KbSegmentDocument> response = esClient.search(request, KbSegmentDocument.class);
             return convertHits(response);
         } catch (Exception e) {
@@ -123,17 +134,19 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         }
     }
 
-    private SearchRequest buildTextSearchRequest(String query, int limit) {
+    private SearchRequest buildTextSearchRequest(String query, int limit, KbSearchFilter filter) {
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())
                 .size(limit)
-                .query(q -> q.bool(b -> b
-                        .should(sh -> sh.match(m -> m.field("title").query(query).boost(2.5f)))
-                        .should(sh -> sh.match(m -> m.field("contentText").query(query).boost(4.0f)))
-                        .should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(3.0f)))
-                        .should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)))
-                        .minimumShouldMatch("1")
-                ))
+                .query(q -> q.bool(b -> {
+                    applyFilters(b, filter);
+                    b.should(sh -> sh.match(m -> m.field("title").query(query).boost(2.5f)));
+                    b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(4.0f)));
+                    b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(3.0f)));
+                    b.should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)));
+                    b.minimumShouldMatch("1");
+                    return b;
+                }))
                 .highlight(h -> h
                         .fields("title", f -> f.numberOfFragments(0))
                         .fields("contentText", f -> f.fragmentSize(180).numberOfFragments(1))
@@ -143,19 +156,83 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         );
     }
 
-    private SearchRequest buildVectorSearchRequest(List<Float> queryVector, int topK) {
+    private SearchRequest buildVectorSearchRequest(List<Float> queryVector, int topK, KbSearchFilter filter) {
         int numCandidates = Math.max(EmbeddingConstant.DEFAULT_NUM_CANDIDATES, topK * EmbeddingConstant.NUM_CANDIDATES_FACTOR);
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())
                 .size(topK)
                 .source(src -> src.filter(f -> f.excludes("embedding")))
-                .knn(k -> k
-                        .field("embedding")
-                        .queryVector(queryVector)
-                        .k(topK)
-                        .numCandidates(numCandidates)
-                )
+                .knn(k -> {
+                    k.field("embedding")
+                            .queryVector(queryVector)
+                            .k(topK)
+                            .numCandidates(numCandidates);
+                    applyKnnFilters(k, filter);
+                    return k;
+                })
         );
+    }
+
+    private void applyFilters(co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery.Builder builder,
+                              KbSearchFilter filter) {
+        if (filter == null) {
+            return;
+        }
+        if (!CollectionUtils.isEmpty(filter.getKbIds())) {
+            builder.filter(f -> f.terms(t -> t.field("kbId").terms(v -> v.value(
+                    filter.getKbIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
+        if (!CollectionUtils.isEmpty(filter.getAssetTypes())) {
+            builder.filter(f -> f.terms(t -> t.field("assetType").terms(v -> v.value(
+                    filter.getAssetTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
+        if (!CollectionUtils.isEmpty(filter.getHitTypes())) {
+            builder.filter(f -> f.terms(t -> t.field("segmentType").terms(v -> v.value(
+                    filter.getHitTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
+        if (filter.getCreatedFrom() != null || filter.getCreatedTo() != null) {
+            builder.filter(f -> f.range(r -> r.number(n -> {
+                n.field("createdAt");
+                if (filter.getCreatedFrom() != null) {
+                    n.gte(filter.getCreatedFrom().doubleValue());
+                }
+                if (filter.getCreatedTo() != null) {
+                    n.lte(filter.getCreatedTo().doubleValue());
+                }
+                return n;
+            })));
+        }
+    }
+
+    private void applyKnnFilters(co.elastic.clients.elasticsearch._types.KnnSearch.Builder builder,
+                                 KbSearchFilter filter) {
+        if (filter == null) {
+            return;
+        }
+        if (!CollectionUtils.isEmpty(filter.getKbIds())) {
+            builder.filter(f -> f.terms(t -> t.field("kbId").terms(v -> v.value(
+                    filter.getKbIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
+        if (!CollectionUtils.isEmpty(filter.getAssetTypes())) {
+            builder.filter(f -> f.terms(t -> t.field("assetType").terms(v -> v.value(
+                    filter.getAssetTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
+        if (!CollectionUtils.isEmpty(filter.getHitTypes())) {
+            builder.filter(f -> f.terms(t -> t.field("segmentType").terms(v -> v.value(
+                    filter.getHitTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
+        if (filter.getCreatedFrom() != null || filter.getCreatedTo() != null) {
+            builder.filter(f -> f.range(r -> r.number(n -> {
+                n.field("createdAt");
+                if (filter.getCreatedFrom() != null) {
+                    n.gte(filter.getCreatedFrom().doubleValue());
+                }
+                if (filter.getCreatedTo() != null) {
+                    n.lte(filter.getCreatedTo().doubleValue());
+                }
+                return n;
+            })));
+        }
     }
 
     private SearchRequest buildNeighborChunksRequest(String assetId, Integer pageNo, int chunkOrder, int window) {
@@ -231,6 +308,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
     private Segment toSegment(KbSegmentDocument doc) {
         return Segment.builder()
                 .segmentId(doc.getSegmentId())
+                .kbId(doc.getKbId())
                 .assetId(doc.getAssetId())
                 .assetType(parseAssetType(doc.getAssetType()))
                 .segmentType(parseSegmentType(doc.getSegmentType()))

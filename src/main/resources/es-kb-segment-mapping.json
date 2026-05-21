@@ -3,6 +3,9 @@
     "segmentId": {
       "type": "keyword"
     },
+    "kbId": {
+      "type": "keyword"
+    },
     "assetId": {
       "type": "keyword"
     },

@@ -31,6 +31,7 @@ public class TextSegmentIndexWriter implements TextSegmentRepository {
                 .filter(chunk -> StringUtils.hasText(chunk.getSegmentId()))
                 .map(chunk -> Segment.builder()
                         .segmentId(chunk.getSegmentId())
+                        .kbId(chunk.getKbId())
                         .assetId(chunk.getAssetId())
                         .assetType(KbAssetTypeEnum.TEXT)
                         .segmentType(SegmentType.TEXT_CHUNK)

@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * Conversation APIs.
@@ -78,6 +79,14 @@ public class ConversationApiController {
             @PathVariable @NotBlank String sessionId,
             @Valid @RequestBody ConversationMessageRequestDTO request) {
         return Result.success(conversationService.createMessage(sessionId, request));
+    }
+
+    @PostMapping(value = "/{sessionId}/messages/stream", produces = "text/event-stream;charset=UTF-8")
+    @RequireAuth
+    public SseEmitter streamMessage(
+            @PathVariable @NotBlank String sessionId,
+            @Valid @RequestBody ConversationMessageRequestDTO request) {
+        return conversationService.streamMessage(sessionId, request);
     }
     
     @GetMapping("/{sessionId}/messages")

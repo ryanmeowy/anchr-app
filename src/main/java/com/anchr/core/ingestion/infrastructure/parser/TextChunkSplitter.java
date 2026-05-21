@@ -59,7 +59,8 @@ public class TextChunkSplitter {
                 }
                 Integer pageNo = unit.getPageNo();
                 String segmentId = buildSegmentId(assetId, pageNo, chunkOrder);
-                chunks.add(new TextChunk(segmentId, assetId, title, pageNo, chunkText, chunkOrder, metadata.getObjectKey(), null));
+                chunks.add(new TextChunk(segmentId, metadata.getKbId(), assetId, title, pageNo,
+                        chunkText, chunkOrder, metadata.getObjectKey(), null));
                 chunkOrder++;
                 if (end >= normalized.length()) {
                     break;
