@@ -15,6 +15,7 @@ public class PreviewSegmentDTO implements Serializable {
 
     private String segmentId;
     private String assetId;
+    private String kbId;
     private String assetType;
     private String segmentType;
     private String fileName;
@@ -28,4 +29,14 @@ public class PreviewSegmentDTO implements Serializable {
     private String ocrSummary;
     private PreviewAnchorDTO anchor;
     private List<SurroundingChunkDTO> surroundingChunks;
+    private CitationContextDTO citationContext;
+
+    @Data
+    @Builder
+    public static class CitationContextDTO implements Serializable {
+        private String sourceQuestion;
+        private String answerClaim;
+        private Integer citationIndex;
+        private String citationReason;
+    }
 }

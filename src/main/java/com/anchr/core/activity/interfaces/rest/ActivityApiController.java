@@ -1,0 +1,39 @@
+package com.anchr.core.activity.interfaces.rest;
+
+import com.anchr.core.activity.application.ActivityQueryService;
+import com.anchr.core.activity.interfaces.rest.dto.RecentCitationListDTO;
+import com.anchr.core.activity.interfaces.rest.dto.RecentQuestionListDTO;
+import com.anchr.core.auth.RequireAuth;
+import com.anchr.core.common.model.Result;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * Activity query APIs.
+ */
+@RestController
+@RequestMapping("/api/v1/activity")
+@RequiredArgsConstructor
+public class ActivityApiController {
+
+    private final ActivityQueryService activityQueryService;
+
+    @RequireAuth
+    @GetMapping("/recent-questions")
+    public Result<RecentQuestionListDTO> recentQuestions(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor) {
+        return Result.success(activityQueryService.recentQuestions(limit, cursor));
+    }
+
+    @RequireAuth
+    @GetMapping("/recent-citations")
+    public Result<RecentCitationListDTO> recentCitations(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor) {
+        return Result.success(activityQueryService.recentCitations(limit, cursor));
+    }
+}

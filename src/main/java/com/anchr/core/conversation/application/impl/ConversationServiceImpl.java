@@ -1,6 +1,9 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.anchr.core.activity.application.ActivityEventService;
+import com.anchr.core.common.application.context.RequestUserContext;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.FollowUpQuestionService;
@@ -20,11 +23,16 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
+import com.anchr.core.search.application.KbScopeResolver;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -32,12 +40,14 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Default conversation application service.
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ConversationServiceImpl implements ConversationService {
 
@@ -55,8 +65,12 @@ public class ConversationServiceImpl implements ConversationService {
     private final FollowUpQuestionService followUpQuestionService;
     private final ConversationTurnCodec conversationTurnCodec;
     private final ConversationRetrievalTraceBuilder conversationRetrievalTraceBuilder;
+    private final KbScopeResolver kbScopeResolver;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final ActivityEventService activityEventService;
+    @Qualifier("ingestionTaskExecutor")
+    private final Executor streamExecutor;
 
     @Override
     public ConversationSessionDTO createSession(ConversationCreateRequestDTO request) {
@@ -69,6 +83,7 @@ public class ConversationServiceImpl implements ConversationService {
                 now,
                 resolveExpiresAt(now)
         );
+        session.setKbScope(kbScopeResolver.resolveVisibleKbIds(request.getKbIds()));
         conversationRepository.saveSession(session);
         meterRegistry.counter("conversation.created.count").increment();
         return toSessionDto(session);
@@ -121,6 +136,7 @@ public class ConversationServiceImpl implements ConversationService {
     public ConversationMessageResponseDTO createMessage(String sessionId, ConversationMessageRequestDTO request) {
         ConversationSession session = loadSessionOrThrow(sessionId);
         long now = System.currentTimeMillis();
+        applyConversationScope(session, request);
         boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
         ConversationMessagePipelineResult pipelineResult = conversationMessagePipeline.execute(session.getSessionId(), request);
@@ -132,6 +148,8 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setQuery(request.getQuery().trim());
         turn.setRewrittenQuery(pipelineResult.rewriteResult().getRewrittenQuery());
         turn.setAnswer(pipelineResult.answerGenerationResult().getAnswerText());
+        turn.setKbScopeJson(conversationTurnCodec.serializeKbScope(request.getKbIds()));
+        turn.setAnswerMode(resolveAnswerMode(request));
         turn.setCitationsJson(conversationTurnCodec.serializeCitations(pipelineResult.answerCitations()));
         turn.setResultCardsJson(conversationTurnCodec.serializeResultCards(pipelineResult.resultCards()));
         turn.setRetrievalTraceJson(conversationRetrievalTraceBuilder.buildTraceJson(
@@ -142,6 +160,11 @@ public class ConversationServiceImpl implements ConversationService {
         ));
         turn.setCreatedAt(now);
         conversationRepository.saveTurn(turn);
+        activityEventService.recordQuestionAsked(
+                session.getSessionId(),
+                turn.getTurnId(),
+                turn.getQuery(),
+                request.getKbIds());
         meterRegistry.counter("conversation.turn.count").increment();
 
         if (shouldAutoTitle) {
@@ -155,6 +178,9 @@ public class ConversationServiceImpl implements ConversationService {
         response.setTurnId(turn.getTurnId());
         response.setRewrittenQuery(pipelineResult.rewriteResult().getRewrittenQuery());
         response.setAnswer(turn.getAnswer());
+        response.setKbScope(request.getKbIds());
+        response.setAnswerMode(turn.getAnswerMode());
+        response.setRetrievalStage("ANSWERED");
         response.setCitations(conversationTurnCodec.toCitationDTOs(pipelineResult.answerCitations()));
         response.setResultCards(pipelineResult.resultCards());
         List<String> suggestedQuestions = followUpQuestionService.generate(
@@ -175,6 +201,30 @@ public class ConversationServiceImpl implements ConversationService {
             meterRegistry.counter("answer.citation.empty.count").increment();
         }
         return response;
+    }
+
+    @Override
+    public SseEmitter streamMessage(String sessionId, ConversationMessageRequestDTO request) {
+        SseEmitter emitter = new SseEmitter(120_000L);
+        RequestUserContext context = UserContextHolder.get();
+        streamExecutor.execute(() -> {
+            UserContextHolder.set(context);
+            try {
+                sendEvent(emitter, "trace", Map.of("stage", "retrieval", "message", "started"));
+                ConversationMessageResponseDTO response = createMessage(sessionId, request);
+                streamAnswer(emitter, response.getAnswer());
+                sendEvent(emitter, "citations", response.getCitations() == null ? List.of() : response.getCitations());
+                sendEvent(emitter, "done", Map.of("turnId", response.getTurnId(), "kbScope", response.getKbScope()));
+                emitter.complete();
+            } catch (BusinessException e) {
+                sendError(emitter, e.getError() == null ? ApiError.INTERNAL_ERROR.name() : e.getError().name(), e.getMessage());
+            } catch (Exception e) {
+                sendError(emitter, ApiError.INTERNAL_ERROR.name(), ApiError.INTERNAL_ERROR.getMessage());
+            } finally {
+                UserContextHolder.clear();
+            }
+        });
+        return emitter;
     }
 
     @Override
@@ -223,6 +273,7 @@ public class ConversationServiceImpl implements ConversationService {
         dto.setUserId(session.getUserId());
         dto.setTitle(session.getTitle());
         dto.setStatus(session.getStatus().name());
+        dto.setKbScope(session.getKbScope() == null ? List.of() : session.getKbScope());
         dto.setCreatedAt(session.getCreatedAt());
         dto.setUpdatedAt(session.getUpdatedAt());
         dto.setExpiresAt(session.getExpiresAt());
@@ -259,6 +310,8 @@ public class ConversationServiceImpl implements ConversationService {
         dto.setQuery(turn.getQuery());
         dto.setRewrittenQuery(turn.getRewrittenQuery());
         dto.setAnswer(turn.getAnswer());
+        dto.setKbScope(conversationTurnCodec.parseKbScope(turn.getKbScopeJson()));
+        dto.setAnswerMode(turn.getAnswerMode());
         dto.setCitations(conversationTurnCodec.parseCitations(turn.getCitationsJson()));
         dto.setResultCards(conversationTurnCodec.parseResultCards(turn.getResultCardsJson()));
         dto.setCreatedAt(turn.getCreatedAt());
@@ -311,6 +364,54 @@ public class ConversationServiceImpl implements ConversationService {
             return null;
         }
         return text.trim();
+    }
+
+    private void applyConversationScope(ConversationSession session, ConversationMessageRequestDTO request) {
+        List<String> requested = request.getKbIds();
+        if ((requested == null || requested.isEmpty()) && session.getKbScope() != null && !session.getKbScope().isEmpty()) {
+            request.setKbIds(session.getKbScope());
+            return;
+        }
+        request.setKbIds(kbScopeResolver.resolveVisibleKbIds(requested));
+    }
+
+    private String resolveAnswerMode(ConversationMessageRequestDTO request) {
+        return StringUtils.hasText(request.getAnswerMode()) ? request.getAnswerMode().trim() : "STRICT";
+    }
+
+    private void streamAnswer(SseEmitter emitter, String answer) throws IOException {
+        if (!StringUtils.hasText(answer)) {
+            return;
+        }
+        int chunkSize = 48;
+        for (int start = 0; start < answer.length(); start += chunkSize) {
+            int end = Math.min(answer.length(), start + chunkSize);
+            sendEvent(emitter, "delta", Map.of("text", answer.substring(start, end)));
+        }
+    }
+
+    private void sendEvent(SseEmitter emitter, String event, Object data) throws IOException {
+        emitter.send(SseEmitter.event().name(event).data(data));
+    }
+
+    private void sendError(SseEmitter emitter, String code, String message) {
+        try {
+            sendEvent(emitter, "error", Map.of("code", code, "message", message));
+            emitter.complete();
+        } catch (IOException e) {
+            try {
+                emitter.completeWithError(e);
+            } catch (Exception completeError) {
+                log.warn("failed to complete SSE emitter after error event failure, code={}", code, completeError);
+            }
+        } catch (Exception e) {
+            log.warn("failed to send SSE error event, code={}", code, e);
+            try {
+                emitter.completeWithError(e);
+            } catch (Exception completeError) {
+                log.warn("failed to complete SSE emitter after runtime error, code={}", code, completeError);
+            }
+        }
     }
 
     private boolean shouldAutoGenerateTitle(String sessionId, String existingTitle) {

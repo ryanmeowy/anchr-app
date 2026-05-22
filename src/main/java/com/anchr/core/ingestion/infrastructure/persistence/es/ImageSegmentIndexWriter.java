@@ -50,6 +50,7 @@ public class ImageSegmentIndexWriter {
         if (StringUtils.hasText(captionText)) {
             segments.add(Segment.builder()
                     .segmentId(assetId + ":caption")
+                    .kbId(doc.getKbId())
                     .assetId(assetId)
                     .assetType(KbAssetTypeEnum.IMAGE)
                     .segmentType(SegmentType.IMAGE_CAPTION)
@@ -77,6 +78,7 @@ public class ImageSegmentIndexWriter {
             Bbox bbox = resolveBbox(paragraph.getBbox(), imageWidth, imageHeight);
             segments.add(Segment.builder()
                     .segmentId(assetId + ":ocr:" + paragraph.getIndex())
+                    .kbId(doc.getKbId())
                     .assetId(assetId)
                     .assetType(KbAssetTypeEnum.IMAGE)
                     .segmentType(SegmentType.IMAGE_OCR_BLOCK)

@@ -16,6 +16,8 @@ public class ConversationTurnDTO implements Serializable {
     private String query;
     private String rewrittenQuery;
     private String answer;
+    private List<String> kbScope;
+    private String answerMode;
     private List<CitationDTO> citations;
     private List<ResultCardDTO> resultCards;
     private long createdAt;

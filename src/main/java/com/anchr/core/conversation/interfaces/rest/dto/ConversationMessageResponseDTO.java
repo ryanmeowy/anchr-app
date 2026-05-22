@@ -16,6 +16,9 @@ public class ConversationMessageResponseDTO implements Serializable {
     private String turnId;
     private String rewrittenQuery;
     private String answer;
+    private List<String> kbScope;
+    private String answerMode;
+    private String retrievalStage;
     private List<ConversationTurnDTO.CitationDTO> citations;
     private List<ResultCardDTO> resultCards;
     private RetrievalTraceDTO retrievalTrace;

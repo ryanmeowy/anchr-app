@@ -7,6 +7,7 @@ import lombok.Data;
  */
 @Data
 public class TextAssetMetadata {
+    private String kbId;
     private String assetId;
     private String title;
     private String fileName;

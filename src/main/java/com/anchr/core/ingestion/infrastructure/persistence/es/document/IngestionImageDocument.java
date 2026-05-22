@@ -21,6 +21,9 @@ public class IngestionImageDocument {
     @Field(type = FieldType.Long)
     private Long id;
 
+    @Transient
+    private String kbId;
+
     @Field(type = FieldType.Keyword)
     private String imagePath;
 

@@ -13,6 +13,6 @@ public interface ConversationRetrievalOrchestrator {
                                          Integer topK,
                                          Integer limit,
                                          String strategy,
+                                         List<String> kbIds,
                                          List<String> preferredModalities);
 }
-

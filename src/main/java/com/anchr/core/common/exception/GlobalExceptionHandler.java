@@ -25,14 +25,18 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public Result<Void> handleBusinessException(BusinessException e) {
+        String traceId = UUID.randomUUID().toString();
         String fallback = e.getError() == null ? ApiError.INTERNAL_ERROR.getMessage() : e.getError().getMessage();
-        return Result.error(e.getCode(), safeMessage(e.getMessage(), fallback));
+        ApiError error = e.getError() == null ? ApiError.INTERNAL_ERROR : e.getError();
+        return Result.error(error, safeMessage(e.getMessage(), fallback), traceId);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public Result<Void> handleIllegalArgument(IllegalArgumentException e) {
-        return Result.error(ApiError.INVALID_REQUEST.getCode(),
-                safeMessage(e.getMessage(), ApiError.INVALID_REQUEST.getMessage()));
+        String traceId = UUID.randomUUID().toString();
+        return Result.error(ApiError.INVALID_REQUEST,
+                safeMessage(e.getMessage(), ApiError.INVALID_REQUEST.getMessage()),
+                traceId);
     }
 
     @ExceptionHandler({
@@ -44,12 +48,14 @@ public class GlobalExceptionHandler {
             ConstraintViolationException.class
     })
     public Result<Void> handleBadRequest(Exception e) {
-        return Result.error(ApiError.INVALID_REQUEST);
+        String traceId = UUID.randomUUID().toString();
+        return Result.error(ApiError.INVALID_REQUEST, traceId);
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public Result<Void> handleUploadTooLarge(MaxUploadSizeExceededException e) {
-        return Result.error(ApiError.UPLOAD_TOO_LARGE);
+        String traceId = UUID.randomUUID().toString();
+        return Result.error(ApiError.UPLOAD_TOO_LARGE, traceId);
     }
 
     @ExceptionHandler(Exception.class)

@@ -40,6 +40,7 @@ public class ConversationMessagePipeline {
                 request.getTopK(),
                 request.getLimit(),
                 request.getStrategy(),
+                request.getKbIds(),
                 rewriteResult.getPreferredModalities()
         );
         List<ResultCardDTO> resultCards = conversationResultCardMapper.map(retrievalResult.getTopCandidates());

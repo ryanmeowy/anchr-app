@@ -3,6 +3,7 @@ package com.anchr.core.conversation.interfaces.rest.dto;
 import lombok.Data;
 
 import java.io.Serializable;
+import java.util.List;
 
 /**
  * Conversation session response DTO.
@@ -15,6 +16,7 @@ public class ConversationSessionDTO implements Serializable {
     private String title;
     private String status;
     private String lastMessagePreview;
+    private List<String> kbScope;
     private long createdAt;
     private long updatedAt;
     private long expiresAt;

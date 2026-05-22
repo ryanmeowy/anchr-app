@@ -35,6 +35,7 @@ public class KbSearchResultDTO implements Serializable {
      * Optional trace fields for callback to original asset.
      */
     private String segmentId;
+    private String kbId;
     private String assetId;
     private String sourceRef;
 
@@ -52,6 +53,7 @@ public class KbSearchResultDTO implements Serializable {
     @Builder
     public static class TopChunk implements Serializable {
         private String segmentId;
+        private String kbId;
         private String segmentType;
         private String snippet;
         private Double score;

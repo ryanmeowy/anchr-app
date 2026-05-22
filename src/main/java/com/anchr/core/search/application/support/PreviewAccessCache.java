@@ -48,6 +48,13 @@ public class PreviewAccessCache {
         cache.put(buildKey(segmentId, accessToken), new CacheEntry(access, cacheUntil));
     }
 
+    public void evict(String segmentId, String accessToken) {
+        if (!StringUtils.hasText(segmentId)) {
+            return;
+        }
+        cache.remove(buildKey(segmentId, accessToken));
+    }
+
     private String buildKey(String segmentId, String accessToken) {
         return CACHE_KEY_PREFIX + segmentId + ":token:" + tokenHash(accessToken);
     }

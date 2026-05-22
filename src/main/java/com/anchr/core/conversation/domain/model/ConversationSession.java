@@ -3,6 +3,8 @@ package com.anchr.core.conversation.domain.model;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * Conversation session aggregate root.
  */
@@ -17,6 +19,7 @@ public class ConversationSession {
     private long createdAt;
     private long updatedAt;
     private long expiresAt;
+    private List<String> kbScope;
 
     public static ConversationSession createActive(String sessionId, String userId, String title, long now, long expiresAt) {
         ConversationSession session = new ConversationSession();

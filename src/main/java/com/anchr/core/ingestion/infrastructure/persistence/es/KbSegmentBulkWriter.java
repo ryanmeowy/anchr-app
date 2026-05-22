@@ -70,6 +70,7 @@ public class KbSegmentBulkWriter {
     private KbSegmentDocument toDocument(Segment segment) {
         KbSegmentDocument document = new KbSegmentDocument();
         document.setSegmentId(segment.getSegmentId());
+        document.setKbId(segment.getKbId());
         document.setAssetId(segment.getAssetId());
         document.setAssetType(segment.getAssetType() == null ? null : segment.getAssetType().name());
         document.setSegmentType(segment.getSegmentType() == null ? null : segment.getSegmentType().name());

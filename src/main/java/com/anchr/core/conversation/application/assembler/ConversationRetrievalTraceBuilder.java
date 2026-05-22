@@ -31,6 +31,8 @@ public class ConversationRetrievalTraceBuilder {
         trace.put("topK", request.getTopK());
         trace.put("limit", request.getLimit());
         trace.put("strategy", request.getStrategy());
+        trace.put("kbIds", request.getKbIds());
+        trace.put("answerMode", request.getAnswerMode());
         trace.put("rewriteReason", rewriteResult.getRewriteReason());
         trace.put("topicEntities", rewriteResult.getTopicEntities());
         trace.put("preferredModalities", rewriteResult.getPreferredModalities());

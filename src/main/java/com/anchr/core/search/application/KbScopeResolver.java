@@ -1,0 +1,68 @@
+package com.anchr.core.search.application;
+
+import com.anchr.core.common.application.context.RequestUserContext;
+import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * Resolves visible knowledge base scope for search and conversation.
+ */
+@Service
+@RequiredArgsConstructor
+public class KbScopeResolver {
+
+    private static final int ACTIVE_KB_PAGE_SIZE = 100;
+
+    private final KnowledgeBaseRepository knowledgeBaseRepository;
+
+    public List<String> resolveVisibleKbIds(List<String> requestedKbIds) {
+        RequestUserContext context = UserContextHolder.get();
+        List<String> activeIds = listAllActiveIds(context.workspaceId());
+        if (activeIds.isEmpty()) {
+            return List.of();
+        }
+        if (requestedKbIds == null || requestedKbIds.isEmpty()) {
+            return activeIds;
+        }
+        Set<String> activeSet = new LinkedHashSet<>(activeIds);
+        LinkedHashSet<String> resolved = new LinkedHashSet<>();
+        for (String kbId : requestedKbIds) {
+            if (!StringUtils.hasText(kbId)) {
+                continue;
+            }
+            String normalized = kbId.trim();
+            if (activeSet.contains(normalized)) {
+                resolved.add(normalized);
+            }
+        }
+        return resolved.stream().toList();
+    }
+
+    private List<String> listAllActiveIds(String workspaceId) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        int offset = 0;
+        while (true) {
+            List<KnowledgeBase> page = knowledgeBaseRepository.listActive(workspaceId, ACTIVE_KB_PAGE_SIZE, offset);
+            if (page.isEmpty()) {
+                break;
+            }
+            page.stream()
+                    .map(KnowledgeBase::getId)
+                    .filter(StringUtils::hasText)
+                    .forEach(ids::add);
+            if (page.size() < ACTIVE_KB_PAGE_SIZE) {
+                break;
+            }
+            offset += ACTIVE_KB_PAGE_SIZE;
+        }
+        return ids.stream().toList();
+    }
+}
