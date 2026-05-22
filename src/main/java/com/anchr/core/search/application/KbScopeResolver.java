@@ -19,14 +19,13 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class KbScopeResolver {
 
+    private static final int ACTIVE_KB_PAGE_SIZE = 100;
+
     private final KnowledgeBaseRepository knowledgeBaseRepository;
 
     public List<String> resolveVisibleKbIds(List<String> requestedKbIds) {
         RequestUserContext context = UserContextHolder.get();
-        List<String> activeIds = knowledgeBaseRepository.listActive(context.workspaceId(), 100, 0).stream()
-                .map(KnowledgeBase::getId)
-                .filter(StringUtils::hasText)
-                .toList();
+        List<String> activeIds = listAllActiveIds(context.workspaceId());
         if (activeIds.isEmpty()) {
             return List.of();
         }
@@ -45,5 +44,25 @@ public class KbScopeResolver {
             }
         }
         return resolved.stream().toList();
+    }
+
+    private List<String> listAllActiveIds(String workspaceId) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        int offset = 0;
+        while (true) {
+            List<KnowledgeBase> page = knowledgeBaseRepository.listActive(workspaceId, ACTIVE_KB_PAGE_SIZE, offset);
+            if (page.isEmpty()) {
+                break;
+            }
+            page.stream()
+                    .map(KnowledgeBase::getId)
+                    .filter(StringUtils::hasText)
+                    .forEach(ids::add);
+            if (page.size() < ACTIVE_KB_PAGE_SIZE) {
+                break;
+            }
+            offset += ACTIVE_KB_PAGE_SIZE;
+        }
+        return ids.stream().toList();
     }
 }

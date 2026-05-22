@@ -49,6 +49,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
     private static final String STRATEGY_CODE = "KB_RRF";
     private static final String STRATEGY_CODE_RERANK = "KB_RRF_RERANK";
+    private static final int MAX_CURSOR_OFFSET = 10_000;
 
     private final KbSegmentRepository kbSegmentRepository;
     private final KbQueryEmbeddingService kbQueryEmbeddingService;
@@ -734,7 +735,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         }
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(cursor.trim()), StandardCharsets.UTF_8);
-            return Math.max(0, Integer.parseInt(decoded));
+            return Math.min(MAX_CURSOR_OFFSET, Math.max(0, Integer.parseInt(decoded)));
         } catch (Exception e) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "cursor is invalid.");
         }

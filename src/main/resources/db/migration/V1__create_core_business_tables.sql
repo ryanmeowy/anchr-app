@@ -1,4 +1,4 @@
-create table knowledge_base (
+create table if not exists knowledge_base (
   id varchar(64) primary key,
   workspace_id varchar(64) not null default 'default',
   name varchar(128) not null,
@@ -17,7 +17,7 @@ create table knowledge_base (
 create index idx_kb_workspace_status on knowledge_base(workspace_id, status);
 create index idx_kb_updated_at on knowledge_base(updated_at);
 
-create table document_asset (
+create table if not exists document_asset (
   id varchar(64) primary key,
   workspace_id varchar(64) not null default 'default',
   kb_id varchar(64) not null,
@@ -48,7 +48,7 @@ create index idx_doc_kb_status on document_asset(kb_id, parse_status, index_stat
 create index idx_doc_hash on document_asset(kb_id, file_hash);
 create index idx_doc_created_at on document_asset(kb_id, created_at);
 
-create table ingestion_task (
+create table if not exists ingestion_task (
   id varchar(64) primary key,
   workspace_id varchar(64) not null default 'default',
   kb_id varchar(64) not null,
@@ -68,7 +68,7 @@ create table ingestion_task (
 create index idx_task_kb_created on ingestion_task(kb_id, created_at);
 create index idx_task_status on ingestion_task(status);
 
-create table ingestion_task_item (
+create table if not exists ingestion_task_item (
   id varchar(64) primary key,
   task_id varchar(64) not null,
   kb_id varchar(64) not null,

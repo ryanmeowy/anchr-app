@@ -2,6 +2,8 @@ package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.activity.application.ActivityEventService;
+import com.anchr.core.common.application.context.RequestUserContext;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.FollowUpQuestionService;
@@ -24,6 +26,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.search.application.KbScopeResolver;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -44,6 +47,7 @@ import java.util.concurrent.TimeUnit;
  * Default conversation application service.
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ConversationServiceImpl implements ConversationService {
 
@@ -202,7 +206,9 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public SseEmitter streamMessage(String sessionId, ConversationMessageRequestDTO request) {
         SseEmitter emitter = new SseEmitter(120_000L);
+        RequestUserContext context = UserContextHolder.get();
         streamExecutor.execute(() -> {
+            UserContextHolder.set(context);
             try {
                 sendEvent(emitter, "trace", Map.of("stage", "retrieval", "message", "started"));
                 ConversationMessageResponseDTO response = createMessage(sessionId, request);
@@ -214,6 +220,8 @@ public class ConversationServiceImpl implements ConversationService {
                 sendError(emitter, e.getError() == null ? ApiError.INTERNAL_ERROR.name() : e.getError().name(), e.getMessage());
             } catch (Exception e) {
                 sendError(emitter, ApiError.INTERNAL_ERROR.name(), ApiError.INTERNAL_ERROR.getMessage());
+            } finally {
+                UserContextHolder.clear();
             }
         });
         return emitter;
@@ -391,7 +399,18 @@ public class ConversationServiceImpl implements ConversationService {
             sendEvent(emitter, "error", Map.of("code", code, "message", message));
             emitter.complete();
         } catch (IOException e) {
-            emitter.completeWithError(e);
+            try {
+                emitter.completeWithError(e);
+            } catch (Exception completeError) {
+                log.warn("failed to complete SSE emitter after error event failure, code={}", code, completeError);
+            }
+        } catch (Exception e) {
+            log.warn("failed to send SSE error event, code={}", code, e);
+            try {
+                emitter.completeWithError(e);
+            } catch (Exception completeError) {
+                log.warn("failed to complete SSE emitter after runtime error, code={}", code, completeError);
+            }
         }
     }
 

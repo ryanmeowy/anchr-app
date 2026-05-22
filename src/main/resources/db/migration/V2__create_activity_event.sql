@@ -1,4 +1,4 @@
-create table activity_event (
+create table if not exists activity_event (
   id varchar(64) primary key,
   workspace_id varchar(64) not null default 'default',
   user_id varchar(64) not null default 'system',

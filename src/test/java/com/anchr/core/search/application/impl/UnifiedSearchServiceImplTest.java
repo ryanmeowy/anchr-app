@@ -21,6 +21,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -312,6 +315,27 @@ class UnifiedSearchServiceImplTest {
         assertThat(aggregated.getAnchor().getImageWidth()).isEqualTo(1920);
         assertThat(aggregated.getAnchor().getImageHeight()).isEqualTo(1080);
         assertThat(aggregated.getTopChunks().getFirst().getAnchor().getBbox().getUnit()).isEqualTo("PIXEL");
+    }
+
+    @Test
+    void searchPageCursor_shouldClampLargeOffset() throws Exception {
+        UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
+                kbSegmentRepository,
+                kbQueryEmbeddingService,
+                mock(KbScopeResolver.class),
+                searchRerankPort,
+                new AppSearchProperties(),
+                new SimpleMeterRegistry(),
+                mock(ActivityEventService.class)
+        );
+        Method method = UnifiedSearchServiceImpl.class.getDeclaredMethod("decodeCursorOffset", String.class);
+        method.setAccessible(true);
+        String cursor = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("999999".getBytes(StandardCharsets.UTF_8));
+
+        int offset = (int) method.invoke(service, cursor);
+
+        assertThat(offset).isEqualTo(10_000);
     }
 
     private UnifiedSearchServiceImpl buildService() {
