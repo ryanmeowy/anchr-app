@@ -85,6 +85,14 @@ app:
     medium-threshold: 0.6
   debug:
     strategy-header-enabled: false
+  settings:
+    connection-test:
+      generation-prompt: ${APP_SETTINGS_TEST_GENERATION_PROMPT:}
+      embedding-text: ${APP_SETTINGS_TEST_EMBEDDING_TEXT:}
+      rerank-query: ${APP_SETTINGS_TEST_RERANK_QUERY:}
+      rerank-document: ${APP_SETTINGS_TEST_RERANK_DOCUMENT:}
+      ocr-image-url: ${APP_SETTINGS_TEST_OCR_IMAGE_URL:}
+      object-storage-object-key: ${APP_SETTINGS_TEST_OBJECT_STORAGE_OBJECT_KEY:}
 
 logging:
   level:
@@ -96,22 +104,6 @@ management:
     web:
       exposure:
         include: health,info,metrics
-
-grpc:
-  client:
-    vision-python-service:
-      address: ${VISION_PYTHON_SERVICE_ADDRESS:static://127.0.0.1:50051}
-      negotiation-type: ${VISION_PYTHON_SERVICE_NEGOTIATION_TYPE:plaintext}
-  deadline:
-    embed-image-ms: ${GRPC_DEADLINE_EMBED_IMAGE_MS:5000}
-    embed-text-ms: ${GRPC_DEADLINE_EMBED_TEXT_MS:5000}
-    ocr-ms: ${GRPC_DEADLINE_OCR_MS:8000}
-    generate-filename-ms: ${GRPC_DEADLINE_GENERATE_FILENAME_MS:3000}
-    generate-tags-ms: ${GRPC_DEADLINE_GENERATE_TAGS_MS:8000}
-    generate-graph-ms: ${GRPC_DEADLINE_GENERATE_GRAPH_MS:10000}
-    parse-graph-ms: ${GRPC_DEADLINE_PARSE_GRAPH_MS:8000}
-    stream-caption-ms: ${GRPC_DEADLINE_STREAM_CAPTION_MS:20000}
-    rerank-ms: ${GRPC_DEADLINE_RERANK_MS:5000}
 
 aliyun:
   oss:

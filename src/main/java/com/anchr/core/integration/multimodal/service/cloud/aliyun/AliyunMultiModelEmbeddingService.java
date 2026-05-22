@@ -5,9 +5,10 @@ import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.anchr.core.integration.multimodal.manager.aliyun.BailianEmbeddingManager;
 import com.anchr.core.integration.multimodal.domain.model.AliyunErrorCode;
 import com.anchr.core.integration.multimodal.embedding.EmbeddingBackend;
+import com.anchr.core.settings.application.provider.ProviderIdentity;
+import com.anchr.core.settings.domain.model.ProviderType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.Base64;
@@ -16,14 +17,23 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.embedding", name = "backend", havingValue = "aliyun")
-public class AliyunMultiModelEmbeddingService implements EmbeddingBackend {
+public class AliyunMultiModelEmbeddingService implements EmbeddingBackend, ProviderIdentity {
 
     private final BailianEmbeddingManager bailianManager;
 
     @Override
     public String backendName() {
         return "aliyun";
+    }
+
+    @Override
+    public ProviderType providerType() {
+        return ProviderType.EMBEDDING;
+    }
+
+    @Override
+    public String providerName() {
+        return backendName();
     }
 
     /**

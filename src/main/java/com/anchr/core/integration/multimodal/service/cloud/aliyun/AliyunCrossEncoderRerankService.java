@@ -11,9 +11,10 @@ import com.alibaba.dashscope.rerank.TextReRankResult;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.domain.port.SearchRerankPort;
+import com.anchr.core.settings.application.provider.ProviderIdentity;
+import com.anchr.core.settings.domain.model.ProviderType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -30,8 +31,17 @@ import static com.anchr.core.integration.constant.AliyunConstant.RERANK_MODEL_NA
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "rerank", havingValue = "aliyun")
-public class AliyunCrossEncoderRerankService implements SearchRerankPort {
+public class AliyunCrossEncoderRerankService implements SearchRerankPort, ProviderIdentity {
+
+    @Override
+    public ProviderType providerType() {
+        return ProviderType.RERANK;
+    }
+
+    @Override
+    public String providerName() {
+        return "aliyun";
+    }
 
     @Override
     public List<RerankItem> rerank(String query, List<String> documents, Integer topN) {
