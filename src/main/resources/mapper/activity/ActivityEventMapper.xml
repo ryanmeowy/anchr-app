@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.activity.infrastructure.persistence.ActivityEventMapper">
+
+    <resultMap id="ActivityEventRecordMap" type="com.anchr.core.activity.infrastructure.persistence.ActivityEventRecord">
+        <id property="id" column="id"/>
+        <result property="workspaceId" column="workspace_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="resourceType" column="resource_type"/>
+        <result property="resourceId" column="resource_id"/>
+        <result property="payload" column="payload"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="ActivityEventColumns">
+        id, workspace_id, user_id, event_type, resource_type, resource_id, payload, created_at
+    </sql>
+
+    <insert id="insert" parameterType="com.anchr.core.activity.infrastructure.persistence.ActivityEventRecord">
+        insert into activity_event (
+            <include refid="ActivityEventColumns"/>
+        ) values (
+            #{id}, #{workspaceId}, #{userId}, #{eventType}, #{resourceType}, #{resourceId}, #{payload}, #{createdAt}
+        )
+    </insert>
+
+    <select id="listByType" resultMap="ActivityEventRecordMap">
+        select
+            <include refid="ActivityEventColumns"/>
+        from activity_event
+        where workspace_id = #{workspaceId}
+          and user_id = #{userId}
+          and event_type = #{eventType}
+        order by created_at desc, id desc
+        limit #{limit} offset #{offset}
+    </select>
+</mapper>

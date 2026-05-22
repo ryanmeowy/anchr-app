@@ -1,5 +1,6 @@
 package com.anchr.core.search.application.impl;
 
+import com.anchr.core.activity.application.ActivityEventService;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
@@ -55,10 +56,13 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private final SearchRerankPort searchRerankPort;
     private final AppSearchProperties appSearchProperties;
     private final MeterRegistry meterRegistry;
+    private final ActivityEventService activityEventService;
 
     @Override
     public List<KbSearchResultDTO> search(KbSearchQueryDTO query) {
-        return searchInternal(query, 0).items();
+        SearchResult result = searchInternal(query, 0);
+        recordSearchEvent(query, result.total());
+        return result.items();
     }
 
     @Override
@@ -70,12 +74,14 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         String nextCursor = result.total() > offset + pageItems.size()
                 ? encodeCursorOffset(offset + pageItems.size())
                 : null;
-        return KbSearchPageDTO.builder()
+        KbSearchPageDTO page = KbSearchPageDTO.builder()
                 .items(pageItems)
                 .total(result.total())
                 .nextCursor(nextCursor)
                 .facets(buildFacets(result.allItems()))
                 .build();
+        recordSearchEvent(query, result.total());
+        return page;
     }
 
     private SearchResult searchInternal(KbSearchQueryDTO query, int offset) {
@@ -118,6 +124,13 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         List<KbSearchResultDTO> allAggregated = aggregateByAsset(segmentResults, pageEnd);
         List<KbSearchResultDTO> pageItems = page(allAggregated, offset, limit);
         return new SearchResult(pageItems, allAggregated, allAggregated.size(), Math.max(0, offset), limit);
+    }
+
+    private void recordSearchEvent(KbSearchQueryDTO query, long total) {
+        if (query == null) {
+            return;
+        }
+        activityEventService.recordSearchExecuted(query.getQuery(), query.getKbIds(), Math.toIntExact(Math.min(total, Integer.MAX_VALUE)));
     }
 
     private List<SegmentRerankCandidate> fuseCandidates(List<KbSegmentHit> textHits,

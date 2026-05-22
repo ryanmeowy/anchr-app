@@ -50,6 +50,13 @@ public class MyBatisIngestionTaskRepository implements IngestionTaskRepository {
     }
 
     @Override
+    public List<IngestionTask> listRecent(String workspaceId, int limit) {
+        return mapper.listRecentTasks(workspaceId, limit).stream()
+                .map(record -> toDomain(record, List.of()))
+                .toList();
+    }
+
+    @Override
     public List<IngestionTaskItem> listItems(String taskId) {
         return mapper.listItems(taskId).stream().map(this::toDomain).toList();
     }

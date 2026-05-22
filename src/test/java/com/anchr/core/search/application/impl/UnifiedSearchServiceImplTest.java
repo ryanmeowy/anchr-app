@@ -1,9 +1,12 @@
 package com.anchr.core.search.application.impl;
 
+import com.anchr.core.activity.application.ActivityEventService;
 import com.anchr.core.search.application.KbQueryEmbeddingService;
+import com.anchr.core.search.application.KbScopeResolver;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.Bbox;
 import com.anchr.core.search.domain.model.KbAssetTypeEnum;
+import com.anchr.core.search.domain.model.KbSearchFilter;
 import com.anchr.core.search.domain.model.KbSegmentHit;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
@@ -22,8 +25,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,7 +53,7 @@ class UnifiedSearchServiceImplTest {
         query.setStrategy("KB_RRF");
 
         when(kbQueryEmbeddingService.embedQuery("mysql")).thenReturn(List.of(0.1f, 0.2f));
-        when(kbSegmentRepository.textSearch("mysql", 5)).thenReturn(List.of(
+        when(kbSegmentRepository.textSearch(eq("mysql"), eq(5), any(KbSearchFilter.class))).thenReturn(List.of(
                 KbSegmentHit.builder()
                         .segment(buildSegment("seg-1", KbAssetTypeEnum.TEXT, SegmentType.TEXT_CHUNK, "mysql notes", "mysql chunk", null, 2))
                         .rawScore(3.2d)
@@ -56,7 +61,7 @@ class UnifiedSearchServiceImplTest {
                         .highlightFields(List.of("contentText"))
                         .build()
         ));
-        when(kbSegmentRepository.vectorSearch(List.of(0.1f, 0.2f), 5)).thenReturn(List.of(
+        when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(5), any(KbSearchFilter.class))).thenReturn(List.of(
                 KbSegmentHit.builder()
                         .segment(buildSegment("seg-1", KbAssetTypeEnum.TEXT, SegmentType.TEXT_CHUNK, "mysql notes", "mysql chunk", null, 2))
                         .rawScore(1.1d)
@@ -107,7 +112,7 @@ class UnifiedSearchServiceImplTest {
         query.setLimit(3);
 
         when(kbQueryEmbeddingService.embedQuery("mysql")).thenReturn(List.of(0.1f, 0.2f));
-        when(kbSegmentRepository.textSearch("mysql", 5)).thenReturn(List.of(
+        when(kbSegmentRepository.textSearch(eq("mysql"), eq(5), any(KbSearchFilter.class))).thenReturn(List.of(
                 KbSegmentHit.builder()
                         .segment(buildSegment("seg-t1", KbAssetTypeEnum.TEXT, SegmentType.TEXT_CHUNK, "mysql notes", "mysql chunk", null, 3))
                         .rawScore(2.1d)
@@ -115,7 +120,7 @@ class UnifiedSearchServiceImplTest {
                         .highlightFields(List.of("contentText"))
                         .build()
         ));
-        when(kbSegmentRepository.vectorSearch(List.of(0.1f, 0.2f), 5)).thenReturn(List.of());
+        when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(5), any(KbSearchFilter.class))).thenReturn(List.of());
 
         List<KbSearchResultDTO> results = service.search(query);
 
@@ -139,8 +144,8 @@ class UnifiedSearchServiceImplTest {
         query.setLimit(3);
 
         when(kbQueryEmbeddingService.embedQuery("mysql")).thenReturn(List.of(0.1f, 0.2f));
-        when(kbSegmentRepository.textSearch("mysql", 5)).thenReturn(List.of());
-        when(kbSegmentRepository.vectorSearch(List.of(0.1f, 0.2f), 5)).thenReturn(List.of(
+        when(kbSegmentRepository.textSearch(eq("mysql"), eq(5), any(KbSearchFilter.class))).thenReturn(List.of());
+        when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(5), any(KbSearchFilter.class))).thenReturn(List.of(
                 KbSegmentHit.builder()
                         .segment(buildSegment("seg-i1", KbAssetTypeEnum.IMAGE, SegmentType.IMAGE_OCR_BLOCK, "diagram", null, "mysql ocr text", null))
                         .rawScore(1.8d)
@@ -176,8 +181,8 @@ class UnifiedSearchServiceImplTest {
         query.setStrategy("KB_RRF_RERANK");
 
         when(kbQueryEmbeddingService.embedQuery("mysql")).thenReturn(List.of(0.1f, 0.2f));
-        when(kbSegmentRepository.textSearch("mysql", 3)).thenReturn(List.of());
-        when(kbSegmentRepository.vectorSearch(List.of(0.1f, 0.2f), 3)).thenReturn(List.of(
+        when(kbSegmentRepository.textSearch(eq("mysql"), eq(3), any(KbSearchFilter.class))).thenReturn(List.of());
+        when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(3), any(KbSearchFilter.class))).thenReturn(List.of(
                 KbSegmentHit.builder()
                         .segment(buildSegment("seg-1", KbAssetTypeEnum.TEXT, SegmentType.TEXT_CHUNK, "mysql notes", "mysql chunk", null, 2))
                         .rawScore(1.0d)
@@ -213,13 +218,13 @@ class UnifiedSearchServiceImplTest {
         query.setLimit(3);
 
         when(kbQueryEmbeddingService.embedQuery("mysql")).thenReturn(List.of(0.1f, 0.2f));
-        when(kbSegmentRepository.textSearch("mysql", 12)).thenReturn(List.of());
-        when(kbSegmentRepository.vectorSearch(List.of(0.1f, 0.2f), 12)).thenReturn(List.of());
+        when(kbSegmentRepository.textSearch(eq("mysql"), eq(12), any(KbSearchFilter.class))).thenReturn(List.of());
+        when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(12), any(KbSearchFilter.class))).thenReturn(List.of());
 
         service.search(query);
 
-        verify(kbSegmentRepository).textSearch("mysql", 12);
-        verify(kbSegmentRepository).vectorSearch(List.of(0.1f, 0.2f), 12);
+        verify(kbSegmentRepository).textSearch(eq("mysql"), eq(12), any(KbSearchFilter.class));
+        verify(kbSegmentRepository).vectorSearch(eq(List.of(0.1f, 0.2f)), eq(12), any(KbSearchFilter.class));
     }
 
     @Test
@@ -232,12 +237,12 @@ class UnifiedSearchServiceImplTest {
         query.setLimit(5);
 
         when(kbQueryEmbeddingService.embedQuery("mysql")).thenReturn(List.of(0.1f, 0.2f));
-        when(kbSegmentRepository.textSearch("mysql", 5)).thenReturn(List.of());
+        when(kbSegmentRepository.textSearch(eq("mysql"), eq(5), any(KbSearchFilter.class))).thenReturn(List.of());
 
         Segment imageCaption = buildSegment("seg-a1", KbAssetTypeEnum.IMAGE, SegmentType.IMAGE_CAPTION, "db chart", "mysql chart", null, null, "asset-image-1");
         Segment imageOcr = buildSegment("seg-a2", KbAssetTypeEnum.IMAGE, SegmentType.IMAGE_OCR_BLOCK, "db chart", null, "mysql ocr summary text", null, "asset-image-1");
 
-        when(kbSegmentRepository.vectorSearch(List.of(0.1f, 0.2f), 5)).thenReturn(List.of(
+        when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(5), any(KbSearchFilter.class))).thenReturn(List.of(
                 KbSegmentHit.builder()
                         .segment(imageCaption)
                         .rawScore(1.8d)
@@ -278,12 +283,12 @@ class UnifiedSearchServiceImplTest {
         query.setLimit(5);
 
         when(kbQueryEmbeddingService.embedQuery("mysql")).thenReturn(List.of(0.1f, 0.2f));
-        when(kbSegmentRepository.textSearch("mysql", 5)).thenReturn(List.of());
+        when(kbSegmentRepository.textSearch(eq("mysql"), eq(5), any(KbSearchFilter.class))).thenReturn(List.of());
 
         Segment imageOcr = buildSegment("seg-b1", KbAssetTypeEnum.IMAGE, SegmentType.IMAGE_OCR_BLOCK, "db chart", null, "mysql ocr summary text", null, "asset-image-2");
         Segment imageCaption = buildSegment("seg-b2", KbAssetTypeEnum.IMAGE, SegmentType.IMAGE_CAPTION, "db chart", "mysql chart", null, null, "asset-image-2");
 
-        when(kbSegmentRepository.vectorSearch(List.of(0.1f, 0.2f), 5)).thenReturn(List.of(
+        when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(5), any(KbSearchFilter.class))).thenReturn(List.of(
                 KbSegmentHit.builder()
                         .segment(imageOcr)
                         .rawScore(1.9d)
@@ -319,12 +324,16 @@ class UnifiedSearchServiceImplTest {
         props.getRerank().setWindowSize(2);
         props.getRerank().setWindowMin(1);
         props.getRerank().setWindowMax(10);
+        KbScopeResolver kbScopeResolver = mock(KbScopeResolver.class);
+        when(kbScopeResolver.resolveVisibleKbIds(any())).thenReturn(List.of("kb-test"));
         return new UnifiedSearchServiceImpl(
                 kbSegmentRepository,
                 kbQueryEmbeddingService,
+                kbScopeResolver,
                 searchRerankPort,
                 props,
-                new SimpleMeterRegistry()
+                new SimpleMeterRegistry(),
+                mock(ActivityEventService.class)
         );
     }
 

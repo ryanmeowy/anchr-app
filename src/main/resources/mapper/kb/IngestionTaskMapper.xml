@@ -90,6 +90,15 @@
         limit #{limit}
     </select>
 
+    <select id="listRecentTasks" resultMap="IngestionTaskRecordMap">
+        select
+            <include refid="IngestionTaskColumns"/>
+        from ingestion_task
+        where workspace_id = #{workspaceId}
+        order by created_at desc, id desc
+        limit #{limit}
+    </select>
+
     <select id="listItems" resultMap="IngestionTaskItemRecordMap">
         select
             <include refid="IngestionTaskItemColumns"/>

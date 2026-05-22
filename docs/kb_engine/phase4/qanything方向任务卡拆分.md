@@ -238,11 +238,17 @@ P0 验收必须覆盖：
 
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
-| Q4-23 | TODO | Ask 首页聚合基础接口 | Q4-05, Q4-07, Q4-11 | `GET /api/v1/home/summary` | 一次返回常用知识库、最近导入摘要、最近问题/引用空数组或数据 |
-| Q4-24 | TODO | 最近问题接口 P1 | Q4-18 | `GET /api/v1/activity/recent-questions` | 用户提问后可在首页展示最近问题；无数据返回空数组 |
-| Q4-25 | TODO | 最近引用接口 P1 | Q4-20, Q4-22 | `GET /api/v1/activity/recent-citations` | 打开引用后可展示最近引用；引用记录包含来源文件和 segment |
-| Q4-26 | TODO | activity_event 轻量事件表 P1 | Q4-01 | `activity_event` migration 与事件写入 | 可记录 QUESTION_ASKED、CITATION_OPENED、DOCUMENT_IMPORTED、SEARCH_EXECUTED |
-| Q4-27 | TODO | 前端状态聚合契约确认 | Q4-23, Q4-04 | 首页 loading/empty/error 字段约定 | 聚合接口部分字段缺失时，首页能降级渲染，不阻断提问入口 |
+| Q4-23 | IMPLEMENTED | Ask 首页聚合基础接口 | Q4-05, Q4-07, Q4-11 | `GET /api/v1/home/summary` | 一次返回常用知识库、最近导入摘要、最近问题/引用空数组或数据 |
+| Q4-24 | IMPLEMENTED | 最近问题接口 P1 | Q4-18 | `GET /api/v1/activity/recent-questions` | 用户提问后可在首页展示最近问题；无数据返回空数组 |
+| Q4-25 | IMPLEMENTED | 最近引用接口 P1 | Q4-20, Q4-22 | `GET /api/v1/activity/recent-citations` | 打开引用后可展示最近引用；引用记录包含来源文件和 segment |
+| Q4-26 | IMPLEMENTED | activity_event 轻量事件表 P1 | Q4-01 | `activity_event` migration 与事件写入 | 可记录 QUESTION_ASKED、CITATION_OPENED、DOCUMENT_IMPORTED、SEARCH_EXECUTED |
+| Q4-27 | IMPLEMENTED | 前端状态聚合契约确认 | Q4-23, Q4-04 | 首页 loading/empty/error 字段约定 | 聚合接口部分字段缺失时，首页能降级渲染，不阻断提问入口 |
+
+实施说明：
+- Q4-23 已新增 `HomeSummaryService` 与 `GET /api/v1/home/summary`，返回 `favoriteKbs/recentQuestions/recentCitations/recentIngestionTasks/helpLinks/warnings/state`；常用知识库按 `knowledge_base.updated_at`，最近导入按 `ingestion_task.created_at` 聚合。
+- Q4-24/Q4-25 已新增 `GET /api/v1/activity/recent-questions`、`GET /api/v1/activity/recent-citations`，基于 `activity_event` 查询，支持 `limit/cursor`，无数据稳定返回空数组。
+- Q4-26 已新增 `activity_event` migration 和写入服务；成功路径记录 `QUESTION_ASKED`、`CITATION_OPENED`、`DOCUMENT_IMPORTED`、`SEARCH_EXECUTED`。
+- Q4-27 首页聚合响应通过 `warnings` 和 `state.loading/empty/error` 声明降级状态；单块聚合失败返回空块并追加 warning，不阻断首页主入口渲染。
 
 ## E5：设置、Provider 与外观偏好
 

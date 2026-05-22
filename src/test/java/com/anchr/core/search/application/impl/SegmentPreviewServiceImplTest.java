@@ -1,5 +1,6 @@
 package com.anchr.core.search.application.impl;
 
+import com.anchr.core.activity.application.ActivityEventService;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Bbox;
@@ -32,7 +33,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment segment = buildImageOcrSegment();
         when(kbSegmentRepository.findBySegmentId("asset-1:ocr:0")).thenReturn(Optional.of(segment));
@@ -62,7 +64,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment segment = textSegment("asset-6:text:1", "oss://docs/expiry.pdf");
         when(kbSegmentRepository.findBySegmentId("asset-6:text:1")).thenReturn(Optional.of(segment));
@@ -82,7 +85,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment segment = Segment.builder()
                 .segmentId("asset-2:text:3")
@@ -140,7 +144,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment pdfSegment = textSegment("asset-3:text:1", "oss://docs/mysql.pdf");
         Segment txtSegment = textSegment("asset-4:text:1", "oss://docs/readme.txt");
@@ -163,7 +168,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment markdownSegment = textSegment("asset-7:text:1", "oss://docs/runbook.markdown");
         Segment imageSegment = Segment.builder()
@@ -194,7 +200,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment segment = buildImageOcrSegment();
         when(kbSegmentRepository.findBySegmentId("asset-1:ocr:0")).thenReturn(Optional.of(segment));
@@ -221,7 +228,8 @@ class SegmentPreviewServiceImplTest {
                     public Optional<PreviewAccess> find(String segmentId, String accessToken) {
                         return Optional.empty();
                     }
-                }
+                },
+                mock(ActivityEventService.class)
         );
         Segment segment = textSegment("asset-9:text:1", "oss://docs/cache.pdf");
         when(kbSegmentRepository.findBySegmentId("asset-9:text:1")).thenReturn(Optional.of(segment));
@@ -244,7 +252,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment segment = Segment.builder()
                 .segmentId("asset-10:text:1")
@@ -271,7 +280,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment segment = Segment.builder()
                 .segmentId("asset-11:ocr:0")
@@ -299,8 +309,7 @@ class SegmentPreviewServiceImplTest {
         assertThat(preview.getPreviewType()).isEqualTo("IMAGE");
         assertThat(preview.getPreviewUrl()).isEqualTo("https://preview.example.com/invalid-bbox.png");
         assertThat(preview.getSnippet()).isEqualTo("仍然返回 OCR 命中文本");
-        assertThat(preview.getAnchor().getBbox().getWidth()).isEqualTo(-10);
-        assertThat(preview.getAnchor().getBbox().getUnit()).isEqualTo("PERCENT");
+        assertThat(preview.getAnchor().getBbox()).isNull();
     }
 
     @Test
@@ -310,13 +319,14 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         when(kbSegmentRepository.findBySegmentId("missing")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getSegmentPreview("missing", "token-a"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("Segment not found.");
+                .hasMessage("Segment not found");
     }
 
     @Test
@@ -326,7 +336,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
 
         assertThatThrownBy(() -> service.getSegmentPreview("asset-1:ocr:0", " "))
@@ -341,7 +352,8 @@ class SegmentPreviewServiceImplTest {
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
                 objectStoragePort,
-                new PreviewAccessCache()
+                new PreviewAccessCache(),
+                mock(ActivityEventService.class)
         );
         Segment segment = textSegment("asset-5:text:1", "oss://docs/fail.pdf");
         when(kbSegmentRepository.findBySegmentId("asset-5:text:1")).thenReturn(Optional.of(segment));

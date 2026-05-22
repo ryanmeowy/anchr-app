@@ -1,5 +1,6 @@
 package com.anchr.core.search.application.impl;
 
+import com.anchr.core.activity.application.ActivityEventService;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentPreviewService;
@@ -38,6 +39,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private final KbSegmentRepository kbSegmentRepository;
     private final SearchObjectStoragePort objectStoragePort;
     private final PreviewAccessCache previewAccessCache;
+    private final ActivityEventService activityEventService;
 
     @Override
     public PreviewSegmentDTO getSegmentPreview(String segmentId, String accessToken) {
@@ -49,7 +51,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         }
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        return toPreview(segment, accessToken);
+        PreviewSegmentDTO preview = toPreview(segment, accessToken);
+        recordCitationOpened(preview);
+        return preview;
     }
 
     @Override
@@ -95,6 +99,19 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .surroundingChunks(buildSurroundingChunks(segment, SURROUNDING_CHUNK_WINDOW))
                 .citationContext(buildCitationContext(segment))
                 .build();
+    }
+
+    private void recordCitationOpened(PreviewSegmentDTO preview) {
+        PreviewSegmentDTO.CitationContextDTO citationContext = preview.getCitationContext();
+        activityEventService.recordCitationOpened(
+                preview.getSegmentId(),
+                preview.getAssetId(),
+                preview.getKbId(),
+                preview.getFileName(),
+                preview.getTitle(),
+                preview.getSnippet(),
+                citationContext == null ? null : citationContext.getCitationReason()
+        );
     }
 
     private PreviewAnchorDTO toAnchor(Segment segment) {

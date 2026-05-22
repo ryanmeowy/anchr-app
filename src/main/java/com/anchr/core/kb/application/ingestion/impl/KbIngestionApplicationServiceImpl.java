@@ -1,5 +1,6 @@
 package com.anchr.core.kb.application.ingestion.impl;
 
+import com.anchr.core.activity.application.ActivityEventService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -53,6 +54,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private final IngestionTaskRepository ingestionTaskRepository;
     private final IngestionCapabilityService ingestionCapabilityService;
     private final PrefixedIdGenerator idGenerator;
+    private final ActivityEventService activityEventService;
 
     @Override
     @Transactional
@@ -65,6 +67,8 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         List<IngestionTaskItem> items = createItems(context, kbId, sourceType, dedupeStrategy, command.items(), now);
         IngestionTask task = buildTask(context, kbId, sourceType, items, now);
         ingestionTaskRepository.save(task);
+        activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
+                task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
         knowledgeBaseRepository.refreshDocumentStats(context.workspaceId(), kbId, context.userId(), now);
         return getTask(kbId, task.getId());
     }
@@ -151,6 +155,8 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
                 .build();
         IngestionTask task = buildTask(context, kbId, sourceType, List.of(item), now);
         ingestionTaskRepository.save(task);
+        activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
+                task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
         if (sourceType == IngestionSourceType.REPARSE) {
             documentAssetRepository.updateStatuses(context.workspaceId(), kbId, document.getId(),
                     DocumentParseStatus.PENDING.name(), DocumentIndexStatus.PENDING.name(), context.userId(), now);

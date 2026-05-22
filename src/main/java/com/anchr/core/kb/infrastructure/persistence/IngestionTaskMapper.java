@@ -26,6 +26,9 @@ public interface IngestionTaskMapper {
                                         @Param("status") String status,
                                         @Param("limit") int limit);
 
+    List<IngestionTaskRecord> listRecentTasks(@Param("workspaceId") String workspaceId,
+                                              @Param("limit") int limit);
+
     List<IngestionTaskItemRecord> listItems(@Param("taskId") String taskId);
 
     List<IngestionTaskItemRecord> listFailedItems(@Param("workspaceId") String workspaceId,

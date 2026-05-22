@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.anchr.core.activity.application.ActivityEventService;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.FollowUpQuestionService;
@@ -63,6 +64,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final KbScopeResolver kbScopeResolver;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final ActivityEventService activityEventService;
     @Qualifier("ingestionTaskExecutor")
     private final Executor streamExecutor;
 
@@ -154,6 +156,11 @@ public class ConversationServiceImpl implements ConversationService {
         ));
         turn.setCreatedAt(now);
         conversationRepository.saveTurn(turn);
+        activityEventService.recordQuestionAsked(
+                session.getSessionId(),
+                turn.getTurnId(),
+                turn.getQuery(),
+                request.getKbIds());
         meterRegistry.counter("conversation.turn.count").increment();
 
         if (shouldAutoTitle) {

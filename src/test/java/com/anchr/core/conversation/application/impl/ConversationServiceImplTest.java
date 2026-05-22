@@ -2,6 +2,7 @@ package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.anchr.core.activity.application.ActivityEventService;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.FollowUpQuestionService;
@@ -26,6 +27,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
+import com.anchr.core.search.application.KbScopeResolver;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -60,6 +63,10 @@ class ConversationServiceImplTest {
     private AnswerGenerationService answerGenerationService;
     @Mock
     private FollowUpQuestionService followUpQuestionService;
+    @Mock
+    private KbScopeResolver kbScopeResolver;
+    @Mock
+    private ActivityEventService activityEventService;
 
     private InMemoryConversationRepository repository;
     private ObjectMapper objectMapper;
@@ -78,14 +85,21 @@ class ConversationServiceImplTest {
                 new ConversationResultCardMapper(),
                 answerGenerationService
         );
+        when(kbScopeResolver.resolveVisibleKbIds(any())).thenAnswer(invocation -> {
+            List<String> requested = invocation.getArgument(0);
+            return requested == null ? List.of() : requested;
+        });
         service = new ConversationServiceImpl(
                 repository,
                 conversationMessagePipeline,
                 followUpQuestionService,
                 new ConversationTurnCodec(objectMapper),
                 new ConversationRetrievalTraceBuilder(objectMapper),
+                kbScopeResolver,
                 objectMapper,
-                meterRegistry
+                meterRegistry,
+                activityEventService,
+                Runnable::run
         );
     }
 
@@ -117,10 +131,10 @@ class ConversationServiceImplTest {
                 buildResult("seg_text_2", "asset_1", "TEXT_CHUNK", "oss://bucket/mysql-notes.pdf", "InnoDB 支持事务与行锁", 12)
         ));
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 架构是什么 核心组件"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+                eq("mysql 架构是什么 核心组件"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList(), anyList()
         )).thenReturn(firstRetrieval);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 架构中的 InnoDB 作用"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+                eq("mysql 架构中的 InnoDB 作用"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList(), anyList()
         )).thenReturn(secondRetrieval);
 
         when(answerGenerationService.generate(eq("mysql 架构是什么"), eq("mysql 架构是什么 核心组件"), anyList(), anyList()))
@@ -194,7 +208,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("它和 buffer pool 有什么关系"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+                eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList(), anyList()
         )).thenReturn(buildRetrievalResult(List.of()));
         when(answerGenerationService.generate(
                 eq("它和 buffer pool 有什么关系"), eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), anyList(), anyList()
@@ -240,7 +254,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("mysql 索引有哪些"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 索引 类型 适用场景"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+                eq("mysql 索引 类型 适用场景"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList(), anyList()
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_asset_1", "asset_1", "TEXT_CHUNK", "oss://bucket/mysql-1.pdf", "BTree 索引适合范围查询", 1),
                 buildResult("seg_asset_2", "asset_2", "TEXT_CHUNK", "oss://bucket/mysql-2.pdf", "Hash 索引适合等值查询", 2),
@@ -286,7 +300,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("mysql redo log 是什么"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql redo log 作用"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+                eq("mysql redo log 作用"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList(), anyList()
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_redo_1", "asset_redo_1", "TEXT_CHUNK", "oss://bucket/mysql-redo.pdf", "redo log 保障崩溃恢复", 8),
                 buildResult("seg_redo_2", "asset_redo_2", "TEXT_CHUNK", "oss://bucket/mysql-log.pdf", "redo log 先写日志再刷盘", 9)
@@ -319,7 +333,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("mysql buffer pool"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql buffer pool 机制"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+                eq("mysql buffer pool 机制"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList(), anyList()
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_pool_1", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 缓存数据页", 3),
                 buildResult("seg_pool_2", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 使用 LRU 链表", 4)
@@ -400,7 +414,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("那 InnoDB 呢"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 架构中的 InnoDB 作用"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList()
+                eq("mysql 架构中的 InnoDB 作用"), eq(60), eq(20), eq("KB_RRF_RERANK"), anyList(), anyList()
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_text_2", "asset_1", "TEXT_CHUNK", "oss://bucket/mysql-notes.pdf", "InnoDB 支持事务与行锁", 12)
         )));

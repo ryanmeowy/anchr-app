@@ -19,6 +19,8 @@ public interface IngestionTaskRepository {
 
     List<IngestionTask> list(String workspaceId, String kbId, IngestionTaskStatus status, int limit);
 
+    List<IngestionTask> listRecent(String workspaceId, int limit);
+
     List<IngestionTaskItem> listItems(String taskId);
 
     List<IngestionTaskItem> listFailedItems(String workspaceId, String kbId, String taskId);
