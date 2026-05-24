@@ -1,6 +1,8 @@
 package com.anchr.core.kb.application.ingestion.impl;
 
 import com.anchr.core.activity.application.ActivityEventService;
+import com.anchr.core.auth.application.AuditLogService;
+import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -55,10 +57,13 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private final IngestionCapabilityService ingestionCapabilityService;
     private final PrefixedIdGenerator idGenerator;
     private final ActivityEventService activityEventService;
+    private final PermissionService permissionService;
+    private final AuditLogService auditLogService;
 
     @Override
     @Transactional
     public IngestionTask createTask(String kbId, IngestionCreateCommand command) {
+        permissionService.requireImport();
         knowledgeBaseService.get(kbId);
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
@@ -69,6 +74,8 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         ingestionTaskRepository.save(task);
         activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
                 task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
+        auditLogService.record("DOCUMENT_IMPORTED", "INGESTION_TASK", task.getId(), "SUCCESS",
+                "{\"kbId\":\"" + kbId + "\"}");
         knowledgeBaseRepository.refreshDocumentStats(context.workspaceId(), kbId, context.userId(), now);
         return getTask(kbId, task.getId());
     }
@@ -91,6 +98,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     @Override
     @Transactional
     public IngestionTask retryItem(String kbId, String taskId, String itemId) {
+        permissionService.requireImport();
         IngestionTask task = getTask(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         var item = ingestionTaskRepository.findItem(context.workspaceId(), kbId, task.getId(), requireText(itemId, "itemId"))
@@ -107,6 +115,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     @Override
     @Transactional
     public IngestionTask retryFailed(String kbId, String taskId) {
+        permissionService.requireImport();
         IngestionTask task = getTask(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         List<IngestionTaskItem> failedItems =
@@ -123,12 +132,14 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     @Override
     @Transactional
     public IngestionTask createReparseTask(String kbId, String assetId) {
+        permissionService.requireImport();
         return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REPARSE, IngestionStage.PARSE);
     }
 
     @Override
     @Transactional
     public IngestionTask createReembedTask(String kbId, String assetId) {
+        permissionService.requireImport();
         return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REEMBED, IngestionStage.EMBED);
     }
 

@@ -1,5 +1,7 @@
 package com.anchr.core.settings.application.impl;
 
+import com.anchr.core.auth.application.AuditLogService;
+import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -27,6 +29,8 @@ public class SearchSettingServiceImpl implements SearchSettingService {
     private final AppSettingRepository appSettingRepository;
     private final AppSearchProperties appSearchProperties;
     private final ObjectMapper objectMapper;
+    private final PermissionService permissionService;
+    private final AuditLogService auditLogService;
 
     @Override
     public SearchSetting get() {
@@ -38,6 +42,7 @@ public class SearchSettingServiceImpl implements SearchSettingService {
 
     @Override
     public SearchSetting update(Integer topK, Integer rerankWindow, Integer rrfK, Double minScore) {
+        permissionService.requireManageSettings();
         if (topK == null && rerankWindow == null && rrfK == null && minScore == null) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "At least one search setting field is required.");
         }
@@ -52,6 +57,7 @@ public class SearchSettingServiceImpl implements SearchSettingService {
         apply(next);
         RequestUserContext context = UserContextHolder.get();
         appSettingRepository.upsert(context.workspaceId(), SETTING_KEY, toJson(next), context.userId());
+        auditLogService.record("SETTING_UPDATED", "SETTING", SETTING_KEY, "SUCCESS", toJson(next));
         return next;
     }
 

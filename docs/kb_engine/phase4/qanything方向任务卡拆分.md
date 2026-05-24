@@ -281,11 +281,11 @@ P0 验收必须覆盖：
 
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
-| Q4-38 | TODO | 本地账号密码 P1 | Q4-03, Q4-02 | `user_account`、登录、退出、密码哈希、session/token | 不同用户数据能按 `createdBy` 区分；不要求完整 workspace 权限隔离 |
-| Q4-39 | TODO | Workspace 与成员角色 P2 | Q4-38 | `workspace/workspace_member`、OWNER/ADMIN/EDITOR/VIEWER | VIEWER 不能删除；EDITOR 可导入；ADMIN 可配置 workspace |
-| Q4-40 | TODO | SSO / 企业身份集成 P2 | Q4-39 | OIDC/企业微信/飞书/LDAP 至少一种方案 | 可通过外部身份登录并映射本地用户；失败有可排查日志 |
-| Q4-41 | TODO | 审计日志 P2 | Q4-39 | `audit_log`、审计查询接口 | 可按用户、资源、时间检索登录、导入、删除、设置修改等事件 |
-| Q4-42 | TODO | 联网搜索 provider P2 | Q4-17, Q4-28 | `POST /api/v1/search/web`、provider 配置、来源标识 | 未配置 provider 时前端置灰；启用后答案能区分本地知识库和联网来源 |
+| Q4-38 | IMPLEMENTED | 本地账号密码 P1 | Q4-03, Q4-02 | `user_account`、登录、退出、密码哈希、session/token | 不同用户数据能按 `createdBy` 区分；不要求完整 workspace 权限隔离 |
+| Q4-39 | IMPLEMENTED | Workspace 与成员角色 P2 | Q4-38 | `workspace/workspace_member`、OWNER/ADMIN/EDITOR/VIEWER | VIEWER 不能删除；EDITOR 可导入；ADMIN 可配置 workspace |
+| Q4-40 | IMPLEMENTED | SSO / 企业身份集成 P2 | Q4-39 | OIDC/企业微信/飞书/LDAP 至少一种方案 | 可通过外部身份登录并映射本地用户；失败有可排查日志 |
+| Q4-41 | IMPLEMENTED | 审计日志 P2 | Q4-39 | `audit_log`、审计查询接口 | 可按用户、资源、时间检索登录、导入、删除、设置修改等事件 |
+| Q4-42 | IMPLEMENTED | 联网搜索 provider P2 | Q4-17, Q4-28 | `POST /api/v1/search/web`、provider 配置、来源标识 | 未配置 provider 时前端置灰；启用后答案能区分本地知识库和联网来源 |
 
 ## E8：验收、文档与联调
 
