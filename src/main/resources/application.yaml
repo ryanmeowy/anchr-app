@@ -9,9 +9,9 @@ spring:
       database: 0
       timeout: 3000ms
   datasource:
-    url: ${MYSQL_URL:jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:anchr}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
-    username: ${MYSQL_USER:anchr}
-    password: ${MYSQL_PASSWORD:anchr}
+    url: ${MYSQL_URL:jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   flyway:
     enabled: true
@@ -43,6 +43,9 @@ app:
     dimension: ${APP_EMBEDDING_DIMENSION:1024}
     preprocess-version: ${APP_EMBEDDING_PREPROCESS_VERSION:v1}
     image-input-mode: ${APP_EMBEDDING_IMAGE_INPUT_MODE:url}
+    ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
+    ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
+    ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
   vector:
     index-name: ${APP_VECTOR_INDEX_NAME:smart_gallery}
     indexVersion: ${APP_VECTOR_INDEX_VERSION:v1}

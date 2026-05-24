@@ -48,12 +48,14 @@ public class AliyunMultiModelEmbeddingService implements EmbeddingBackend, Provi
             return bailianManager.embedImage(imageUrl);
         } catch (NoApiKeyException e) {
             log.error(AliyunErrorCode.API_KEY_MISSING.getMessage(), e);
+            throw new RuntimeException("embed image failed, api key is missing.", e);
         } catch (ApiException e) {
             log.error(AliyunErrorCode.CALL_FAILED.getMessage(), e);
+            throw new RuntimeException("embed image failed, try again later: " + e.getMessage(), e);
         } catch (Exception e) {
             log.error(AliyunErrorCode.UNKNOWN.getMessage(), e);
+            throw new RuntimeException("embed image failed, try again later.", e);
         }
-        throw new RuntimeException("embed image failed, try again later.");
     }
 
     @Override
@@ -79,11 +81,13 @@ public class AliyunMultiModelEmbeddingService implements EmbeddingBackend, Provi
             return bailianManager.embedText(text);
         } catch (NoApiKeyException e) {
             log.error(AliyunErrorCode.API_KEY_MISSING.getMessage(), e);
+            throw new RuntimeException("embed text failed, api key is missing.", e);
         } catch (ApiException e) {
             log.error(AliyunErrorCode.CALL_FAILED.getMessage(), e);
+            throw new RuntimeException("embed text failed, try again later: " + e.getMessage(), e);
         } catch (Exception e) {
             log.error(AliyunErrorCode.UNKNOWN.getMessage(), e);
+            throw new RuntimeException("embed text failed, try again later.", e);
         }
-        throw new RuntimeException("embed text failed, try again later.");
     }
 }

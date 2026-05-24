@@ -94,6 +94,23 @@
         update document_asset
         set parse_status = #{parseStatus},
             index_status = #{indexStatus},
+            error_code = null,
+            error_message = null,
+            updated_by = #{updatedBy},
+            updated_at = #{updatedAt}
+        where id = #{assetId}
+          and workspace_id = #{workspaceId}
+          and kb_id = #{kbId}
+          and deleted_at is null
+    </update>
+
+    <update id="updateIngestionResult">
+        update document_asset
+        set parse_status = #{parseStatus},
+            index_status = #{indexStatus},
+            segment_count = #{segmentCount},
+            error_code = #{errorCode},
+            error_message = #{errorMessage},
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{assetId}

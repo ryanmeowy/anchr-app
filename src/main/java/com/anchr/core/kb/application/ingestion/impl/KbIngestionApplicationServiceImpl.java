@@ -11,6 +11,7 @@ import com.anchr.core.common.infrastructure.id.PrefixedIdGenerator;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.application.ingestion.IngestionCapabilityService;
 import com.anchr.core.kb.application.ingestion.KbIngestionApplicationService;
+import com.anchr.core.kb.application.ingestion.KbIngestionTaskProcessor;
 import com.anchr.core.kb.domain.model.DocumentAsset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
@@ -28,6 +29,8 @@ import com.anchr.core.kb.domain.repository.ingestion.IngestionTaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -59,6 +62,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private final ActivityEventService activityEventService;
     private final PermissionService permissionService;
     private final AuditLogService auditLogService;
+    private final KbIngestionTaskProcessor ingestionTaskProcessor;
 
     @Override
     @Transactional
@@ -77,6 +81,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         auditLogService.record("DOCUMENT_IMPORTED", "INGESTION_TASK", task.getId(), "SUCCESS",
                 "{\"kbId\":\"" + kbId + "\"}");
         knowledgeBaseRepository.refreshDocumentStats(context.workspaceId(), kbId, context.userId(), now);
+        submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
 
@@ -109,6 +114,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         LocalDateTime now = LocalDateTime.now();
         ingestionTaskRepository.resetFailedItem(context.workspaceId(), kbId, task.getId(), item.getId(), now);
         ingestionTaskRepository.refreshSummary(context.workspaceId(), kbId, task.getId(), context.userId(), now);
+        submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
 
@@ -126,6 +132,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         LocalDateTime now = LocalDateTime.now();
         ingestionTaskRepository.resetFailedItems(context.workspaceId(), kbId, task.getId(), now);
         ingestionTaskRepository.refreshSummary(context.workspaceId(), kbId, task.getId(), context.userId(), now);
+        submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
 
@@ -175,6 +182,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
             documentAssetRepository.updateStatuses(context.workspaceId(), kbId, document.getId(),
                     document.getParseStatus().name(), DocumentIndexStatus.PENDING.name(), context.userId(), now);
         }
+        submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
 
@@ -349,7 +357,10 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
 
     private IngestionTaskStatus resolveTaskStatus(List<IngestionTaskItem> items, int successCount,
                                                   int failureCount, int runningCount) {
-        if (hasPendingOrRunning(items) || runningCount > 0) {
+        if (runningCount > 0) {
+            return IngestionTaskStatus.RUNNING;
+        }
+        if (hasPending(items)) {
             return IngestionTaskStatus.PENDING;
         }
         if (failureCount == 0) {
@@ -361,9 +372,26 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         return IngestionTaskStatus.PARTIAL_SUCCESS;
     }
 
+    private boolean hasPending(List<IngestionTaskItem> items) {
+        return items.stream().anyMatch(item -> item.getStatus() == IngestionTaskItemStatus.PENDING);
+    }
+
     private boolean hasPendingOrRunning(List<IngestionTaskItem> items) {
         return items.stream().anyMatch(item -> item.getStatus() == IngestionTaskItemStatus.PENDING
                 || item.getStatus() == IngestionTaskItemStatus.RUNNING);
+    }
+
+    private void submitAfterCommit(String workspaceId, String kbId, String taskId, String userId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            ingestionTaskProcessor.submit(workspaceId, kbId, taskId, userId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                ingestionTaskProcessor.submit(workspaceId, kbId, taskId, userId);
+            }
+        });
     }
 
     private DedupeResult resolveNewDedupeResult(DedupeStrategy strategy) {

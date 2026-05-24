@@ -29,6 +29,8 @@ public class TextAssetContentLoader {
 
     private static final int CONNECT_TIMEOUT_MS = 5_000;
     private static final int READ_TIMEOUT_MS = 20_000;
+    private static final String DOWNLOAD_USER_AGENT =
+            "Mozilla/5.0 (compatible; AnchrBot/1.0; +https://anchr.local)";
 
     private final IngestionObjectStoragePort objectStoragePort;
 
@@ -38,7 +40,7 @@ public class TextAssetContentLoader {
         }
         try {
             URLConnection connection = openUrlConnection(metadata.getSourceUrl());
-            connection.connect();
+            ensureHttpSuccess(connection);
             enrichMimeType(metadata, connection.getContentType());
             enrichFileName(metadata, connection);
         } catch (BusinessException e) {
@@ -79,11 +81,15 @@ public class TextAssetContentLoader {
     private byte[] loadFromUrl(String sourceUrl) {
         try {
             URLConnection connection = openUrlConnection(sourceUrl);
+            ensureHttpSuccess(connection);
             try (InputStream inputStream = connection.getInputStream()) {
                 return inputStream.readAllBytes();
             }
         } catch (BusinessException e) {
             throw e;
+        } catch (IOException e) {
+            throw new BusinessException(ApiError.TEXT_PARSE_FAILED,
+                    "Failed to load source URL content: " + e.getMessage(), e);
         } catch (Exception e) {
             throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "Failed to load source URL content", e);
         }
@@ -97,8 +103,26 @@ public class TextAssetContentLoader {
         connection.setReadTimeout(READ_TIMEOUT_MS);
         if (connection instanceof HttpURLConnection httpConnection) {
             httpConnection.setInstanceFollowRedirects(true);
+            httpConnection.setRequestProperty("User-Agent", DOWNLOAD_USER_AGENT);
+            httpConnection.setRequestProperty("Accept",
+                    "application/pdf,application/octet-stream,text/html,text/plain,*/*");
+            httpConnection.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
         }
         return connection;
+    }
+
+    private void ensureHttpSuccess(URLConnection connection) throws IOException {
+        if (!(connection instanceof HttpURLConnection httpConnection)) {
+            connection.connect();
+            return;
+        }
+        int status = httpConnection.getResponseCode();
+        if (status >= 200 && status < 400) {
+            return;
+        }
+        String message = httpConnection.getResponseMessage();
+        throw new BusinessException(ApiError.TEXT_PARSE_FAILED,
+                "Source URL responded HTTP " + status + (StringUtils.hasText(message) ? " " + message : ""));
     }
 
     private void validateUri(URI uri) throws Exception {
