@@ -254,21 +254,28 @@ P0 验收必须覆盖：
 
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
-| Q4-28 | TODO | 设置页 capabilities 与 providers 查询 P1 | Q4-04 | `GET /settings/capabilities`、`GET /settings/providers` | 可看到当前模型、OCR、对象存储、检索能力状态；API Key 不明文返回 |
-| Q4-29 | TODO | 检索参数查询与可热更新项 P1 | Q4-28 | `GET/PATCH /settings/search` | 阈值、RRF、rerank window 可热更新；影响旧数据的配置有明确提示 |
-| Q4-30 | TODO | Provider 连接测试 P1 | Q4-28 | `POST /settings/test-connection` | 至少支持模型、OCR、对象存储一种连接测试；失败返回可读原因 |
-| Q4-31 | TODO | light/dark/system 外观偏好 P1 | Q4-04 | 本地偏好策略或 `GET/PATCH /settings/preferences` | 切换主题不影响页面状态；跨设备同步不是第一版必选 |
-| Q4-32 | TODO | Provider Router 与配置版本 P2 | Q4-28, Q4-29 | provider registry、配置版本、回滚策略 | 可热切配置无需重启；不可热切配置有生效策略和 reembed/reindex 提示 |
+| Q4-28 | IMPLEMENTED | 设置页 capabilities 与 providers 查询 P1 | Q4-04 | `GET /settings/capabilities`、`GET /settings/providers` | 可看到当前模型、OCR、对象存储、检索能力状态；API Key 不明文返回 |
+| Q4-29 | IMPLEMENTED | 检索参数查询与可热更新项 P1 | Q4-28 | `GET/PATCH /settings/search` | 阈值、RRF、rerank window 可热更新；影响旧数据的配置有明确提示 |
+| Q4-30 | IMPLEMENTED | Provider 连接测试 P1 | Q4-28 | `POST /settings/test-connection` | 至少支持模型、OCR、对象存储一种连接测试；失败返回可读原因 |
+| Q4-31 | IMPLEMENTED | light/dark/system 外观偏好 P1 | Q4-04 | 本地偏好策略或 `GET/PATCH /settings/preferences` | 切换主题不影响页面状态；跨设备同步不是第一版必选 |
+| Q4-32 | IMPLEMENTED | Provider Router 与配置版本 P2 | Q4-28, Q4-29 | provider registry、配置版本、回滚策略 | 可热切配置无需重启；不可热切配置有生效策略和 reembed/reindex 提示 |
+
+实施说明：
+- Q4-28 已落 `GET /api/v1/settings/capabilities` 与 `GET /api/v1/settings/providers`，provider 响应仅返回 `secretConfigured/maskedApiKey`，不返回明文密钥。
+- Q4-29 已落 `GET/PATCH /api/v1/settings/search`，检索参数写入 `app_setting` 并同步更新进程内 `AppSearchProperties`；响应包含 `requiresReindexFields` 与 warnings。
+- Q4-30 已落 `POST /api/v1/settings/test-connection`，按 provider 类型执行真实轻量调用，失败返回可读 code/message，且不修改当前配置。
+- Q4-31 已落 `GET/PATCH /api/v1/settings/preferences`，主题偏好持久化到 `app_setting`，支持 `LIGHT/DARK/SYSTEM`。
+- Q4-32 已落 provider registry/router、`provider_setting` 与 `provider_config_version`，`PATCH /api/v1/settings/providers/selection` 可切换当前进程已加载 provider；embedding/storage 等不可完全无损热切的场景通过 warnings 提示 reembed/reindex 或存量对象策略。
 
 ## E6：文档格式扩展
 
 | 卡片ID | 状态 | 标题 | 依赖 | 交付物 | 验收标准 |
 |---|---|---|---|---|---|
-| Q4-33 | TODO | DOCX 解析入库 P1 | Q4-11, Q4-20 | DOCX parser、heading/段落/表格提取 | DOCX 可入库、检索、问答、预览定位；失败原因可见 |
-| Q4-34 | TODO | XLSX / CSV 解析入库 P1 | Q4-11, Q4-20 | 表格 parser、sheet/表头/行列定位 | 表格内容可检索和问答；结果包含 sheet、行列等定位信息 |
-| Q4-35 | TODO | URL 导入 P1 | Q4-11 | URL 抓取、正文抽取、标题层级、失败重试 | URL 导入生成文档资产；可搜索问答；抓取失败原因可见 |
-| Q4-36 | TODO | PPTX 解析入库 P2 | Q4-33 | PPTX parser、slide/备注/图片 OCR | PPTX 可按页定位，文本和图片 OCR 可进入检索 |
-| Q4-37 | TODO | ZIP 批量导入 P2 | Q4-11, Q4-33, Q4-34 | ZIP 解包、格式过滤、批量任务生成 | ZIP 内不支持格式被明确跳过并展示原因 |
+| Q4-33 | IMPLEMENTED | DOCX 解析入库 P1 | Q4-11, Q4-20 | DOCX parser、heading/段落/表格提取 | DOCX 可入库、检索、问答、预览定位；失败原因可见 |
+| Q4-34 | IMPLEMENTED | XLSX / CSV 解析入库 P1 | Q4-11, Q4-20 | 表格 parser、sheet/表头/行列定位 | 表格内容可检索和问答；结果包含 sheet、行列等定位信息 |
+| Q4-35 | IMPLEMENTED | URL 导入 P1 | Q4-11 | URL 抓取、正文抽取、标题层级、失败重试 | URL 导入生成文档资产；可搜索问答；抓取失败原因可见 |
+| Q4-36 | IMPLEMENTED | PPTX 解析入库 P2 | Q4-33 | PPTX parser、slide/备注/图片 OCR | PPTX 可按页定位，文本和图片 OCR 可进入检索 |
+| Q4-37 | IMPLEMENTED | ZIP 批量导入 P2 | Q4-11, Q4-33, Q4-34 | ZIP 解包、格式过滤、批量任务生成 | ZIP 内不支持格式被明确跳过并展示原因 |
 
 ## E7：账号、权限与企业集成
 

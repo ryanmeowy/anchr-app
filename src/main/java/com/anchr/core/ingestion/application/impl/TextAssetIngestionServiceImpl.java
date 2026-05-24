@@ -19,6 +19,7 @@ import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.ingestion.domain.repository.TextSegmentRepository;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.infrastructure.parser.TextChunkSplitter;
+import com.anchr.core.ingestion.infrastructure.parser.TextAssetContentLoader;
 import com.anchr.core.ingestion.infrastructure.parser.TextParserRouter;
 import com.anchr.core.ingestion.interfaces.rest.dto.BatchTaskStatusDTO;
 import com.anchr.core.ingestion.interfaces.rest.dto.TextBatchProcessDTO;
@@ -54,6 +55,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
 
     @Qualifier("ingestionTaskExecutor")
     private final Executor ingestionTaskExecutor;
+    private final TextAssetContentLoader textAssetContentLoader;
     private final TextParserRouter textParserRouter;
     private final TextChunkSplitter textChunkSplitter;
     private final IngestionEmbeddingPort embeddingPort;
@@ -74,9 +76,13 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
         List<BatchTaskItem> taskItems = new ArrayList<>();
 
         for (TextBatchProcessDTO item : items) {
-            String fileName = normalizeFileName(item.getFileName());
+            String fileName = normalizeFileName(item.getFileName(), item.getSourceUrl());
             String assetId = String.valueOf(idGen.nextId());
-            boolean supported = TextAssetType.isSupported(fileName, item.getMimeType());
+            boolean hasSourceUrl = StringUtils.hasText(item.getSourceUrl());
+            boolean supported = hasSourceUrl || TextAssetType.isSupported(fileName, item.getMimeType());
+            if (supported && !hasSourceUrl && !StringUtils.hasText(item.getKey())) {
+                supported = false;
+            }
 
             if (supported) {
                 TextAssetMetadata metadata = new TextAssetMetadata();
@@ -86,6 +92,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
                 metadata.setMimeType(item.getMimeType());
                 metadata.setObjectKey(item.getKey());
                 metadata.setFileHash(item.getFileHash());
+                metadata.setSourceUrl(trimToNull(item.getSourceUrl()));
                 metadata.setCreatedAt(now);
                 metadata.setUpdatedAt(now);
                 saveAssetMetadata(metadata);
@@ -230,6 +237,7 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
             if (metadata == null) {
                 throw new BusinessException(ApiError.TEXT_ASSET_META_NOT_FOUND);
             }
+            textAssetContentLoader.enrichRemoteMetadata(metadata);
 
             var parserOpt = textParserRouter.route(metadata);
             if (parserOpt.isEmpty()) {
@@ -317,11 +325,18 @@ public class TextAssetIngestionServiceImpl implements TextAssetIngestionService 
         }
     }
 
-    private String normalizeFileName(String fileName) {
+    private String normalizeFileName(String fileName, String sourceUrl) {
         if (!StringUtils.hasText(fileName)) {
+            if (StringUtils.hasText(sourceUrl)) {
+                return sourceUrl.trim();
+            }
             return "text-asset-" + System.currentTimeMillis();
         }
         return fileName.trim();
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private void enrichChunkEmbeddings(List<TextChunk> chunks) {

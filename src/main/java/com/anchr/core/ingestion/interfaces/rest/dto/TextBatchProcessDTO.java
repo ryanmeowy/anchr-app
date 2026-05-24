@@ -1,6 +1,5 @@
 package com.anchr.core.ingestion.interfaces.rest.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
@@ -12,19 +11,16 @@ public class TextBatchProcessDTO {
     /**
      * OSS object key.
      */
-    @NotBlank(message = "OSS key cannot be empty")
     private String key;
 
     /**
      * Original file name.
      */
-    @NotBlank(message = "fileName cannot be empty")
     private String fileName;
 
     /**
      * File fingerprint (MD5) provided by frontend.
      */
-    @NotBlank(message = "fileHash cannot be empty")
     private String fileHash;
 
     /**
@@ -36,4 +32,9 @@ public class TextBatchProcessDTO {
      * Optional mime type from browser.
      */
     private String mimeType;
+
+    /**
+     * Optional source URL for URL/HTML ingestion.
+     */
+    private String sourceUrl;
 }

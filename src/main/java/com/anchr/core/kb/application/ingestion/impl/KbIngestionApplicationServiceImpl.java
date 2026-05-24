@@ -191,8 +191,28 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         String fileType = normalizeFileType(command.fileType());
         String fileName = normalizeFileName(command.fileName(), command.sourceUrl());
         if (sourceType == IngestionSourceType.URL) {
-            return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
-                    "URL_NOT_SUPPORTED", "URL ingestion is not enabled in this phase.", now);
+            requireText(command.sourceUrl(), "sourceUrl");
+            if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
+                return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
+                        "UNSUPPORTED_FILE_TYPE", "Unsupported URL file type.", now);
+            }
+            DocumentAsset document = createDocument(context, kbId, command, fileName, fileType, now);
+            documentAssetRepository.save(document);
+            return IngestionTaskItem.builder()
+                    .id(idGenerator.nextId(ITEM_ID_PREFIX))
+                    .taskId(taskId)
+                    .kbId(kbId)
+                    .assetId(document.getId())
+                    .fileName(fileName)
+                    .fileHash(trimToNull(command.fileHash()))
+                    .sourceUrl(trimToNull(command.sourceUrl()))
+                    .stage(IngestionStage.PARSE)
+                    .status(IngestionTaskItemStatus.PENDING)
+                    .progress(10)
+                    .dedupeResult(resolveNewDedupeResult(dedupeStrategy))
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build();
         }
         if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
             return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
