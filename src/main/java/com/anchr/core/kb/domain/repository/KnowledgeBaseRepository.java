@@ -18,6 +18,8 @@ public interface KnowledgeBaseRepository {
 
     Optional<KnowledgeBase> findActiveById(String workspaceId, String id);
 
+    List<KnowledgeBase> listActiveByIds(String workspaceId, List<String> ids);
+
     List<KnowledgeBase> listActive(String workspaceId, int limit, int offset);
 
     long countActive(String workspaceId);

@@ -17,5 +17,6 @@ public class RecentQuestionDTO {
     String sessionId;
     String question;
     List<String> kbScope;
+    List<String> knowledgeBaseNames;
     LocalDateTime createdAt;
 }

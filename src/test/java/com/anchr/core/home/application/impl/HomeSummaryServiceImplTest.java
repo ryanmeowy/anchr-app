@@ -38,7 +38,7 @@ class HomeSummaryServiceImplTest {
 
     @Test
     void summary_shouldReturnHomeBlocksAndStableState() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a"));
+        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
         when(knowledgeBaseRepository.listActive("ws-a", 6, 0)).thenReturn(List.of(kb()));
         when(ingestionTaskRepository.listRecent("ws-a", 5)).thenReturn(List.of(task()));
         when(activityQueryService.recentQuestions(10, null)).thenReturn(RecentQuestionListDTO.builder()
