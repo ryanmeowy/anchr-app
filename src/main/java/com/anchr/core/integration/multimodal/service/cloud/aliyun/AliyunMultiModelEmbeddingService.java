@@ -5,9 +5,10 @@ import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.anchr.core.integration.multimodal.manager.aliyun.BailianEmbeddingManager;
 import com.anchr.core.integration.multimodal.domain.model.AliyunErrorCode;
 import com.anchr.core.integration.multimodal.embedding.EmbeddingBackend;
+import com.anchr.core.settings.application.provider.ProviderIdentity;
+import com.anchr.core.settings.domain.model.ProviderType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.Base64;
@@ -16,14 +17,23 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.embedding", name = "backend", havingValue = "aliyun")
-public class AliyunMultiModelEmbeddingService implements EmbeddingBackend {
+public class AliyunMultiModelEmbeddingService implements EmbeddingBackend, ProviderIdentity {
 
     private final BailianEmbeddingManager bailianManager;
 
     @Override
     public String backendName() {
         return "aliyun";
+    }
+
+    @Override
+    public ProviderType providerType() {
+        return ProviderType.EMBEDDING;
+    }
+
+    @Override
+    public String providerName() {
+        return backendName();
     }
 
     /**
@@ -38,12 +48,14 @@ public class AliyunMultiModelEmbeddingService implements EmbeddingBackend {
             return bailianManager.embedImage(imageUrl);
         } catch (NoApiKeyException e) {
             log.error(AliyunErrorCode.API_KEY_MISSING.getMessage(), e);
+            throw new RuntimeException("embed image failed, api key is missing.", e);
         } catch (ApiException e) {
             log.error(AliyunErrorCode.CALL_FAILED.getMessage(), e);
+            throw new RuntimeException("embed image failed, try again later: " + e.getMessage(), e);
         } catch (Exception e) {
             log.error(AliyunErrorCode.UNKNOWN.getMessage(), e);
+            throw new RuntimeException("embed image failed, try again later.", e);
         }
-        throw new RuntimeException("embed image failed, try again later.");
     }
 
     @Override
@@ -69,11 +81,13 @@ public class AliyunMultiModelEmbeddingService implements EmbeddingBackend {
             return bailianManager.embedText(text);
         } catch (NoApiKeyException e) {
             log.error(AliyunErrorCode.API_KEY_MISSING.getMessage(), e);
+            throw new RuntimeException("embed text failed, api key is missing.", e);
         } catch (ApiException e) {
             log.error(AliyunErrorCode.CALL_FAILED.getMessage(), e);
+            throw new RuntimeException("embed text failed, try again later: " + e.getMessage(), e);
         } catch (Exception e) {
             log.error(AliyunErrorCode.UNKNOWN.getMessage(), e);
+            throw new RuntimeException("embed text failed, try again later.", e);
         }
-        throw new RuntimeException("embed text failed, try again later.");
     }
 }

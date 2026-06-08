@@ -64,6 +64,19 @@
           and deleted_at is null
     </select>
 
+    <select id="listActiveByIds" resultMap="KnowledgeBaseRecordMap">
+        select
+            <include refid="KnowledgeBaseColumns"/>
+        from knowledge_base
+        where workspace_id = #{workspaceId}
+          and status = 'ACTIVE'
+          and deleted_at is null
+          and id in
+          <foreach collection="ids" item="id" open="(" separator="," close=")">
+              #{id}
+          </foreach>
+    </select>
+
     <select id="listActive" resultMap="KnowledgeBaseRecordMap">
         select
             <include refid="KnowledgeBaseColumns"/>

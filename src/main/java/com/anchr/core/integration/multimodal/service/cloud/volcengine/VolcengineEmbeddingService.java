@@ -2,6 +2,8 @@ package com.anchr.core.integration.multimodal.service.cloud.volcengine;
 
 import com.anchr.core.integration.multimodal.manager.volcengine.VolcengineEmbeddingManager;
 import com.anchr.core.integration.multimodal.embedding.EmbeddingBackend;
+import com.anchr.core.settings.application.provider.ProviderIdentity;
+import com.anchr.core.settings.domain.model.ProviderType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,13 +16,23 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "app.embedding", name = "backend", havingValue = "volcengine")
-public class VolcengineEmbeddingService implements EmbeddingBackend {
+public class VolcengineEmbeddingService implements EmbeddingBackend, ProviderIdentity {
 
     private final VolcengineEmbeddingManager volcengineEmbeddingManager;
 
     @Override
     public String backendName() {
         return "volcengine";
+    }
+
+    @Override
+    public ProviderType providerType() {
+        return ProviderType.EMBEDDING;
+    }
+
+    @Override
+    public String providerName() {
+        return backendName();
     }
 
     /**

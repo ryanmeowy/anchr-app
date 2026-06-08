@@ -31,5 +31,15 @@ public interface IngestionTaskRepository {
 
     boolean resetFailedItems(String workspaceId, String kbId, String taskId, LocalDateTime updatedAt);
 
+    boolean markItemRunning(String workspaceId, String kbId, String taskId, String itemId,
+                            String stage, int progress, LocalDateTime updatedAt);
+
+    boolean markItemSuccess(String workspaceId, String kbId, String taskId, String itemId,
+                            String stage, int progress, LocalDateTime updatedAt);
+
+    boolean markItemFailed(String workspaceId, String kbId, String taskId, String itemId,
+                           String stage, int progress, String errorCode, String errorMessage,
+                           LocalDateTime updatedAt);
+
     void refreshSummary(String workspaceId, String kbId, String taskId, String updatedBy, LocalDateTime updatedAt);
 }

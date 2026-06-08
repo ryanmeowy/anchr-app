@@ -25,7 +25,6 @@ import com.anchr.core.integration.multimodal.domain.model.PromptEnum;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.util.Strings;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
@@ -59,7 +58,6 @@ import static com.anchr.core.integration.multimodal.domain.model.PromptEnum.TAG_
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "gen", havingValue = "aliyun")
 public class AliyunGenManager {
 
     private final Gson gson;

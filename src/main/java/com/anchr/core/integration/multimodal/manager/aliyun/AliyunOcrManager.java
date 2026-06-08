@@ -13,7 +13,6 @@ import com.anchr.core.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.util.Strings;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
@@ -40,7 +39,6 @@ import static com.anchr.core.integration.multimodal.domain.model.PromptEnum.OCR;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "ocr", havingValue = "aliyun")
 public class AliyunOcrManager {
 
     private static final Pattern TEXT_PATTERN = Pattern.compile(AI_RESPONSE_REGEX);

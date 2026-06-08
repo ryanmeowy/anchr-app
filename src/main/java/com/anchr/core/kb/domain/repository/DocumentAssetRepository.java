@@ -24,5 +24,10 @@ public interface DocumentAssetRepository {
     boolean updateStatuses(String workspaceId, String kbId, String assetId,
                            String parseStatus, String indexStatus, String updatedBy, LocalDateTime updatedAt);
 
+    boolean updateIngestionResult(String workspaceId, String kbId, String assetId,
+                                  String parseStatus, String indexStatus, int segmentCount,
+                                  String errorCode, String errorMessage,
+                                  String updatedBy, LocalDateTime updatedAt);
+
     boolean markDeleted(String workspaceId, String kbId, String assetId, String updatedBy, LocalDateTime updatedAt);
 }

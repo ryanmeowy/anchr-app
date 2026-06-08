@@ -36,6 +36,16 @@ public class MyBatisKnowledgeBaseRepository implements KnowledgeBaseRepository {
     }
 
     @Override
+    public List<KnowledgeBase> listActiveByIds(String workspaceId, List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return mapper.listActiveByIds(workspaceId, ids).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
     public List<KnowledgeBase> listActive(String workspaceId, int limit, int offset) {
         return mapper.listActive(workspaceId, limit, offset).stream()
                 .map(this::toDomain)

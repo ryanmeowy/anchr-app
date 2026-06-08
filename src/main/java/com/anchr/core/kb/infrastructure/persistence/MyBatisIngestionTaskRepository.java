@@ -45,7 +45,7 @@ public class MyBatisIngestionTaskRepository implements IngestionTaskRepository {
     public List<IngestionTask> list(String workspaceId, String kbId, IngestionTaskStatus status, int limit) {
         String statusValue = status == null ? null : status.name();
         return mapper.listTasks(workspaceId, kbId, statusValue, limit).stream()
-                .map(record -> toDomain(record, List.of()))
+                .map(record -> toDomain(record, mapper.listItems(record.getId())))
                 .toList();
     }
 
@@ -80,6 +80,26 @@ public class MyBatisIngestionTaskRepository implements IngestionTaskRepository {
     @Override
     public boolean resetFailedItems(String workspaceId, String kbId, String taskId, LocalDateTime updatedAt) {
         return mapper.resetFailedItems(workspaceId, kbId, taskId, updatedAt) > 0;
+    }
+
+    @Override
+    public boolean markItemRunning(String workspaceId, String kbId, String taskId, String itemId,
+                                   String stage, int progress, LocalDateTime updatedAt) {
+        return mapper.markItemRunning(workspaceId, kbId, taskId, itemId, stage, progress, updatedAt) > 0;
+    }
+
+    @Override
+    public boolean markItemSuccess(String workspaceId, String kbId, String taskId, String itemId,
+                                   String stage, int progress, LocalDateTime updatedAt) {
+        return mapper.markItemSuccess(workspaceId, kbId, taskId, itemId, stage, progress, updatedAt) > 0;
+    }
+
+    @Override
+    public boolean markItemFailed(String workspaceId, String kbId, String taskId, String itemId,
+                                  String stage, int progress, String errorCode, String errorMessage,
+                                  LocalDateTime updatedAt) {
+        return mapper.markItemFailed(workspaceId, kbId, taskId, itemId, stage, progress,
+                errorCode, errorMessage, updatedAt) > 0;
     }
 
     @Override

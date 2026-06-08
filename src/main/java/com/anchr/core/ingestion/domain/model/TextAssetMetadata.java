@@ -14,6 +14,7 @@ public class TextAssetMetadata {
     private String mimeType;
     private String objectKey;
     private String fileHash;
+    private String sourceUrl;
     private Long createdAt;
     private Long updatedAt;
 }
