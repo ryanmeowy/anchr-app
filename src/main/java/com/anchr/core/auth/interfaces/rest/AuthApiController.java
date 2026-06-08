@@ -5,7 +5,7 @@ import com.anchr.core.auth.application.OssService;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.auth.RequireAuth;
+import com.anchr.core.auth.infrastructure.RequireAuth;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

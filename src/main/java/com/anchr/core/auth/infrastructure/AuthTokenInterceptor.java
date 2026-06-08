@@ -1,7 +1,6 @@
 package com.anchr.core.auth.infrastructure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.auth.RequireAuth;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.model.Result;

@@ -1,6 +1,5 @@
 package com.anchr.core.auth.infrastructure;
 
-import com.anchr.core.auth.RequireAuth;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

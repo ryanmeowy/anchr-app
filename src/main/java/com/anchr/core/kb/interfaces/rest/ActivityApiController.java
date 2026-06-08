@@ -3,7 +3,7 @@ package com.anchr.core.kb.interfaces.rest;
 import com.anchr.core.kb.application.ActivityQueryService;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionListDTO;
-import com.anchr.core.auth.RequireAuth;
+import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;

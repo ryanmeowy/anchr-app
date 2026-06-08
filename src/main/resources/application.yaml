@@ -55,10 +55,6 @@ app:
   search:
     quality-absolute-min-score: 0.72
     vector-min-score: 0.6
-    escli:
-      # Optional allowlist for ES CLI accessible indices (supports wildcard '*').
-      # When empty, defaults to kb_segment read/write alias and physical index.
-      allowed-index-patterns: []
     rrf:
       enabled: true
       native-enabled: false

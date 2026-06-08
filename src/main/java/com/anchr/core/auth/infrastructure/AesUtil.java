@@ -1,6 +1,5 @@
 package com.anchr.core.auth.infrastructure;
 
-import com.anchr.core.auth.EncryptionException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 

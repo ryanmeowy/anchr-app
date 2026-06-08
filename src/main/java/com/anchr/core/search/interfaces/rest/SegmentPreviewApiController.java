@@ -1,6 +1,6 @@
 package com.anchr.core.search.interfaces.rest;
 
-import com.anchr.core.auth.RequireAuth;
+import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.Result;
