@@ -236,13 +236,13 @@ IngestionTaskApplicationService
 IngestionCapabilityService
 ```
 
-内部仍可复用：
+内部复用统一处理能力：
 
 ```text
-TextAssetIngestionService
-ImageIngestionService
-ImageSegmentIndexWriter
-Text parser / embedding / ES writer
+Document parser / image OCR parser
+Chunk planner
+Embedding provider
+KbSegmentBulkWriter
 ```
 
 前端只调用：

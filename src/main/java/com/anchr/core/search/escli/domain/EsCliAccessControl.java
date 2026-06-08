@@ -1,6 +1,6 @@
 package com.anchr.core.search.escli.domain;
 
-import com.anchr.core.common.config.VectorConfig;
+import com.anchr.core.common.config.KbSegmentConfig;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
 public class EsCliAccessControl {
 
     private final EsCliAccessConfig accessConfig;
-    private final VectorConfig vectorConfig;
+    private final KbSegmentConfig kbSegmentConfig;
 
     public void assertIndexAllowed(String index) {
         if (!isAllowed(index)) {
@@ -47,9 +47,9 @@ public class EsCliAccessControl {
         }
 
         List<String> defaults = new ArrayList<>();
-        addIfPresent(defaults, vectorConfig.getReadAlias());
-        addIfPresent(defaults, vectorConfig.getWriteAlias());
-        addIfPresent(defaults, vectorConfig.getPhysicalIndexName());
+        addIfPresent(defaults, kbSegmentConfig.getReadAlias());
+        addIfPresent(defaults, kbSegmentConfig.getWriteAlias());
+        addIfPresent(defaults, kbSegmentConfig.getPhysicalIndexName());
         return defaults;
     }
 

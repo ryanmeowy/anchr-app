@@ -1,7 +1,8 @@
 package com.anchr.core.auth.infrastructure;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.auth.RequireAuth;
+import com.anchr.core.auth.application.SessionTokenService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,6 +13,8 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.method.HandlerMethod;
+
+import java.util.Optional;
 
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,11 +29,14 @@ class AuthTokenInterceptorTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
+    @Mock
+    private SessionTokenService sessionTokenService;
+
     private AuthTokenInterceptor interceptor;
 
     @BeforeEach
     void setUp() {
-        interceptor = new AuthTokenInterceptor(redisTemplate, new ObjectMapper());
+        interceptor = new AuthTokenInterceptor(redisTemplate, new ObjectMapper(), sessionTokenService);
     }
 
     @Test
@@ -62,6 +68,7 @@ class AuthTokenInterceptorTest {
         request.addHeader("X-Access-Token", "token-123");
         MockHttpServletResponse response = new MockHttpServletResponse();
         HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "protectedApi");
+        when(sessionTokenService.resolve("token-123")).thenReturn(Optional.empty());
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get(TOKEN_CACHE_PREFIX)).thenReturn("token-123");
 
@@ -77,6 +84,7 @@ class AuthTokenInterceptorTest {
         request.addHeader("X-Access-Token", "wrong-token");
         MockHttpServletResponse response = new MockHttpServletResponse();
         HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "protectedApi");
+        when(sessionTokenService.resolve("wrong-token")).thenReturn(Optional.empty());
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get(TOKEN_CACHE_PREFIX)).thenReturn("server-token");
 
