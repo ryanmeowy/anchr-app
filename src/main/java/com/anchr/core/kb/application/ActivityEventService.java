@@ -1,4 +1,4 @@
-package com.anchr.core.activity.application;
+package com.anchr.core.kb.application;
 
 import java.util.List;
 

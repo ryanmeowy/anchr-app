@@ -1,6 +1,6 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.activity.application.ActivityEventService;
+import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.search.application.KbQueryEmbeddingService;
 import com.anchr.core.search.application.KbScopeResolver;
 import com.anchr.core.search.config.AppSearchProperties;

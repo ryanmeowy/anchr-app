@@ -1,4 +1,4 @@
-package com.anchr.core.activity.interfaces.rest.dto;
+package com.anchr.core.kb.interfaces.rest.dto;
 
 import lombok.Builder;
 import lombok.Value;

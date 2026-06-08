@@ -1,7 +1,7 @@
-package com.anchr.core.activity.domain.repository;
+package com.anchr.core.kb.domain.repository;
 
-import com.anchr.core.activity.domain.model.ActivityEvent;
-import com.anchr.core.activity.domain.model.ActivityEventType;
+import com.anchr.core.kb.domain.model.ActivityEvent;
+import com.anchr.core.kb.domain.model.ActivityEventType;
 
 import java.util.List;
 

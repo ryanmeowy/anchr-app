@@ -1,15 +1,15 @@
-package com.anchr.core.activity.application.impl;
+package com.anchr.core.kb.application.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.activity.application.ActivityQueryService;
-import com.anchr.core.activity.domain.model.ActivityEvent;
-import com.anchr.core.activity.domain.model.ActivityEventType;
-import com.anchr.core.activity.domain.repository.ActivityEventRepository;
-import com.anchr.core.activity.interfaces.rest.dto.RecentCitationDTO;
-import com.anchr.core.activity.interfaces.rest.dto.RecentCitationListDTO;
-import com.anchr.core.activity.interfaces.rest.dto.RecentQuestionDTO;
-import com.anchr.core.activity.interfaces.rest.dto.RecentQuestionListDTO;
+import com.anchr.core.kb.application.ActivityQueryService;
+import com.anchr.core.kb.domain.model.ActivityEvent;
+import com.anchr.core.kb.domain.model.ActivityEventType;
+import com.anchr.core.kb.domain.repository.ActivityEventRepository;
+import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentCitationListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionListDTO;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;

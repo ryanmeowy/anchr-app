@@ -1,7 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.activity.application.ActivityEventService;
+import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;

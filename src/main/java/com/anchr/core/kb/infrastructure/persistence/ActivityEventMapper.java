@@ -1,4 +1,4 @@
-package com.anchr.core.activity.infrastructure.persistence;
+package com.anchr.core.kb.infrastructure.persistence;
 
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;

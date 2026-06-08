@@ -1,4 +1,4 @@
-package com.anchr.core.activity.domain.model;
+package com.anchr.core.kb.domain.model;
 
 import lombok.Builder;
 import lombok.Value;

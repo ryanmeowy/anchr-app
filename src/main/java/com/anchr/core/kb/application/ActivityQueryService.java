@@ -1,7 +1,7 @@
-package com.anchr.core.activity.application;
+package com.anchr.core.kb.application;
 
-import com.anchr.core.activity.interfaces.rest.dto.RecentCitationListDTO;
-import com.anchr.core.activity.interfaces.rest.dto.RecentQuestionListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentCitationListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionListDTO;
 
 /**
  * Query service for recent Ask First activities.

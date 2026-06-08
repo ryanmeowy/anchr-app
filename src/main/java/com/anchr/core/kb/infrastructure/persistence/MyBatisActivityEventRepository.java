@@ -1,8 +1,8 @@
-package com.anchr.core.activity.infrastructure.persistence;
+package com.anchr.core.kb.infrastructure.persistence;
 
-import com.anchr.core.activity.domain.model.ActivityEvent;
-import com.anchr.core.activity.domain.model.ActivityEventType;
-import com.anchr.core.activity.domain.repository.ActivityEventRepository;
+import com.anchr.core.kb.domain.model.ActivityEvent;
+import com.anchr.core.kb.domain.model.ActivityEventType;
+import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 

@@ -2,9 +2,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.anchr.core.activity.infrastructure.persistence.ActivityEventMapper">
+<mapper namespace="com.anchr.core.kb.infrastructure.persistence.ActivityEventMapper">
 
-    <resultMap id="ActivityEventRecordMap" type="com.anchr.core.activity.infrastructure.persistence.ActivityEventRecord">
+    <resultMap id="ActivityEventRecordMap" type="com.anchr.core.kb.infrastructure.persistence.ActivityEventRecord">
         <id property="id" column="id"/>
         <result property="workspaceId" column="workspace_id"/>
         <result property="userId" column="user_id"/>
@@ -19,7 +19,7 @@
         id, workspace_id, user_id, event_type, resource_type, resource_id, payload, created_at
     </sql>
 
-    <insert id="insert" parameterType="com.anchr.core.activity.infrastructure.persistence.ActivityEventRecord">
+    <insert id="insert" parameterType="com.anchr.core.kb.infrastructure.persistence.ActivityEventRecord">
         insert into activity_event (
             <include refid="ActivityEventColumns"/>
         ) values (

@@ -2,7 +2,7 @@ package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.activity.application.ActivityEventService;
+import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.FollowUpQuestionService;

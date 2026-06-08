@@ -1,6 +1,6 @@
 package com.anchr.core.ingestion.application.impl;
 
-import com.anchr.core.activity.application.ActivityEventService;
+import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;

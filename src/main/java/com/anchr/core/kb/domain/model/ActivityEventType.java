@@ -1,4 +1,4 @@
-package com.anchr.core.activity.domain.model;
+package com.anchr.core.kb.domain.model;
 
 /**
  * Lightweight activity event types for Ask First experience aggregation.
