@@ -1,4 +1,0 @@
-streamlit>=1.37,<2
-requests>=2.31,<3
-oss2>=2.18,<3
-pycryptodome>=3.20,<4
