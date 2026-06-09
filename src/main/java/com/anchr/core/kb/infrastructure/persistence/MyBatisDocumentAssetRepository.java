@@ -55,6 +55,15 @@ public class MyBatisDocumentAssetRepository implements DocumentAssetRepository {
     }
 
     @Override
+    public boolean updateIngestionResult(String workspaceId, String kbId, String assetId,
+                                         String parseStatus, String indexStatus, int segmentCount,
+                                         String errorCode, String errorMessage,
+                                         String updatedBy, LocalDateTime updatedAt) {
+        return mapper.updateIngestionResult(workspaceId, kbId, assetId, parseStatus, indexStatus, segmentCount,
+                errorCode, errorMessage, updatedBy, updatedAt) > 0;
+    }
+
+    @Override
     public boolean markDeleted(String workspaceId, String kbId, String assetId,
                                String updatedBy, LocalDateTime updatedAt) {
         return mapper.markDeleted(workspaceId, kbId, assetId, updatedBy, updatedAt) > 0;

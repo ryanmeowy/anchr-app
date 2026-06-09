@@ -34,7 +34,7 @@ final class TextParserSupport {
         if (metadata == null || !StringUtils.hasText(metadata.getMimeType())) {
             return false;
         }
-        String mimeType = metadata.getMimeType().trim().toLowerCase();
+        String mimeType = TextAssetType.normalizeMimeType(metadata.getMimeType());
         for (String candidate : mimeTypes) {
             if (candidate.equalsIgnoreCase(mimeType)) {
                 return true;

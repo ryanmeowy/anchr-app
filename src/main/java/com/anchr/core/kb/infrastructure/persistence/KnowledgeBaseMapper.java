@@ -21,6 +21,9 @@ public interface KnowledgeBaseMapper {
     Optional<KnowledgeBaseRecord> findById(@Param("workspaceId") String workspaceId,
                                            @Param("id") String id);
 
+    List<KnowledgeBaseRecord> listActiveByIds(@Param("workspaceId") String workspaceId,
+                                              @Param("ids") List<String> ids);
+
     List<KnowledgeBaseRecord> listActive(@Param("workspaceId") String workspaceId,
                                          @Param("limit") int limit,
                                          @Param("offset") int offset);

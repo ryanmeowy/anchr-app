@@ -14,14 +14,19 @@ import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Default recent activity query service.
@@ -34,6 +39,7 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
     private static final int MAX_LIMIT = 50;
 
     private final ActivityEventRepository activityEventRepository;
+    private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -41,9 +47,12 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         int boundedLimit = normalizeLimit(limit);
         int offset = decodeOffset(cursor);
         List<ActivityEvent> events = listEvents(ActivityEventType.QUESTION_ASKED, boundedLimit + 1, offset);
-        List<RecentQuestionDTO> items = events.stream()
+        List<ActivityEvent> pageEvents = events.stream()
                 .limit(boundedLimit)
-                .map(this::toRecentQuestion)
+                .toList();
+        Map<String, String> knowledgeBaseNamesById = loadKnowledgeBaseNamesById(pageEvents);
+        List<RecentQuestionDTO> items = pageEvents.stream()
+                .map(event -> toRecentQuestion(event, knowledgeBaseNamesById))
                 .toList();
         return RecentQuestionListDTO.builder()
                 .items(items)
@@ -71,15 +80,39 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         return activityEventRepository.listByType(context.workspaceId(), context.userId(), eventType, limit, offset);
     }
 
-    private RecentQuestionDTO toRecentQuestion(ActivityEvent event) {
+    private RecentQuestionDTO toRecentQuestion(ActivityEvent event, Map<String, String> knowledgeBaseNamesById) {
         Map<String, Object> payload = parsePayload(event);
+        List<String> kbScope = readStringList(payload, "kbScope");
         return RecentQuestionDTO.builder()
                 .turnId(readString(payload, "turnId", event.getResourceId()))
                 .sessionId(readString(payload, "sessionId", null))
                 .question(readString(payload, "question", null))
-                .kbScope(readStringList(payload, "kbScope"))
+                .kbScope(kbScope)
+                .knowledgeBaseNames(kbScope.stream()
+                        .map(knowledgeBaseNamesById::get)
+                        .filter(StringUtils::hasText)
+                        .toList())
                 .createdAt(event.getCreatedAt())
                 .build();
+    }
+
+    private Map<String, String> loadKnowledgeBaseNamesById(List<ActivityEvent> events) {
+        Set<String> kbIds = events.stream()
+                .flatMap(event -> readStringList(parsePayload(event), "kbScope").stream())
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (kbIds.isEmpty()) {
+            return Map.of();
+        }
+        RequestUserContext context = UserContextHolder.get();
+        return knowledgeBaseRepository.listActiveByIds(context.workspaceId(), List.copyOf(kbIds)).stream()
+                .filter(knowledgeBase -> StringUtils.hasText(knowledgeBase.getId())
+                        && StringUtils.hasText(knowledgeBase.getName()))
+                .collect(Collectors.toMap(
+                        KnowledgeBase::getId,
+                        KnowledgeBase::getName,
+                        (first, second) -> first
+                ));
     }
 
     private RecentCitationDTO toRecentCitation(ActivityEvent event) {

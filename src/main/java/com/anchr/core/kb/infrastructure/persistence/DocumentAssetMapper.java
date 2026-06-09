@@ -39,6 +39,17 @@ public interface DocumentAssetMapper {
                        @Param("updatedBy") String updatedBy,
                        @Param("updatedAt") LocalDateTime updatedAt);
 
+    int updateIngestionResult(@Param("workspaceId") String workspaceId,
+                              @Param("kbId") String kbId,
+                              @Param("assetId") String assetId,
+                              @Param("parseStatus") String parseStatus,
+                              @Param("indexStatus") String indexStatus,
+                              @Param("segmentCount") int segmentCount,
+                              @Param("errorCode") String errorCode,
+                              @Param("errorMessage") String errorMessage,
+                              @Param("updatedBy") String updatedBy,
+                              @Param("updatedAt") LocalDateTime updatedAt);
+
     int markDeleted(@Param("workspaceId") String workspaceId,
                     @Param("kbId") String kbId,
                     @Param("assetId") String assetId,

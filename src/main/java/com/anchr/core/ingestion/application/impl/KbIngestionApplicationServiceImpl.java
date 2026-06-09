@@ -1,6 +1,8 @@
 package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.auth.application.AuditLogService;
+import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -9,6 +11,7 @@ import com.anchr.core.common.infrastructure.id.PrefixedIdGenerator;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.application.KbIngestionApplicationService;
+import com.anchr.core.kb.application.ingestion.KbIngestionTaskProcessor;
 import com.anchr.core.kb.domain.model.DocumentAsset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
@@ -26,6 +29,8 @@ import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -55,10 +60,14 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private final IngestionCapabilityService ingestionCapabilityService;
     private final PrefixedIdGenerator idGenerator;
     private final ActivityEventService activityEventService;
+    private final PermissionService permissionService;
+    private final AuditLogService auditLogService;
+    private final KbIngestionTaskProcessor ingestionTaskProcessor;
 
     @Override
     @Transactional
     public IngestionTask createTask(String kbId, IngestionCreateCommand command) {
+        permissionService.requireImport();
         knowledgeBaseService.get(kbId);
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
@@ -69,7 +78,10 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         ingestionTaskRepository.save(task);
         activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
                 task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
+        auditLogService.record("DOCUMENT_IMPORTED", "INGESTION_TASK", task.getId(), "SUCCESS",
+                "{\"kbId\":\"" + kbId + "\"}");
         knowledgeBaseRepository.refreshDocumentStats(context.workspaceId(), kbId, context.userId(), now);
+        submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
 
@@ -91,6 +103,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     @Override
     @Transactional
     public IngestionTask retryItem(String kbId, String taskId, String itemId) {
+        permissionService.requireImport();
         IngestionTask task = getTask(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         var item = ingestionTaskRepository.findItem(context.workspaceId(), kbId, task.getId(), requireText(itemId, "itemId"))
@@ -101,12 +114,14 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         LocalDateTime now = LocalDateTime.now();
         ingestionTaskRepository.resetFailedItem(context.workspaceId(), kbId, task.getId(), item.getId(), now);
         ingestionTaskRepository.refreshSummary(context.workspaceId(), kbId, task.getId(), context.userId(), now);
+        submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
 
     @Override
     @Transactional
     public IngestionTask retryFailed(String kbId, String taskId) {
+        permissionService.requireImport();
         IngestionTask task = getTask(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         List<IngestionTaskItem> failedItems =
@@ -117,18 +132,21 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         LocalDateTime now = LocalDateTime.now();
         ingestionTaskRepository.resetFailedItems(context.workspaceId(), kbId, task.getId(), now);
         ingestionTaskRepository.refreshSummary(context.workspaceId(), kbId, task.getId(), context.userId(), now);
+        submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
 
     @Override
     @Transactional
     public IngestionTask createReparseTask(String kbId, String assetId) {
+        permissionService.requireImport();
         return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REPARSE, IngestionStage.PARSE);
     }
 
     @Override
     @Transactional
     public IngestionTask createReembedTask(String kbId, String assetId) {
+        permissionService.requireImport();
         return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REEMBED, IngestionStage.EMBED);
     }
 
@@ -164,6 +182,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
             documentAssetRepository.updateStatuses(context.workspaceId(), kbId, document.getId(),
                     document.getParseStatus().name(), DocumentIndexStatus.PENDING.name(), context.userId(), now);
         }
+        submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
 
@@ -191,8 +210,28 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         String fileType = normalizeFileType(command.fileType());
         String fileName = normalizeFileName(command.fileName(), command.sourceUrl());
         if (sourceType == IngestionSourceType.URL) {
-            return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
-                    "URL_NOT_SUPPORTED", "URL ingestion is not enabled in this phase.", now);
+            requireText(command.sourceUrl(), "sourceUrl");
+            if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
+                return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
+                        "UNSUPPORTED_FILE_TYPE", "Unsupported URL file type.", now);
+            }
+            DocumentAsset document = createDocument(context, kbId, command, fileName, fileType, now);
+            documentAssetRepository.save(document);
+            return IngestionTaskItem.builder()
+                    .id(idGenerator.nextId(ITEM_ID_PREFIX))
+                    .taskId(taskId)
+                    .kbId(kbId)
+                    .assetId(document.getId())
+                    .fileName(fileName)
+                    .fileHash(trimToNull(command.fileHash()))
+                    .sourceUrl(trimToNull(command.sourceUrl()))
+                    .stage(IngestionStage.PARSE)
+                    .status(IngestionTaskItemStatus.PENDING)
+                    .progress(10)
+                    .dedupeResult(resolveNewDedupeResult(dedupeStrategy))
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build();
         }
         if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
             return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
@@ -318,7 +357,10 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
 
     private IngestionTaskStatus resolveTaskStatus(List<IngestionTaskItem> items, int successCount,
                                                   int failureCount, int runningCount) {
-        if (hasPendingOrRunning(items) || runningCount > 0) {
+        if (runningCount > 0) {
+            return IngestionTaskStatus.RUNNING;
+        }
+        if (hasPending(items)) {
             return IngestionTaskStatus.PENDING;
         }
         if (failureCount == 0) {
@@ -330,9 +372,26 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         return IngestionTaskStatus.PARTIAL_SUCCESS;
     }
 
+    private boolean hasPending(List<IngestionTaskItem> items) {
+        return items.stream().anyMatch(item -> item.getStatus() == IngestionTaskItemStatus.PENDING);
+    }
+
     private boolean hasPendingOrRunning(List<IngestionTaskItem> items) {
         return items.stream().anyMatch(item -> item.getStatus() == IngestionTaskItemStatus.PENDING
                 || item.getStatus() == IngestionTaskItemStatus.RUNNING);
+    }
+
+    private void submitAfterCommit(String workspaceId, String kbId, String taskId, String userId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            ingestionTaskProcessor.submit(workspaceId, kbId, taskId, userId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                ingestionTaskProcessor.submit(workspaceId, kbId, taskId, userId);
+            }
+        });
     }
 
     private DedupeResult resolveNewDedupeResult(DedupeStrategy strategy) {

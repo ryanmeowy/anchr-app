@@ -51,6 +51,32 @@ public interface IngestionTaskMapper {
                          @Param("taskId") String taskId,
                          @Param("updatedAt") LocalDateTime updatedAt);
 
+    int markItemRunning(@Param("workspaceId") String workspaceId,
+                        @Param("kbId") String kbId,
+                        @Param("taskId") String taskId,
+                        @Param("itemId") String itemId,
+                        @Param("stage") String stage,
+                        @Param("progress") int progress,
+                        @Param("updatedAt") LocalDateTime updatedAt);
+
+    int markItemSuccess(@Param("workspaceId") String workspaceId,
+                        @Param("kbId") String kbId,
+                        @Param("taskId") String taskId,
+                        @Param("itemId") String itemId,
+                        @Param("stage") String stage,
+                        @Param("progress") int progress,
+                        @Param("updatedAt") LocalDateTime updatedAt);
+
+    int markItemFailed(@Param("workspaceId") String workspaceId,
+                       @Param("kbId") String kbId,
+                       @Param("taskId") String taskId,
+                       @Param("itemId") String itemId,
+                       @Param("stage") String stage,
+                       @Param("progress") int progress,
+                       @Param("errorCode") String errorCode,
+                       @Param("errorMessage") String errorMessage,
+                       @Param("updatedAt") LocalDateTime updatedAt);
+
     int refreshSummary(@Param("workspaceId") String workspaceId,
                        @Param("kbId") String kbId,
                        @Param("taskId") String taskId,

@@ -167,6 +167,54 @@
           and iti.status = 'FAILED'
     </update>
 
+    <update id="markItemRunning">
+        update ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        set iti.stage = #{stage},
+            iti.status = 'RUNNING',
+            iti.progress = #{progress},
+            iti.error_code = null,
+            iti.error_message = null,
+            iti.updated_at = #{updatedAt},
+            iti.finished_at = null
+        where it.workspace_id = #{workspaceId}
+          and it.kb_id = #{kbId}
+          and it.id = #{taskId}
+          and iti.id = #{itemId}
+    </update>
+
+    <update id="markItemSuccess">
+        update ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        set iti.stage = #{stage},
+            iti.status = 'SUCCESS',
+            iti.progress = #{progress},
+            iti.error_code = null,
+            iti.error_message = null,
+            iti.updated_at = #{updatedAt},
+            iti.finished_at = #{updatedAt}
+        where it.workspace_id = #{workspaceId}
+          and it.kb_id = #{kbId}
+          and it.id = #{taskId}
+          and iti.id = #{itemId}
+    </update>
+
+    <update id="markItemFailed">
+        update ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        set iti.stage = #{stage},
+            iti.status = 'FAILED',
+            iti.progress = #{progress},
+            iti.error_code = #{errorCode},
+            iti.error_message = #{errorMessage},
+            iti.updated_at = #{updatedAt},
+            iti.finished_at = #{updatedAt}
+        where it.workspace_id = #{workspaceId}
+          and it.kb_id = #{kbId}
+          and it.id = #{taskId}
+          and iti.id = #{itemId}
+    </update>
+
     <update id="refreshSummary">
         update ingestion_task it
         set it.total_count = (
@@ -197,7 +245,13 @@
                     select count(1)
                     from ingestion_task_item iti
                     where iti.task_id = #{taskId}
-                      and iti.status in ('RUNNING', 'PENDING')
+                      and iti.status = 'RUNNING'
+                ) > 0 then 'RUNNING'
+                when (
+                    select count(1)
+                    from ingestion_task_item iti
+                    where iti.task_id = #{taskId}
+                      and iti.status = 'PENDING'
                 ) > 0 then 'PENDING'
                 when (
                     select count(1)

@@ -1,6 +1,8 @@
 package com.anchr.core.auth.infrastructure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.anchr.core.auth.RequireAuth;
+import com.anchr.core.auth.application.SessionTokenService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.model.Result;
@@ -34,6 +36,7 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final SessionTokenService sessionTokenService;
 
     @Override
     public boolean preHandle(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull Object handler) throws Exception {
@@ -45,8 +48,13 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
         try {
             if (hm.getMethodAnnotation(RequireAuth.class) != null) {
                 String clientToken = request.getHeader("X-Access-Token");
-                String serverToken = redisTemplate.opsForValue().get(TOKEN_CACHE_PREFIX);
-                if (serverToken == null || !serverToken.equals(clientToken)) {
+                boolean accepted = sessionTokenService.resolve(clientToken)
+                        .map(principal -> {
+                            UserContextHolder.set(principal.toContext());
+                            return true;
+                        })
+                        .orElseGet(() -> acceptAdminToken(clientToken));
+                if (!accepted) {
                     response.setStatus(401);
                     response.setContentType("application/json;charset=UTF-8");
                     Result<Void> result = Result.error(ApiError.AUTH_TOKEN_INVALID, UUID.randomUUID().toString());
@@ -59,7 +67,9 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
                     return false;
                 }
             }
-            UserContextHolder.set(RequestUserContext.systemDefault());
+            if (UserContextHolder.get() == null) {
+                UserContextHolder.set(RequestUserContext.systemDefault());
+            }
             return true;
         } catch (Exception e) {
             UserContextHolder.clear();
@@ -80,5 +90,14 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
                                                @NonNull HttpServletResponse response,
                                                @NonNull Object handler) {
         UserContextHolder.clear();
+    }
+
+    private boolean acceptAdminToken(String clientToken) {
+        String serverToken = redisTemplate.opsForValue().get(TOKEN_CACHE_PREFIX);
+        if (serverToken == null || !serverToken.equals(clientToken)) {
+            return false;
+        }
+        UserContextHolder.set(RequestUserContext.systemDefault());
+        return true;
     }
 }

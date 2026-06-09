@@ -59,10 +59,10 @@ services:
     container_name: mysql
     environment:
       - TZ=Asia/Shanghai
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-anchr}
-      - MYSQL_USER=${MYSQL_USER:-anchr}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-anchr}
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
     ports:
       - "3306:3306"
     command:
@@ -76,7 +76,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 450M
+          memory: 1024M
 
 volumes:
   es_data:

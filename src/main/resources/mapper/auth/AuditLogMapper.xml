@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.auth.infrastructure.persistence.AuditLogMapper">
+
+    <resultMap id="AuditLogMap" type="com.anchr.core.auth.infrastructure.persistence.AuditLogRecord">
+        <id property="id" column="id"/>
+        <result property="workspaceId" column="workspace_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="action" column="action"/>
+        <result property="resourceType" column="resource_type"/>
+        <result property="resourceId" column="resource_id"/>
+        <result property="outcome" column="outcome"/>
+        <result property="payload" column="payload"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.anchr.core.auth.infrastructure.persistence.AuditLogRecord">
+        insert into audit_log (
+            id, workspace_id, user_id, action, resource_type, resource_id, outcome, payload, created_at
+        ) values (
+            #{id}, #{workspaceId}, #{userId}, #{action}, #{resourceType}, #{resourceId},
+            #{outcome}, #{payload}, #{createdAt}
+        )
+    </insert>
+
+    <select id="list" resultMap="AuditLogMap">
+        select id, workspace_id, user_id, action, resource_type, resource_id, outcome, payload, created_at
+        from audit_log
+        where workspace_id = #{workspaceId}
+        <if test="action != null and action != ''">
+            and action = #{action}
+        </if>
+        <if test="resourceType != null and resourceType != ''">
+            and resource_type = #{resourceType}
+        </if>
+        <if test="userId != null and userId != ''">
+            and user_id = #{userId}
+        </if>
+        <if test="from != null">
+            and created_at &gt;= #{from}
+        </if>
+        <if test="to != null">
+            and created_at &lt;= #{to}
+        </if>
+        order by created_at desc, id desc
+        limit #{limit}
+    </select>
+</mapper>

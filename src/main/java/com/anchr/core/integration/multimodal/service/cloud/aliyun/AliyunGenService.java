@@ -11,9 +11,10 @@ import com.anchr.core.integration.multimodal.domain.model.AliyunErrorCode;
 import com.anchr.core.search.domain.port.QueryGraphParserPort;
 import com.anchr.core.search.domain.port.SearchContentPort;
 import com.anchr.core.search.interfaces.rest.dto.GraphTripleDTO;
+import com.anchr.core.settings.application.provider.ProviderIdentity;
+import com.anchr.core.settings.domain.model.ProviderType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,10 +23,20 @@ import java.util.Objects;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "app.capability-provider", name = "gen", havingValue = "aliyun")
-public class AliyunGenService implements SearchContentPort, IngestionContentPort, QueryGraphParserPort, ConversationRewritePort {
+public class AliyunGenService implements SearchContentPort, IngestionContentPort,
+        QueryGraphParserPort, ConversationRewritePort, ProviderIdentity {
 
     private final AliyunGenManager genManager;
+
+    @Override
+    public ProviderType providerType() {
+        return ProviderType.GENERATION;
+    }
+
+    @Override
+    public String providerName() {
+        return "aliyun";
+    }
 
     @Override
     public String generateSummary(String imageUrl) {

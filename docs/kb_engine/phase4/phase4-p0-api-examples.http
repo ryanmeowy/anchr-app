@@ -1,0 +1,143 @@
+@baseUrl = http://localhost:8080
+@adminSecret = change-me
+@accessToken = replace-after-login
+@kbId = replace-kb-id
+@taskId = replace-task-id
+@assetId = replace-asset-id
+@segmentId = replace-segment-id
+@workspaceId = default
+
+### Refresh admin token
+GET {{baseUrl}}/api/v1/auth/refresh-token
+X-Admin-Secret: {{adminSecret}}
+
+### Local account login
+POST {{baseUrl}}/api/v1/account/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "change-me"
+}
+
+### Current account
+GET {{baseUrl}}/api/v1/account/me
+X-Access-Token: {{accessToken}}
+
+### Create knowledge base
+POST {{baseUrl}}/api/v1/kbs
+X-Access-Token: {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Phase4 Acceptance KB",
+  "description": "Acceptance test knowledge base"
+}
+
+### Ingestion capabilities
+GET {{baseUrl}}/api/v1/ingestion/capabilities
+X-Access-Token: {{accessToken}}
+
+### Create upload ingestion task
+POST {{baseUrl}}/api/v1/kbs/{{kbId}}/ingestion-tasks
+X-Access-Token: {{accessToken}}
+Content-Type: application/json
+
+{
+  "sourceType": "UPLOAD",
+  "dedupeStrategy": "SKIP",
+  "items": [
+    {
+      "fileName": "contract.pdf",
+      "title": "Acceptance Contract",
+      "fileType": "PDF",
+      "mimeType": "application/pdf",
+      "sizeBytes": 204800,
+      "objectKey": "uploads/phase4/contract.pdf",
+      "fileHash": "sha256_contract_demo"
+    }
+  ]
+}
+
+### Create URL ingestion task
+POST {{baseUrl}}/api/v1/kbs/{{kbId}}/ingestion-tasks
+X-Access-Token: {{accessToken}}
+Content-Type: application/json
+
+{
+  "sourceType": "URL",
+  "dedupeStrategy": "SKIP",
+  "items": [
+    {
+      "fileName": "remote-contract.pdf",
+      "fileType": "PDF",
+      "sourceUrl": "https://example.com/files/contract.pdf"
+    }
+  ]
+}
+
+### Get task
+GET {{baseUrl}}/api/v1/kbs/{{kbId}}/ingestion-tasks/{{taskId}}
+X-Access-Token: {{accessToken}}
+
+### List documents
+GET {{baseUrl}}/api/v1/kbs/{{kbId}}/documents?page=1&size=20
+X-Access-Token: {{accessToken}}
+
+### Search with answer
+POST {{baseUrl}}/api/v1/search/kb
+X-Access-Token: {{accessToken}}
+Content-Type: application/json
+
+{
+  "query": "What is the payment deadline?",
+  "kbIds": ["{{kbId}}"],
+  "limit": 10,
+  "withAnswer": true
+}
+
+### Answer only
+POST {{baseUrl}}/api/v1/search/kb-answer
+X-Access-Token: {{accessToken}}
+Content-Type: application/json
+
+{
+  "query": "What is the payment deadline?",
+  "kbIds": ["{{kbId}}"],
+  "limit": 6
+}
+
+### Create conversation
+POST {{baseUrl}}/api/conversations
+X-Access-Token: {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "Acceptance conversation",
+  "kbIds": ["{{kbId}}"]
+}
+
+### Segment preview
+GET {{baseUrl}}/api/v1/preview/segments/{{segmentId}}
+X-Access-Token: {{accessToken}}
+
+### Segment neighbors
+GET {{baseUrl}}/api/v1/preview/segments/{{segmentId}}/neighbors?before=2&after=2
+X-Access-Token: {{accessToken}}
+
+### Home summary
+GET {{baseUrl}}/api/v1/home/summary
+X-Access-Token: {{accessToken}}
+
+### Settings capabilities
+GET {{baseUrl}}/api/v1/settings/capabilities
+X-Access-Token: {{accessToken}}
+
+### Web search fallback
+POST {{baseUrl}}/api/v1/search/web
+X-Access-Token: {{accessToken}}
+Content-Type: application/json
+
+{
+  "query": "latest product announcement"
+}

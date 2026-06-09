@@ -3,6 +3,7 @@ package com.anchr.core.ingestion.interfaces.rest.dto;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
 import lombok.Builder;
 import lombok.Value;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 
@@ -21,6 +22,7 @@ public class IngestionTaskSummaryDTO {
     int successCount;
     int failureCount;
     int runningCount;
+    String failureReason;
     LocalDateTime createdAt;
     LocalDateTime updatedAt;
 
@@ -34,8 +36,26 @@ public class IngestionTaskSummaryDTO {
                 .successCount(task.getSuccessCount())
                 .failureCount(task.getFailureCount())
                 .runningCount(task.getRunningCount())
+                .failureReason(resolveFailureReason(task))
                 .createdAt(task.getCreatedAt())
                 .updatedAt(task.getUpdatedAt())
                 .build();
+    }
+
+    private static String resolveFailureReason(IngestionTask task) {
+        if (task.getItems() == null || task.getItems().isEmpty()) {
+            return null;
+        }
+        return task.getItems().stream()
+                .filter(item -> StringUtils.hasText(item.getErrorMessage()))
+                .findFirst()
+                .map(item -> {
+                    String message = item.getErrorMessage().trim();
+                    if (!StringUtils.hasText(item.getFileName())) {
+                        return message;
+                    }
+                    return item.getFileName() + ": " + message;
+                })
+                .orElse(null);
     }
 }
