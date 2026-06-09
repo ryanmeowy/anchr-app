@@ -1,5 +1,6 @@
 package com.anchr.core.ingestion.application.impl;
 
+import com.anchr.core.ingestion.application.KbIngestionTaskProcessor;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.auth.application.AuditLogService;
 import com.anchr.core.auth.application.PermissionService;
@@ -11,7 +12,6 @@ import com.anchr.core.common.infrastructure.id.PrefixedIdGenerator;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.application.KbIngestionApplicationService;
-import com.anchr.core.kb.application.ingestion.KbIngestionTaskProcessor;
 import com.anchr.core.kb.domain.model.DocumentAsset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;

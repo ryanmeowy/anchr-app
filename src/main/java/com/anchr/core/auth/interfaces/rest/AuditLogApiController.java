@@ -1,7 +1,7 @@
 package com.anchr.core.auth.interfaces.rest;
 
-import com.anchr.core.auth.RequireAuth;
 import com.anchr.core.auth.application.AuditLogService;
+import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.auth.infrastructure.persistence.AuditLogRecord;
 import com.anchr.core.common.model.Result;
 import lombok.RequiredArgsConstructor;

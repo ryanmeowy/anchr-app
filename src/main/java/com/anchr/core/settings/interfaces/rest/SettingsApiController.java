@@ -1,6 +1,6 @@
 package com.anchr.core.settings.interfaces.rest;
 
-import com.anchr.core.auth.RequireAuth;
+import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.settings.application.PreferenceSettingService;
 import com.anchr.core.settings.application.ProviderConnectionTestService;

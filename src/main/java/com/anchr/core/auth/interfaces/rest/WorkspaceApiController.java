@@ -1,6 +1,6 @@
 package com.anchr.core.auth.interfaces.rest;
 
-import com.anchr.core.auth.RequireAuth;
+import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.auth.application.WorkspaceService;
 import com.anchr.core.auth.domain.model.WorkspaceRole;
 import com.anchr.core.auth.infrastructure.persistence.WorkspaceMemberRecord;

@@ -1,9 +1,9 @@
 package com.anchr.core.auth.interfaces.rest;
 
-import com.anchr.core.auth.RequireAuth;
 import com.anchr.core.auth.application.AccountService;
 import com.anchr.core.auth.application.SessionTokenService;
 import com.anchr.core.auth.domain.model.WorkspaceRole;
+import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.Result;

@@ -1,4 +1,4 @@
-package com.anchr.core.kb.application.ingestion;
+package com.anchr.core.ingestion.application;
 
 /**
  * Executes persisted knowledge base ingestion tasks.
