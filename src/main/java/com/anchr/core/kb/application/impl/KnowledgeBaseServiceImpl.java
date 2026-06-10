@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Default knowledge base application service.
@@ -66,6 +67,20 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         knowledgeBaseRepository.save(knowledgeBase);
         auditLogService.record("KB_CREATED", "KB", knowledgeBase.getId(), "SUCCESS", "{}");
         return knowledgeBase;
+    }
+
+    private static final int DEFAULT_SEARCH_LIMIT = 20;
+    private static final int MAX_SEARCH_LIMIT = 50;
+
+    @Override
+    public List<KnowledgeBase> search(String query, int limit) {
+        if (!StringUtils.hasText(query)) {
+            return List.of();
+        }
+        String trimmed = query.trim();
+        int boundedLimit = limit <= 0 ? DEFAULT_SEARCH_LIMIT : Math.min(limit, MAX_SEARCH_LIMIT);
+        RequestUserContext context = UserContextHolder.get();
+        return knowledgeBaseRepository.searchActive(context.workspaceId(), trimmed, boundedLimit);
     }
 
     @Override

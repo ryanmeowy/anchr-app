@@ -142,6 +142,19 @@
           and deleted_at is null
     </update>
 
+    <select id="searchActive" resultMap="KnowledgeBaseRecordMap">
+        select
+            <include refid="KnowledgeBaseColumns"/>
+        from knowledge_base
+        where workspace_id = #{workspaceId}
+          and status = 'ACTIVE'
+          and deleted_at is null
+          and (name like concat('%', #{query}, '%')
+               or description like concat('%', #{query}, '%'))
+        order by updated_at desc, id desc
+        limit #{limit}
+    </select>
+
     <select id="findStats" resultMap="KnowledgeBaseStatsRecordMap">
         select
             kb.id as kb_id,

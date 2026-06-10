@@ -24,6 +24,8 @@ public interface KnowledgeBaseRepository {
 
     long countActive(String workspaceId);
 
+    List<KnowledgeBase> searchActive(String workspaceId, String query, int limit);
+
     boolean updateProfile(String workspaceId, String id, String name, String description,
                           String updatedBy, LocalDateTime updatedAt);
 

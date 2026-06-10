@@ -13,6 +13,8 @@ public interface KnowledgeBaseService {
 
     KnowledgeBase create(String name, String description);
 
+    List<KnowledgeBase> search(String query, int limit);
+
     PagedResult<KnowledgeBase> list(int page, int size);
 
     KnowledgeBase get(String kbId);

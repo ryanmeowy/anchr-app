@@ -26,6 +26,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * Knowledge base product APIs.
  */
@@ -42,6 +44,16 @@ public class KnowledgeBaseApiController {
     public Result<KnowledgeBaseDTO> create(@Valid @RequestBody KnowledgeBaseCreateRequestDTO request) {
         return Result.success(KnowledgeBaseDTO.from(
                 knowledgeBaseService.create(request.getName(), request.getDescription())));
+    }
+
+    @RequireAuth
+    @GetMapping("/search")
+    public Result<List<KnowledgeBaseDTO>> search(
+            @RequestParam("q") String query,
+            @RequestParam(defaultValue = "20") int limit) {
+        return Result.success(knowledgeBaseService.search(query, limit).stream()
+                .map(KnowledgeBaseDTO::from)
+                .toList());
     }
 
     @RequireAuth

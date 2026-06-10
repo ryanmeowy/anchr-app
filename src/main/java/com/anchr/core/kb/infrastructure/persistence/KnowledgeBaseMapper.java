@@ -47,6 +47,10 @@ public interface KnowledgeBaseMapper {
                              @Param("updatedBy") String updatedBy,
                              @Param("updatedAt") LocalDateTime updatedAt);
 
+    List<KnowledgeBaseRecord> searchActive(@Param("workspaceId") String workspaceId,
+                                           @Param("query") String query,
+                                           @Param("limit") int limit);
+
     Optional<KnowledgeBaseStatsRecord> findStats(@Param("workspaceId") String workspaceId,
                                                  @Param("id") String id);
 }

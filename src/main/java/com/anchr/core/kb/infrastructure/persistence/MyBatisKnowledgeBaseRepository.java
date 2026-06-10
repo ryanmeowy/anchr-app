@@ -58,6 +58,13 @@ public class MyBatisKnowledgeBaseRepository implements KnowledgeBaseRepository {
     }
 
     @Override
+    public List<KnowledgeBase> searchActive(String workspaceId, String query, int limit) {
+        return mapper.searchActive(workspaceId, query, limit).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
     public boolean updateProfile(String workspaceId, String id, String name, String description,
                                  String updatedBy, LocalDateTime updatedAt) {
         return mapper.updateProfile(workspaceId, id, name, description, updatedBy, updatedAt) > 0;
