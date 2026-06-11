@@ -10,14 +10,12 @@
         <result property="displayName" column="display_name"/>
         <result property="passwordHash" column="password_hash"/>
         <result property="status" column="status"/>
-        <result property="externalIssuer" column="external_issuer"/>
-        <result property="externalSubject" column="external_subject"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
     <sql id="UserColumns">
-        id, email, display_name, password_hash, status, external_issuer, external_subject, created_at, updated_at
+        id, email, display_name, password_hash, status, created_at, updated_at
     </sql>
 
     <insert id="insert" parameterType="com.anchr.core.auth.infrastructure.persistence.UserAccountRecord">
@@ -25,7 +23,7 @@
             <include refid="UserColumns"/>
         ) values (
             #{id}, #{email}, #{displayName}, #{passwordHash}, #{status},
-            #{externalIssuer}, #{externalSubject}, #{createdAt}, #{updatedAt}
+            #{createdAt}, #{updatedAt}
         )
     </insert>
 
@@ -47,20 +45,4 @@
           and status = 'ACTIVE'
     </select>
 
-    <select id="findByExternal" resultMap="UserAccountMap">
-        select <include refid="UserColumns"/>
-        from user_account
-        where external_issuer = #{issuer}
-          and external_subject = #{subject}
-          and status = 'ACTIVE'
-    </select>
-
-    <update id="bindExternal">
-        update user_account
-        set external_issuer = #{issuer},
-            external_subject = #{subject},
-            updated_at = current_timestamp
-        where id = #{id}
-          and status = 'ACTIVE'
-    </update>
 </mapper>

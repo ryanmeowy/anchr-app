@@ -4,12 +4,9 @@ create table if not exists user_account (
   display_name      varchar(128) not null,
   password_hash     varchar(512),
   status            varchar(32) not null default 'ACTIVE',
-  external_issuer   varchar(256),
-  external_subject  varchar(256),
   created_at        timestamp not null,
   updated_at        timestamp not null,
-  unique key uk_user_account_email (email),
-  unique key uk_user_account_external (external_issuer, external_subject)
+  unique key uk_user_account_email (email)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci;
 
 create table if not exists workspace (

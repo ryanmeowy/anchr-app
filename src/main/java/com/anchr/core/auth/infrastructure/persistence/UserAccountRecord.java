@@ -11,8 +11,6 @@ public class UserAccountRecord {
     private String displayName;
     private String passwordHash;
     private String status;
-    private String externalIssuer;
-    private String externalSubject;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

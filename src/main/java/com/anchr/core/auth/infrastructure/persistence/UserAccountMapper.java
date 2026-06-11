@@ -15,11 +15,4 @@ public interface UserAccountMapper {
     Optional<UserAccountRecord> findByEmail(@Param("email") String email);
 
     Optional<UserAccountRecord> findById(@Param("id") String id);
-
-    Optional<UserAccountRecord> findByExternal(@Param("issuer") String issuer,
-                                              @Param("subject") String subject);
-
-    int bindExternal(@Param("id") String id,
-                     @Param("issuer") String issuer,
-                     @Param("subject") String subject);
 }
