@@ -23,7 +23,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void handleBusinessException_shouldUseCodeAndMessageFromException() {
-        Result<Void> result = handler.handleBusinessException(new BusinessException(ApiError.CONFLICT));
+        Result<Void> result = handler.handleBusinessException(new BusinessException(ApiError.FORBIDDEN));
 
         assertThat(result.getCode()).isEqualTo(409);
         assertThat(result.getMessage()).isEqualTo("Resource conflict.");

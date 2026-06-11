@@ -34,7 +34,7 @@ class SearchSettingServiceImplTest {
 
     @Test
     void get_shouldApplyPersistedSettingToRuntimeProperties() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a"));
+        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
         when(appSettingRepository.find("ws-a", SearchSettingServiceImpl.SETTING_KEY))
                 .thenReturn(Optional.of(setting("{\"topK\":15,\"rerankWindow\":30,\"rrfK\":55,\"minScore\":0.8}")));
 
@@ -49,7 +49,7 @@ class SearchSettingServiceImplTest {
 
     @Test
     void update_shouldPersistAndHotApplyAllowedFields() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a"));
+        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
         when(appSettingRepository.upsert(eq("ws-a"), eq(SearchSettingServiceImpl.SETTING_KEY),
                 contains("\"topK\":20"), eq("user-a"))).thenReturn(setting("{}"));
 

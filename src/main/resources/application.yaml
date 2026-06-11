@@ -72,10 +72,6 @@ app:
       window-max: 80
       fusion-alpha: 0.6
       fusion-beta: 0.4
-  compare:
-    max-text-length: 500
-    high-threshold: 0.8
-    medium-threshold: 0.6
   debug:
     strategy-header-enabled: false
   settings:

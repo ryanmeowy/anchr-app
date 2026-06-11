@@ -29,7 +29,7 @@ class KbScopeResolverTest {
 
     @Test
     void resolveVisibleKbIds_shouldLoadAllActiveKnowledgeBasesByPage() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a"));
+        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
         when(knowledgeBaseRepository.listActive("ws-a", 100, 0)).thenReturn(kbs(0, 100));
         when(knowledgeBaseRepository.listActive("ws-a", 100, 100)).thenReturn(kbs(100, 1));
 
@@ -44,7 +44,7 @@ class KbScopeResolverTest {
 
     @Test
     void resolveVisibleKbIds_shouldMatchRequestedIdsBeyondFirstPage() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a"));
+        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
         when(knowledgeBaseRepository.listActive("ws-a", 100, 0)).thenReturn(kbs(0, 100));
         when(knowledgeBaseRepository.listActive("ws-a", 100, 100)).thenReturn(kbs(100, 1));
 

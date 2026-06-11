@@ -42,7 +42,7 @@ class ProviderSettingServiceImplTest {
 
     @Test
     void switchProvider_shouldPersistSelectionAndVersionSnapshot() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a"));
+        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
         when(appSettingRepository.find("ws-a", ProviderSelectionService.SETTING_KEY))
                 .thenReturn(Optional.of(AppSetting.builder()
                         .id("set-1")
