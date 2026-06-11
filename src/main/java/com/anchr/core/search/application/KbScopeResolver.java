@@ -1,7 +1,5 @@
 package com.anchr.core.search.application;
 
-import com.anchr.core.common.application.context.RequestUserContext;
-import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import lombok.RequiredArgsConstructor;
