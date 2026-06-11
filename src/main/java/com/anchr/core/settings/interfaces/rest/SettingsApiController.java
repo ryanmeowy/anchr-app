@@ -3,7 +3,6 @@ package com.anchr.core.settings.interfaces.rest;
 import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.settings.application.PreferenceSettingService;
-import com.anchr.core.settings.application.ProviderConnectionTestService;
 import com.anchr.core.settings.application.ProviderSettingService;
 import com.anchr.core.settings.application.SearchSettingService;
 import com.anchr.core.settings.application.SettingsQueryService;
@@ -14,8 +13,6 @@ import com.anchr.core.settings.domain.model.ProviderType;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilitiesDTO;
 import com.anchr.core.settings.interfaces.rest.dto.PreferenceDTO;
 import com.anchr.core.settings.interfaces.rest.dto.PreferenceUpdateRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.ProviderConnectionTestRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.ProviderConnectionTestResultDTO;
 import com.anchr.core.settings.interfaces.rest.dto.ProviderListDTO;
 import com.anchr.core.settings.interfaces.rest.dto.ProviderSwitchRequestDTO;
 import com.anchr.core.settings.interfaces.rest.dto.ProviderSwitchResultDTO;
@@ -26,7 +23,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,7 +43,6 @@ public class SettingsApiController {
 
     private final SettingsQueryService settingsQueryService;
     private final SearchSettingService searchSettingService;
-    private final ProviderConnectionTestService providerConnectionTestService;
     private final PreferenceSettingService preferenceSettingService;
     private final ProviderSettingService providerSettingService;
 
@@ -75,14 +70,6 @@ public class SettingsApiController {
         SearchSetting setting = searchSettingService.update(
                 request.getTopK(), request.getRerankWindow(), request.getRrfK(), request.getMinScore());
         return Result.success(toSearchDto(setting, List.of("Search settings take effect immediately.")));
-    }
-
-    @RequireAuth
-    @PostMapping("/test-connection")
-    public Result<ProviderConnectionTestResultDTO> testConnection(
-            @Valid @RequestBody ProviderConnectionTestRequestDTO request) {
-        return Result.success(providerConnectionTestService.test(
-                ProviderType.parse(request.getProviderType()), request.getProviderName()));
     }
 
     @RequireAuth
