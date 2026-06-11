@@ -18,10 +18,6 @@ public class SearchConstant {
 
     public static final Integer MAX_INPUT_LENGTH = 50;
 
-    public static final Integer IMAGE_MAX_SIZE = 10 * 1024 * 1024;
-
-    public static final Integer IMAGE_TO_IMAGE_TOP_K = 20;
-
     public static final Integer DEFAULT_RESULT_LIMIT = 20;
 
 
