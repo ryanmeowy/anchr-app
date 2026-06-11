@@ -6,11 +6,16 @@ import com.anchr.core.integration.multimodal.domain.model.EmbedParamEnum;
 import com.anchr.core.integration.multimodal.domain.model.GenParamEnum;
 import com.anchr.core.integration.multimodal.domain.model.RerankParamEnum;
 import com.anchr.core.settings.application.CapabilityConfigService;
+import com.anchr.core.settings.application.StorageConfigService;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigUpdateRequestDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestRequestDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResultDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityParamsDTO;
+import com.anchr.core.settings.interfaces.rest.dto.StorageConfigDTO;
+import com.anchr.core.settings.interfaces.rest.dto.StorageConfigUpdateRequestDTO;
+import com.anchr.core.settings.interfaces.rest.dto.StorageConnectionTestRequestDTO;
+import com.anchr.core.settings.interfaces.rest.dto.StorageConnectionTestResultDTO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
@@ -31,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class SettingsApiController {
 
     private final CapabilityConfigService capabilityConfigService;
+    private final StorageConfigService storageConfigService;
 
     // ── embedding ────────────────────────────────────────────────────────
 
@@ -123,5 +129,35 @@ public class SettingsApiController {
     public Result<CapabilityConnectionTestResultDTO> testConnection(
             @Valid @RequestBody CapabilityConnectionTestRequestDTO request) {
         return Result.success(capabilityConfigService.test(request));
+    }
+
+    // ── storage ────────────────────────────────────────────────────────────
+
+    @RequireAuth
+    @GetMapping("/storage")
+    public Result<StorageConfigDTO> getStorageConfig() {
+        return storageConfigService.get()
+                .map(config -> StorageConfigDTO.from(config,
+                        storageConfigService.maskAccessKey(config),
+                        storageConfigService.maskSecretKey(config)))
+                .map(Result::success)
+                .orElse(Result.success(null));
+    }
+
+    @RequireAuth
+    @PatchMapping("/storage")
+    public Result<StorageConfigDTO> updateStorageConfig(
+            @Valid @RequestBody StorageConfigUpdateRequestDTO request) {
+        var saved = storageConfigService.save(request);
+        return Result.success(StorageConfigDTO.from(saved,
+                storageConfigService.maskAccessKey(saved),
+                storageConfigService.maskSecretKey(saved)));
+    }
+
+    @RequireAuth
+    @PostMapping("/storage/test")
+    public Result<StorageConnectionTestResultDTO> testStorage(
+            @Valid @RequestBody StorageConnectionTestRequestDTO request) {
+        return Result.success(storageConfigService.test(request));
     }
 }

@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
  */
 @Data
 public class StorageConfigRecord {
-    private String id;
+    private Long id;
     private String endpoint;
     private String accessKeyEnc;
     private String secretKeyEnc;
@@ -18,6 +18,6 @@ public class StorageConfigRecord {
     private String prefix;
     private String roleArn;
     private boolean enabled;
-    private String updatedBy;
+    private Long updatedBy;
     private LocalDateTime updatedAt;
 }

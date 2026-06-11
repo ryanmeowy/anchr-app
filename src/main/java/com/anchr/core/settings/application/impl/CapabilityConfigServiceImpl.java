@@ -52,16 +52,14 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         }
 
         CapabilityConfig config = CapabilityConfig.builder()
-                .id(existing != null ? existing.getId() : idGen.nextIdStr())
+                .id(existing != null ? existing.getId() : idGen.nextId())
                 .capability(capability)
                 .baseUrl(request.getBaseUrl())
                 .apiKeyEnc(apiKeyEnc)
                 .modelName(request.getModelName())
-                .imageModel(request.getImageModel())
-                .imageEndpoint(request.getImageEndpoint())
                 .extraConfig(extraConfigJson(request.getExtraConfig()))
                 .enabled(true)
-                .updatedBy(UserContextHolder.get().userId())
+                .updatedBy(parseUserId(UserContextHolder.get().userId()))
                 .updatedAt(LocalDateTime.now())
                 .build();
 
@@ -124,5 +122,11 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         } catch (Exception e) {
             return "****";
         }
+    }
+
+    private static long parseUserId(String userId) {
+        if (userId == null || userId.isBlank()) return 0L;
+        try { return Long.parseLong(userId); }
+        catch (NumberFormatException e) { return 0L; }
     }
 }

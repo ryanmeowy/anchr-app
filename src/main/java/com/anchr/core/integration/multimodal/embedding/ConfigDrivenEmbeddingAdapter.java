@@ -12,7 +12,6 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 
 /**
@@ -36,23 +35,12 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
 
     @Override
     public List<Float> embedImage(String imageInput) {
-        return embedImageInternal(imageInput);
+        throw new UnsupportedOperationException("Image embedding is not supported via OpenAI-compatible API.");
     }
 
     @Override
     public List<Float> embedImage(byte[] imageBytes, String contentType) {
-        String dataUrl = "data:" + contentType + ";base64," + Base64.getEncoder().encodeToString(imageBytes);
-        return embedImageInternal(dataUrl);
-    }
-
-    private List<Float> embedImageInternal(String imageInput) {
-        CapabilityConfig config = loadConfig();
-        if (config.getImageModel() == null || config.getImageEndpoint() == null) {
-            throw new IllegalStateException("Image embedding is not configured. Set image_model and image_endpoint.");
-        }
-        OpenAiClient client = new OpenAiClient(config.getImageEndpoint(), decrypt(config.getApiKeyEnc()));
-        JsonNode result = client.embeddings(config.getImageModel(), List.of(imageInput), null);
-        return parseEmbeddingVector(result);
+        throw new UnsupportedOperationException("Image embedding is not supported via OpenAI-compatible API.");
     }
 
     private CapabilityConfig loadConfig() {

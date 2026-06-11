@@ -9,15 +9,13 @@ import java.time.LocalDateTime;
  */
 @Data
 public class CapabilityConfigRecord {
-    private String id;
+    private Long id;
     private String capability;
     private String baseUrl;
     private String apiKeyEnc;
     private String modelName;
-    private String imageModel;
-    private String imageEndpoint;
     private String extraConfig;
     private boolean enabled;
-    private String updatedBy;
+    private Long updatedBy;
     private LocalDateTime updatedAt;
 }

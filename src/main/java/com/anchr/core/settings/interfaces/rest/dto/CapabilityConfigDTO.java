@@ -1,7 +1,6 @@
 package com.anchr.core.settings.interfaces.rest.dto;
 
 import com.anchr.core.settings.domain.model.CapabilityConfig;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Value;
@@ -18,8 +17,6 @@ public class CapabilityConfigDTO {
 
     String baseUrl;
     String modelName;
-    String imageModel;
-    String imageEndpoint;
     Map<String, Object> extraConfig;
     String apiKeyMasked;
     boolean enabled;
@@ -28,8 +25,6 @@ public class CapabilityConfigDTO {
         return CapabilityConfigDTO.builder()
                 .baseUrl(config.getBaseUrl())
                 .modelName(config.getModelName())
-                .imageModel(config.getImageModel())
-                .imageEndpoint(config.getImageEndpoint())
                 .extraConfig(parseExtraConfig(config.getExtraConfig()))
                 .apiKeyMasked(apiKeyMasked)
                 .enabled(config.isEnabled())

@@ -38,8 +38,7 @@ public class MyBatisCapabilityConfigRepository implements CapabilityConfigReposi
         record.setBaseUrl(config.getBaseUrl());
         record.setApiKeyEnc(config.getApiKeyEnc());
         record.setModelName(config.getModelName());
-        record.setImageModel(config.getImageModel());
-        record.setImageEndpoint(config.getImageEndpoint());
+        record.setExtraConfig(config.getExtraConfig());
         record.setEnabled(config.isEnabled());
         record.setUpdatedBy(config.getUpdatedBy());
         record.setUpdatedAt(config.getUpdatedAt());
@@ -53,8 +52,7 @@ public class MyBatisCapabilityConfigRepository implements CapabilityConfigReposi
                 .baseUrl(record.getBaseUrl())
                 .apiKeyEnc(record.getApiKeyEnc())
                 .modelName(record.getModelName())
-                .imageModel(record.getImageModel())
-                .imageEndpoint(record.getImageEndpoint())
+                .extraConfig(record.getExtraConfig())
                 .enabled(record.isEnabled())
                 .updatedBy(record.getUpdatedBy())
                 .updatedAt(record.getUpdatedAt())

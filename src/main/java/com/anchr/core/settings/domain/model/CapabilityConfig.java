@@ -12,15 +12,13 @@ import java.time.LocalDateTime;
 @Builder
 public class CapabilityConfig {
 
-    String id;
+    Long id;
     String capability;
     String baseUrl;
     String apiKeyEnc;
     String modelName;
-    String imageModel;
-    String imageEndpoint;
     String extraConfig;
     boolean enabled;
-    String updatedBy;
+    Long updatedBy;
     LocalDateTime updatedAt;
 }

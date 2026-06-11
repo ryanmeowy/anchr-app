@@ -21,10 +21,5 @@ public class CapabilityConfigUpdateRequestDTO {
     @Size(max = 128)
     private String modelName;
 
-    @Size(max = 128)
-    private String imageModel;
-
-    @Size(max = 512)
-    private String imageEndpoint;
     private java.util.Map<String, Object> extraConfig;
 }

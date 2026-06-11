@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 @Value
 @Builder
 public class StorageConfig {
-    String id;
+    Long id;
     String endpoint;
     String accessKeyEnc;
     String secretKeyEnc;
@@ -20,6 +20,6 @@ public class StorageConfig {
     String prefix;
     String roleArn;
     boolean enabled;
-    String updatedBy;
+    Long updatedBy;
     LocalDateTime updatedAt;
 }

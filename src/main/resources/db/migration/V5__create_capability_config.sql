@@ -4,8 +4,6 @@ create table if not exists capability_config (
   base_url        varchar(512) not null,
   api_key_enc     varchar(512) not null,
   model_name      varchar(128),
-  image_model     varchar(128),
-  image_endpoint  varchar(512),
   extra_config    json,
   enabled         boolean not null default true,
   updated_by bigint not null default 0,
