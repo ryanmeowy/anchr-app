@@ -8,16 +8,12 @@ import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
-import com.anchr.core.ingestion.domain.model.OcrBoundingBox;
-import com.anchr.core.ingestion.domain.model.OcrParagraph;
-import com.anchr.core.ingestion.domain.model.OcrStructuredResult;
 import com.anchr.core.ingestion.domain.model.TextAssetMetadata;
 import com.anchr.core.ingestion.domain.model.TextChunk;
 import com.anchr.core.ingestion.domain.model.TextParseResult;
 import com.anchr.core.ingestion.domain.port.IngestionContentPort;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
-import com.anchr.core.ingestion.domain.port.IngestionOcrPort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.domain.repository.TextSegmentRepository;
 import com.anchr.core.ingestion.infrastructure.parser.TextAssetContentLoader;
@@ -29,7 +25,6 @@ import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.DocumentAssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.search.domain.model.Bbox;
 import com.anchr.core.search.domain.model.KbAssetTypeEnum;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
@@ -44,7 +39,6 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executor;
@@ -81,7 +75,6 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
     private final IngestionEmbeddingPort embeddingPort;
     private final TextSegmentRepository textSegmentRepository;
     private final IngestionObjectStoragePort objectStoragePort;
-    private final IngestionOcrPort ocrPort;
     private final IngestionContentPort contentPort;
     private final KbSegmentBulkWriter kbSegmentBulkWriter;
     private final RedissonClient redissonClient;
@@ -178,7 +171,6 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
 
         String imageInput = objectStoragePort.buildAiImageInput(document.getObjectKey());
         List<Float> embedding = embedImageWithRetry(imageInput);
-        OcrStructuredResult structuredOcr = ocrPort.extractStructuredText(imageInput);
         List<String> tags = safeList(contentPort.generateTags(imageInput));
         List<GraphTriple> graph = safeList(contentPort.generateGraph(imageInput));
 
@@ -186,7 +178,7 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
         documentAssetRepository.updateStatuses(kbId, document.getId(),
                 DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.RUNNING.name(), userId, LocalDateTime.now());
 
-        List<Segment> segments = buildImageSegments(document, embedding, structuredOcr, tags, graph);
+        List<Segment> segments = buildImageSegments(document, embedding, tags, graph);
         kbSegmentBulkWriter.write(segments);
         completeItem(kbId, taskId, item.getId(), document.getId(), segments.size(), userId);
     }
@@ -215,15 +207,10 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
     }
 
     private List<Segment> buildImageSegments(DocumentAsset document, List<Float> embedding,
-                                             OcrStructuredResult structuredOcr, List<String> tags,
-                                             List<GraphTriple> graph) {
+                                             List<String> tags, List<GraphTriple> graph) {
         long createdAt = toMillis(document.getCreatedAt());
         String title = StringUtils.hasText(document.getTitle()) ? document.getTitle() : document.getFileName();
-        String ocrContent = structuredOcr == null ? null : structuredOcr.getFullText();
-        String ocrSummary = clip(ocrContent, 180);
-        List<Segment> segments = new ArrayList<>();
-
-        segments.add(Segment.builder()
+        return List.of(Segment.builder()
                 .segmentId(document.getId() + ":caption")
                 .kbId(document.getKbId())
                 .assetId(document.getId())
@@ -234,37 +221,9 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
                 .embedding(embedding)
                 .sourceRef(document.getObjectKey())
                 .thumbnail(document.getObjectKey())
-                .ocrSummary(ocrSummary)
                 .tags(tags)
                 .createdAt(createdAt)
                 .build());
-
-        List<OcrParagraph> paragraphs = resolveParagraphs(structuredOcr, ocrContent);
-        Integer imageWidth = structuredOcr == null ? null : structuredOcr.getImageWidth();
-        Integer imageHeight = structuredOcr == null ? null : structuredOcr.getImageHeight();
-        for (OcrParagraph paragraph : paragraphs) {
-            if (!StringUtils.hasText(paragraph.getText())) {
-                continue;
-            }
-            segments.add(Segment.builder()
-                    .segmentId(document.getId() + ":ocr:" + paragraph.getIndex())
-                    .kbId(document.getKbId())
-                    .assetId(document.getId())
-                    .assetType(KbAssetTypeEnum.IMAGE)
-                    .segmentType(SegmentType.IMAGE_OCR_BLOCK)
-                    .title(title)
-                    .ocrText(paragraph.getText())
-                    .bbox(resolveBbox(paragraph.getBbox(), imageWidth, imageHeight))
-                    .imageWidth(imageWidth)
-                    .imageHeight(imageHeight)
-                    .sourceRef(document.getObjectKey())
-                    .thumbnail(document.getObjectKey())
-                    .ocrSummary(ocrSummary)
-                    .tags(tags)
-                    .createdAt(createdAt)
-                    .build());
-        }
-        return segments;
     }
 
     private void updateRunning(String kbId, String taskId, String itemId,
@@ -400,38 +359,6 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
             Thread.currentThread().interrupt();
             throw new BusinessException(ApiError.INTERNAL_ERROR, "Ingestion task was interrupted.", e);
         }
-    }
-
-    private List<OcrParagraph> resolveParagraphs(OcrStructuredResult structuredOcr, String ocrContent) {
-        if (structuredOcr != null && structuredOcr.getParagraphs() != null && !structuredOcr.getParagraphs().isEmpty()) {
-            return structuredOcr.getParagraphs();
-        }
-        if (!StringUtils.hasText(ocrContent)) {
-            return List.of();
-        }
-        return List.of(OcrParagraph.builder()
-                .index(0)
-                .text(ocrContent)
-                .build());
-    }
-
-    private Bbox resolveBbox(OcrBoundingBox box, Integer imageWidth, Integer imageHeight) {
-        if (box == null || !box.isValid()) {
-            return null;
-        }
-        if (imageWidth != null && imageHeight != null && imageWidth > 0 && imageHeight > 0
-                && (box.getX() < 0 || box.getY() < 0
-                || box.getX() + box.getWidth() > imageWidth
-                || box.getY() + box.getHeight() > imageHeight)) {
-            return null;
-        }
-        return Bbox.builder()
-                .x(box.getX())
-                .y(box.getY())
-                .width(box.getWidth())
-                .height(box.getHeight())
-                .unit(box.getUnit())
-                .build();
     }
 
     private String resolveImageCaption(String title, List<GraphTriple> graph) {

@@ -4,7 +4,7 @@ import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.common.infrastructure.id.PrefixedIdGenerator;
+import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.DocumentAsset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
@@ -30,14 +30,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
-    private static final String KB_ID_PREFIX = "kb";
     private static final int DEFAULT_PAGE = 1;
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 100;
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final DocumentAssetRepository documentAssetRepository;
-    private final PrefixedIdGenerator idGenerator;
+    private final IdGen idGen;
     private final KbSegmentRepository kbSegmentRepository;
 
     @Override
@@ -47,7 +46,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
         KnowledgeBase knowledgeBase = KnowledgeBase.builder()
-                .id(idGenerator.nextId(KB_ID_PREFIX))
+                .id(idGen.nextIdStr())
                 .name(normalizedName)
                 .description(trimToNull(description))
                 .status(KnowledgeBaseStatus.ACTIVE)

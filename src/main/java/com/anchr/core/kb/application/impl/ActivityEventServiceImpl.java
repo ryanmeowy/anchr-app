@@ -8,7 +8,7 @@ import com.anchr.core.kb.domain.model.ActivityEventType;
 import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
-import com.anchr.core.common.infrastructure.id.PrefixedIdGenerator;
+import com.anchr.core.common.util.IdGen;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,10 +26,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ActivityEventServiceImpl implements ActivityEventService {
 
-    private static final String EVENT_ID_PREFIX = "act";
 
     private final ActivityEventRepository activityEventRepository;
-    private final PrefixedIdGenerator idGenerator;
+    private final IdGen idGen;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -83,7 +82,7 @@ public class ActivityEventServiceImpl implements ActivityEventService {
         try {
             RequestUserContext context = UserContextHolder.get();
             ActivityEvent event = ActivityEvent.builder()
-                    .id(idGenerator.nextId(EVENT_ID_PREFIX))
+                    .id(idGen.nextIdStr())
                     .userId(context.userId())
                     .eventType(eventType)
                     .resourceType(resourceType)

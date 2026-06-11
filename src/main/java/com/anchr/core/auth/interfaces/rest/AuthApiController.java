@@ -1,11 +1,12 @@
-
 package com.anchr.core.auth.interfaces.rest;
 
-import com.anchr.core.auth.application.OssService;
-import com.anchr.core.common.model.Result;
-import com.anchr.core.common.exception.ApiError;
-import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.auth.infrastructure.AesUtil;
 import com.anchr.core.auth.infrastructure.RequireAuth;
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.model.Result;
+import com.anchr.core.integration.storage.StorageTokenIssuer;
+import com.anchr.core.settings.domain.model.StorageConfig;
+import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
@@ -31,26 +33,22 @@ import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 public class AuthApiController {
 
     private final StringRedisTemplate redisTemplate;
+    private final StorageConfigRepository storageConfigRepository;
+    private final AesUtil aesUtil;
+    private final StorageTokenIssuer storageTokenIssuer;
 
     @Value("${app.security.admin-secret}")
     private String adminSecret;
 
-    private final OssService ossService;
-
     private final SecureRandom secureRandom = new SecureRandom();
 
     private boolean constantTimeEquals(String a, String b) {
-        if (a == null || b == null) {
-            return false;
-        }
+        if (a == null || b == null) return false;
         byte[] aBytes = a.getBytes(StandardCharsets.UTF_8);
         byte[] bBytes = b.getBytes(StandardCharsets.UTF_8);
         return MessageDigest.isEqual(aBytes, bBytes);
     }
 
-    /**
-     * Remote refresh upload token interface
-     */
     @GetMapping("/refresh-token")
     public Result<String> refreshToken(@RequestHeader("X-Admin-Secret") String secret,
                                        @RequestParam(required = false) String code) {
@@ -61,7 +59,6 @@ public class AuthApiController {
         if (!constantTimeEquals(adminSecret, secret)) {
             return Result.error(ApiError.FORBIDDEN);
         }
-
         String newToken;
         if (code != null && !code.isBlank()) {
             newToken = code;
@@ -98,14 +95,15 @@ public class AuthApiController {
 
     @RequireAuth
     @GetMapping("/sts")
-    public Result<String> getStsToken() {
+    public Result<Map<String, Object>> getStsToken() {
+        StorageConfig config = storageConfigRepository.find()
+                .orElseThrow(() -> new RuntimeException("Object storage is not configured."));
         try {
-            return Result.success(ossService.fetchStsToken());
-        } catch (BusinessException e) {
-            log.warn("Upload credential issue denied: {}", e.getMessage());
-            return Result.error(e.getCode(), e.getMessage());
+            String accessKey = aesUtil.decrypt(config.getAccessKeyEnc());
+            String secretKey = aesUtil.decrypt(config.getSecretKeyEnc());
+            return Result.success(storageTokenIssuer.issueToken(config, accessKey, secretKey));
         } catch (Exception e) {
-            log.error("Unexpected error fetching STS token", e);
+            log.error("Failed to issue STS token", e);
             return Result.error(ApiError.AUTH_STS_FETCH_FAILED);
         }
     }

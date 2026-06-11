@@ -6,7 +6,7 @@ import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.common.infrastructure.id.PrefixedIdGenerator;
+import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.application.KbIngestionApplicationService;
@@ -44,9 +44,6 @@ import java.util.Locale;
 @RequiredArgsConstructor
 public class KbIngestionApplicationServiceImpl implements KbIngestionApplicationService {
 
-    private static final String TASK_ID_PREFIX = "task";
-    private static final String ITEM_ID_PREFIX = "item";
-    private static final String DOCUMENT_ID_PREFIX = "doc";
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
     private static final int MAX_BATCH_ITEMS = 50;
@@ -56,7 +53,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final IngestionTaskRepository ingestionTaskRepository;
     private final IngestionCapabilityService ingestionCapabilityService;
-    private final PrefixedIdGenerator idGenerator;
+    private final IdGen idGen;
     private final ActivityEventService activityEventService;
     private final KbIngestionTaskProcessor ingestionTaskProcessor;
 
@@ -147,9 +144,9 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         DocumentAsset document = knowledgeBaseService.getDocument(kbId, assetId);
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
-        String taskId = idGenerator.nextId(TASK_ID_PREFIX);
+        String taskId = idGen.nextIdStr();
         IngestionTaskItem item = IngestionTaskItem.builder()
-                .id(idGenerator.nextId(ITEM_ID_PREFIX))
+                .id(idGen.nextIdStr())
                 .taskId(taskId)
                 .kbId(kbId)
                 .assetId(document.getId())
@@ -188,7 +185,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         if (commands.size() > MAX_BATCH_ITEMS) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "items size must be <= 50.");
         }
-        String taskId = idGenerator.nextId(TASK_ID_PREFIX);
+        String taskId = idGen.nextIdStr();
         List<IngestionTaskItem> items = new ArrayList<>();
         for (IngestionCreateItemCommand command : commands) {
             items.add(createItem(context, kbId, taskId, sourceType, dedupeStrategy, command, now));
@@ -210,7 +207,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
             DocumentAsset document = createDocument(context, kbId, command, fileName, fileType, now);
             documentAssetRepository.save(document);
             return IngestionTaskItem.builder()
-                    .id(idGenerator.nextId(ITEM_ID_PREFIX))
+                    .id(idGen.nextIdStr())
                     .taskId(taskId)
                     .kbId(kbId)
                     .assetId(document.getId())
@@ -239,7 +236,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         DocumentAsset document = createDocument(context, kbId, command, fileName, fileType, now);
         documentAssetRepository.save(document);
         return IngestionTaskItem.builder()
-                .id(idGenerator.nextId(ITEM_ID_PREFIX))
+                .id(idGen.nextIdStr())
                 .taskId(taskId)
                 .kbId(kbId)
                 .assetId(document.getId())
@@ -258,7 +255,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private DocumentAsset createDocument(RequestUserContext context, String kbId, IngestionCreateItemCommand command,
                                          String fileName, String fileType, LocalDateTime now) {
         return DocumentAsset.builder()
-                .id(idGenerator.nextId(DOCUMENT_ID_PREFIX))
+                .id(idGen.nextIdStr())
                 .kbId(kbId)
                 .fileName(fileName)
                 .title(trimToNull(command.title()))
@@ -308,7 +305,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
                                          String sourceUrl, String errorCode, String errorMessage,
                                          LocalDateTime now) {
         return IngestionTaskItem.builder()
-                .id(idGenerator.nextId(ITEM_ID_PREFIX))
+                .id(idGen.nextIdStr())
                 .taskId(taskId)
                 .kbId(kbId)
                 .fileName(fileName)
@@ -328,7 +325,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
 
     private IngestionTaskItem skippedItem(String kbId, String taskId, DocumentAsset existing, LocalDateTime now) {
         return IngestionTaskItem.builder()
-                .id(idGenerator.nextId(ITEM_ID_PREFIX))
+                .id(idGen.nextIdStr())
                 .taskId(taskId)
                 .kbId(kbId)
                 .assetId(existing.getId())

@@ -44,6 +44,10 @@ public class IdGen {
         stringRedisTemplate.opsForValue().setIfAbsent(cacheKey, String.valueOf(ID_GEN_MIN_ID));
     }
 
+    public String nextIdStr() {
+        return String.valueOf(nextId());
+    }
+
     public long nextId() {
         if (exhausted) {
             throw new RuntimeException("ID Space Exhausted: Global limit reached.");

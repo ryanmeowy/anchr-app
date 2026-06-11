@@ -75,7 +75,6 @@ public class AesUtil {
         }
     }
 
-    @Deprecated
     public String decrypt(String base64Ciphertext) {
         if (base64Ciphertext == null) {
             throw new EncryptionException("Ciphertext must not be null");

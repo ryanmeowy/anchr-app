@@ -1,13 +1,13 @@
 create table if not exists knowledge_base (
-  id varchar(64) primary key,
+  id bigint primary key,
   name varchar(128) not null,
   description text,
   status varchar(32) not null,
   document_count int not null default 0,
   segment_count int not null default 0,
   last_ingested_at timestamp null,
-  created_by varchar(64) not null default 'system',
-  updated_by varchar(64) not null default 'system',
+  created_by bigint not null default 0,
+  updated_by bigint not null default 0,
   created_at timestamp not null,
   updated_at timestamp not null,
   deleted_at timestamp null
@@ -16,8 +16,8 @@ create table if not exists knowledge_base (
 create index idx_kb_updated_at on knowledge_base(updated_at);
 
 create table if not exists document_asset (
-  id varchar(64) primary key,
-  kb_id varchar(64) not null,
+  id bigint primary key,
+  kb_id bigint not null,
   file_name varchar(512) not null,
   title varchar(512),
   file_type varchar(32) not null,
@@ -34,8 +34,8 @@ create table if not exists document_asset (
   embedding_profile varchar(128),
   error_code varchar(128),
   error_message text,
-  created_by varchar(64) not null default 'system',
-  updated_by varchar(64) not null default 'system',
+  created_by bigint not null default 0,
+  updated_by bigint not null default 0,
   created_at timestamp not null,
   updated_at timestamp not null,
   deleted_at timestamp null
@@ -46,16 +46,16 @@ create index idx_doc_hash on document_asset(kb_id, file_hash);
 create index idx_doc_created_at on document_asset(kb_id, created_at);
 
 create table if not exists ingestion_task (
-  id varchar(64) primary key,
-  kb_id varchar(64) not null,
+  id bigint primary key,
+  kb_id bigint not null,
   source_type varchar(32) not null,
   status varchar(32) not null,
   total_count int not null default 0,
   success_count int not null default 0,
   failure_count int not null default 0,
   running_count int not null default 0,
-  created_by varchar(64) not null default 'system',
-  updated_by varchar(64) not null default 'system',
+  created_by bigint not null default 0,
+  updated_by bigint not null default 0,
   created_at timestamp not null,
   updated_at timestamp not null,
   finished_at timestamp null
@@ -65,9 +65,9 @@ create index idx_task_kb_created on ingestion_task(kb_id, created_at);
 create index idx_task_status on ingestion_task(status);
 
 create table if not exists ingestion_task_item (
-  id varchar(64) primary key,
-  task_id varchar(64) not null,
-  kb_id varchar(64) not null,
+  id bigint primary key,
+  task_id bigint not null,
+  kb_id bigint not null,
   asset_id varchar(64),
   file_name varchar(512),
   file_hash varchar(128),

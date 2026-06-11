@@ -2,19 +2,15 @@ package com.anchr.core.settings.interfaces.rest;
 
 import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
+import com.anchr.core.integration.multimodal.domain.model.EmbedParamEnum;
+import com.anchr.core.integration.multimodal.domain.model.GenParamEnum;
+import com.anchr.core.integration.multimodal.domain.model.RerankParamEnum;
 import com.anchr.core.settings.application.CapabilityConfigService;
-import com.anchr.core.settings.application.PreferenceSettingService;
-import com.anchr.core.settings.application.SearchSettingService;
-import com.anchr.core.settings.application.model.SearchSetting;
-import com.anchr.core.settings.domain.model.PreferenceTheme;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigUpdateRequestDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestRequestDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResultDTO;
-import com.anchr.core.settings.interfaces.rest.dto.PreferenceDTO;
-import com.anchr.core.settings.interfaces.rest.dto.PreferenceUpdateRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.SearchSettingDTO;
-import com.anchr.core.settings.interfaces.rest.dto.SearchSettingUpdateRequestDTO;
+import com.anchr.core.settings.interfaces.rest.dto.CapabilityParamsDTO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
@@ -25,10 +21,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
-
 /**
- * Settings APIs.
+ * Settings APIs for capability configuration.
  */
 @Validated
 @RestController
@@ -36,14 +30,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SettingsApiController {
 
-    private static final List<String> REQUIRES_REINDEX_FIELDS = List.of(
-            "embeddingModel", "embeddingDimension", "chunkSize", "chunkOverlap");
-
-    private final SearchSettingService searchSettingService;
-    private final PreferenceSettingService preferenceSettingService;
     private final CapabilityConfigService capabilityConfigService;
 
-    // ── embedding config ──────────────────────────────────────────────────
+    // ── embedding ────────────────────────────────────────────────────────
 
     @RequireAuth
     @GetMapping("/embedding")
@@ -61,56 +50,78 @@ public class SettingsApiController {
                 CapabilityConfigService.CAPABILITY_EMBEDDING, request));
     }
 
+    @GetMapping("/embedding/params")
+    public Result<CapabilityParamsDTO> embeddingParams() {
+        return Result.success(CapabilityParamsDTO.builder()
+                .params(EmbedParamEnum.all().stream()
+                        .map(p -> CapabilityParamsDTO.ParamItem.builder()
+                                .key(p.getKey()).label(p.getLabel()).build())
+                        .toList())
+                .build());
+    }
+
+    // ── generation ───────────────────────────────────────────────────────
+
     @RequireAuth
-    @PostMapping("/embedding/test")
-    public Result<CapabilityConnectionTestResultDTO> testEmbeddingConnection(
+    @GetMapping("/generation")
+    public Result<CapabilityConfigDTO> getGenerationConfig() {
+        return capabilityConfigService.get(CapabilityConfigService.CAPABILITY_GENERATION)
+                .map(Result::success)
+                .orElse(Result.success(null));
+    }
+
+    @RequireAuth
+    @PatchMapping("/generation")
+    public Result<CapabilityConfigDTO> updateGenerationConfig(
+            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
+        return Result.success(capabilityConfigService.save(
+                CapabilityConfigService.CAPABILITY_GENERATION, request));
+    }
+
+    @GetMapping("/generation/params")
+    public Result<CapabilityParamsDTO> generationParams() {
+        return Result.success(CapabilityParamsDTO.builder()
+                .params(GenParamEnum.all().stream()
+                        .map(p -> CapabilityParamsDTO.ParamItem.builder()
+                                .key(p.getKey()).label(p.getLabel()).build())
+                        .toList())
+                .build());
+    }
+
+    // ── rerank ───────────────────────────────────────────────────────────
+
+    @RequireAuth
+    @GetMapping("/rerank")
+    public Result<CapabilityConfigDTO> getRerankConfig() {
+        return capabilityConfigService.get(CapabilityConfigService.CAPABILITY_RERANK)
+                .map(Result::success)
+                .orElse(Result.success(null));
+    }
+
+    @RequireAuth
+    @PatchMapping("/rerank")
+    public Result<CapabilityConfigDTO> updateRerankConfig(
+            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
+        return Result.success(capabilityConfigService.save(
+                CapabilityConfigService.CAPABILITY_RERANK, request));
+    }
+
+    @GetMapping("/rerank/params")
+    public Result<CapabilityParamsDTO> rerankParams() {
+        return Result.success(CapabilityParamsDTO.builder()
+                .params(RerankParamEnum.all().stream()
+                        .map(p -> CapabilityParamsDTO.ParamItem.builder()
+                                .key(p.getKey()).label(p.getLabel()).build())
+                        .toList())
+                .build());
+    }
+
+    // ── test connection ──────────────────────────────────────────────────
+
+    @RequireAuth
+    @PostMapping("/test-connection")
+    public Result<CapabilityConnectionTestResultDTO> testConnection(
             @Valid @RequestBody CapabilityConnectionTestRequestDTO request) {
         return Result.success(capabilityConfigService.test(request));
-    }
-
-    // ── search ────────────────────────────────────────────────────────────
-
-    @RequireAuth
-    @GetMapping("/search")
-    public Result<SearchSettingDTO> getSearch() {
-        return Result.success(toSearchDto(searchSettingService.get(), List.of()));
-    }
-
-    @RequireAuth
-    @PatchMapping("/search")
-    public Result<SearchSettingDTO> updateSearch(@Valid @RequestBody SearchSettingUpdateRequestDTO request) {
-        SearchSetting setting = searchSettingService.update(
-                request.getTopK(), request.getRerankWindow(), request.getRrfK(), request.getMinScore());
-        return Result.success(toSearchDto(setting, List.of("Search settings take effect immediately.")));
-    }
-
-    // ── preferences ───────────────────────────────────────────────────────
-
-    @RequireAuth
-    @GetMapping("/preferences")
-    public Result<PreferenceDTO> getPreferences() {
-        return Result.success(PreferenceDTO.builder()
-                .theme(preferenceSettingService.get().getTheme().name())
-                .build());
-    }
-
-    @RequireAuth
-    @PatchMapping("/preferences")
-    public Result<PreferenceDTO> updatePreferences(@Valid @RequestBody PreferenceUpdateRequestDTO request) {
-        return Result.success(PreferenceDTO.builder()
-                .theme(preferenceSettingService.update(PreferenceTheme.parse(request.getTheme())).getTheme().name())
-                .build());
-    }
-
-    private SearchSettingDTO toSearchDto(SearchSetting setting, List<String> warnings) {
-        return SearchSettingDTO.builder()
-                .topK(setting.getTopK())
-                .rerankWindow(setting.getRerankWindow())
-                .rrfK(setting.getRrfK())
-                .minScore(setting.getMinScore())
-                .hotUpdateSupported(setting.isHotUpdateSupported())
-                .requiresReindexFields(REQUIRES_REINDEX_FIELDS)
-                .warnings(warnings)
-                .build();
     }
 }

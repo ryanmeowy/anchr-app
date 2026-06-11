@@ -28,21 +28,11 @@ mybatis:
     map-underscore-to-camel-case: true
 
 app:
-  capability-provider:
-    rerank: ${APP_CAPABILITY_PROVIDER_RERANK:aliyun}
-    gen: ${APP_CAPABILITY_PROVIDER_GEN:aliyun}
-    ocr: ${APP_CAPABILITY_PROVIDER_OCR:aliyun}
-    object-storage: ${APP_CAPABILITY_PROVIDER_OBJECT_STORAGE:aliyun}
   security:
     admin-secret: ${APP_ADMIN_SECRET}
     encrypt-key: ${APP_ENCRYPT_KEY}
     encrypt-iv: ${APP_ENCRYPT_IV}
   embedding:
-    backend: ${APP_EMBEDDING_BACKEND:aliyun}
-    model: ${APP_EMBEDDING_MODEL:multimodal-embedding-v1}
-    dimension: ${APP_EMBEDDING_DIMENSION:1024}
-    preprocess-version: ${APP_EMBEDDING_PREPROCESS_VERSION:v1}
-    image-input-mode: ${APP_EMBEDDING_IMAGE_INPUT_MODE:url}
     ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
     ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
@@ -51,7 +41,7 @@ app:
     indexVersion: ${APP_KB_SEGMENT_INDEX_VERSION:v1}
     read-alias: ${APP_KB_SEGMENT_READ_ALIAS:kb_segment_read}
     write-alias: ${APP_KB_SEGMENT_WRITE_ALIAS:kb_segment_write}
-    dimension: ${APP_KB_SEGMENT_DIMENSION:${APP_EMBEDDING_DIMENSION:1024}}
+    dimension: ${APP_KB_SEGMENT_DIMENSION:1024}
   search:
     quality-absolute-min-score: 0.72
     vector-min-score: 0.6
@@ -63,7 +53,6 @@ app:
       max-candidates: 200
     rerank:
       enabled: true
-      model: gte-rerank-v2
       max-doc-chars: 1200
       window-enabled: true
       window-size: 40
@@ -72,8 +61,6 @@ app:
       window-max: 80
       fusion-alpha: 0.6
       fusion-beta: 0.4
-  debug:
-    strategy-header-enabled: false
 
 logging:
   level:
@@ -85,16 +72,3 @@ management:
     web:
       exposure:
         include: health,info,metrics
-
-aliyun:
-  oss:
-    endpoint: ${OSS_ENDPOINT:}
-    public-endpoint: ${OSS_PUBLIC_ENDPOINT:}
-    access-key-id: ${ALIYUN_ACCESS_KEY_ID:}
-    access-key-secret: ${ALIYUN_ACCESS_KEY_SECRET:}
-    bucket-name: ${ALIYUN_OSS_BUCKET_NAME:}
-    role-arn: ${ALIYUN_OSS_ROLE_ARN:}
-  ocr:
-    access-key-id: ${ALIYUN_ACCESS_KEY_ID:}
-    access-key-secret: ${ALIYUN_ACCESS_KEY_SECRET:}
-    endpoint: ${OCR_ENDPOINT:}
