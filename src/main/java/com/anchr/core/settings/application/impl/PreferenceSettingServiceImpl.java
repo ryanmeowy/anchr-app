@@ -1,6 +1,5 @@
 package com.anchr.core.settings.application.impl;
 
-import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -26,7 +25,6 @@ public class PreferenceSettingServiceImpl implements PreferenceSettingService {
 
     private final AppSettingRepository appSettingRepository;
     private final ObjectMapper objectMapper;
-    private final PermissionService permissionService;
 
     @Override
     public PreferenceSetting get() {
@@ -39,7 +37,6 @@ public class PreferenceSettingServiceImpl implements PreferenceSettingService {
 
     @Override
     public PreferenceSetting update(PreferenceTheme theme) {
-        permissionService.requireManageSettings();
         PreferenceTheme safeTheme = theme == null ? PreferenceTheme.SYSTEM : theme;
         RequestUserContext context = UserContextHolder.get();
         appSettingRepository.upsert(context.workspaceId(), SETTING_KEY, toJson(safeTheme), context.userId());

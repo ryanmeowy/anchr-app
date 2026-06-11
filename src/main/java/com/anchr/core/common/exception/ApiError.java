@@ -11,7 +11,6 @@ public enum ApiError {
     UNAUTHORIZED(401, "Unauthorized access"),
     FORBIDDEN(403, "Forbidden"),
     NOT_FOUND(404, "Resource not found."),
-    CONFLICT(409, "Resource conflict."),
     AUTH_TOKEN_INVALID(401, "The token is invalid or expired, please contact the administrator to refresh it"),
     AUTH_ADMIN_SECRET_MISSING(500, "Internal error"),
     AUTH_STS_FETCH_FAILED(500, "Failed to fetch STS token"),

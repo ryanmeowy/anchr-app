@@ -2,7 +2,6 @@ package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.ingestion.application.KbIngestionTaskProcessor;
 import com.anchr.core.kb.application.ActivityEventService;
-import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -59,13 +58,12 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private final IngestionCapabilityService ingestionCapabilityService;
     private final PrefixedIdGenerator idGenerator;
     private final ActivityEventService activityEventService;
-    private final PermissionService permissionService;
     private final KbIngestionTaskProcessor ingestionTaskProcessor;
 
     @Override
     @Transactional
     public IngestionTask createTask(String kbId, IngestionCreateCommand command) {
-        permissionService.requireImport();
+
         knowledgeBaseService.get(kbId);
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
@@ -99,7 +97,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     @Override
     @Transactional
     public IngestionTask retryItem(String kbId, String taskId, String itemId) {
-        permissionService.requireImport();
+
         IngestionTask task = getTask(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         var item = ingestionTaskRepository.findItem(context.workspaceId(), kbId, task.getId(), requireText(itemId, "itemId"))
@@ -117,7 +115,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     @Override
     @Transactional
     public IngestionTask retryFailed(String kbId, String taskId) {
-        permissionService.requireImport();
+
         IngestionTask task = getTask(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         List<IngestionTaskItem> failedItems =
@@ -135,14 +133,14 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     @Override
     @Transactional
     public IngestionTask createReparseTask(String kbId, String assetId) {
-        permissionService.requireImport();
+
         return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REPARSE, IngestionStage.PARSE);
     }
 
     @Override
     @Transactional
     public IngestionTask createReembedTask(String kbId, String assetId) {
-        permissionService.requireImport();
+
         return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REEMBED, IngestionStage.EMBED);
     }
 

@@ -1,6 +1,5 @@
 package com.anchr.core.settings.application.impl;
 
-import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -35,11 +34,9 @@ public class ProviderSettingServiceImpl implements ProviderSettingService {
     private final ProviderConfigVersionRepository providerConfigVersionRepository;
     private final ProviderRuntimeRegistry providerRuntimeRegistry;
     private final ObjectMapper objectMapper;
-    private final PermissionService permissionService;
 
     @Override
     public ProviderSwitchResult switchProvider(ProviderType providerType, String providerName) {
-        permissionService.requireManageSettings();
         if (!StringUtils.hasText(providerName)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "providerName cannot be blank.");
         }

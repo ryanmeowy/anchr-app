@@ -1,7 +1,6 @@
 package com.anchr.core.auth.infrastructure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.auth.application.SessionTokenService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.model.Result;
@@ -21,9 +20,8 @@ import java.util.UUID;
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 
 /**
- * Authentication Interceptor, used to verify whether a request has upload permissions.
- * This interceptor checks interface methods annotated with @RequireAuth and validates
- * if the X-Access-Token in the request header matches the configured upload token.
+ * Authentication Interceptor, validates X-Access-Token against the
+ * admin token stored in Redis (set via refresh-token endpoint).
  *
  * @author Ryan
  * @since 2025/12/17
@@ -35,7 +33,6 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-    private final SessionTokenService sessionTokenService;
 
     @Override
     public boolean preHandle(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull Object handler) throws Exception {
@@ -47,13 +44,8 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
         try {
             if (hm.getMethodAnnotation(RequireAuth.class) != null) {
                 String clientToken = request.getHeader("X-Access-Token");
-                boolean accepted = sessionTokenService.resolve(clientToken)
-                        .map(principal -> {
-                            UserContextHolder.set(principal.toContext());
-                            return true;
-                        })
-                        .orElseGet(() -> acceptAdminToken(clientToken));
-                if (!accepted) {
+                String serverToken = redisTemplate.opsForValue().get(TOKEN_CACHE_PREFIX);
+                if (serverToken == null || !serverToken.equals(clientToken)) {
                     response.setStatus(401);
                     response.setContentType("application/json;charset=UTF-8");
                     Result<Void> result = Result.error(ApiError.AUTH_TOKEN_INVALID, UUID.randomUUID().toString());
@@ -89,14 +81,5 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
                                                @NonNull HttpServletResponse response,
                                                @NonNull Object handler) {
         UserContextHolder.clear();
-    }
-
-    private boolean acceptAdminToken(String clientToken) {
-        String serverToken = redisTemplate.opsForValue().get(TOKEN_CACHE_PREFIX);
-        if (serverToken == null || !serverToken.equals(clientToken)) {
-            return false;
-        }
-        UserContextHolder.set(RequestUserContext.systemDefault());
-        return true;
     }
 }

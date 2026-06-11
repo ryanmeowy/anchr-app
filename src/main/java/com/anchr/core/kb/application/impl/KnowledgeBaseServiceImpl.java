@@ -1,6 +1,5 @@
 package com.anchr.core.kb.application.impl;
 
-import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -40,12 +39,10 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final DocumentAssetRepository documentAssetRepository;
     private final PrefixedIdGenerator idGenerator;
     private final KbSegmentRepository kbSegmentRepository;
-    private final PermissionService permissionService;
 
     @Override
     @Transactional
     public KnowledgeBase create(String name, String description) {
-        permissionService.requireImport();
         String normalizedName = requireName(name);
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
@@ -116,7 +113,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     @Override
     @Transactional
     public void archive(String kbId) {
-        permissionService.requireDelete();
         RequestUserContext context = UserContextHolder.get();
         boolean archived = knowledgeBaseRepository.archive(
                 context.workspaceId(), requireId(kbId, "kbId"), context.userId(), LocalDateTime.now());
@@ -157,7 +153,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     @Override
     @Transactional
     public void deleteDocument(String kbId, String assetId) {
-        permissionService.requireDelete();
         String id = requireId(kbId, "kbId");
         String documentId = requireId(assetId, "assetId");
         RequestUserContext context = UserContextHolder.get();
