@@ -3,7 +3,6 @@ package com.anchr.core.search.interfaces.rest;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.search.application.KbSearchAnswerService;
 import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.search.interfaces.rest.dto.KbAnswerDTO;
 import com.anchr.core.search.interfaces.rest.dto.KbSearchPageDTO;
 import com.anchr.core.search.interfaces.rest.dto.KbSearchQueryDTO;
 import jakarta.validation.Valid;
@@ -33,8 +32,4 @@ public class KbSearchApiController {
         return Result.success(page);
     }
 
-    @PostMapping("/kb-answer")
-    public Result<KbAnswerDTO> answerKb(@Valid @RequestBody KbSearchQueryDTO query) {
-        return Result.success(kbSearchAnswerService.answer(query));
-    }
 }
