@@ -74,14 +74,6 @@ app:
       fusion-beta: 0.4
   debug:
     strategy-header-enabled: false
-  settings:
-    connection-test:
-      generation-prompt: ${APP_SETTINGS_TEST_GENERATION_PROMPT:}
-      embedding-text: ${APP_SETTINGS_TEST_EMBEDDING_TEXT:}
-      rerank-query: ${APP_SETTINGS_TEST_RERANK_QUERY:}
-      rerank-document: ${APP_SETTINGS_TEST_RERANK_DOCUMENT:}
-      ocr-image-url: ${APP_SETTINGS_TEST_OCR_IMAGE_URL:}
-      object-storage-object-key: ${APP_SETTINGS_TEST_OBJECT_STORAGE_OBJECT_KEY:}
 
 logging:
   level:
