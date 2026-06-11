@@ -70,7 +70,6 @@ public class ProviderConnectionTestServiceImpl implements ProviderConnectionTest
                 requireText(properties.getObjectStorageObjectKey(), "Object storage test object key is not configured.");
                 ((IngestionObjectStoragePort) provider).buildDownloadUrl(properties.getObjectStorageObjectKey());
             }
-            case WEB_SEARCH -> throw new IllegalArgumentException("Web search provider is not configured in this phase.");
         }
     }
 

@@ -1,2 +1,0 @@
--- Tables removed: user_account, workspace, workspace_member, audit_log
--- No longer needed — single-user model with admin-token auth.

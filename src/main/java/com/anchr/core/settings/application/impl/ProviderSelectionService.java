@@ -42,7 +42,6 @@ public class ProviderSelectionService {
             case RERANK -> capabilityProviderProperties.getRerank();
             case OCR -> capabilityProviderProperties.getOcr();
             case OBJECT_STORAGE -> capabilityProviderProperties.getObjectStorage();
-            case WEB_SEARCH -> "";
         };
     }
 

@@ -40,11 +40,6 @@ public class SettingsQueryServiceImpl implements SettingsQueryService {
                 .rerank(capability(ProviderType.RERANK, "gte-rerank-v2", null))
                 .ocr(capability(ProviderType.OCR, null, null))
                 .objectStorage(capability(ProviderType.OBJECT_STORAGE, null, null))
-                .webSearch(CapabilityDTO.builder()
-                        .enabled(false)
-                        .provider("")
-                        .reason("Provider not configured.")
-                        .build())
                 .build();
     }
 
@@ -131,7 +126,6 @@ public class SettingsQueryServiceImpl implements SettingsQueryService {
         return switch (providerType) {
             case EMBEDDING -> "Hot switch affects new embedding calls; existing documents require reembed.";
             case OBJECT_STORAGE -> "Hot switch affects new storage operations only.";
-            case WEB_SEARCH -> "Not configured.";
             default -> "Hot switch takes effect for new requests.";
         };
     }

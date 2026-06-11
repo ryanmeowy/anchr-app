@@ -92,7 +92,6 @@ public class ProviderSettingServiceImpl implements ProviderSettingService {
         return switch (providerType) {
             case EMBEDDING -> List.of("Embedding provider changes require reembed for existing documents.");
             case OBJECT_STORAGE -> List.of("Existing object keys remain on the previous storage provider.");
-            case WEB_SEARCH -> List.of("Web search provider is not configured in this phase.");
             default -> List.of();
         };
     }

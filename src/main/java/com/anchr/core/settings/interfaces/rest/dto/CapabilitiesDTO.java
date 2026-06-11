@@ -14,5 +14,4 @@ public class CapabilitiesDTO {
     CapabilityDTO rerank;
     CapabilityDTO ocr;
     CapabilityDTO objectStorage;
-    CapabilityDTO webSearch;
 }

@@ -10,8 +10,7 @@ public enum ProviderType {
     EMBEDDING,
     RERANK,
     OCR,
-    OBJECT_STORAGE,
-    WEB_SEARCH;
+    OBJECT_STORAGE;
 
     public static ProviderType parse(String value) {
         if (value == null || value.isBlank()) {
