@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 public class ActivityEventRecord {
 
     private String id;
-    private String workspaceId;
     private String userId;
     private String eventType;
     private String resourceType;

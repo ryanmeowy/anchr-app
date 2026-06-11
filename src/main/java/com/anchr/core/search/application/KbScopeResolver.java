@@ -24,8 +24,7 @@ public class KbScopeResolver {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
 
     public List<String> resolveVisibleKbIds(List<String> requestedKbIds) {
-        RequestUserContext context = UserContextHolder.get();
-        List<String> activeIds = listAllActiveIds(context.workspaceId());
+        List<String> activeIds = listAllActiveIds();
         if (activeIds.isEmpty()) {
             return List.of();
         }
@@ -46,11 +45,11 @@ public class KbScopeResolver {
         return resolved.stream().toList();
     }
 
-    private List<String> listAllActiveIds(String workspaceId) {
+    private List<String> listAllActiveIds() {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
         int offset = 0;
         while (true) {
-            List<KnowledgeBase> page = knowledgeBaseRepository.listActive(workspaceId, ACTIVE_KB_PAGE_SIZE, offset);
+            List<KnowledgeBase> page = knowledgeBaseRepository.listActive(ACTIVE_KB_PAGE_SIZE, offset);
             if (page.isEmpty()) {
                 break;
             }

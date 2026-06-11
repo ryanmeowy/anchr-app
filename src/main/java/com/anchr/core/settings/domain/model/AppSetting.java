@@ -12,7 +12,6 @@ import java.time.LocalDateTime;
 @Builder
 public class AppSetting {
     String id;
-    String workspaceId;
     String settingKey;
     String settingValue;
     int version;

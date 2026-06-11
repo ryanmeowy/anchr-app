@@ -15,42 +15,33 @@ public interface KnowledgeBaseMapper {
 
     int insert(KnowledgeBaseRecord record);
 
-    Optional<KnowledgeBaseRecord> findActiveById(@Param("workspaceId") String workspaceId,
-                                                @Param("id") String id);
+    Optional<KnowledgeBaseRecord> findActiveById(@Param("id") String id);
 
-    Optional<KnowledgeBaseRecord> findById(@Param("workspaceId") String workspaceId,
-                                           @Param("id") String id);
+    Optional<KnowledgeBaseRecord> findById(@Param("id") String id);
 
-    List<KnowledgeBaseRecord> listActiveByIds(@Param("workspaceId") String workspaceId,
-                                              @Param("ids") List<String> ids);
+    List<KnowledgeBaseRecord> listActiveByIds(@Param("ids") List<String> ids);
 
-    List<KnowledgeBaseRecord> listActive(@Param("workspaceId") String workspaceId,
-                                         @Param("limit") int limit,
+    List<KnowledgeBaseRecord> listActive(@Param("limit") int limit,
                                          @Param("offset") int offset);
 
-    long countActive(@Param("workspaceId") String workspaceId);
+    long countActive();
 
-    int updateProfile(@Param("workspaceId") String workspaceId,
-                      @Param("id") String id,
+    int updateProfile(@Param("id") String id,
                       @Param("name") String name,
                       @Param("description") String description,
                       @Param("updatedBy") String updatedBy,
                       @Param("updatedAt") LocalDateTime updatedAt);
 
-    int archive(@Param("workspaceId") String workspaceId,
-                @Param("id") String id,
+    int archive(@Param("id") String id,
                 @Param("updatedBy") String updatedBy,
                 @Param("updatedAt") LocalDateTime updatedAt);
 
-    int refreshDocumentStats(@Param("workspaceId") String workspaceId,
-                             @Param("id") String id,
+    int refreshDocumentStats(@Param("id") String id,
                              @Param("updatedBy") String updatedBy,
                              @Param("updatedAt") LocalDateTime updatedAt);
 
-    List<KnowledgeBaseRecord> searchActive(@Param("workspaceId") String workspaceId,
-                                           @Param("query") String query,
+    List<KnowledgeBaseRecord> searchActive(@Param("query") String query,
                                            @Param("limit") int limit);
 
-    Optional<KnowledgeBaseStatsRecord> findStats(@Param("workspaceId") String workspaceId,
-                                                 @Param("id") String id);
+    Optional<KnowledgeBaseStatsRecord> findStats(@Param("id") String id);
 }

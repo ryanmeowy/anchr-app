@@ -6,7 +6,6 @@
 
     <resultMap id="IngestionTaskRecordMap" type="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskRecord">
         <id property="id" column="id"/>
-        <result property="workspaceId" column="workspace_id"/>
         <result property="kbId" column="kb_id"/>
         <result property="sourceType" column="source_type"/>
         <result property="status" column="status"/>
@@ -41,7 +40,7 @@
     </resultMap>
 
     <sql id="IngestionTaskColumns">
-        id, workspace_id, kb_id, source_type, status, total_count, success_count,
+        id, kb_id, source_type, status, total_count, success_count,
         failure_count, running_count, created_by, updated_by, created_at, updated_at, finished_at
     </sql>
 
@@ -54,7 +53,7 @@
         insert into ingestion_task (
             <include refid="IngestionTaskColumns"/>
         ) values (
-            #{id}, #{workspaceId}, #{kbId}, #{sourceType}, #{status}, #{totalCount}, #{successCount},
+            #{id}, #{kbId}, #{sourceType}, #{status}, #{totalCount}, #{successCount},
             #{failureCount}, #{runningCount}, #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
     </insert>
@@ -73,7 +72,6 @@
             <include refid="IngestionTaskColumns"/>
         from ingestion_task
         where id = #{taskId}
-          and workspace_id = #{workspaceId}
           and kb_id = #{kbId}
     </select>
 
@@ -81,8 +79,7 @@
         select
             <include refid="IngestionTaskColumns"/>
         from ingestion_task
-        where workspace_id = #{workspaceId}
-          and kb_id = #{kbId}
+        where kb_id = #{kbId}
         <if test="status != null and status != ''">
           and status = #{status}
         </if>
@@ -94,7 +91,6 @@
         select
             <include refid="IngestionTaskColumns"/>
         from ingestion_task
-        where workspace_id = #{workspaceId}
         order by created_at desc, id desc
         limit #{limit}
     </select>
@@ -114,8 +110,7 @@
             iti.created_at, iti.updated_at, iti.finished_at
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        where it.workspace_id = #{workspaceId}
-          and it.kb_id = #{kbId}
+        where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.status = 'FAILED'
         order by iti.created_at asc, iti.id asc
@@ -128,8 +123,7 @@
             iti.created_at, iti.updated_at, iti.finished_at
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        where it.workspace_id = #{workspaceId}
-          and it.kb_id = #{kbId}
+        where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.id = #{itemId}
     </select>
@@ -144,8 +138,7 @@
             iti.error_message = null,
             iti.updated_at = #{updatedAt},
             iti.finished_at = null
-        where it.workspace_id = #{workspaceId}
-          and it.kb_id = #{kbId}
+        where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.id = #{itemId}
           and iti.status = 'FAILED'
@@ -161,8 +154,7 @@
             iti.error_message = null,
             iti.updated_at = #{updatedAt},
             iti.finished_at = null
-        where it.workspace_id = #{workspaceId}
-          and it.kb_id = #{kbId}
+        where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.status = 'FAILED'
     </update>
@@ -177,8 +169,7 @@
             iti.error_message = null,
             iti.updated_at = #{updatedAt},
             iti.finished_at = null
-        where it.workspace_id = #{workspaceId}
-          and it.kb_id = #{kbId}
+        where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.id = #{itemId}
     </update>
@@ -193,8 +184,7 @@
             iti.error_message = null,
             iti.updated_at = #{updatedAt},
             iti.finished_at = #{updatedAt}
-        where it.workspace_id = #{workspaceId}
-          and it.kb_id = #{kbId}
+        where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.id = #{itemId}
     </update>
@@ -209,8 +199,7 @@
             iti.error_message = #{errorMessage},
             iti.updated_at = #{updatedAt},
             iti.finished_at = #{updatedAt}
-        where it.workspace_id = #{workspaceId}
-          and it.kb_id = #{kbId}
+        where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.id = #{itemId}
     </update>
@@ -279,7 +268,6 @@
                 else #{updatedAt}
             end
         where it.id = #{taskId}
-          and it.workspace_id = #{workspaceId}
           and it.kb_id = #{kbId}
     </update>
 </mapper>

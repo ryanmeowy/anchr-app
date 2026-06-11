@@ -96,53 +96,53 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
     private long embeddingRateLimitBackoffMs;
 
     @Override
-    public void submit(String workspaceId, String kbId, String taskId, String userId) {
-        ingestionTaskExecutor.execute(() -> processTask(workspaceId, kbId, taskId, userId));
+    public void submit(String kbId, String taskId, String userId) {
+        ingestionTaskExecutor.execute(() -> processTask(kbId, taskId, userId));
     }
 
-    private void processTask(String workspaceId, String kbId, String taskId, String userId) {
+    private void processTask( String kbId, String taskId, String userId) {
         RLock lock = redissonClient.getLock(TASK_LOCK_PREFIX + taskId);
         if (!lock.tryLock()) {
             return;
         }
         try {
-            IngestionTask task = ingestionTaskRepository.findById(workspaceId, kbId, taskId).orElse(null);
+            IngestionTask task = ingestionTaskRepository.findById(kbId, taskId).orElse(null);
             if (task == null || task.getItems() == null || task.getItems().isEmpty()) {
                 return;
             }
             for (IngestionTaskItem item : task.getItems()) {
                 if (item.getStatus() == IngestionTaskItemStatus.PENDING) {
-                    processItem(workspaceId, kbId, taskId, item, userId);
+                    processItem(kbId, taskId, item, userId);
                 }
             }
         } finally {
-            refreshTask(workspaceId, kbId, taskId, userId);
+            refreshTask(kbId, taskId, userId);
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
         }
     }
 
-    private void processItem(String workspaceId, String kbId, String taskId, IngestionTaskItem item, String userId) {
-        DocumentAsset document = findDocument(workspaceId, kbId, item);
+    private void processItem( String kbId, String taskId, IngestionTaskItem item, String userId) {
+        DocumentAsset document = findDocument(kbId, item);
         try {
             if (isImage(document)) {
-                processImage(workspaceId, kbId, taskId, item, document, userId);
+                processImage(kbId, taskId, item, document, userId);
             } else {
-                processText(workspaceId, kbId, taskId, item, document, userId);
+                processText(kbId, taskId, item, document, userId);
             }
-            knowledgeBaseRepository.refreshDocumentStats(workspaceId, kbId, userId, LocalDateTime.now());
+            knowledgeBaseRepository.refreshDocumentStats(kbId, userId, LocalDateTime.now());
         } catch (Exception e) {
             log.warn("knowledge base ingestion item failed, taskId={}, itemId={}, assetId={}: {}",
                     taskId, item.getId(), item.getAssetId(), e.getMessage());
-            failItem(workspaceId, kbId, taskId, item, document, userId, e);
+            failItem(kbId, taskId, item, document, userId, e);
         }
     }
 
-    private void processText(String workspaceId, String kbId, String taskId, IngestionTaskItem item,
+    private void processText(String kbId, String taskId, IngestionTaskItem item,
                              DocumentAsset document, String userId) {
-        updateRunning(workspaceId, kbId, taskId, item.getId(), IngestionStage.PARSE, STAGE_PARSE_PROGRESS, userId);
-        documentAssetRepository.updateStatuses(workspaceId, kbId, document.getId(),
+        updateRunning(kbId, taskId, item.getId(), IngestionStage.PARSE, STAGE_PARSE_PROGRESS, userId);
+        documentAssetRepository.updateStatuses(kbId, document.getId(),
                 DocumentParseStatus.RUNNING.name(), DocumentIndexStatus.PENDING.name(), userId, LocalDateTime.now());
         TextAssetMetadata metadata = toTextMetadata(document);
         textAssetContentLoader.enrichRemoteMetadata(metadata);
@@ -155,25 +155,25 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
             throw new BusinessException(ApiError.TEXT_PARSE_FAILED);
         }
 
-        updateRunning(workspaceId, kbId, taskId, item.getId(), IngestionStage.CHUNK, STAGE_CHUNK_PROGRESS, userId);
+        updateRunning(kbId, taskId, item.getId(), IngestionStage.CHUNK, STAGE_CHUNK_PROGRESS, userId);
         List<TextChunk> chunks = textChunkSplitter.split(metadata, parseResult);
 
-        updateRunning(workspaceId, kbId, taskId, item.getId(), IngestionStage.EMBED, STAGE_EMBED_PROGRESS, userId);
+        updateRunning(kbId, taskId, item.getId(), IngestionStage.EMBED, STAGE_EMBED_PROGRESS, userId);
         enrichTextEmbeddings(chunks);
 
-        updateRunning(workspaceId, kbId, taskId, item.getId(), IngestionStage.INDEX, STAGE_INDEX_PROGRESS, userId);
-        documentAssetRepository.updateStatuses(workspaceId, kbId, document.getId(),
+        updateRunning(kbId, taskId, item.getId(), IngestionStage.INDEX, STAGE_INDEX_PROGRESS, userId);
+        documentAssetRepository.updateStatuses(kbId, document.getId(),
                 DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.RUNNING.name(), userId, LocalDateTime.now());
         textSegmentRepository.save(document.getId(), chunks);
 
-        completeItem(workspaceId, kbId, taskId, item.getId(), document.getId(), chunks.size(), userId);
+        completeItem(kbId, taskId, item.getId(), document.getId(), chunks.size(), userId);
     }
 
-    private void processImage(String workspaceId, String kbId, String taskId, IngestionTaskItem item,
+    private void processImage(String kbId, String taskId, IngestionTaskItem item,
                               DocumentAsset document, String userId) {
         requireText(document.getObjectKey(), "objectKey");
-        updateRunning(workspaceId, kbId, taskId, item.getId(), IngestionStage.PARSE, STAGE_PARSE_PROGRESS, userId);
-        documentAssetRepository.updateStatuses(workspaceId, kbId, document.getId(),
+        updateRunning(kbId, taskId, item.getId(), IngestionStage.PARSE, STAGE_PARSE_PROGRESS, userId);
+        documentAssetRepository.updateStatuses(kbId, document.getId(),
                 DocumentParseStatus.RUNNING.name(), DocumentIndexStatus.PENDING.name(), userId, LocalDateTime.now());
 
         String imageInput = objectStoragePort.buildAiImageInput(document.getObjectKey());
@@ -182,20 +182,20 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
         List<String> tags = safeList(contentPort.generateTags(imageInput));
         List<GraphTriple> graph = safeList(contentPort.generateGraph(imageInput));
 
-        updateRunning(workspaceId, kbId, taskId, item.getId(), IngestionStage.INDEX, STAGE_INDEX_PROGRESS, userId);
-        documentAssetRepository.updateStatuses(workspaceId, kbId, document.getId(),
+        updateRunning(kbId, taskId, item.getId(), IngestionStage.INDEX, STAGE_INDEX_PROGRESS, userId);
+        documentAssetRepository.updateStatuses(kbId, document.getId(),
                 DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.RUNNING.name(), userId, LocalDateTime.now());
 
         List<Segment> segments = buildImageSegments(document, embedding, structuredOcr, tags, graph);
         kbSegmentBulkWriter.write(segments);
-        completeItem(workspaceId, kbId, taskId, item.getId(), document.getId(), segments.size(), userId);
+        completeItem(kbId, taskId, item.getId(), document.getId(), segments.size(), userId);
     }
 
-    private DocumentAsset findDocument(String workspaceId, String kbId, IngestionTaskItem item) {
+    private DocumentAsset findDocument(String kbId, IngestionTaskItem item) {
         if (!StringUtils.hasText(item.getAssetId())) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND, "Task item is not linked to a document asset.");
         }
-        return documentAssetRepository.findActiveById(workspaceId, kbId, item.getAssetId())
+        return documentAssetRepository.findActiveById(kbId, item.getAssetId())
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
     }
 
@@ -267,41 +267,41 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
         return segments;
     }
 
-    private void updateRunning(String workspaceId, String kbId, String taskId, String itemId,
+    private void updateRunning(String kbId, String taskId, String itemId,
                                IngestionStage stage, int progress, String userId) {
         LocalDateTime now = LocalDateTime.now();
-        ingestionTaskRepository.markItemRunning(workspaceId, kbId, taskId, itemId, stage.name(), progress, now);
-        ingestionTaskRepository.refreshSummary(workspaceId, kbId, taskId, userId, now);
+        ingestionTaskRepository.markItemRunning(kbId, taskId, itemId, stage.name(), progress, now);
+        ingestionTaskRepository.refreshSummary(kbId, taskId, userId, now);
     }
 
-    private void completeItem(String workspaceId, String kbId, String taskId, String itemId,
+    private void completeItem(String kbId, String taskId, String itemId,
                               String assetId, int segmentCount, String userId) {
         LocalDateTime now = LocalDateTime.now();
-        documentAssetRepository.updateIngestionResult(workspaceId, kbId, assetId,
+        documentAssetRepository.updateIngestionResult(kbId, assetId,
                 DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.SUCCESS.name(), segmentCount,
                 null, null, userId, now);
-        ingestionTaskRepository.markItemSuccess(workspaceId, kbId, taskId, itemId,
+        ingestionTaskRepository.markItemSuccess(kbId, taskId, itemId,
                 IngestionStage.ASKABLE.name(), STAGE_DONE_PROGRESS, now);
-        ingestionTaskRepository.refreshSummary(workspaceId, kbId, taskId, userId, now);
+        ingestionTaskRepository.refreshSummary(kbId, taskId, userId, now);
     }
 
-    private void failItem(String workspaceId, String kbId, String taskId, IngestionTaskItem item,
+    private void failItem(String kbId, String taskId, IngestionTaskItem item,
                           DocumentAsset document, String userId, Exception e) {
         LocalDateTime now = LocalDateTime.now();
         String errorCode = e instanceof BusinessException businessException
                 ? businessException.getError().name()
                 : ApiError.INTERNAL_ERROR.name();
         String errorMessage = clip(e.getMessage(), ERROR_MESSAGE_MAX_LENGTH);
-        documentAssetRepository.updateIngestionResult(workspaceId, kbId, document.getId(),
+        documentAssetRepository.updateIngestionResult(kbId, document.getId(),
                 DocumentParseStatus.FAILED.name(), DocumentIndexStatus.FAILED.name(), document.getSegmentCount(),
                 errorCode, errorMessage, userId, now);
-        ingestionTaskRepository.markItemFailed(workspaceId, kbId, taskId, item.getId(),
+        ingestionTaskRepository.markItemFailed(kbId, taskId, item.getId(),
                 item.getStage().name(), item.getProgress(), errorCode, errorMessage, now);
-        ingestionTaskRepository.refreshSummary(workspaceId, kbId, taskId, userId, now);
+        ingestionTaskRepository.refreshSummary(kbId, taskId, userId, now);
     }
 
-    private void refreshTask(String workspaceId, String kbId, String taskId, String userId) {
-        ingestionTaskRepository.refreshSummary(workspaceId, kbId, taskId, userId, LocalDateTime.now());
+    private void refreshTask(String kbId, String taskId, String userId) {
+        ingestionTaskRepository.refreshSummary(kbId, taskId, userId, LocalDateTime.now());
     }
 
     private boolean isImage(DocumentAsset document) {

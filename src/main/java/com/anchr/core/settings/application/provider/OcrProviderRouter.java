@@ -3,8 +3,8 @@ package com.anchr.core.settings.application.provider;
 import com.anchr.core.ingestion.domain.model.OcrStructuredResult;
 import com.anchr.core.ingestion.domain.port.IngestionOcrPort;
 import com.anchr.core.search.domain.port.SearchOcrPort;
+import com.anchr.core.common.config.EmbeddingProperties;
 import com.anchr.core.settings.application.impl.ProviderRuntimeRegistry;
-import com.anchr.core.settings.application.impl.ProviderSelectionService;
 import com.anchr.core.settings.domain.model.ProviderType;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
@@ -16,9 +16,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class OcrProviderRouter extends ProviderRouterSupport implements SearchOcrPort, IngestionOcrPort {
 
-    public OcrProviderRouter(ProviderSelectionService providerSelectionService,
-                             ProviderRuntimeRegistry providerRuntimeRegistry) {
-        super(providerSelectionService, providerRuntimeRegistry);
+    public OcrProviderRouter(ProviderRuntimeRegistry providerRuntimeRegistry,
+                             EmbeddingProperties embeddingProperties) {
+        super(providerRuntimeRegistry, embeddingProperties);
     }
 
     @Override

@@ -4,7 +4,9 @@ import java.util.Locale;
 
 /**
  * Configurable provider capability types.
+ * @deprecated Replaced by capability_config. Kept for legacy router compatibility.
  */
+@Deprecated
 public enum ProviderType {
     GENERATION,
     EMBEDDING,

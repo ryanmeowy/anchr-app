@@ -15,31 +15,31 @@ public interface IngestionTaskRepository {
 
     void save(IngestionTask task);
 
-    Optional<IngestionTask> findById(String workspaceId, String kbId, String taskId);
+    Optional<IngestionTask> findById(String kbId, String taskId);
 
-    List<IngestionTask> list(String workspaceId, String kbId, IngestionTaskStatus status, int limit);
+    List<IngestionTask> list(String kbId, IngestionTaskStatus status, int limit);
 
-    List<IngestionTask> listRecent(String workspaceId, int limit);
+    List<IngestionTask> listRecent(int limit);
 
     List<IngestionTaskItem> listItems(String taskId);
 
-    List<IngestionTaskItem> listFailedItems(String workspaceId, String kbId, String taskId);
+    List<IngestionTaskItem> listFailedItems(String kbId, String taskId);
 
-    Optional<IngestionTaskItem> findItem(String workspaceId, String kbId, String taskId, String itemId);
+    Optional<IngestionTaskItem> findItem(String kbId, String taskId, String itemId);
 
-    boolean resetFailedItem(String workspaceId, String kbId, String taskId, String itemId, LocalDateTime updatedAt);
+    boolean resetFailedItem(String kbId, String taskId, String itemId, LocalDateTime updatedAt);
 
-    boolean resetFailedItems(String workspaceId, String kbId, String taskId, LocalDateTime updatedAt);
+    boolean resetFailedItems(String kbId, String taskId, LocalDateTime updatedAt);
 
-    boolean markItemRunning(String workspaceId, String kbId, String taskId, String itemId,
+    boolean markItemRunning(String kbId, String taskId, String itemId,
                             String stage, int progress, LocalDateTime updatedAt);
 
-    boolean markItemSuccess(String workspaceId, String kbId, String taskId, String itemId,
+    boolean markItemSuccess(String kbId, String taskId, String itemId,
                             String stage, int progress, LocalDateTime updatedAt);
 
-    boolean markItemFailed(String workspaceId, String kbId, String taskId, String itemId,
+    boolean markItemFailed(String kbId, String taskId, String itemId,
                            String stage, int progress, String errorCode, String errorMessage,
                            LocalDateTime updatedAt);
 
-    void refreshSummary(String workspaceId, String kbId, String taskId, String updatedBy, LocalDateTime updatedAt);
+    void refreshSummary(String kbId, String taskId, String updatedBy, LocalDateTime updatedAt);
 }

@@ -2,20 +2,17 @@ package com.anchr.core.settings.interfaces.rest;
 
 import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
+import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.application.PreferenceSettingService;
-import com.anchr.core.settings.application.ProviderSettingService;
 import com.anchr.core.settings.application.SearchSettingService;
-import com.anchr.core.settings.application.SettingsQueryService;
-import com.anchr.core.settings.application.model.ProviderSwitchResult;
 import com.anchr.core.settings.application.model.SearchSetting;
 import com.anchr.core.settings.domain.model.PreferenceTheme;
-import com.anchr.core.settings.domain.model.ProviderType;
-import com.anchr.core.settings.interfaces.rest.dto.CapabilitiesDTO;
+import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigDTO;
+import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigUpdateRequestDTO;
+import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestRequestDTO;
+import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResultDTO;
 import com.anchr.core.settings.interfaces.rest.dto.PreferenceDTO;
 import com.anchr.core.settings.interfaces.rest.dto.PreferenceUpdateRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.ProviderListDTO;
-import com.anchr.core.settings.interfaces.rest.dto.ProviderSwitchRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.ProviderSwitchResultDTO;
 import com.anchr.core.settings.interfaces.rest.dto.SearchSettingDTO;
 import com.anchr.core.settings.interfaces.rest.dto.SearchSettingUpdateRequestDTO;
 import jakarta.validation.Valid;
@@ -23,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Settings APIs for capabilities, providers, search parameters, and preferences.
+ * Settings APIs.
  */
 @Validated
 @RestController
@@ -41,22 +39,36 @@ public class SettingsApiController {
     private static final List<String> REQUIRES_REINDEX_FIELDS = List.of(
             "embeddingModel", "embeddingDimension", "chunkSize", "chunkOverlap");
 
-    private final SettingsQueryService settingsQueryService;
     private final SearchSettingService searchSettingService;
     private final PreferenceSettingService preferenceSettingService;
-    private final ProviderSettingService providerSettingService;
+    private final CapabilityConfigService capabilityConfigService;
+
+    // ── embedding config ──────────────────────────────────────────────────
 
     @RequireAuth
-    @GetMapping("/capabilities")
-    public Result<CapabilitiesDTO> capabilities() {
-        return Result.success(settingsQueryService.capabilities());
+    @GetMapping("/embedding")
+    public Result<CapabilityConfigDTO> getEmbeddingConfig() {
+        return capabilityConfigService.get(CapabilityConfigService.CAPABILITY_EMBEDDING)
+                .map(Result::success)
+                .orElse(Result.success(null));
     }
 
     @RequireAuth
-    @GetMapping("/providers")
-    public Result<ProviderListDTO> providers() {
-        return Result.success(settingsQueryService.providers());
+    @PatchMapping("/embedding")
+    public Result<CapabilityConfigDTO> updateEmbeddingConfig(
+            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
+        return Result.success(capabilityConfigService.save(
+                CapabilityConfigService.CAPABILITY_EMBEDDING, request));
     }
+
+    @RequireAuth
+    @PostMapping("/embedding/test")
+    public Result<CapabilityConnectionTestResultDTO> testEmbeddingConnection(
+            @Valid @RequestBody CapabilityConnectionTestRequestDTO request) {
+        return Result.success(capabilityConfigService.test(request));
+    }
+
+    // ── search ────────────────────────────────────────────────────────────
 
     @RequireAuth
     @GetMapping("/search")
@@ -72,6 +84,8 @@ public class SettingsApiController {
         return Result.success(toSearchDto(setting, List.of("Search settings take effect immediately.")));
     }
 
+    // ── preferences ───────────────────────────────────────────────────────
+
     @RequireAuth
     @GetMapping("/preferences")
     public Result<PreferenceDTO> getPreferences() {
@@ -85,20 +99,6 @@ public class SettingsApiController {
     public Result<PreferenceDTO> updatePreferences(@Valid @RequestBody PreferenceUpdateRequestDTO request) {
         return Result.success(PreferenceDTO.builder()
                 .theme(preferenceSettingService.update(PreferenceTheme.parse(request.getTheme())).getTheme().name())
-                .build());
-    }
-
-    @RequireAuth
-    @PatchMapping("/providers/selection")
-    public Result<ProviderSwitchResultDTO> switchProvider(@Valid @RequestBody ProviderSwitchRequestDTO request) {
-        ProviderSwitchResult result = providerSettingService.switchProvider(
-                ProviderType.parse(request.getProviderType()), request.getProviderName());
-        return Result.success(ProviderSwitchResultDTO.builder()
-                .providerType(result.getProviderType().name())
-                .providerName(result.getProviderName())
-                .version(result.getVersion())
-                .effectiveImmediately(result.isEffectiveImmediately())
-                .warnings(result.getWarnings())
                 .build());
     }
 

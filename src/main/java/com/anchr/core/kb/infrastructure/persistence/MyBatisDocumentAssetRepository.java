@@ -26,53 +26,52 @@ public class MyBatisDocumentAssetRepository implements DocumentAssetRepository {
     }
 
     @Override
-    public Optional<DocumentAsset> findActiveById(String workspaceId, String kbId, String assetId) {
-        return mapper.findActiveById(workspaceId, kbId, assetId).map(this::toDomain);
+    public Optional<DocumentAsset> findActiveById(String kbId, String assetId) {
+        return mapper.findActiveById(kbId, assetId).map(this::toDomain);
     }
 
     @Override
-    public List<DocumentAsset> listActive(String workspaceId, String kbId, int limit, int offset) {
-        return mapper.listActive(workspaceId, kbId, limit, offset).stream()
+    public List<DocumentAsset> listActive(String kbId, int limit, int offset) {
+        return mapper.listActive(kbId, limit, offset).stream()
                 .map(this::toDomain)
                 .toList();
     }
 
     @Override
-    public long countActive(String workspaceId, String kbId) {
-        return mapper.countActive(workspaceId, kbId);
+    public long countActive(String kbId) {
+        return mapper.countActive(kbId);
     }
 
     @Override
-    public Optional<DocumentAsset> findActiveByHash(String workspaceId, String kbId, String fileHash) {
-        return mapper.findActiveByHash(workspaceId, kbId, fileHash).map(this::toDomain);
+    public Optional<DocumentAsset> findActiveByHash(String kbId, String fileHash) {
+        return mapper.findActiveByHash(kbId, fileHash).map(this::toDomain);
     }
 
     @Override
-    public boolean updateStatuses(String workspaceId, String kbId, String assetId,
+    public boolean updateStatuses(String kbId, String assetId,
                                   String parseStatus, String indexStatus,
                                   String updatedBy, LocalDateTime updatedAt) {
-        return mapper.updateStatuses(workspaceId, kbId, assetId, parseStatus, indexStatus, updatedBy, updatedAt) > 0;
+        return mapper.updateStatuses(kbId, assetId, parseStatus, indexStatus, updatedBy, updatedAt) > 0;
     }
 
     @Override
-    public boolean updateIngestionResult(String workspaceId, String kbId, String assetId,
+    public boolean updateIngestionResult(String kbId, String assetId,
                                          String parseStatus, String indexStatus, int segmentCount,
                                          String errorCode, String errorMessage,
                                          String updatedBy, LocalDateTime updatedAt) {
-        return mapper.updateIngestionResult(workspaceId, kbId, assetId, parseStatus, indexStatus, segmentCount,
+        return mapper.updateIngestionResult(kbId, assetId, parseStatus, indexStatus, segmentCount,
                 errorCode, errorMessage, updatedBy, updatedAt) > 0;
     }
 
     @Override
-    public boolean markDeleted(String workspaceId, String kbId, String assetId,
+    public boolean markDeleted(String kbId, String assetId,
                                String updatedBy, LocalDateTime updatedAt) {
-        return mapper.markDeleted(workspaceId, kbId, assetId, updatedBy, updatedAt) > 0;
+        return mapper.markDeleted(kbId, assetId, updatedBy, updatedAt) > 0;
     }
 
     private DocumentAsset toDomain(DocumentAssetRecord record) {
         return DocumentAsset.builder()
                 .id(record.getId())
-                .workspaceId(record.getWorkspaceId())
                 .kbId(record.getKbId())
                 .fileName(record.getFileName())
                 .title(record.getTitle())
@@ -101,7 +100,6 @@ public class MyBatisDocumentAssetRepository implements DocumentAssetRepository {
     private DocumentAssetRecord toRecord(DocumentAsset documentAsset) {
         DocumentAssetRecord record = new DocumentAssetRecord();
         record.setId(documentAsset.getId());
-        record.setWorkspaceId(documentAsset.getWorkspaceId());
         record.setKbId(documentAsset.getKbId());
         record.setFileName(documentAsset.getFileName());
         record.setTitle(documentAsset.getTitle());

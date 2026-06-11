@@ -13,7 +13,6 @@ import java.time.LocalDateTime;
 public class ActivityEvent {
 
     String id;
-    String workspaceId;
     String userId;
     ActivityEventType eventType;
     String resourceType;

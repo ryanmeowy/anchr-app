@@ -6,8 +6,8 @@ import com.anchr.core.ingestion.domain.port.IngestionContentPort;
 import com.anchr.core.search.domain.port.QueryGraphParserPort;
 import com.anchr.core.search.domain.port.SearchContentPort;
 import com.anchr.core.search.interfaces.rest.dto.GraphTripleDTO;
+import com.anchr.core.common.config.EmbeddingProperties;
 import com.anchr.core.settings.application.impl.ProviderRuntimeRegistry;
-import com.anchr.core.settings.application.impl.ProviderSelectionService;
 import com.anchr.core.settings.domain.model.ProviderType;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
@@ -22,9 +22,9 @@ import java.util.List;
 public class GenerationProviderRouter extends ProviderRouterSupport
         implements SearchContentPort, IngestionContentPort, QueryGraphParserPort, ConversationRewritePort {
 
-    public GenerationProviderRouter(ProviderSelectionService providerSelectionService,
-                                    ProviderRuntimeRegistry providerRuntimeRegistry) {
-        super(providerSelectionService, providerRuntimeRegistry);
+    public GenerationProviderRouter(ProviderRuntimeRegistry providerRuntimeRegistry,
+                                    EmbeddingProperties embeddingProperties) {
+        super(providerRuntimeRegistry, embeddingProperties);
     }
 
     @Override

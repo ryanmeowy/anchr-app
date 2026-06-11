@@ -9,7 +9,7 @@ import java.util.Optional;
  */
 public interface AppSettingRepository {
 
-    Optional<AppSetting> find(String workspaceId, String settingKey);
+    Optional<AppSetting> find(String settingKey);
 
-    AppSetting upsert(String workspaceId, String settingKey, String settingValue, String updatedBy);
+    AppSetting upsert(String settingKey, String settingValue, String updatedBy);
 }

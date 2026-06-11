@@ -13,7 +13,6 @@ import java.time.LocalDateTime;
 public class DocumentAsset {
 
     String id;
-    String workspaceId;
     String kbId;
     String fileName;
     String title;

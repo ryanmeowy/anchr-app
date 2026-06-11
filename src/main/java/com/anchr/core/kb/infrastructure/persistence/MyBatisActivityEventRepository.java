@@ -23,9 +23,9 @@ public class MyBatisActivityEventRepository implements ActivityEventRepository {
     }
 
     @Override
-    public List<ActivityEvent> listByType(String workspaceId, String userId,
+    public List<ActivityEvent> listByType(String userId,
                                           ActivityEventType eventType, int limit, int offset) {
-        return mapper.listByType(workspaceId, userId, eventType.name(), limit, offset).stream()
+        return mapper.listByType(userId, eventType.name(), limit, offset).stream()
                 .map(this::toDomain)
                 .toList();
     }
@@ -33,7 +33,6 @@ public class MyBatisActivityEventRepository implements ActivityEventRepository {
     private ActivityEventRecord toRecord(ActivityEvent event) {
         ActivityEventRecord record = new ActivityEventRecord();
         record.setId(event.getId());
-        record.setWorkspaceId(event.getWorkspaceId());
         record.setUserId(event.getUserId());
         record.setEventType(event.getEventType().name());
         record.setResourceType(event.getResourceType());
@@ -46,7 +45,6 @@ public class MyBatisActivityEventRepository implements ActivityEventRepository {
     private ActivityEvent toDomain(ActivityEventRecord record) {
         return ActivityEvent.builder()
                 .id(record.getId())
-                .workspaceId(record.getWorkspaceId())
                 .userId(record.getUserId())
                 .eventType(ActivityEventType.valueOf(record.getEventType()))
                 .resourceType(record.getResourceType())

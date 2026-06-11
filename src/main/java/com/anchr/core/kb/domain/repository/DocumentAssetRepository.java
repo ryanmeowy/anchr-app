@@ -13,21 +13,21 @@ public interface DocumentAssetRepository {
 
     void save(DocumentAsset documentAsset);
 
-    Optional<DocumentAsset> findActiveById(String workspaceId, String kbId, String assetId);
+    Optional<DocumentAsset> findActiveById(String kbId, String assetId);
 
-    List<DocumentAsset> listActive(String workspaceId, String kbId, int limit, int offset);
+    List<DocumentAsset> listActive(String kbId, int limit, int offset);
 
-    long countActive(String workspaceId, String kbId);
+    long countActive(String kbId);
 
-    Optional<DocumentAsset> findActiveByHash(String workspaceId, String kbId, String fileHash);
+    Optional<DocumentAsset> findActiveByHash(String kbId, String fileHash);
 
-    boolean updateStatuses(String workspaceId, String kbId, String assetId,
+    boolean updateStatuses(String kbId, String assetId,
                            String parseStatus, String indexStatus, String updatedBy, LocalDateTime updatedAt);
 
-    boolean updateIngestionResult(String workspaceId, String kbId, String assetId,
+    boolean updateIngestionResult(String kbId, String assetId,
                                   String parseStatus, String indexStatus, int segmentCount,
                                   String errorCode, String errorMessage,
                                   String updatedBy, LocalDateTime updatedAt);
 
-    boolean markDeleted(String workspaceId, String kbId, String assetId, String updatedBy, LocalDateTime updatedAt);
+    boolean markDeleted(String kbId, String assetId, String updatedBy, LocalDateTime updatedAt);
 }

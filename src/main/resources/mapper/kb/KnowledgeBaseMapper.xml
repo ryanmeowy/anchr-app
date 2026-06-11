@@ -6,7 +6,6 @@
 
     <resultMap id="KnowledgeBaseRecordMap" type="com.anchr.core.kb.infrastructure.persistence.KnowledgeBaseRecord">
         <id property="id" column="id"/>
-        <result property="workspaceId" column="workspace_id"/>
         <result property="name" column="name"/>
         <result property="description" column="description"/>
         <result property="status" column="status"/>
@@ -30,7 +29,7 @@
     </resultMap>
 
     <sql id="KnowledgeBaseColumns">
-        id, workspace_id, name, description, status,
+        id, name, description, status,
         document_count, segment_count, last_ingested_at,
         created_by, updated_by, created_at, updated_at, deleted_at
     </sql>
@@ -39,7 +38,7 @@
         insert into knowledge_base (
             <include refid="KnowledgeBaseColumns"/>
         ) values (
-            #{id}, #{workspaceId}, #{name}, #{description}, #{status},
+            #{id}, #{name}, #{description}, #{status},
             #{documentCount}, #{segmentCount}, #{lastIngestedAt},
             #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{deletedAt}
         )
@@ -50,7 +49,6 @@
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and deleted_at is null
           and status = 'ACTIVE'
     </select>
@@ -60,7 +58,6 @@
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and deleted_at is null
     </select>
 
@@ -68,8 +65,7 @@
         select
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
-        where workspace_id = #{workspaceId}
-          and status = 'ACTIVE'
+        where status = 'ACTIVE'
           and deleted_at is null
           and id in
           <foreach collection="ids" item="id" open="(" separator="," close=")">
@@ -81,8 +77,7 @@
         select
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
-        where workspace_id = #{workspaceId}
-          and status = 'ACTIVE'
+        where status = 'ACTIVE'
           and deleted_at is null
         order by updated_at desc, id desc
         limit #{limit} offset #{offset}
@@ -91,8 +86,7 @@
     <select id="countActive" resultType="long">
         select count(1)
         from knowledge_base
-        where workspace_id = #{workspaceId}
-          and status = 'ACTIVE'
+        where status = 'ACTIVE'
           and deleted_at is null
     </select>
 
@@ -103,7 +97,6 @@
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and status = 'ACTIVE'
           and deleted_at is null
     </update>
@@ -114,7 +107,6 @@
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and status = 'ACTIVE'
           and deleted_at is null
     </update>
@@ -124,21 +116,18 @@
         set document_count = (
                 select count(1)
                 from document_asset da
-                where da.workspace_id = #{workspaceId}
-                  and da.kb_id = #{id}
+                where da.kb_id = #{id}
                   and da.deleted_at is null
             ),
             segment_count = (
                 select coalesce(sum(da.segment_count), 0)
                 from document_asset da
-                where da.workspace_id = #{workspaceId}
-                  and da.kb_id = #{id}
+                where da.kb_id = #{id}
                   and da.deleted_at is null
             ),
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and deleted_at is null
     </update>
 
@@ -146,8 +135,7 @@
         select
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
-        where workspace_id = #{workspaceId}
-          and status = 'ACTIVE'
+        where status = 'ACTIVE'
           and deleted_at is null
           and (name like concat('%', #{query}, '%')
                or description like concat('%', #{query}, '%'))
@@ -164,15 +152,13 @@
             (
                 select it.status
                 from ingestion_task it
-                where it.workspace_id = kb.workspace_id
-                  and it.kb_id = kb.id
+                where it.kb_id = kb.id
                 order by it.created_at desc, it.id desc
                 limit 1
             ) as last_ingestion_status,
             kb.updated_at
         from knowledge_base kb
         where kb.id = #{id}
-          and kb.workspace_id = #{workspaceId}
           and kb.deleted_at is null
           and kb.status = 'ACTIVE'
     </select>

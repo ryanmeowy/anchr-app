@@ -77,7 +77,7 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
 
     private List<ActivityEvent> listEvents(ActivityEventType eventType, int limit, int offset) {
         RequestUserContext context = UserContextHolder.get();
-        return activityEventRepository.listByType(context.workspaceId(), context.userId(), eventType, limit, offset);
+        return activityEventRepository.listByType(context.userId(), eventType, limit, offset);
     }
 
     private RecentQuestionDTO toRecentQuestion(ActivityEvent event, Map<String, String> knowledgeBaseNamesById) {
@@ -104,8 +104,7 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         if (kbIds.isEmpty()) {
             return Map.of();
         }
-        RequestUserContext context = UserContextHolder.get();
-        return knowledgeBaseRepository.listActiveByIds(context.workspaceId(), List.copyOf(kbIds)).stream()
+        return knowledgeBaseRepository.listActiveByIds(List.copyOf(kbIds)).stream()
                 .filter(knowledgeBase -> StringUtils.hasText(knowledgeBase.getId())
                         && StringUtils.hasText(knowledgeBase.getName()))
                 .collect(Collectors.toMap(

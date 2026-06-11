@@ -5,5 +5,5 @@ package com.anchr.core.ingestion.application;
  */
 public interface KbIngestionTaskProcessor {
 
-    void submit(String workspaceId, String kbId, String taskId, String userId);
+    void submit(String kbId, String taskId, String userId);
 }

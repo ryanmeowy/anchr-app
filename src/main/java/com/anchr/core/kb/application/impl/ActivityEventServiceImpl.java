@@ -84,7 +84,6 @@ public class ActivityEventServiceImpl implements ActivityEventService {
             RequestUserContext context = UserContextHolder.get();
             ActivityEvent event = ActivityEvent.builder()
                     .id(idGenerator.nextId(EVENT_ID_PREFIX))
-                    .workspaceId(context.workspaceId())
                     .userId(context.userId())
                     .eventType(eventType)
                     .resourceType(resourceType)

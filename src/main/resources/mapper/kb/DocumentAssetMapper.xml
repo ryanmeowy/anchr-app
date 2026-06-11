@@ -6,7 +6,6 @@
 
     <resultMap id="DocumentAssetRecordMap" type="com.anchr.core.kb.infrastructure.persistence.DocumentAssetRecord">
         <id property="id" column="id"/>
-        <result property="workspaceId" column="workspace_id"/>
         <result property="kbId" column="kb_id"/>
         <result property="fileName" column="file_name"/>
         <result property="title" column="title"/>
@@ -32,7 +31,7 @@
     </resultMap>
 
     <sql id="DocumentAssetColumns">
-        id, workspace_id, kb_id, file_name, title, file_type, mime_type,
+        id, kb_id, file_name, title, file_type, mime_type,
         size_bytes, file_hash, object_key, preview_object_key, thumbnail_key,
         source_url, parse_status, index_status, segment_count, embedding_profile,
         error_code, error_message, created_by, updated_by, created_at, updated_at, deleted_at
@@ -42,7 +41,7 @@
         insert into document_asset (
             <include refid="DocumentAssetColumns"/>
         ) values (
-            #{id}, #{workspaceId}, #{kbId}, #{fileName}, #{title}, #{fileType}, #{mimeType},
+            #{id}, #{kbId}, #{fileName}, #{title}, #{fileType}, #{mimeType},
             #{sizeBytes}, #{fileHash}, #{objectKey}, #{previewObjectKey}, #{thumbnailKey},
             #{sourceUrl}, #{parseStatus}, #{indexStatus}, #{segmentCount}, #{embeddingProfile},
             #{errorCode}, #{errorMessage}, #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{deletedAt}
@@ -54,7 +53,6 @@
             <include refid="DocumentAssetColumns"/>
         from document_asset
         where id = #{assetId}
-          and workspace_id = #{workspaceId}
           and kb_id = #{kbId}
           and deleted_at is null
     </select>
@@ -63,8 +61,7 @@
         select
             <include refid="DocumentAssetColumns"/>
         from document_asset
-        where workspace_id = #{workspaceId}
-          and kb_id = #{kbId}
+        where kb_id = #{kbId}
           and deleted_at is null
         order by created_at desc, id desc
         limit #{limit} offset #{offset}
@@ -73,8 +70,7 @@
     <select id="countActive" resultType="long">
         select count(1)
         from document_asset
-        where workspace_id = #{workspaceId}
-          and kb_id = #{kbId}
+        where kb_id = #{kbId}
           and deleted_at is null
     </select>
 
@@ -82,8 +78,7 @@
         select
             <include refid="DocumentAssetColumns"/>
         from document_asset
-        where workspace_id = #{workspaceId}
-          and kb_id = #{kbId}
+        where kb_id = #{kbId}
           and file_hash = #{fileHash}
           and deleted_at is null
         order by created_at desc, id desc
@@ -99,7 +94,6 @@
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{assetId}
-          and workspace_id = #{workspaceId}
           and kb_id = #{kbId}
           and deleted_at is null
     </update>
@@ -114,7 +108,6 @@
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{assetId}
-          and workspace_id = #{workspaceId}
           and kb_id = #{kbId}
           and deleted_at is null
     </update>
@@ -125,7 +118,6 @@
             updated_at = #{updatedAt},
             deleted_at = #{updatedAt}
         where id = #{assetId}
-          and workspace_id = #{workspaceId}
           and kb_id = #{kbId}
           and deleted_at is null
     </update>

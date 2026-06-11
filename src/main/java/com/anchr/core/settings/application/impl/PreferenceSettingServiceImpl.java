@@ -29,7 +29,7 @@ public class PreferenceSettingServiceImpl implements PreferenceSettingService {
     @Override
     public PreferenceSetting get() {
         RequestUserContext context = UserContextHolder.get();
-        PreferenceTheme theme = appSettingRepository.find(context.workspaceId(), SETTING_KEY)
+        PreferenceTheme theme = appSettingRepository.find(SETTING_KEY)
                 .map(setting -> readTheme(setting.getSettingValue()))
                 .orElse(PreferenceTheme.SYSTEM);
         return PreferenceSetting.builder().theme(theme).build();
@@ -39,7 +39,7 @@ public class PreferenceSettingServiceImpl implements PreferenceSettingService {
     public PreferenceSetting update(PreferenceTheme theme) {
         PreferenceTheme safeTheme = theme == null ? PreferenceTheme.SYSTEM : theme;
         RequestUserContext context = UserContextHolder.get();
-        appSettingRepository.upsert(context.workspaceId(), SETTING_KEY, toJson(safeTheme), context.userId());
+        appSettingRepository.upsert(SETTING_KEY, toJson(safeTheme), context.userId());
         return PreferenceSetting.builder().theme(safeTheme).build();
     }
 

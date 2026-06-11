@@ -2,8 +2,8 @@ package com.anchr.core.settings.application.provider;
 
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
+import com.anchr.core.common.config.EmbeddingProperties;
 import com.anchr.core.settings.application.impl.ProviderRuntimeRegistry;
-import com.anchr.core.settings.application.impl.ProviderSelectionService;
 import com.anchr.core.settings.domain.model.ProviderType;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
@@ -17,9 +17,9 @@ import org.springframework.web.multipart.MultipartFile;
 public class ObjectStorageProviderRouter extends ProviderRouterSupport
         implements SearchObjectStoragePort, IngestionObjectStoragePort {
 
-    public ObjectStorageProviderRouter(ProviderSelectionService providerSelectionService,
-                                       ProviderRuntimeRegistry providerRuntimeRegistry) {
-        super(providerSelectionService, providerRuntimeRegistry);
+    public ObjectStorageProviderRouter(ProviderRuntimeRegistry providerRuntimeRegistry,
+                                       EmbeddingProperties embeddingProperties) {
+        super(providerRuntimeRegistry, embeddingProperties);
     }
 
     @Override

@@ -34,8 +34,8 @@ class SearchSettingServiceImplTest {
 
     @Test
     void get_shouldApplyPersistedSettingToRuntimeProperties() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
-        when(appSettingRepository.find("ws-a", SearchSettingServiceImpl.SETTING_KEY))
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
+        when(appSettingRepository.find(SearchSettingServiceImpl.SETTING_KEY))
                 .thenReturn(Optional.of(setting("{\"topK\":15,\"rerankWindow\":30,\"rrfK\":55,\"minScore\":0.8}")));
 
         SearchSetting result = service.get();
@@ -49,22 +49,21 @@ class SearchSettingServiceImplTest {
 
     @Test
     void update_shouldPersistAndHotApplyAllowedFields() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
-        when(appSettingRepository.upsert(eq("ws-a"), eq(SearchSettingServiceImpl.SETTING_KEY),
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
+        when(appSettingRepository.upsert(eq(SearchSettingServiceImpl.SETTING_KEY),
                 contains("\"topK\":20"), eq("user-a"))).thenReturn(setting("{}"));
 
         SearchSetting result = service.update(20, 40, 70, 0.77d);
 
         assertThat(result.getTopK()).isEqualTo(20);
         assertThat(properties.getPage().getDefaultPageSize()).isEqualTo(20);
-        verify(appSettingRepository).upsert(eq("ws-a"), eq(SearchSettingServiceImpl.SETTING_KEY),
+        verify(appSettingRepository).upsert(eq(SearchSettingServiceImpl.SETTING_KEY),
                 contains("\"rerankWindow\":40"), eq("user-a"));
     }
 
     private AppSetting setting(String value) {
         return AppSetting.builder()
                 .id("set-1")
-                .workspaceId("ws-a")
                 .settingKey(SearchSettingServiceImpl.SETTING_KEY)
                 .settingValue(value)
                 .version(1)

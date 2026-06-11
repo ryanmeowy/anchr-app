@@ -10,7 +10,6 @@ import java.time.LocalDateTime;
 @Data
 public class AppSettingRecord {
     private String id;
-    private String workspaceId;
     private String settingKey;
     private String settingValue;
     private Integer version;

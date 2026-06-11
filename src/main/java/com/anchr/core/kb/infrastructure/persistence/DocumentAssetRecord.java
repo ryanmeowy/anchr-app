@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 public class DocumentAssetRecord {
 
     private String id;
-    private String workspaceId;
     private String kbId;
     private String fileName;
     private String title;

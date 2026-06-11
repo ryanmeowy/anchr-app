@@ -48,7 +48,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         LocalDateTime now = LocalDateTime.now();
         KnowledgeBase knowledgeBase = KnowledgeBase.builder()
                 .id(idGenerator.nextId(KB_ID_PREFIX))
-                .workspaceId(context.workspaceId())
                 .name(normalizedName)
                 .description(trimToNull(description))
                 .status(KnowledgeBaseStatus.ACTIVE)
@@ -73,25 +72,22 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         }
         String trimmed = query.trim();
         int boundedLimit = limit <= 0 ? DEFAULT_SEARCH_LIMIT : Math.min(limit, MAX_SEARCH_LIMIT);
-        RequestUserContext context = UserContextHolder.get();
-        return knowledgeBaseRepository.searchActive(context.workspaceId(), trimmed, boundedLimit);
+        return knowledgeBaseRepository.searchActive(trimmed, boundedLimit);
     }
 
     @Override
     public PagedResult<KnowledgeBase> list(int page, int size) {
         PageBounds bounds = normalizePage(page, size);
-        RequestUserContext context = UserContextHolder.get();
         return new PagedResult<>(
-                knowledgeBaseRepository.listActive(context.workspaceId(), bounds.size(), bounds.offset()),
-                knowledgeBaseRepository.countActive(context.workspaceId()),
+                knowledgeBaseRepository.listActive(bounds.size(), bounds.offset()),
+                knowledgeBaseRepository.countActive(),
                 bounds.page(),
                 bounds.size());
     }
 
     @Override
     public KnowledgeBase get(String kbId) {
-        RequestUserContext context = UserContextHolder.get();
-        return knowledgeBaseRepository.findActiveById(context.workspaceId(), requireId(kbId, "kbId"))
+        return knowledgeBaseRepository.findActiveById(requireId(kbId, "kbId"))
                 .orElseThrow(() -> new BusinessException(ApiError.KNOWLEDGE_BASE_NOT_FOUND));
     }
 
@@ -103,7 +99,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         String normalizedName = requireName(name);
         LocalDateTime now = LocalDateTime.now();
         boolean updated = knowledgeBaseRepository.updateProfile(
-                context.workspaceId(), id, normalizedName, trimToNull(description), context.userId(), now);
+                id, normalizedName, trimToNull(description), context.userId(), now);
         if (!updated) {
             throw new BusinessException(ApiError.KNOWLEDGE_BASE_NOT_FOUND);
         }
@@ -115,7 +111,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     public void archive(String kbId) {
         RequestUserContext context = UserContextHolder.get();
         boolean archived = knowledgeBaseRepository.archive(
-                context.workspaceId(), requireId(kbId, "kbId"), context.userId(), LocalDateTime.now());
+                requireId(kbId, "kbId"), context.userId(), LocalDateTime.now());
         if (!archived) {
             throw new BusinessException(ApiError.KNOWLEDGE_BASE_NOT_FOUND);
         }
@@ -123,8 +119,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     @Override
     public KnowledgeBaseStats getStats(String kbId) {
-        RequestUserContext context = UserContextHolder.get();
-        return knowledgeBaseRepository.findStats(context.workspaceId(), requireId(kbId, "kbId"))
+        return knowledgeBaseRepository.findStats(requireId(kbId, "kbId"))
                 .orElseThrow(() -> new BusinessException(ApiError.KNOWLEDGE_BASE_NOT_FOUND));
     }
 
@@ -133,10 +128,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         String id = requireId(kbId, "kbId");
         get(id);
         PageBounds bounds = normalizePage(page, size);
-        RequestUserContext context = UserContextHolder.get();
         return new PagedResult<>(
-                documentAssetRepository.listActive(context.workspaceId(), id, bounds.size(), bounds.offset()),
-                documentAssetRepository.countActive(context.workspaceId(), id),
+                documentAssetRepository.listActive(id, bounds.size(), bounds.offset()),
+                documentAssetRepository.countActive(id),
                 bounds.page(),
                 bounds.size());
     }
@@ -146,7 +140,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         String id = requireId(kbId, "kbId");
         RequestUserContext context = UserContextHolder.get();
         get(id);
-        return documentAssetRepository.findActiveById(context.workspaceId(), id, requireId(assetId, "assetId"))
+        return documentAssetRepository.findActiveById(id, requireId(assetId, "assetId"))
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
     }
 
@@ -158,11 +152,11 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         RequestUserContext context = UserContextHolder.get();
         get(id);
         boolean deleted = documentAssetRepository.markDeleted(
-                context.workspaceId(), id, documentId, context.userId(), LocalDateTime.now());
+                id, documentId, context.userId(), LocalDateTime.now());
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
-        knowledgeBaseRepository.refreshDocumentStats(context.workspaceId(), id, context.userId(), LocalDateTime.now());
+        knowledgeBaseRepository.refreshDocumentStats(id, context.userId(), LocalDateTime.now());
         try {
             kbSegmentRepository.deleteByAssetId(documentId);
         } catch (BusinessException e) {

@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 public class IngestionTaskRecord {
 
     private String id;
-    private String workspaceId;
     private String kbId;
     private String sourceType;
     private String status;

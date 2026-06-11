@@ -26,69 +26,68 @@ public class MyBatisKnowledgeBaseRepository implements KnowledgeBaseRepository {
     }
 
     @Override
-    public Optional<KnowledgeBase> findById(String workspaceId, String id) {
-        return mapper.findById(workspaceId, id).map(this::toDomain);
+    public Optional<KnowledgeBase> findById(String id) {
+        return mapper.findById( id).map(this::toDomain);
     }
 
     @Override
-    public Optional<KnowledgeBase> findActiveById(String workspaceId, String id) {
-        return mapper.findActiveById(workspaceId, id).map(this::toDomain);
+    public Optional<KnowledgeBase> findActiveById(String id) {
+        return mapper.findActiveById( id).map(this::toDomain);
     }
 
     @Override
-    public List<KnowledgeBase> listActiveByIds(String workspaceId, List<String> ids) {
+    public List<KnowledgeBase> listActiveByIds(List<String> ids) {
         if (ids == null || ids.isEmpty()) {
             return List.of();
         }
-        return mapper.listActiveByIds(workspaceId, ids).stream()
+        return mapper.listActiveByIds( ids).stream()
                 .map(this::toDomain)
                 .toList();
     }
 
     @Override
-    public List<KnowledgeBase> listActive(String workspaceId, int limit, int offset) {
-        return mapper.listActive(workspaceId, limit, offset).stream()
+    public List<KnowledgeBase> listActive(int limit, int offset) {
+        return mapper.listActive( limit, offset).stream()
                 .map(this::toDomain)
                 .toList();
     }
 
     @Override
-    public long countActive(String workspaceId) {
-        return mapper.countActive(workspaceId);
+    public long countActive() {
+        return mapper.countActive();
     }
 
     @Override
-    public List<KnowledgeBase> searchActive(String workspaceId, String query, int limit) {
-        return mapper.searchActive(workspaceId, query, limit).stream()
+    public List<KnowledgeBase> searchActive(String query, int limit) {
+        return mapper.searchActive( query, limit).stream()
                 .map(this::toDomain)
                 .toList();
     }
 
     @Override
-    public boolean updateProfile(String workspaceId, String id, String name, String description,
+    public boolean updateProfile(String id, String name, String description,
                                  String updatedBy, LocalDateTime updatedAt) {
-        return mapper.updateProfile(workspaceId, id, name, description, updatedBy, updatedAt) > 0;
+        return mapper.updateProfile( id, name, description, updatedBy, updatedAt) > 0;
     }
 
     @Override
-    public boolean archive(String workspaceId, String id, String updatedBy, LocalDateTime updatedAt) {
-        return mapper.archive(workspaceId, id, updatedBy, updatedAt) > 0;
+    public boolean archive(String id, String updatedBy, LocalDateTime updatedAt) {
+        return mapper.archive( id, updatedBy, updatedAt) > 0;
     }
 
     @Override
-    public void refreshDocumentStats(String workspaceId, String id, String updatedBy, LocalDateTime updatedAt) {
-        mapper.refreshDocumentStats(workspaceId, id, updatedBy, updatedAt);
+    public void refreshDocumentStats(String id, String updatedBy, LocalDateTime updatedAt) {
+        mapper.refreshDocumentStats( id, updatedBy, updatedAt);
     }
 
     @Override
-    public Optional<KnowledgeBaseStats> findStats(String workspaceId, String id) {
-        return mapper.findStats(workspaceId, id).map(this::toStats);
+    public Optional<KnowledgeBaseStats> findStats(String id) {
+        return mapper.findStats( id).map(this::toStats);
     }
 
     private KnowledgeBaseRecord toRecord(KnowledgeBase knowledgeBase) {
         KnowledgeBaseRecord record = new KnowledgeBaseRecord();
         record.setId(knowledgeBase.getId());
-        record.setWorkspaceId(knowledgeBase.getWorkspaceId());
         record.setName(knowledgeBase.getName());
         record.setDescription(knowledgeBase.getDescription());
         record.setStatus(knowledgeBase.getStatus().name());
@@ -106,7 +105,6 @@ public class MyBatisKnowledgeBaseRepository implements KnowledgeBaseRepository {
     private KnowledgeBase toDomain(KnowledgeBaseRecord record) {
         return KnowledgeBase.builder()
                 .id(record.getId())
-                .workspaceId(record.getWorkspaceId())
                 .name(record.getName())
                 .description(record.getDescription())
                 .status(KnowledgeBaseStatus.valueOf(record.getStatus()))

@@ -17,58 +17,48 @@ public interface IngestionTaskMapper {
 
     int insertItem(IngestionTaskItemRecord record);
 
-    Optional<IngestionTaskRecord> findTask(@Param("workspaceId") String workspaceId,
-                                           @Param("kbId") String kbId,
+    Optional<IngestionTaskRecord> findTask(@Param("kbId") String kbId,
                                            @Param("taskId") String taskId);
 
-    List<IngestionTaskRecord> listTasks(@Param("workspaceId") String workspaceId,
-                                        @Param("kbId") String kbId,
+    List<IngestionTaskRecord> listTasks(@Param("kbId") String kbId,
                                         @Param("status") String status,
                                         @Param("limit") int limit);
 
-    List<IngestionTaskRecord> listRecentTasks(@Param("workspaceId") String workspaceId,
-                                              @Param("limit") int limit);
+    List<IngestionTaskRecord> listRecentTasks(@Param("limit") int limit);
 
     List<IngestionTaskItemRecord> listItems(@Param("taskId") String taskId);
 
-    List<IngestionTaskItemRecord> listFailedItems(@Param("workspaceId") String workspaceId,
-                                                  @Param("kbId") String kbId,
+    List<IngestionTaskItemRecord> listFailedItems(@Param("kbId") String kbId,
                                                   @Param("taskId") String taskId);
 
-    Optional<IngestionTaskItemRecord> findItem(@Param("workspaceId") String workspaceId,
-                                               @Param("kbId") String kbId,
+    Optional<IngestionTaskItemRecord> findItem(@Param("kbId") String kbId,
                                                @Param("taskId") String taskId,
                                                @Param("itemId") String itemId);
 
-    int resetFailedItem(@Param("workspaceId") String workspaceId,
-                        @Param("kbId") String kbId,
+    int resetFailedItem(@Param("kbId") String kbId,
                         @Param("taskId") String taskId,
                         @Param("itemId") String itemId,
                         @Param("updatedAt") LocalDateTime updatedAt);
 
-    int resetFailedItems(@Param("workspaceId") String workspaceId,
-                         @Param("kbId") String kbId,
+    int resetFailedItems(@Param("kbId") String kbId,
                          @Param("taskId") String taskId,
                          @Param("updatedAt") LocalDateTime updatedAt);
 
-    int markItemRunning(@Param("workspaceId") String workspaceId,
-                        @Param("kbId") String kbId,
+    int markItemRunning(@Param("kbId") String kbId,
                         @Param("taskId") String taskId,
                         @Param("itemId") String itemId,
                         @Param("stage") String stage,
                         @Param("progress") int progress,
                         @Param("updatedAt") LocalDateTime updatedAt);
 
-    int markItemSuccess(@Param("workspaceId") String workspaceId,
-                        @Param("kbId") String kbId,
+    int markItemSuccess(@Param("kbId") String kbId,
                         @Param("taskId") String taskId,
                         @Param("itemId") String itemId,
                         @Param("stage") String stage,
                         @Param("progress") int progress,
                         @Param("updatedAt") LocalDateTime updatedAt);
 
-    int markItemFailed(@Param("workspaceId") String workspaceId,
-                       @Param("kbId") String kbId,
+    int markItemFailed(@Param("kbId") String kbId,
                        @Param("taskId") String taskId,
                        @Param("itemId") String itemId,
                        @Param("stage") String stage,
@@ -77,8 +67,7 @@ public interface IngestionTaskMapper {
                        @Param("errorMessage") String errorMessage,
                        @Param("updatedAt") LocalDateTime updatedAt);
 
-    int refreshSummary(@Param("workspaceId") String workspaceId,
-                       @Param("kbId") String kbId,
+    int refreshSummary(@Param("kbId") String kbId,
                        @Param("taskId") String taskId,
                        @Param("updatedBy") String updatedBy,
                        @Param("updatedAt") LocalDateTime updatedAt);

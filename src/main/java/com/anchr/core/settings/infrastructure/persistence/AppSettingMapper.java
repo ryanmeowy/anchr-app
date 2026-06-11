@@ -12,11 +12,9 @@ import java.util.Optional;
 @Mapper
 public interface AppSettingMapper {
 
-    Optional<AppSettingRecord> find(@Param("workspaceId") String workspaceId,
-                                    @Param("settingKey") String settingKey);
+    Optional<AppSettingRecord> find(@Param("settingKey") String settingKey);
 
     int upsert(@Param("id") String id,
-               @Param("workspaceId") String workspaceId,
                @Param("settingKey") String settingKey,
                @Param("settingValue") String settingValue,
                @Param("updatedBy") String updatedBy,

@@ -6,7 +6,6 @@
 
     <resultMap id="AppSettingRecordMap" type="com.anchr.core.settings.infrastructure.persistence.AppSettingRecord">
         <id property="id" column="id"/>
-        <result property="workspaceId" column="workspace_id"/>
         <result property="settingKey" column="setting_key"/>
         <result property="settingValue" column="setting_value"/>
         <result property="version" column="version"/>
@@ -15,22 +14,21 @@
     </resultMap>
 
     <sql id="AppSettingColumns">
-        id, workspace_id, setting_key, setting_value, version, updated_by, updated_at
+        id, setting_key, setting_value, version, updated_by, updated_at
     </sql>
 
     <select id="find" resultMap="AppSettingRecordMap">
         select
             <include refid="AppSettingColumns"/>
         from app_setting
-        where workspace_id = #{workspaceId}
-          and setting_key = #{settingKey}
+        where setting_key = #{settingKey}
     </select>
 
     <insert id="upsert">
         insert into app_setting (
-            id, workspace_id, setting_key, setting_value, version, updated_by, updated_at
+            id, setting_key, setting_value, version, updated_by, updated_at
         ) values (
-            #{id}, #{workspaceId}, #{settingKey}, #{settingValue}, 1, #{updatedBy}, #{updatedAt}
+            #{id}, #{settingKey}, #{settingValue}, 1, #{updatedBy}, #{updatedAt}
         )
         on duplicate key update
             setting_value = #{settingValue},

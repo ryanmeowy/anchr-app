@@ -13,8 +13,7 @@ public interface ActivityEventMapper {
 
     int insert(ActivityEventRecord record);
 
-    List<ActivityEventRecord> listByType(@Param("workspaceId") String workspaceId,
-                                         @Param("userId") String userId,
+    List<ActivityEventRecord> listByType(@Param("userId") String userId,
                                          @Param("eventType") String eventType,
                                          @Param("limit") int limit,
                                          @Param("offset") int offset);

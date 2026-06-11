@@ -36,14 +36,14 @@ class ActivityQueryServiceImplTest {
 
     @Test
     void recentQuestions_shouldMapPayloadAndBuildNextCursor() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
         ActivityEvent first = event(ActivityEventType.QUESTION_ASKED, "turn-1",
                 "{\"sessionId\":\"sess-1\",\"turnId\":\"turn-1\",\"question\":\"付款期限是什么？\",\"kbScope\":[\"kb-1\"]}");
         ActivityEvent second = event(ActivityEventType.QUESTION_ASKED, "turn-2",
                 "{\"sessionId\":\"sess-2\",\"turnId\":\"turn-2\",\"question\":\"违约金怎么约定？\",\"kbScope\":[\"kb-2\"]}");
-        when(activityEventRepository.listByType("ws-a", "user-a", ActivityEventType.QUESTION_ASKED, 2, 0))
+        when(activityEventRepository.listByType("user-a", ActivityEventType.QUESTION_ASKED, 2, 0))
                 .thenReturn(List.of(first, second));
-        when(knowledgeBaseRepository.listActiveByIds("ws-a", List.of("kb-1")))
+        when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1")))
                 .thenReturn(List.of(kb("kb-1", "合同知识库")));
 
         RecentQuestionListDTO result = service.recentQuestions(1, null);
@@ -58,12 +58,12 @@ class ActivityQueryServiceImplTest {
 
     @Test
     void recentCitations_shouldMapCitationPayload() {
-        UserContextHolder.set(new RequestUserContext("ws-a", "user-a", "OWNER"));
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
         ActivityEvent event = event(ActivityEventType.CITATION_OPENED, "seg-1",
                 "{\"segmentId\":\"seg-1\",\"assetId\":\"doc-1\",\"kbId\":\"kb-1\","
                         + "\"fileName\":\"合同.pdf\",\"title\":\"合同\",\"snippet\":\"30日内付款\","
                         + "\"citationReason\":\"该片段包含付款期限。\"}");
-        when(activityEventRepository.listByType("ws-a", "user-a", ActivityEventType.CITATION_OPENED, 11, 0))
+        when(activityEventRepository.listByType("user-a", ActivityEventType.CITATION_OPENED, 11, 0))
                 .thenReturn(List.of(event));
 
         RecentCitationListDTO result = service.recentCitations(10, null);
@@ -78,7 +78,6 @@ class ActivityQueryServiceImplTest {
     private ActivityEvent event(ActivityEventType eventType, String resourceId, String payload) {
         return ActivityEvent.builder()
                 .id("act-" + resourceId)
-                .workspaceId("ws-a")
                 .userId("user-a")
                 .eventType(eventType)
                 .resourceType("TEST")
@@ -92,7 +91,6 @@ class ActivityQueryServiceImplTest {
         LocalDateTime now = LocalDateTime.now();
         return KnowledgeBase.builder()
                 .id(id)
-                .workspaceId("ws-a")
                 .name(name)
                 .status(KnowledgeBaseStatus.ACTIVE)
                 .createdAt(now)

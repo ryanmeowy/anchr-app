@@ -12,5 +12,5 @@ public interface ActivityEventRepository {
 
     void save(ActivityEvent event);
 
-    List<ActivityEvent> listByType(String workspaceId, String userId, ActivityEventType eventType, int limit, int offset);
+    List<ActivityEvent> listByType(String userId, ActivityEventType eventType, int limit, int offset);
 }

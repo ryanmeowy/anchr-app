@@ -30,8 +30,7 @@ public class SearchSettingServiceImpl implements SearchSettingService {
 
     @Override
     public SearchSetting get() {
-        RequestUserContext context = UserContextHolder.get();
-        appSettingRepository.find(context.workspaceId(), SETTING_KEY)
+        appSettingRepository.find(SETTING_KEY)
                 .ifPresent(setting -> applyJson(setting.getSettingValue()));
         return current();
     }
@@ -51,7 +50,7 @@ public class SearchSettingServiceImpl implements SearchSettingService {
                 .build();
         apply(next);
         RequestUserContext context = UserContextHolder.get();
-        appSettingRepository.upsert(context.workspaceId(), SETTING_KEY, toJson(next), context.userId());
+        appSettingRepository.upsert(SETTING_KEY, toJson(next), context.userId());
         return next;
     }
 

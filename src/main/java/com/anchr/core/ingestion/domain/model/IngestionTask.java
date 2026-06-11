@@ -14,7 +14,6 @@ import java.util.List;
 public class IngestionTask {
 
     String id;
-    String workspaceId;
     String kbId;
     IngestionSourceType sourceType;
     IngestionTaskStatus status;

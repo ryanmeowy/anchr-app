@@ -15,32 +15,26 @@ public interface DocumentAssetMapper {
 
     int insert(DocumentAssetRecord record);
 
-    Optional<DocumentAssetRecord> findActiveById(@Param("workspaceId") String workspaceId,
-                                                 @Param("kbId") String kbId,
-                                                 @Param("assetId") String assetId);
+    Optional<DocumentAssetRecord> findActiveById(@Param("kbId") String kbId,
+                                                  @Param("assetId") String assetId);
 
-    List<DocumentAssetRecord> listActive(@Param("workspaceId") String workspaceId,
-                                         @Param("kbId") String kbId,
+    List<DocumentAssetRecord> listActive(@Param("kbId") String kbId,
                                          @Param("limit") int limit,
                                          @Param("offset") int offset);
 
-    long countActive(@Param("workspaceId") String workspaceId,
-                     @Param("kbId") String kbId);
+    long countActive(@Param("kbId") String kbId);
 
-    Optional<DocumentAssetRecord> findActiveByHash(@Param("workspaceId") String workspaceId,
-                                                   @Param("kbId") String kbId,
-                                                   @Param("fileHash") String fileHash);
+    Optional<DocumentAssetRecord> findActiveByHash(@Param("kbId") String kbId,
+                                                    @Param("fileHash") String fileHash);
 
-    int updateStatuses(@Param("workspaceId") String workspaceId,
-                       @Param("kbId") String kbId,
+    int updateStatuses(@Param("kbId") String kbId,
                        @Param("assetId") String assetId,
                        @Param("parseStatus") String parseStatus,
                        @Param("indexStatus") String indexStatus,
                        @Param("updatedBy") String updatedBy,
                        @Param("updatedAt") LocalDateTime updatedAt);
 
-    int updateIngestionResult(@Param("workspaceId") String workspaceId,
-                              @Param("kbId") String kbId,
+    int updateIngestionResult(@Param("kbId") String kbId,
                               @Param("assetId") String assetId,
                               @Param("parseStatus") String parseStatus,
                               @Param("indexStatus") String indexStatus,
@@ -50,8 +44,7 @@ public interface DocumentAssetMapper {
                               @Param("updatedBy") String updatedBy,
                               @Param("updatedAt") LocalDateTime updatedAt);
 
-    int markDeleted(@Param("workspaceId") String workspaceId,
-                    @Param("kbId") String kbId,
+    int markDeleted(@Param("kbId") String kbId,
                     @Param("assetId") String assetId,
                     @Param("updatedBy") String updatedBy,
                     @Param("updatedAt") LocalDateTime updatedAt);
