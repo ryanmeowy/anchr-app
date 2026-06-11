@@ -1,6 +1,5 @@
 package com.anchr.core.settings.application.impl;
 
-import com.anchr.core.auth.application.AuditLogService;
 import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
@@ -37,7 +36,6 @@ public class ProviderSettingServiceImpl implements ProviderSettingService {
     private final ProviderRuntimeRegistry providerRuntimeRegistry;
     private final ObjectMapper objectMapper;
     private final PermissionService permissionService;
-    private final AuditLogService auditLogService;
 
     @Override
     public ProviderSwitchResult switchProvider(ProviderType providerType, String providerName) {
@@ -57,8 +55,6 @@ public class ProviderSettingServiceImpl implements ProviderSettingService {
                 normalizedProviderName), context.userId());
         appSettingRepository.upsert(context.workspaceId(), ProviderSelectionService.SETTING_KEY,
                 nextSelectionJson(context.workspaceId(), providerType, normalizedProviderName), context.userId());
-        auditLogService.record("SETTING_UPDATED", "PROVIDER", providerType.name(), "SUCCESS",
-                "{\"providerName\":\"" + normalizedProviderName + "\"}");
         return ProviderSwitchResult.builder()
                 .providerType(providerType)
                 .providerName(normalizedProviderName)

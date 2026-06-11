@@ -1,6 +1,5 @@
 package com.anchr.core.kb.application.impl;
 
-import com.anchr.core.auth.application.AuditLogService;
 import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
@@ -42,7 +41,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final PrefixedIdGenerator idGenerator;
     private final KbSegmentRepository kbSegmentRepository;
     private final PermissionService permissionService;
-    private final AuditLogService auditLogService;
 
     @Override
     @Transactional
@@ -65,7 +63,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 .updatedAt(now)
                 .build();
         knowledgeBaseRepository.save(knowledgeBase);
-        auditLogService.record("KB_CREATED", "KB", knowledgeBase.getId(), "SUCCESS", "{}");
         return knowledgeBase;
     }
 
@@ -170,8 +167,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
-        auditLogService.record("DOCUMENT_DELETED", "DOCUMENT", documentId, "SUCCESS",
-                "{\"kbId\":\"" + id + "\"}");
         knowledgeBaseRepository.refreshDocumentStats(context.workspaceId(), id, context.userId(), LocalDateTime.now());
         try {
             kbSegmentRepository.deleteByAssetId(documentId);

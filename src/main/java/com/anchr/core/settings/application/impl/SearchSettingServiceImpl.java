@@ -1,6 +1,5 @@
 package com.anchr.core.settings.application.impl;
 
-import com.anchr.core.auth.application.AuditLogService;
 import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
@@ -30,7 +29,6 @@ public class SearchSettingServiceImpl implements SearchSettingService {
     private final AppSearchProperties appSearchProperties;
     private final ObjectMapper objectMapper;
     private final PermissionService permissionService;
-    private final AuditLogService auditLogService;
 
     @Override
     public SearchSetting get() {
@@ -57,7 +55,6 @@ public class SearchSettingServiceImpl implements SearchSettingService {
         apply(next);
         RequestUserContext context = UserContextHolder.get();
         appSettingRepository.upsert(context.workspaceId(), SETTING_KEY, toJson(next), context.userId());
-        auditLogService.record("SETTING_UPDATED", "SETTING", SETTING_KEY, "SUCCESS", toJson(next));
         return next;
     }
 

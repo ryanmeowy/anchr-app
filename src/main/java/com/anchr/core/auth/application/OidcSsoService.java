@@ -33,7 +33,6 @@ public class OidcSsoService {
     private final UserAccountMapper userAccountMapper;
     private final WorkspaceMapper workspaceMapper;
     private final SessionTokenService sessionTokenService;
-    private final AuditLogService auditLogService;
     private final PrefixedIdGenerator idGenerator;
     private final ObjectMapper objectMapper;
     private final String authorizationUrl;
@@ -42,7 +41,6 @@ public class OidcSsoService {
     public OidcSsoService(UserAccountMapper userAccountMapper,
                           WorkspaceMapper workspaceMapper,
                           SessionTokenService sessionTokenService,
-                          AuditLogService auditLogService,
                           PrefixedIdGenerator idGenerator,
                           ObjectMapper objectMapper,
                           @org.springframework.beans.factory.annotation.Value("${app.sso.oidc.authorization-url:}") String authorizationUrl,
@@ -50,7 +48,6 @@ public class OidcSsoService {
         this.userAccountMapper = userAccountMapper;
         this.workspaceMapper = workspaceMapper;
         this.sessionTokenService = sessionTokenService;
-        this.auditLogService = auditLogService;
         this.idGenerator = idGenerator;
         this.objectMapper = objectMapper;
         this.authorizationUrl = authorizationUrl;
@@ -84,7 +81,6 @@ public class OidcSsoService {
                     .workspaceId(member.getWorkspaceId())
                     .role(member.getRole())
                     .build());
-            auditLogService.record("LOGIN", "USER", user.getId(), "SUCCESS", "{\"sso\":\"oidc\"}");
             return SsoLoginResult.builder()
                     .token(token)
                     .userId(user.getId())
@@ -94,10 +90,8 @@ public class OidcSsoService {
                     .role(member.getRole())
                     .build();
         } catch (BusinessException e) {
-            auditLogService.record("SSO_LOGIN_FAILED", "USER", "", "FAILED", "{}");
             throw e;
         } catch (Exception e) {
-            auditLogService.record("SSO_LOGIN_FAILED", "USER", "", "FAILED", "{}");
             throw new BusinessException(ApiError.INVALID_REQUEST, "Failed to parse OIDC id_token.", e);
         }
     }

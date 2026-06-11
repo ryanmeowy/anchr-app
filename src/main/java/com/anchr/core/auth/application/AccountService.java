@@ -33,7 +33,6 @@ public class AccountService {
     private final WorkspaceMapper workspaceMapper;
     private final PasswordHashService passwordHashService;
     private final SessionTokenService sessionTokenService;
-    private final AuditLogService auditLogService;
     private final PermissionService permissionService;
     private final PrefixedIdGenerator idGenerator;
 
@@ -41,14 +40,12 @@ public class AccountService {
                           WorkspaceMapper workspaceMapper,
                           PasswordHashService passwordHashService,
                           SessionTokenService sessionTokenService,
-                          AuditLogService auditLogService,
                           PermissionService permissionService,
                           PrefixedIdGenerator idGenerator) {
         this.userAccountMapper = userAccountMapper;
         this.workspaceMapper = workspaceMapper;
         this.passwordHashService = passwordHashService;
         this.sessionTokenService = sessionTokenService;
-        this.auditLogService = auditLogService;
         this.permissionService = permissionService;
         this.idGenerator = idGenerator;
     }
@@ -59,7 +56,6 @@ public class AccountService {
         UserAccountRecord user = userAccountMapper.findByEmail(normalizedEmail)
                 .orElseGet(() -> createFirstUserIfAllowed(normalizedEmail, password));
         if (!passwordHashService.matches(password, user.getPasswordHash())) {
-            auditLogService.record("LOGIN", "USER", user.getId(), "FAILED", "{}");
             throw new BusinessException(ApiError.UNAUTHORIZED, "Invalid email or password.");
         }
         WorkspaceMemberRecord member = workspaceMapper.findMember(DEFAULT_WORKSPACE_ID, user.getId())
@@ -71,7 +67,6 @@ public class AccountService {
                 .workspaceId(member.getWorkspaceId())
                 .role(member.getRole())
                 .build());
-        auditLogService.record("LOGIN", "USER", user.getId(), "SUCCESS", "{}");
         return LoginResult.builder()
                 .token(token)
                 .userId(user.getId())
@@ -88,7 +83,6 @@ public class AccountService {
 
     public void logout(String token) {
         sessionTokenService.revoke(token);
-        auditLogService.record("LOGOUT", "USER", "", "SUCCESS", "{}");
     }
 
     @Transactional
@@ -120,8 +114,6 @@ public class AccountService {
         member.setCreatedAt(now);
         member.setUpdatedAt(now);
         workspaceMapper.insertMember(member);
-        auditLogService.record("MEMBER_UPDATED", "WORKSPACE", context.workspaceId(), "SUCCESS",
-                "{\"userId\":\"" + user.getId() + "\"}");
         return LoginResult.builder()
                 .token(null)
                 .userId(user.getId())

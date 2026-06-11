@@ -31,7 +31,6 @@ public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final UserAccountMapper userAccountMapper;
     private final PermissionService permissionService;
-    private final AuditLogService auditLogService;
     private final PrefixedIdGenerator idGenerator;
 
     public List<WorkspaceRecord> list() {
@@ -53,7 +52,6 @@ public class WorkspaceService {
         workspace.setUpdatedAt(now);
         workspaceMapper.insertWorkspace(workspace);
         addMemberRecord(workspace.getId(), context.userId(), WorkspaceRole.OWNER.name(), context.userId(), now);
-        auditLogService.record("WORKSPACE_CREATED", "WORKSPACE", workspace.getId(), "SUCCESS", "{}");
         return workspace;
     }
 
@@ -70,8 +68,6 @@ public class WorkspaceService {
                 .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND, "User account not found."));
         LocalDateTime now = LocalDateTime.now();
         addMemberRecord(requireText(workspaceId, "workspaceId"), user.getId(), safeRole(role).name(), context.userId(), now);
-        auditLogService.record("MEMBER_UPDATED", "WORKSPACE", workspaceId, "SUCCESS",
-                "{\"userId\":\"" + user.getId() + "\"}");
         return workspaceMapper.findMember(workspaceId, user.getId())
                 .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND, "Workspace member not found."));
     }
@@ -85,8 +81,6 @@ public class WorkspaceService {
         if (updated == 0) {
             throw new BusinessException(ApiError.NOT_FOUND, "Workspace member not found.");
         }
-        auditLogService.record("MEMBER_UPDATED", "WORKSPACE", workspaceId, "SUCCESS",
-                "{\"userId\":\"" + userId + "\"}");
         return workspaceMapper.findMember(workspaceId, userId)
                 .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND, "Workspace member not found."));
     }
@@ -100,8 +94,6 @@ public class WorkspaceService {
         if (updated == 0) {
             throw new BusinessException(ApiError.NOT_FOUND, "Workspace member not found.");
         }
-        auditLogService.record("MEMBER_UPDATED", "WORKSPACE", workspaceId, "SUCCESS",
-                "{\"userId\":\"" + userId + "\"}");
     }
 
     private void addMemberRecord(String workspaceId, String userId, String role, String actorId, LocalDateTime now) {

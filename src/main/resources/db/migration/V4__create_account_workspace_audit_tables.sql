@@ -34,18 +34,3 @@ create table if not exists workspace_member (
   primary key (workspace_id, user_id),
   key idx_workspace_member_user (user_id, status)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci;
-
-create table if not exists audit_log (
-  id             varchar(64) primary key,
-  workspace_id   varchar(64) not null default 'default',
-  user_id        varchar(64) not null default 'system',
-  action         varchar(64) not null,
-  resource_type  varchar(64) not null,
-  resource_id    varchar(128),
-  outcome        varchar(32) not null,
-  payload        json,
-  created_at     timestamp not null,
-  key idx_audit_workspace_created (workspace_id, created_at),
-  key idx_audit_user_created (workspace_id, user_id, created_at),
-  key idx_audit_action_created (workspace_id, action, created_at)
-) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci;

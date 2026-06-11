@@ -2,7 +2,6 @@ package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.ingestion.application.KbIngestionTaskProcessor;
 import com.anchr.core.kb.application.ActivityEventService;
-import com.anchr.core.auth.application.AuditLogService;
 import com.anchr.core.auth.application.PermissionService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
@@ -61,7 +60,6 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private final PrefixedIdGenerator idGenerator;
     private final ActivityEventService activityEventService;
     private final PermissionService permissionService;
-    private final AuditLogService auditLogService;
     private final KbIngestionTaskProcessor ingestionTaskProcessor;
 
     @Override
@@ -78,8 +76,6 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
         ingestionTaskRepository.save(task);
         activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
                 task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
-        auditLogService.record("DOCUMENT_IMPORTED", "INGESTION_TASK", task.getId(), "SUCCESS",
-                "{\"kbId\":\"" + kbId + "\"}");
         knowledgeBaseRepository.refreshDocumentStats(context.workspaceId(), kbId, context.userId(), now);
         submitAfterCommit(context.workspaceId(), kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
