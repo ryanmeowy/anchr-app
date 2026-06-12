@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * Application service for unified knowledge base ingestion tasks.
  */
-public interface KbIngestionApplicationService {
+public interface IngestionApplicationService {
 
     IngestionTask createTask(String kbId, IngestionCreateCommand command);
 

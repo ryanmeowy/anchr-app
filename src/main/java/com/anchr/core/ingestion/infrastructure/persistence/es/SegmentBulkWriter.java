@@ -3,11 +3,11 @@ package com.anchr.core.ingestion.infrastructure.persistence.es;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
-import com.anchr.core.common.config.KbSegmentConfig;
+import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.infrastructure.persistence.es.document.KbSegmentDocument;
+import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -21,10 +21,10 @@ import java.util.List;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class KbSegmentBulkWriter {
+public class SegmentBulkWriter {
 
     private final ElasticsearchClient esClient;
-    private final KbSegmentConfig kbSegmentConfig;
+    private final SegmentIndexConfig kbSegmentConfig;
 
     public void write(List<Segment> segments) {
         if (segments == null || segments.isEmpty()) {
@@ -67,8 +67,8 @@ public class KbSegmentBulkWriter {
         }
     }
 
-    private KbSegmentDocument toDocument(Segment segment) {
-        KbSegmentDocument document = new KbSegmentDocument();
+    private SegmentDocument toDocument(Segment segment) {
+        SegmentDocument document = new SegmentDocument();
         document.setSegmentId(segment.getSegmentId());
         document.setKbId(segment.getKbId());
         document.setAssetId(segment.getAssetId());

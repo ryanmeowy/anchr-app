@@ -34,7 +34,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Validated
 @RequestMapping("/api/conversations")
 @RequiredArgsConstructor
-public class ConversationApiController {
+public class ConversationController {
 
     private final ConversationService conversationService;
 

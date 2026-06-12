@@ -14,7 +14,7 @@ import java.util.List;
  */
 @Data
 @Document(indexName = "#{@kbSegmentConfig.getReadTargetName()}", createIndex = false)
-public class KbSegmentDocument {
+public class SegmentDocument {
 
     @Id
     @Field(type = FieldType.Keyword)

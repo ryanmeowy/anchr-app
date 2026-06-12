@@ -1,10 +1,10 @@
 package com.anchr.core.search.interfaces.rest;
 
 import com.anchr.core.common.model.Result;
-import com.anchr.core.search.application.KbSearchAnswerService;
+import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchPageDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchQueryDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchPageDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,14 +18,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/search")
 @RequiredArgsConstructor
-public class KbSearchApiController {
+public class SearchController {
 
     private final UnifiedSearchService unifiedSearchService;
-    private final KbSearchAnswerService kbSearchAnswerService;
+    private final SearchAnswerService kbSearchAnswerService;
 
     @PostMapping("/kb")
-    public Result<KbSearchPageDTO> searchKb(@Valid @RequestBody KbSearchQueryDTO query) {
-        KbSearchPageDTO page = unifiedSearchService.searchPage(query);
+    public Result<SearchPageDTO> searchKb(@Valid @RequestBody SearchQueryDTO query) {
+        SearchPageDTO page = unifiedSearchService.searchPage(query);
         if (Boolean.TRUE.equals(query.getWithAnswer())) {
             page.setAnswer(kbSearchAnswerService.answer(query));
         }

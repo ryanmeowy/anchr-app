@@ -1,10 +1,10 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.search.application.KbSearchAnswerService;
+import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.search.interfaces.rest.dto.KbAnswerDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchQueryDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchResultDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchAnswerDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -17,49 +17,49 @@ import java.util.List;
  */
 @Service
 @RequiredArgsConstructor
-public class KbSearchAnswerServiceImpl implements KbSearchAnswerService {
+public class SearchAnswerServiceImpl implements SearchAnswerService {
 
     private static final int CITATION_LIMIT = 5;
 
     private final UnifiedSearchService unifiedSearchService;
 
     @Override
-    public KbAnswerDTO answer(KbSearchQueryDTO query) {
-        List<KbSearchResultDTO> results = unifiedSearchService.search(query);
-        List<KbAnswerDTO.CitationDTO> citations = buildCitations(results);
+    public SearchAnswerDTO answer(SearchQueryDTO query) {
+        List<SearchResultDTO> results = unifiedSearchService.search(query);
+        List<SearchAnswerDTO.CitationDTO> citations = buildCitations(results);
         if (citations.isEmpty()) {
-            return KbAnswerDTO.builder()
+            return SearchAnswerDTO.builder()
                     .answer(null)
                     .citations(List.of())
                     .results(results)
-                    .answerTrace(KbAnswerDTO.AnswerTraceDTO.builder()
+                    .answerTrace(SearchAnswerDTO.AnswerTraceDTO.builder()
                             .mode(resolveAnswerMode(query))
                             .grounded(false)
                             .fallbackReason("NO_ENOUGH_EVIDENCE")
                             .build())
                     .build();
         }
-        return KbAnswerDTO.builder()
+        return SearchAnswerDTO.builder()
                 .answer(buildAnswer(citations))
                 .citations(citations)
                 .results(results)
-                .answerTrace(KbAnswerDTO.AnswerTraceDTO.builder()
+                .answerTrace(SearchAnswerDTO.AnswerTraceDTO.builder()
                         .mode(resolveAnswerMode(query))
                         .grounded(true)
                         .build())
                 .build();
     }
 
-    private List<KbAnswerDTO.CitationDTO> buildCitations(List<KbSearchResultDTO> results) {
+    private List<SearchAnswerDTO.CitationDTO> buildCitations(List<SearchResultDTO> results) {
         if (results == null || results.isEmpty()) {
             return List.of();
         }
-        List<KbAnswerDTO.CitationDTO> citations = new ArrayList<>();
-        for (KbSearchResultDTO result : results) {
+        List<SearchAnswerDTO.CitationDTO> citations = new ArrayList<>();
+        for (SearchResultDTO result : results) {
             if (result == null || !StringUtils.hasText(result.getSegmentId()) || !StringUtils.hasText(result.getSnippet())) {
                 continue;
             }
-            citations.add(KbAnswerDTO.CitationDTO.builder()
+            citations.add(SearchAnswerDTO.CitationDTO.builder()
                     .citationIndex(citations.size() + 1)
                     .segmentId(result.getSegmentId())
                     .assetId(result.getAssetId())
@@ -75,9 +75,9 @@ public class KbSearchAnswerServiceImpl implements KbSearchAnswerService {
         return citations;
     }
 
-    private String buildAnswer(List<KbAnswerDTO.CitationDTO> citations) {
+    private String buildAnswer(List<SearchAnswerDTO.CitationDTO> citations) {
         StringBuilder builder = new StringBuilder("根据当前检索结果，可以参考以下证据：");
-        for (KbAnswerDTO.CitationDTO citation : citations) {
+        for (SearchAnswerDTO.CitationDTO citation : citations) {
             builder.append(System.lineSeparator())
                     .append("[")
                     .append(citation.getCitationIndex())
@@ -87,7 +87,7 @@ public class KbSearchAnswerServiceImpl implements KbSearchAnswerService {
         return builder.toString();
     }
 
-    private String resolveAnswerMode(KbSearchQueryDTO query) {
+    private String resolveAnswerMode(SearchQueryDTO query) {
         return query == null || !StringUtils.hasText(query.getAnswerMode()) ? "STRICT" : query.getAnswerMode().trim();
     }
 

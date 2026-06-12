@@ -2,7 +2,7 @@ package com.anchr.core.ingestion.infrastructure.persistence.es;
 
 import com.anchr.core.ingestion.domain.model.TextChunk;
 import com.anchr.core.ingestion.domain.repository.TextSegmentRepository;
-import com.anchr.core.search.domain.model.KbAssetTypeEnum;
+import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +18,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TextSegmentIndexWriter implements TextSegmentRepository {
 
-    private final KbSegmentBulkWriter kbSegmentBulkWriter;
+    private final SegmentBulkWriter kbSegmentBulkWriter;
 
     @Override
     public void save(String assetId, List<TextChunk> chunks) {
@@ -33,7 +33,7 @@ public class TextSegmentIndexWriter implements TextSegmentRepository {
                         .segmentId(chunk.getSegmentId())
                         .kbId(chunk.getKbId())
                         .assetId(chunk.getAssetId())
-                        .assetType(KbAssetTypeEnum.TEXT)
+                        .assetType(AssetType.TEXT)
                         .segmentType(SegmentType.TEXT_CHUNK)
                         .title(chunk.getTitle())
                         .contentText(chunk.getChunkText())

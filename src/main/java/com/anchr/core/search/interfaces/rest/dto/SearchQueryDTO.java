@@ -12,7 +12,7 @@ import java.util.List;
  * Unified kb search request for text + image retrieval.
  */
 @Data
-public class KbSearchQueryDTO {
+public class SearchQueryDTO {
 
     /**
      * Natural language query.

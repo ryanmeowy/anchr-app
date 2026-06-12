@@ -9,7 +9,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequest
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
-import com.anchr.core.conversation.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
-class ConversationApiControllerTest {
+class ConversationControllerTest {
 
     @Mock
     private ConversationService conversationService;
@@ -44,7 +44,7 @@ class ConversationApiControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new ConversationApiController(conversationService))
+                .standaloneSetup(new ConversationController(conversationService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -145,7 +145,7 @@ class ConversationApiControllerTest {
         primaryHit.setScore(0.91d);
         primaryHit.setPageNo(3);
         primaryHit.setHitType("TEXT_CHUNK");
-        PreviewAnchorDTO anchor = new PreviewAnchorDTO();
+        PreviewAnchorDTO anchor = PreviewAnchorDTO.builder().build();
         anchor.setPageNo(3);
         anchor.setChunkOrder(12);
         primaryHit.setAnchor(anchor);

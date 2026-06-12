@@ -1,8 +1,8 @@
 package com.anchr.core.search.application;
 
-import com.anchr.core.search.interfaces.rest.dto.KbSearchQueryDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchPageDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchResultDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchPageDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 
 import java.util.List;
 
@@ -11,7 +11,7 @@ import java.util.List;
  */
 public interface UnifiedSearchService {
 
-    List<KbSearchResultDTO> search(KbSearchQueryDTO query);
+    List<SearchResultDTO> search(SearchQueryDTO query);
 
-    KbSearchPageDTO searchPage(KbSearchQueryDTO query);
+    SearchPageDTO searchPage(SearchQueryDTO query);
 }

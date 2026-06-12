@@ -4,11 +4,11 @@ import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Bbox;
-import com.anchr.core.search.domain.model.KbAssetTypeEnum;
+import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
-import com.anchr.core.search.domain.repository.KbSegmentRepository;
+import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
 import org.junit.jupiter.api.Test;
 
@@ -28,7 +28,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldExposeImageOcrAnchor() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -59,7 +59,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldSetExpectedExpiryForSignedUrl() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -80,7 +80,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldReturnNeighborChunksWithContentLimit() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -91,7 +91,7 @@ class SegmentPreviewServiceImplTest {
         Segment segment = Segment.builder()
                 .segmentId("asset-2:text:3")
                 .assetId("asset-2")
-                .assetType(KbAssetTypeEnum.TEXT)
+                .assetType(AssetType.TEXT)
                 .segmentType(SegmentType.TEXT_CHUNK)
                 .title("manual.md")
                 .contentText("检索定位内容".repeat(2000))
@@ -102,7 +102,7 @@ class SegmentPreviewServiceImplTest {
         Segment previous = Segment.builder()
                 .segmentId("asset-2:text:2")
                 .assetId("asset-2")
-                .assetType(KbAssetTypeEnum.TEXT)
+                .assetType(AssetType.TEXT)
                 .segmentType(SegmentType.TEXT_CHUNK)
                 .contentText("上一段内容")
                 .pageNo(2)
@@ -111,7 +111,7 @@ class SegmentPreviewServiceImplTest {
         Segment next = Segment.builder()
                 .segmentId("asset-2:text:4")
                 .assetId("asset-2")
-                .assetType(KbAssetTypeEnum.TEXT)
+                .assetType(AssetType.TEXT)
                 .segmentType(SegmentType.TEXT_CHUNK)
                 .contentText("下一段内容")
                 .pageNo(2)
@@ -139,7 +139,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldInferPdfAndTxtPreviewTypes() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -163,7 +163,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldInferMarkdownAndImageFallbackPreviewTypes() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -175,7 +175,7 @@ class SegmentPreviewServiceImplTest {
         Segment imageSegment = Segment.builder()
                 .segmentId("asset-8:image:1")
                 .assetId("asset-8")
-                .assetType(KbAssetTypeEnum.IMAGE)
+                .assetType(AssetType.IMAGE)
                 .segmentType(SegmentType.IMAGE_CAPTION)
                 .title("scan-without-extension")
                 .contentText("image caption")
@@ -195,7 +195,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldReusePreviewUrlForSameTokenHash() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -218,7 +218,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldSignAgainWhenPreviewCacheMissesAfterTtl() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -247,7 +247,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldReturnEmptySurroundingChunksWhenContentMissing() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -258,7 +258,7 @@ class SegmentPreviewServiceImplTest {
         Segment segment = Segment.builder()
                 .segmentId("asset-10:text:1")
                 .assetId("asset-10")
-                .assetType(KbAssetTypeEnum.TEXT)
+                .assetType(AssetType.TEXT)
                 .segmentType(SegmentType.TEXT_CHUNK)
                 .sourceRef("https://preview.example.com/direct.txt")
                 .chunkOrder(1)
@@ -275,7 +275,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldReturnImagePreviewWhenBboxInvalid() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -286,7 +286,7 @@ class SegmentPreviewServiceImplTest {
         Segment segment = Segment.builder()
                 .segmentId("asset-11:ocr:0")
                 .assetId("asset-11")
-                .assetType(KbAssetTypeEnum.IMAGE)
+                .assetType(AssetType.IMAGE)
                 .segmentType(SegmentType.IMAGE_OCR_BLOCK)
                 .title("invalid-bbox.png")
                 .ocrText("仍然返回 OCR 命中文本")
@@ -314,7 +314,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldThrowWhenSegmentNotFound() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -331,7 +331,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldThrowWhenTokenMissing() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -347,7 +347,7 @@ class SegmentPreviewServiceImplTest {
 
     @Test
     void getSegmentPreview_shouldThrowClearErrorWhenPreviewUrlSigningFails() {
-        KbSegmentRepository kbSegmentRepository = mock(KbSegmentRepository.class);
+        SegmentRepository kbSegmentRepository = mock(SegmentRepository.class);
         SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
         SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
                 kbSegmentRepository,
@@ -368,7 +368,7 @@ class SegmentPreviewServiceImplTest {
         return Segment.builder()
                 .segmentId("asset-1:ocr:0")
                 .assetId("asset-1")
-                .assetType(KbAssetTypeEnum.IMAGE)
+                .assetType(AssetType.IMAGE)
                 .segmentType(SegmentType.IMAGE_OCR_BLOCK)
                 .title("image-a.png")
                 .ocrText("设备故障代码 E102")
@@ -391,7 +391,7 @@ class SegmentPreviewServiceImplTest {
         return Segment.builder()
                 .segmentId(segmentId)
                 .assetId(segmentId.split(":")[0])
-                .assetType(KbAssetTypeEnum.TEXT)
+                .assetType(AssetType.TEXT)
                 .segmentType(SegmentType.TEXT_CHUNK)
                 .title("text asset")
                 .contentText("text content")

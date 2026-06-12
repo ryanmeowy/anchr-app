@@ -11,11 +11,11 @@ import java.util.List;
  */
 @Data
 @Builder
-public class KbAnswerDTO implements Serializable {
+public class SearchAnswerDTO implements Serializable {
 
     private String answer;
     private List<CitationDTO> citations;
-    private List<KbSearchResultDTO> results;
+    private List<SearchResultDTO> results;
     private AnswerTraceDTO answerTrace;
 
     @Data

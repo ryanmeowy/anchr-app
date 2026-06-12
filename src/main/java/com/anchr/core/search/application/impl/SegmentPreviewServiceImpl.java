@@ -8,7 +8,7 @@ import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Bbox;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
-import com.anchr.core.search.domain.repository.KbSegmentRepository;
+import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
@@ -36,7 +36,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private static final String RELATION_PREVIOUS = "previous";
     private static final String RELATION_NEXT = "next";
 
-    private final KbSegmentRepository kbSegmentRepository;
+    private final SegmentRepository kbSegmentRepository;
     private final SearchObjectStoragePort objectStoragePort;
     private final PreviewAccessCache previewAccessCache;
     private final ActivityEventService activityEventService;

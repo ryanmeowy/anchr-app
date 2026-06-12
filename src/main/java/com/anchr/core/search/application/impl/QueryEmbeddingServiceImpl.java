@@ -2,7 +2,7 @@ package com.anchr.core.search.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.search.application.KbQueryEmbeddingService;
+import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -16,7 +16,7 @@ import java.util.List;
  */
 @Service
 @RequiredArgsConstructor
-public class KbQueryEmbeddingServiceImpl implements KbQueryEmbeddingService {
+public class QueryEmbeddingServiceImpl implements QueryEmbeddingService {
 
     private final SearchEmbeddingPort searchEmbeddingPort;
 

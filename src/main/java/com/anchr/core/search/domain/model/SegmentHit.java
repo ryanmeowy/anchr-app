@@ -11,7 +11,7 @@ import java.util.Map;
  */
 @Value
 @Builder
-public class KbSegmentHit {
+public class SegmentHit {
     Segment segment;
     double rawScore;
     Map<String, String> highlights;

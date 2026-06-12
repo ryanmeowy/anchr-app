@@ -2,7 +2,7 @@ package com.anchr.core.ingestion.interfaces.rest;
 
 import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
-import com.anchr.core.ingestion.application.KbIngestionApplicationService;
+import com.anchr.core.ingestion.application.IngestionApplicationService;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 import com.anchr.core.ingestion.interfaces.rest.dto.DocumentMaintenanceTaskDTO;
 import com.anchr.core.ingestion.interfaces.rest.dto.IngestionTaskCreateItemDTO;
@@ -29,9 +29,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/kbs/{kbId}")
 @RequiredArgsConstructor
-public class KnowledgeBaseIngestionApiController {
+public class KnowledgeBaseIngestionController {
 
-    private final KbIngestionApplicationService ingestionApplicationService;
+    private final IngestionApplicationService ingestionApplicationService;
 
     @RequireAuth
     @PostMapping("/ingestion-tasks")
@@ -92,15 +92,15 @@ public class KnowledgeBaseIngestionApiController {
                 ingestionApplicationService.createReembedTask(kbId, assetId), assetId));
     }
 
-    private KbIngestionApplicationService.IngestionCreateCommand toCommand(IngestionTaskCreateRequestDTO request) {
-        return new KbIngestionApplicationService.IngestionCreateCommand(
+    private IngestionApplicationService.IngestionCreateCommand toCommand(IngestionTaskCreateRequestDTO request) {
+        return new IngestionApplicationService.IngestionCreateCommand(
                 request.getSourceType(),
                 request.getDedupeStrategy(),
                 request.getItems().stream().map(this::toCommand).toList());
     }
 
-    private KbIngestionApplicationService.IngestionCreateItemCommand toCommand(IngestionTaskCreateItemDTO item) {
-        return new KbIngestionApplicationService.IngestionCreateItemCommand(
+    private IngestionApplicationService.IngestionCreateItemCommand toCommand(IngestionTaskCreateItemDTO item) {
+        return new IngestionApplicationService.IngestionCreateItemCommand(
                 item.getFileName(),
                 item.getTitle(),
                 item.getFileType(),

@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/preview")
 @RequiredArgsConstructor
-public class SegmentPreviewApiController {
+public class PreviewController {
 
     private final SegmentPreviewService segmentPreviewService;
 

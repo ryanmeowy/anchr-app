@@ -12,7 +12,7 @@ import java.util.List;
  */
 @Data
 @Builder
-public class KbSearchResultDTO implements Serializable {
+public class SearchResultDTO implements Serializable {
 
     /**
      * Unified protocol fields (Phase 2 E1).
@@ -24,7 +24,7 @@ public class KbSearchResultDTO implements Serializable {
     private String snippet;
     private Integer pageNo;
     private Double score;
-    private KbSearchExplainDTO explain;
+    private SearchExplainDTO explain;
     private Anchor anchor;
     private String thumbnail;
     private String ocrSummary;

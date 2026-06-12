@@ -1,6 +1,6 @@
 package com.anchr.core.search.domain.model;
 
-public enum KbAssetTypeEnum {
+public enum AssetType {
     TEXT,
     IMAGE
 }

@@ -7,17 +7,17 @@ import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
-import com.anchr.core.common.config.KbSegmentConfig;
+import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.search.domain.model.KbSearchFilter;
-import com.anchr.core.search.domain.model.KbAssetTypeEnum;
-import com.anchr.core.search.domain.model.KbSegmentHit;
+import com.anchr.core.search.domain.model.SearchFilter;
+import com.anchr.core.search.domain.model.AssetType;
+import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
-import com.anchr.core.search.domain.repository.KbSegmentRepository;
-import com.anchr.core.search.infrastructure.persistence.es.document.KbSegmentDocument;
+import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Repository;
@@ -35,24 +35,24 @@ import java.util.Optional;
 @Slf4j
 @Repository
 @RequiredArgsConstructor
-public class EsKbSegmentRepository implements KbSegmentRepository {
+public class EsSegmentRepository implements SegmentRepository {
 
     private final ElasticsearchClient esClient;
-    private final KbSegmentConfig kbSegmentConfig;
+    private final SegmentIndexConfig kbSegmentConfig;
 
     @Override
-    public List<KbSegmentHit> textSearch(String query, int limit) {
+    public List<SegmentHit> textSearch(String query, int limit) {
         return textSearch(query, limit, null);
     }
 
     @Override
-    public List<KbSegmentHit> textSearch(String query, int limit, KbSearchFilter filter) {
+    public List<SegmentHit> textSearch(String query, int limit, SearchFilter filter) {
         if (!StringUtils.hasText(query) || limit <= 0) {
             return List.of();
         }
         try {
             SearchRequest request = buildTextSearchRequest(query.trim(), limit, filter);
-            SearchResponse<KbSegmentDocument> response = esClient.search(request, KbSegmentDocument.class);
+            SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
             return convertHits(response);
         } catch (Exception e) {
             log.error("kb text search failed", e);
@@ -61,18 +61,18 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
     }
 
     @Override
-    public List<KbSegmentHit> vectorSearch(List<Float> queryVector, int topK) {
+    public List<SegmentHit> vectorSearch(List<Float> queryVector, int topK) {
         return vectorSearch(queryVector, topK, null);
     }
 
     @Override
-    public List<KbSegmentHit> vectorSearch(List<Float> queryVector, int topK, KbSearchFilter filter) {
+    public List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter) {
         if (CollectionUtils.isEmpty(queryVector) || topK <= 0) {
             return List.of();
         }
         try {
             SearchRequest request = buildVectorSearchRequest(queryVector, topK, filter);
-            SearchResponse<KbSegmentDocument> response = esClient.search(request, KbSegmentDocument.class);
+            SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
             return convertHits(response);
         } catch (Exception e) {
             log.error("kb vector search failed", e);
@@ -86,13 +86,13 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
             return Optional.empty();
         }
         try {
-            GetResponse<KbSegmentDocument> response = esClient.get(g -> g
+            GetResponse<SegmentDocument> response = esClient.get(g -> g
                     .index(kbSegmentConfig.getReadTargetName())
-                    .id(segmentId.trim()), KbSegmentDocument.class);
+                    .id(segmentId.trim()), SegmentDocument.class);
             if (response == null || !response.found() || response.source() == null) {
                 return Optional.empty();
             }
-            KbSegmentDocument doc = response.source();
+            SegmentDocument doc = response.source();
             if (!StringUtils.hasText(doc.getSegmentId())) {
                 doc.setSegmentId(segmentId.trim());
             }
@@ -110,7 +110,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         }
         try {
             SearchRequest request = buildNeighborChunksRequest(assetId.trim(), pageNo, chunkOrder, window);
-            SearchResponse<KbSegmentDocument> response = esClient.search(request, KbSegmentDocument.class);
+            SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
             return convertSegmentHits(response);
         } catch (Exception e) {
             log.error("kb neighbor chunks search failed, assetId={}, chunkOrder={}", assetId, chunkOrder, e);
@@ -134,7 +134,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         }
     }
 
-    private SearchRequest buildTextSearchRequest(String query, int limit, KbSearchFilter filter) {
+    private SearchRequest buildTextSearchRequest(String query, int limit, SearchFilter filter) {
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())
                 .size(limit)
@@ -156,7 +156,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         );
     }
 
-    private SearchRequest buildVectorSearchRequest(List<Float> queryVector, int topK, KbSearchFilter filter) {
+    private SearchRequest buildVectorSearchRequest(List<Float> queryVector, int topK, SearchFilter filter) {
         int numCandidates = Math.max(EmbeddingConstant.DEFAULT_NUM_CANDIDATES, topK * EmbeddingConstant.NUM_CANDIDATES_FACTOR);
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())
@@ -174,7 +174,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
     }
 
     private void applyFilters(co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery.Builder builder,
-                              KbSearchFilter filter) {
+                              SearchFilter filter) {
         if (filter == null) {
             return;
         }
@@ -205,7 +205,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
     }
 
     private void applyKnnFilters(co.elastic.clients.elasticsearch._types.KnnSearch.Builder builder,
-                                 KbSearchFilter filter) {
+                                 SearchFilter filter) {
         if (filter == null) {
             return;
         }
@@ -258,7 +258,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         );
     }
 
-    private List<KbSegmentHit> convertHits(SearchResponse<KbSegmentDocument> response) {
+    private List<SegmentHit> convertHits(SearchResponse<SegmentDocument> response) {
         if (response == null || response.hits() == null || response.hits().hits() == null) {
             return List.of();
         }
@@ -268,15 +268,15 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
                 .toList();
     }
 
-    private KbSegmentHit convertSingleHit(Hit<KbSegmentDocument> hit) {
+    private SegmentHit convertSingleHit(Hit<SegmentDocument> hit) {
         if (hit == null || hit.source() == null || hit.score() == null) {
             return null;
         }
-        KbSegmentDocument doc = hit.source();
+        SegmentDocument doc = hit.source();
         if (!StringUtils.hasText(doc.getSegmentId()) && StringUtils.hasText(hit.id())) {
             doc.setSegmentId(hit.id());
         }
-        return KbSegmentHit.builder()
+        return SegmentHit.builder()
                 .segment(toSegment(doc))
                 .rawScore(hit.score())
                 .highlights(extractHighlightMap(hit))
@@ -284,7 +284,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
                 .build();
     }
 
-    private List<Segment> convertSegmentHits(SearchResponse<KbSegmentDocument> response) {
+    private List<Segment> convertSegmentHits(SearchResponse<SegmentDocument> response) {
         if (response == null || response.hits() == null || response.hits().hits() == null) {
             return List.of();
         }
@@ -294,18 +294,18 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
                 .toList();
     }
 
-    private Segment convertSegmentHit(Hit<KbSegmentDocument> hit) {
+    private Segment convertSegmentHit(Hit<SegmentDocument> hit) {
         if (hit == null || hit.source() == null) {
             return null;
         }
-        KbSegmentDocument doc = hit.source();
+        SegmentDocument doc = hit.source();
         if (!StringUtils.hasText(doc.getSegmentId()) && StringUtils.hasText(hit.id())) {
             doc.setSegmentId(hit.id());
         }
         return toSegment(doc);
     }
 
-    private Segment toSegment(KbSegmentDocument doc) {
+    private Segment toSegment(SegmentDocument doc) {
         return Segment.builder()
                 .segmentId(doc.getSegmentId())
                 .kbId(doc.getKbId())
@@ -329,11 +329,11 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
                 .build();
     }
 
-    private KbAssetTypeEnum parseAssetType(String assetType) {
+    private AssetType parseAssetType(String assetType) {
         if (!StringUtils.hasText(assetType)) {
             return null;
         }
-        return KbAssetTypeEnum.valueOf(assetType.trim().toUpperCase());
+        return AssetType.valueOf(assetType.trim().toUpperCase());
     }
 
     private SegmentType parseSegmentType(String segmentType) {
@@ -343,7 +343,7 @@ public class EsKbSegmentRepository implements KbSegmentRepository {
         return SegmentType.valueOf(segmentType.trim().toUpperCase());
     }
 
-    private Map<String, String> extractHighlightMap(Hit<KbSegmentDocument> hit) {
+    private Map<String, String> extractHighlightMap(Hit<SegmentDocument> hit) {
         Map<String, List<String>> highlightByField = hit.highlight();
         if (highlightByField == null || highlightByField.isEmpty()) {
             return Map.of();

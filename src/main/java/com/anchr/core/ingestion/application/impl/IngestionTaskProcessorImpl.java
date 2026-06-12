@@ -3,7 +3,7 @@ package com.anchr.core.ingestion.application.impl;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.GraphTriple;
-import com.anchr.core.ingestion.application.KbIngestionTaskProcessor;
+import com.anchr.core.ingestion.application.IngestionTaskProcessor;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
@@ -19,13 +19,13 @@ import com.anchr.core.ingestion.domain.repository.TextSegmentRepository;
 import com.anchr.core.ingestion.infrastructure.parser.TextAssetContentLoader;
 import com.anchr.core.ingestion.infrastructure.parser.TextChunkSplitter;
 import com.anchr.core.ingestion.infrastructure.parser.TextParserRouter;
-import com.anchr.core.ingestion.infrastructure.persistence.es.KbSegmentBulkWriter;
+import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
 import com.anchr.core.kb.domain.model.DocumentAsset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.DocumentAssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.search.domain.model.KbAssetTypeEnum;
+import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import lombok.RequiredArgsConstructor;
@@ -51,7 +51,7 @@ import java.util.function.Supplier;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
+public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private static final String TASK_LOCK_PREFIX = "kb:ingestion:task:lock:";
     private static final int STAGE_PARSE_PROGRESS = 20;
@@ -76,7 +76,7 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
     private final TextSegmentRepository textSegmentRepository;
     private final IngestionObjectStoragePort objectStoragePort;
     private final IngestionContentPort contentPort;
-    private final KbSegmentBulkWriter kbSegmentBulkWriter;
+    private final SegmentBulkWriter kbSegmentBulkWriter;
     private final RedissonClient redissonClient;
 
     @Value("${app.embedding.ingestion-min-interval-ms:1500}")
@@ -214,7 +214,7 @@ public class KbIngestionTaskProcessorImpl implements KbIngestionTaskProcessor {
                 .segmentId(document.getId() + ":caption")
                 .kbId(document.getKbId())
                 .assetId(document.getId())
-                .assetType(KbAssetTypeEnum.IMAGE)
+                .assetType(AssetType.IMAGE)
                 .segmentType(SegmentType.IMAGE_CAPTION)
                 .title(title)
                 .contentText(resolveImageCaption(title, graph))

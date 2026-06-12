@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/activity")
 @RequiredArgsConstructor
-public class ActivityApiController {
+public class ActivityController {
 
     private final ActivityQueryService activityQueryService;
 

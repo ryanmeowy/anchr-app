@@ -10,7 +10,7 @@ import java.util.List;
  */
 @Value
 @Builder
-public class KbSearchFilter {
+public class SearchFilter {
 
     List<String> kbIds;
     List<String> assetTypes;

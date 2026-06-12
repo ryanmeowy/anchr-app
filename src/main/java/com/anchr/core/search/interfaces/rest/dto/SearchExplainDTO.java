@@ -11,7 +11,7 @@ import java.util.List;
  */
 @Data
 @Builder
-public class KbSearchExplainDTO implements Serializable {
+public class SearchExplainDTO implements Serializable {
 
     /**
      * Effective strategy marker for diagnostics.

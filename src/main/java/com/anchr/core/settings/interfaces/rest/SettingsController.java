@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/settings")
 @RequiredArgsConstructor
-public class SettingsApiController {
+public class SettingsController {
 
     private final CapabilityConfigService capabilityConfigService;
     private final StorageConfigService storageConfigService;

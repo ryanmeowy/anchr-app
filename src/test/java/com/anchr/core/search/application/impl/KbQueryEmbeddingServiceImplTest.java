@@ -14,14 +14,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class KbQueryEmbeddingServiceImplTest {
+class QueryEmbeddingServiceImplTest {
 
     @Mock
     private SearchEmbeddingPort searchEmbeddingPort;
 
     @Test
     void embedQuery_shouldReturnEmbedding() {
-        KbQueryEmbeddingServiceImpl service = new KbQueryEmbeddingServiceImpl(searchEmbeddingPort);
+        QueryEmbeddingServiceImpl service = new QueryEmbeddingServiceImpl(searchEmbeddingPort);
         when(searchEmbeddingPort.embedText("invoice")).thenReturn(List.of(0.1f, 0.2f));
 
         List<Float> embedding = service.embedQuery("invoice");
@@ -31,7 +31,7 @@ class KbQueryEmbeddingServiceImplTest {
 
     @Test
     void embedQuery_shouldThrowWhenEmbeddingEmpty() {
-        KbQueryEmbeddingServiceImpl service = new KbQueryEmbeddingServiceImpl(searchEmbeddingPort);
+        QueryEmbeddingServiceImpl service = new QueryEmbeddingServiceImpl(searchEmbeddingPort);
         when(searchEmbeddingPort.embedText("invoice")).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.embedQuery("invoice"))

@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/ingestion")
 @RequiredArgsConstructor
-public class IngestionCapabilityApiController {
+public class IngestionCapabilityController {
 
     private final IngestionCapabilityService ingestionCapabilityService;
 

@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
-class SegmentPreviewApiControllerTest {
+class PreviewControllerTest {
 
     @Mock
     private SegmentPreviewService segmentPreviewService;
@@ -32,7 +32,7 @@ class SegmentPreviewApiControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new SegmentPreviewApiController(segmentPreviewService))
+                .standaloneSetup(new PreviewController(segmentPreviewService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }

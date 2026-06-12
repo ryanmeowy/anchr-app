@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Generates embedding vectors for kb search queries.
  */
-public interface KbQueryEmbeddingService {
+public interface QueryEmbeddingService {
 
     /**
      * Build query embedding vector from user query text.

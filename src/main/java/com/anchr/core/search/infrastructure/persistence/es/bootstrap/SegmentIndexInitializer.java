@@ -4,7 +4,7 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
 import co.elastic.clients.elasticsearch.indices.IndexSettings;
 import co.elastic.clients.transport.endpoints.BooleanResponse;
-import com.anchr.core.common.config.KbSegmentConfig;
+import com.anchr.core.common.config.SegmentIndexConfig;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,13 +23,13 @@ import java.nio.charset.StandardCharsets;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class KbSegmentIndexInitializer {
+public class SegmentIndexInitializer {
 
     private static final String SETTINGS_PATH = "es-settings.json";
     private static final String MAPPING_PATH = "es-kb-segment-mapping.json";
 
     private final ElasticsearchClient esClient;
-    private final KbSegmentConfig kbSegmentConfig;
+    private final SegmentIndexConfig kbSegmentConfig;
 
     @PostConstruct
     public void init() {

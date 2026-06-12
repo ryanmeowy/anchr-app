@@ -35,7 +35,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/kbs")
 @RequiredArgsConstructor
-public class KnowledgeBaseApiController {
+public class KnowledgeBaseController {
 
     private final KnowledgeBaseService knowledgeBaseService;
 

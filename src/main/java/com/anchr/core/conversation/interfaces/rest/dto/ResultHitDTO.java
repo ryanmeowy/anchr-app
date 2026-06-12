@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.interfaces.rest.dto;
 
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import lombok.Data;
 
 import java.io.Serializable;

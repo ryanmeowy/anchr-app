@@ -12,7 +12,7 @@ import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.domain.repository.DocumentAssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.search.domain.repository.KbSegmentRepository;
+import com.anchr.core.search.domain.repository.SegmentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,7 +37,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final DocumentAssetRepository documentAssetRepository;
     private final IdGen idGen;
-    private final KbSegmentRepository kbSegmentRepository;
+    private final SegmentRepository kbSegmentRepository;
 
     @Override
     @Transactional

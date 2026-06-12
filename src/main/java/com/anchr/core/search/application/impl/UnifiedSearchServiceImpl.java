@@ -4,23 +4,23 @@ import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.search.application.KbQueryEmbeddingService;
+import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.KbScopeResolver;
 import com.anchr.core.search.application.UnifiedSearchService;
 import com.anchr.core.search.config.AppSearchProperties;
-import com.anchr.core.search.domain.model.KbAssetTypeEnum;
-import com.anchr.core.search.domain.model.KbSearchFilter;
-import com.anchr.core.search.domain.model.KbSegmentHit;
+import com.anchr.core.search.domain.model.AssetType;
+import com.anchr.core.search.domain.model.SearchFilter;
+import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.port.SearchRerankPort;
 import com.anchr.core.search.domain.port.SearchRerankPort.RerankItem;
 import com.anchr.core.search.domain.model.SegmentType;
-import com.anchr.core.search.domain.repository.KbSegmentRepository;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchExplainDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchPageDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchQueryDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchResultDTO;
+import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchPageDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -51,8 +51,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private static final String STRATEGY_CODE_RERANK = "KB_RRF_RERANK";
     private static final int MAX_CURSOR_OFFSET = 10_000;
 
-    private final KbSegmentRepository kbSegmentRepository;
-    private final KbQueryEmbeddingService kbQueryEmbeddingService;
+    private final SegmentRepository kbSegmentRepository;
+    private final QueryEmbeddingService kbQueryEmbeddingService;
     private final KbScopeResolver kbScopeResolver;
     private final SearchRerankPort searchRerankPort;
     private final AppSearchProperties appSearchProperties;
@@ -60,22 +60,22 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private final ActivityEventService activityEventService;
 
     @Override
-    public List<KbSearchResultDTO> search(KbSearchQueryDTO query) {
+    public List<SearchResultDTO> search(SearchQueryDTO query) {
         SearchResult result = searchInternal(query, 0);
         recordSearchEvent(query, result.total());
         return result.items();
     }
 
     @Override
-    public KbSearchPageDTO searchPage(KbSearchQueryDTO query) {
+    public SearchPageDTO searchPage(SearchQueryDTO query) {
         SearchResult result = searchInternal(query, decodeCursorOffset(query == null ? null : query.getCursor()));
-        List<KbSearchResultDTO> pageItems = result.items();
+        List<SearchResultDTO> pageItems = result.items();
         int offset = result.offset();
         int limit = result.limit();
         String nextCursor = result.total() > offset + pageItems.size()
                 ? encodeCursorOffset(offset + pageItems.size())
                 : null;
-        KbSearchPageDTO page = KbSearchPageDTO.builder()
+        SearchPageDTO page = SearchPageDTO.builder()
                 .items(pageItems)
                 .total(result.total())
                 .nextCursor(nextCursor)
@@ -85,7 +85,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return page;
     }
 
-    private SearchResult searchInternal(KbSearchQueryDTO query, int offset) {
+    private SearchResult searchInternal(SearchQueryDTO query, int offset) {
         if (query == null || !StringUtils.hasText(query.getQuery())) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
@@ -96,14 +96,14 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         int recallTopK = resolveRecallTopK(requestTopK, pageEnd);
         String requestedStrategyCode = resolveStrategy(query.getStrategy());
         boolean rerankRequested = STRATEGY_CODE_RERANK.equals(requestedStrategyCode);
-        KbSearchFilter filter = buildFilter(query);
+        SearchFilter filter = buildFilter(query);
         if (filter.getKbIds().isEmpty()) {
             return new SearchResult(List.of(), List.of(), 0, Math.max(0, offset), limit);
         }
 
         List<Float> queryVector = kbQueryEmbeddingService.embedQuery(keyword);
-        List<KbSegmentHit> textHits = kbSegmentRepository.textSearch(keyword, recallTopK, filter);
-        List<KbSegmentHit> vectorHits = kbSegmentRepository.vectorSearch(queryVector, recallTopK, filter);
+        List<SegmentHit> textHits = kbSegmentRepository.textSearch(keyword, recallTopK, filter);
+        List<SegmentHit> vectorHits = kbSegmentRepository.vectorSearch(queryVector, recallTopK, filter);
         log.info("kb search recall completed, keyword={}, strategy={}, rerankRequested={}, recallTopK={}, textHits={}, vectorHits={}",
                 keyword, requestedStrategyCode, rerankRequested, recallTopK, textHits.size(), vectorHits.size());
 
@@ -118,24 +118,24 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 : candidates;
         String effectiveStrategyCode = rerankEnabled ? STRATEGY_CODE_RERANK : STRATEGY_CODE;
 
-        List<KbSearchResultDTO> segmentResults = rankedCandidates.stream()
+        List<SearchResultDTO> segmentResults = rankedCandidates.stream()
                 .map(candidate -> toResult(candidate, keyword, effectiveStrategyCode))
                 .filter(Objects::nonNull)
                 .toList();
-        List<KbSearchResultDTO> allAggregated = aggregateByAsset(segmentResults, pageEnd);
-        List<KbSearchResultDTO> pageItems = page(allAggregated, offset, limit);
+        List<SearchResultDTO> allAggregated = aggregateByAsset(segmentResults, pageEnd);
+        List<SearchResultDTO> pageItems = page(allAggregated, offset, limit);
         return new SearchResult(pageItems, allAggregated, allAggregated.size(), Math.max(0, offset), limit);
     }
 
-    private void recordSearchEvent(KbSearchQueryDTO query, long total) {
+    private void recordSearchEvent(SearchQueryDTO query, long total) {
         if (query == null) {
             return;
         }
         activityEventService.recordSearchExecuted(query.getQuery(), query.getKbIds(), Math.toIntExact(Math.min(total, Integer.MAX_VALUE)));
     }
 
-    private List<SegmentRerankCandidate> fuseCandidates(List<KbSegmentHit> textHits,
-                                                        List<KbSegmentHit> vectorHits,
+    private List<SegmentRerankCandidate> fuseCandidates(List<SegmentHit> textHits,
+                                                        List<SegmentHit> vectorHits,
                                                         int rankConstant) {
         Map<String, Accumulator> grouped = new LinkedHashMap<>();
         ingest(textHits, false, Math.max(1, rankConstant), grouped);
@@ -150,7 +150,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .toList();
     }
 
-    private void ingest(List<KbSegmentHit> ranking,
+    private void ingest(List<SegmentHit> ranking,
                         boolean vectorRoute,
                         int rankConstant,
                         Map<String, Accumulator> grouped) {
@@ -158,7 +158,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             return;
         }
         for (int i = 0; i < ranking.size(); i++) {
-            KbSegmentHit hit = ranking.get(i);
+            SegmentHit hit = ranking.get(i);
             Segment segment = hit == null ? null : hit.getSegment();
             String segmentId = segment == null ? null : segment.getSegmentId();
             if (!StringUtils.hasText(segmentId)) {
@@ -186,7 +186,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private SegmentRerankCandidate toCandidate(Accumulator acc) {
-        KbSegmentHit displaySource = acc.textSource != null ? acc.textSource : acc.vectorSource;
+        SegmentHit displaySource = acc.textSource != null ? acc.textSource : acc.vectorSource;
         Segment segment = displaySource == null ? null : displaySource.getSegment();
         if (segment == null) {
             return null;
@@ -205,7 +205,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         );
     }
 
-    private KbSearchResultDTO toResult(SegmentRerankCandidate candidate, String keyword, String strategyCode) {
+    private SearchResultDTO toResult(SegmentRerankCandidate candidate, String keyword, String strategyCode) {
         Segment segment = candidate.segment();
         Map<String, String> highlights = candidate.highlights();
         boolean titleHit = highlights.containsKey("title") || containsIgnoreCase(segment.getTitle(), keyword);
@@ -232,14 +232,14 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
         String content = resolveContent(segment);
         String snippet = pickSnippet(content, highlights);
-        KbSearchResultDTO.Anchor anchor = KbSearchResultDTO.Anchor.builder()
+        SearchResultDTO.Anchor anchor = SearchResultDTO.Anchor.builder()
                 .pageNo(segment.getPageNo())
                 .chunkOrder(segment.getChunkOrder())
                 .bbox(segment.getBbox())
                 .imageWidth(segment.getImageWidth())
                 .imageHeight(segment.getImageHeight())
                 .build();
-        return KbSearchResultDTO.builder()
+        return SearchResultDTO.builder()
                 .segmentType(toCode(segment.getSegmentType()))
                 .content(content)
                 .resultType(toCode(segment.getSegmentType()))
@@ -258,20 +258,20 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .build();
     }
 
-    private List<KbSearchResultDTO> aggregateByAsset(List<KbSearchResultDTO> rankedSegments, int limit) {
+    private List<SearchResultDTO> aggregateByAsset(List<SearchResultDTO> rankedSegments, int limit) {
         if (rankedSegments == null || rankedSegments.isEmpty()) {
             return List.of();
         }
-        Map<String, KbSearchResultDTO> aggregatedByAsset = new LinkedHashMap<>();
-        for (KbSearchResultDTO item : rankedSegments) {
+        Map<String, SearchResultDTO> aggregatedByAsset = new LinkedHashMap<>();
+        for (SearchResultDTO item : rankedSegments) {
             String groupKey = resolveAggregateKey(item);
-            KbSearchResultDTO.TopChunk topChunk = toTopChunk(item);
-            KbSearchResultDTO aggregated = aggregatedByAsset.get(groupKey);
+            SearchResultDTO.TopChunk topChunk = toTopChunk(item);
+            SearchResultDTO aggregated = aggregatedByAsset.get(groupKey);
             if (aggregated == null) {
                 aggregatedByAsset.put(groupKey, initAggregateResult(item, topChunk));
                 continue;
             }
-            List<KbSearchResultDTO.TopChunk> topChunks = aggregated.getTopChunks();
+            List<SearchResultDTO.TopChunk> topChunks = aggregated.getTopChunks();
             if (topChunks == null) {
                 topChunks = new ArrayList<>();
                 aggregated.setTopChunks(topChunks);
@@ -289,10 +289,10 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return aggregatedByAsset.values().stream().limit(limit).toList();
     }
 
-    private KbSearchResultDTO initAggregateResult(KbSearchResultDTO primary, KbSearchResultDTO.TopChunk topChunk) {
-        List<KbSearchResultDTO.TopChunk> topChunks = new ArrayList<>();
+    private SearchResultDTO initAggregateResult(SearchResultDTO primary, SearchResultDTO.TopChunk topChunk) {
+        List<SearchResultDTO.TopChunk> topChunks = new ArrayList<>();
         topChunks.add(topChunk);
-        return KbSearchResultDTO.builder()
+        return SearchResultDTO.builder()
                 .segmentType(primary.getSegmentType())
                 .content(primary.getContent())
                 .resultType(primary.getResultType())
@@ -313,8 +313,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .build();
     }
 
-    private KbSearchResultDTO.TopChunk toTopChunk(KbSearchResultDTO segmentItem) {
-        return KbSearchResultDTO.TopChunk.builder()
+    private SearchResultDTO.TopChunk toTopChunk(SearchResultDTO segmentItem) {
+        return SearchResultDTO.TopChunk.builder()
                 .segmentId(segmentItem.getSegmentId())
                 .kbId(segmentItem.getKbId())
                 .segmentType(segmentItem.getSegmentType())
@@ -328,7 +328,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .build();
     }
 
-    private String resolveAggregateKey(KbSearchResultDTO item) {
+    private String resolveAggregateKey(SearchResultDTO item) {
         if (item == null) {
             return "";
         }
@@ -344,7 +344,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return "__fallback__" + item.hashCode();
     }
 
-    private KbSearchExplainDTO buildExplain(Segment segment,
+    private SearchExplainDTO buildExplain(Segment segment,
                                             String strategyCode,
                                             List<String> hitSources,
                                             boolean vectorHit,
@@ -352,25 +352,25 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                                             boolean contentHit,
                                             boolean ocrHit,
                                             boolean tagHit) {
-        KbSearchExplainDTO.MatchedBy matchedBy = KbSearchExplainDTO.MatchedBy.builder()
+        SearchExplainDTO.MatchedBy matchedBy = SearchExplainDTO.MatchedBy.builder()
                 .vector(vectorHit)
                 .title(titleHit)
                 .content(contentHit)
                 .ocr(ocrHit)
                 .build();
 
-        KbSearchExplainDTO.TextSignals textSignals = null;
-        KbSearchExplainDTO.ImageSignals imageSignals = null;
+        SearchExplainDTO.TextSignals textSignals = null;
+        SearchExplainDTO.ImageSignals imageSignals = null;
 
         if (isTextSegment(segment)) {
-            textSignals = KbSearchExplainDTO.TextSignals.builder()
+            textSignals = SearchExplainDTO.TextSignals.builder()
                     .semantic(vectorHit)
                     .keyword(titleHit || contentHit || ocrHit)
                     .pageHit(segment.getPageNo() != null)
                     .chunkHit(segment.getChunkOrder() != null)
                     .build();
         } else if (isImageSegment(segment)) {
-            imageSignals = KbSearchExplainDTO.ImageSignals.builder()
+            imageSignals = SearchExplainDTO.ImageSignals.builder()
                     .vector(vectorHit)
                     .ocr(ocrHit)
                     .caption(isImageCaptionSegment(segment) && (titleHit || contentHit))
@@ -378,7 +378,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                     .build();
         }
 
-        return KbSearchExplainDTO.builder()
+        return SearchExplainDTO.builder()
                 .strategyEffective(strategyCode)
                 .hitSources(hitSources)
                 .matchedBy(matchedBy)
@@ -427,7 +427,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private String resolveThumbnail(Segment segment) {
-        if (segment == null || segment.getAssetType() != KbAssetTypeEnum.IMAGE) {
+        if (segment == null || segment.getAssetType() != AssetType.IMAGE) {
             return null;
         }
         if (StringUtils.hasText(segment.getThumbnail())) {
@@ -437,7 +437,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private String resolveOcrSummary(Segment segment) {
-        if (segment == null || segment.getAssetType() != KbAssetTypeEnum.IMAGE) {
+        if (segment == null || segment.getAssetType() != AssetType.IMAGE) {
             return null;
         }
         if (StringUtils.hasText(segment.getOcrSummary())) {
@@ -671,8 +671,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return Math.min(limit, 200);
     }
 
-    private KbSearchFilter buildFilter(KbSearchQueryDTO query) {
-        return KbSearchFilter.builder()
+    private SearchFilter buildFilter(SearchQueryDTO query) {
+        return SearchFilter.builder()
                 .kbIds(kbScopeResolver.resolveVisibleKbIds(query.getKbIds()))
                 .assetTypes(normalizeEnums(query.getAssetTypes()))
                 .hitTypes(normalizeEnums(query.getHitTypes()))
@@ -693,7 +693,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .toList();
     }
 
-    private List<KbSearchResultDTO> page(List<KbSearchResultDTO> items, int offset, int limit) {
+    private List<SearchResultDTO> page(List<SearchResultDTO> items, int offset, int limit) {
         if (items == null || items.isEmpty()) {
             return List.of();
         }
@@ -702,17 +702,17 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return items.subList(start, end);
     }
 
-    private Map<String, List<KbSearchPageDTO.FacetItemDTO>> buildFacets(List<KbSearchResultDTO> items) {
+    private Map<String, List<SearchPageDTO.FacetItemDTO>> buildFacets(List<SearchResultDTO> items) {
         if (items == null || items.isEmpty()) {
             return Map.of("assetTypes", List.of(), "hitTypes", List.of());
         }
         return Map.of(
-                "assetTypes", toFacet(items.stream().map(KbSearchResultDTO::getAssetType).toList()),
-                "hitTypes", toFacet(items.stream().map(KbSearchResultDTO::getSegmentType).toList())
+                "assetTypes", toFacet(items.stream().map(SearchResultDTO::getAssetType).toList()),
+                "hitTypes", toFacet(items.stream().map(SearchResultDTO::getSegmentType).toList())
         );
     }
 
-    private List<KbSearchPageDTO.FacetItemDTO> toFacet(List<String> values) {
+    private List<SearchPageDTO.FacetItemDTO> toFacet(List<String> values) {
         Map<String, Long> counts = new LinkedHashMap<>();
         for (String value : values) {
             if (!StringUtils.hasText(value)) {
@@ -722,7 +722,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             counts.put(normalized, counts.getOrDefault(normalized, 0L) + 1L);
         }
         return counts.entrySet().stream()
-                .map(entry -> KbSearchPageDTO.FacetItemDTO.builder()
+                .map(entry -> SearchPageDTO.FacetItemDTO.builder()
                         .value(entry.getKey())
                         .count(entry.getValue())
                         .build())
@@ -766,8 +766,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         private int hitCount;
         private double bestRawScore;
         private boolean vectorHit;
-        private KbSegmentHit vectorSource;
-        private KbSegmentHit textSource;
+        private SegmentHit vectorSource;
+        private SegmentHit textSource;
 
         private Accumulator() {
         }
@@ -788,8 +788,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private record WeightPair(double alpha, double beta) {
     }
 
-    private record SearchResult(List<KbSearchResultDTO> items,
-                                List<KbSearchResultDTO> allItems,
+    private record SearchResult(List<SearchResultDTO> items,
+                                List<SearchResultDTO> allItems,
                                 long total,
                                 int offset,
                                 int limit) {

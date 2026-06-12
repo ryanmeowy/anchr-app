@@ -1,7 +1,7 @@
 package com.anchr.core.conversation.application.assembler;
 
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import com.anchr.core.conversation.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import org.springframework.stereotype.Component;
@@ -100,30 +100,31 @@ public class ConversationResultCardMapper {
         if (source == null && candidate.getPageNo() == null) {
             return null;
         }
-        PreviewAnchorDTO anchor = new PreviewAnchorDTO();
         if (source == null) {
-            anchor.setPageNo(candidate.getPageNo());
-            return anchor;
+            return PreviewAnchorDTO.builder()
+                    .pageNo(candidate.getPageNo())
+                    .build();
         }
-        anchor.setPageNo(source.getPageNo() == null ? candidate.getPageNo() : source.getPageNo());
-        anchor.setChunkOrder(source.getChunkOrder());
-        anchor.setBbox(toBbox(source.getBbox()));
-        anchor.setImageWidth(source.getImageWidth());
-        anchor.setImageHeight(source.getImageHeight());
-        return anchor;
+        return PreviewAnchorDTO.builder()
+                .pageNo(source.getPageNo() == null ? candidate.getPageNo() : source.getPageNo())
+                .chunkOrder(source.getChunkOrder())
+                .bbox(toBbox(source.getBbox()))
+                .imageWidth(source.getImageWidth())
+                .imageHeight(source.getImageHeight())
+                .build();
     }
 
     private PreviewAnchorDTO.BboxDTO toBbox(ConversationRetrievalCandidate.Bbox source) {
         if (source == null) {
             return null;
         }
-        PreviewAnchorDTO.BboxDTO bbox = new PreviewAnchorDTO.BboxDTO();
-        bbox.setX(source.getX());
-        bbox.setY(source.getY());
-        bbox.setWidth(source.getWidth());
-        bbox.setHeight(source.getHeight());
-        bbox.setUnit(source.getUnit());
-        return bbox;
+        return PreviewAnchorDTO.BboxDTO.builder()
+                .x(source.getX())
+                .y(source.getY())
+                .width(source.getWidth())
+                .height(source.getHeight())
+                .unit(source.getUnit())
+                .build();
     }
 
     private Comparator<ConversationRetrievalCandidate> candidateComparator() {

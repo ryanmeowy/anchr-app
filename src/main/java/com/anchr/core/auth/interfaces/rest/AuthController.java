@@ -30,7 +30,7 @@ import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
 @Slf4j
-public class AuthApiController {
+public class AuthController {
 
     private final StringRedisTemplate redisTemplate;
     private final StorageConfigRepository storageConfigRepository;

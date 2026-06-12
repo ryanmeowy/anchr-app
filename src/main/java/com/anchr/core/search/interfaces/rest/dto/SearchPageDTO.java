@@ -12,13 +12,13 @@ import java.util.Map;
  */
 @Data
 @Builder
-public class KbSearchPageDTO implements Serializable {
+public class SearchPageDTO implements Serializable {
 
-    private List<KbSearchResultDTO> items;
+    private List<SearchResultDTO> items;
     private long total;
     private String nextCursor;
     private Map<String, List<FacetItemDTO>> facets;
-    private KbAnswerDTO answer;
+    private SearchAnswerDTO answer;
 
     @Data
     @Builder

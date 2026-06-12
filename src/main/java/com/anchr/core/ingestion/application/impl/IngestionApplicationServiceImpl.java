@@ -1,6 +1,6 @@
 package com.anchr.core.ingestion.application.impl;
 
-import com.anchr.core.ingestion.application.KbIngestionTaskProcessor;
+import com.anchr.core.ingestion.application.IngestionTaskProcessor;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
@@ -9,7 +9,7 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.ingestion.application.IngestionCapabilityService;
-import com.anchr.core.ingestion.application.KbIngestionApplicationService;
+import com.anchr.core.ingestion.application.IngestionApplicationService;
 import com.anchr.core.kb.domain.model.DocumentAsset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
@@ -42,7 +42,7 @@ import java.util.Locale;
  */
 @Service
 @RequiredArgsConstructor
-public class KbIngestionApplicationServiceImpl implements KbIngestionApplicationService {
+public class IngestionApplicationServiceImpl implements IngestionApplicationService {
 
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
@@ -55,7 +55,7 @@ public class KbIngestionApplicationServiceImpl implements KbIngestionApplication
     private final IngestionCapabilityService ingestionCapabilityService;
     private final IdGen idGen;
     private final ActivityEventService activityEventService;
-    private final KbIngestionTaskProcessor ingestionTaskProcessor;
+    private final IngestionTaskProcessor ingestionTaskProcessor;
 
     @Override
     @Transactional
