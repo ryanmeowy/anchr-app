@@ -14,7 +14,7 @@ import java.util.Optional;
  */
 @Repository
 @RequiredArgsConstructor
-public class MyBatisCapabilityConfigRepository implements CapabilityConfigRepository {
+public class CapabilityConfigRepositoryImpl implements CapabilityConfigRepository {
 
     private final CapabilityConfigMapper mapper;
     private final IdGen idGen;

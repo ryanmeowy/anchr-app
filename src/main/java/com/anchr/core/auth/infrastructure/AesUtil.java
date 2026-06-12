@@ -16,8 +16,6 @@ import static com.anchr.core.common.constant.CommonConstant.ALGORITHM;
  * This class provides methods to encrypt and decrypt strings using AES algorithm.
  * The encryption key and initialization vector (IV) are injected from application properties.
  *
- * @author Ryan
- * @since 2025/12/25
  */
 @Component
 public class AesUtil {

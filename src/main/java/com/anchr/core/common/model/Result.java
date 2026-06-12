@@ -11,8 +11,6 @@ import java.util.Map;
  * Unified API response result encapsulation
  * @param <T> Business data type
  *
- * @author Ryan
- * @since 2025/12/15
  */
 @Data
 public class Result<T> implements Serializable {

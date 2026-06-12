@@ -7,8 +7,6 @@ import java.lang.annotation.Target;
 
 /**
  * Require Auth annotation for controller methods
- * @author Ryan
- * @since 2025/12/18
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)

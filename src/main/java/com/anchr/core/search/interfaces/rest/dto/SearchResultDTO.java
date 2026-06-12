@@ -1,6 +1,6 @@
 package com.anchr.core.search.interfaces.rest.dto;
 
-import com.anchr.core.search.domain.model.Bbox;
+import com.anchr.core.common.model.Bbox;
 import lombok.Builder;
 import lombok.Data;
 

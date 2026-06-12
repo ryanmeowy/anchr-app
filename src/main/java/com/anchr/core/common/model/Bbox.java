@@ -1,4 +1,4 @@
-package com.anchr.core.search.domain.model;
+package com.anchr.core.common.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

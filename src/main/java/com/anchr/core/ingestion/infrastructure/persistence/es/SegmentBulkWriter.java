@@ -3,7 +3,7 @@ package com.anchr.core.ingestion.infrastructure.persistence.es;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
-import com.anchr.core.common.config.SegmentIndexConfig;
+import com.anchr.core.search.config.SegmentIndexConfig;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.domain.model.Segment;

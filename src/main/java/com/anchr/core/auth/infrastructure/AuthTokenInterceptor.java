@@ -23,8 +23,6 @@ import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
  * Authentication Interceptor, validates X-Access-Token against the
  * admin token stored in Redis (set via refresh-token endpoint).
  *
- * @author Ryan
- * @since 2025/12/17
  */
 @Component
 @RequiredArgsConstructor

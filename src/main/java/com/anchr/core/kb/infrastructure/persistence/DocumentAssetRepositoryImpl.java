@@ -16,7 +16,7 @@ import java.util.Optional;
  */
 @Repository
 @RequiredArgsConstructor
-public class MyBatisDocumentAssetRepository implements DocumentAssetRepository {
+public class DocumentAssetRepositoryImpl implements DocumentAssetRepository {
 
     private final DocumentAssetMapper mapper;
 

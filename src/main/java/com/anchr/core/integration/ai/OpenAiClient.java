@@ -1,4 +1,4 @@
-package com.anchr.core.integration.multimodal.embedding;
+package com.anchr.core.integration.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

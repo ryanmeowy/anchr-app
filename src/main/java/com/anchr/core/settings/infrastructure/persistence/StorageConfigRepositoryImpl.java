@@ -13,7 +13,7 @@ import java.util.Optional;
  */
 @Repository
 @RequiredArgsConstructor
-public class MyBatisStorageConfigRepository implements StorageConfigRepository {
+public class StorageConfigRepositoryImpl implements StorageConfigRepository {
 
     private final StorageConfigMapper mapper;
 

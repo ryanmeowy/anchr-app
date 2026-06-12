@@ -2,9 +2,9 @@ package com.anchr.core.settings.interfaces.rest;
 
 import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
-import com.anchr.core.integration.multimodal.domain.model.EmbedParamEnum;
-import com.anchr.core.integration.multimodal.domain.model.GenParamEnum;
-import com.anchr.core.integration.multimodal.domain.model.RerankParamEnum;
+import com.anchr.core.integration.ai.EmbedParamEnum;
+import com.anchr.core.integration.ai.GenParamEnum;
+import com.anchr.core.integration.ai.RerankParamEnum;
 import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.application.StorageConfigService;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigDTO;

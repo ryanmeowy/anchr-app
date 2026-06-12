@@ -16,7 +16,7 @@ import java.util.Optional;
  */
 @Repository
 @RequiredArgsConstructor
-public class MyBatisKnowledgeBaseRepository implements KnowledgeBaseRepository {
+public class KnowledgeBaseRepositoryImpl implements KnowledgeBaseRepository {
 
     private final KnowledgeBaseMapper mapper;
 

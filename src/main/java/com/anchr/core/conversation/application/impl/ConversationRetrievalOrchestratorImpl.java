@@ -4,7 +4,7 @@ import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.search.domain.model.Bbox;
+import com.anchr.core.common.model.Bbox;
 import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;

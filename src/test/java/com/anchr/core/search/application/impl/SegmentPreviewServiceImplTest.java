@@ -3,7 +3,7 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.support.PreviewAccessCache;
-import com.anchr.core.search.domain.model.Bbox;
+import com.anchr.core.common.model.Bbox;
 import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;

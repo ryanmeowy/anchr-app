@@ -1,4 +1,4 @@
-package com.anchr.core.integration.multimodal.embedding;
+package com.anchr.core.integration.ai;
 
 import com.anchr.core.auth.infrastructure.AesUtil;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;

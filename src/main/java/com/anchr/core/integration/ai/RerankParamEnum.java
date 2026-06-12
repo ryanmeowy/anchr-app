@@ -1,4 +1,4 @@
-package com.anchr.core.integration.multimodal.domain.model;
+package com.anchr.core.integration.ai;
 
 import lombok.Getter;
 

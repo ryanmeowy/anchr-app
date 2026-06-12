@@ -20,7 +20,7 @@ import java.util.Optional;
  */
 @Repository
 @RequiredArgsConstructor
-public class MyBatisIngestionTaskRepository implements IngestionTaskRepository {
+public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
 
     private final IngestionTaskMapper mapper;
 

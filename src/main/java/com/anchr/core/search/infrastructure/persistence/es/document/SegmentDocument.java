@@ -1,6 +1,6 @@
 package com.anchr.core.search.infrastructure.persistence.es.document;
 
-import com.anchr.core.search.domain.model.Bbox;
+import com.anchr.core.common.model.Bbox;
 import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.elasticsearch.annotations.Document;

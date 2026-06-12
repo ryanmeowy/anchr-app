@@ -2,9 +2,9 @@ package com.anchr.core.search.application;
 
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
-import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -14,13 +14,12 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class KbScopeResolverTest {
 
-    private final KnowledgeBaseRepository knowledgeBaseRepository = mock(KnowledgeBaseRepository.class);
-    private final KbScopeResolver resolver = new KbScopeResolver(knowledgeBaseRepository);
+    private final KnowledgeBaseService knowledgeBaseService = mock(KnowledgeBaseService.class);
+    private final KbScopeResolver resolver = new KbScopeResolver(knowledgeBaseService);
 
     @AfterEach
     void tearDown() {
@@ -28,29 +27,25 @@ class KbScopeResolverTest {
     }
 
     @Test
-    void resolveVisibleKbIds_shouldLoadAllActiveKnowledgeBasesByPage() {
+    void resolveVisibleKbIds_shouldReturnAllWhenNoFilter() {
         UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
-        when(knowledgeBaseRepository.listActive(100, 0)).thenReturn(kbs(0, 100));
-        when(knowledgeBaseRepository.listActive(100, 100)).thenReturn(kbs(100, 1));
+        when(knowledgeBaseService.list(1, 100)).thenReturn(
+                new KnowledgeBaseService.PagedResult<>(kbs(0, 5), 5, 1, 100));
 
         List<String> result = resolver.resolveVisibleKbIds(null);
 
-        assertThat(result).hasSize(101);
-        assertThat(result.getFirst()).isEqualTo("kb-0");
-        assertThat(result.getLast()).isEqualTo("kb-100");
-        verify(knowledgeBaseRepository).listActive(100, 0);
-        verify(knowledgeBaseRepository).listActive(100, 100);
+        assertThat(result).containsExactly("kb-0", "kb-1", "kb-2", "kb-3", "kb-4");
     }
 
     @Test
-    void resolveVisibleKbIds_shouldMatchRequestedIdsBeyondFirstPage() {
+    void resolveVisibleKbIds_shouldFilterByRequestedIds() {
         UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
-        when(knowledgeBaseRepository.listActive(100, 0)).thenReturn(kbs(0, 100));
-        when(knowledgeBaseRepository.listActive(100, 100)).thenReturn(kbs(100, 1));
+        when(knowledgeBaseService.list(1, 100)).thenReturn(
+                new KnowledgeBaseService.PagedResult<>(kbs(0, 5), 5, 1, 100));
 
-        List<String> result = resolver.resolveVisibleKbIds(List.of("kb-100", "kb-missing"));
+        List<String> result = resolver.resolveVisibleKbIds(List.of("kb-2", "kb-missing"));
 
-        assertThat(result).containsExactly("kb-100");
+        assertThat(result).containsExactly("kb-2");
     }
 
     private List<KnowledgeBase> kbs(int start, int count) {

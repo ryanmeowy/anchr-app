@@ -10,8 +10,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 /**
  * Thread pool configuration clazz
  *
- * @author Ryan
- * @since 2025/12/16
  */
 @Configuration
 public class ThreadPoolConfig {

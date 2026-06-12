@@ -4,7 +4,7 @@ import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.KbScopeResolver;
 import com.anchr.core.search.config.AppSearchProperties;
-import com.anchr.core.search.domain.model.Bbox;
+import com.anchr.core.common.model.Bbox;
 import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.SegmentHit;

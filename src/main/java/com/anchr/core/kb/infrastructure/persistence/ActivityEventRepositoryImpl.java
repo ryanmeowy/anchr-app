@@ -13,7 +13,7 @@ import java.util.List;
  */
 @Repository
 @RequiredArgsConstructor
-public class MyBatisActivityEventRepository implements ActivityEventRepository {
+public class ActivityEventRepositoryImpl implements ActivityEventRepository {
 
     private final ActivityEventMapper mapper;
 

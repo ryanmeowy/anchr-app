@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Value;
 
 import java.util.List;
+import com.anchr.core.common.model.Bbox;
 
 /**
  * Unified retrieval unit for both text and image assets.
