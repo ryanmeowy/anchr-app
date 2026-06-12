@@ -72,7 +72,7 @@ class UnifiedSearchServiceImplTest {
                         .highlightFields(List.of())
                         .build(),
                 SegmentHit.builder()
-                        .segment(buildSegment("seg-2", AssetType.IMAGE, SegmentType.IMAGE_CAPTION, "diagram", "mysql architecture", null, null))
+                        .segment(buildSegment("seg-2", AssetType.IMAGE, SegmentType.IMAGE_OCR_BLOCK, "diagram", "mysql architecture", null, null))
                         .rawScore(0.9d)
                         .highlights(Map.of())
                         .highlightFields(List.of())
@@ -242,7 +242,7 @@ class UnifiedSearchServiceImplTest {
         when(kbQueryEmbeddingService.embedQuery("mysql")).thenReturn(List.of(0.1f, 0.2f));
         when(kbSegmentRepository.textSearch(eq("mysql"), eq(5), any(SearchFilter.class))).thenReturn(List.of());
 
-        Segment imageCaption = buildSegment("seg-a1", AssetType.IMAGE, SegmentType.IMAGE_CAPTION, "db chart", "mysql chart", null, null, "asset-image-1");
+        Segment imageCaption = buildSegment("seg-a1", AssetType.IMAGE, SegmentType.IMAGE_OCR_BLOCK, "db chart", "mysql chart", null, null, "asset-image-1");
         Segment imageOcr = buildSegment("seg-a2", AssetType.IMAGE, SegmentType.IMAGE_OCR_BLOCK, "db chart", null, "mysql ocr summary text", null, "asset-image-1");
 
         when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(5), any(SearchFilter.class))).thenReturn(List.of(
@@ -289,7 +289,7 @@ class UnifiedSearchServiceImplTest {
         when(kbSegmentRepository.textSearch(eq("mysql"), eq(5), any(SearchFilter.class))).thenReturn(List.of());
 
         Segment imageOcr = buildSegment("seg-b1", AssetType.IMAGE, SegmentType.IMAGE_OCR_BLOCK, "db chart", null, "mysql ocr summary text", null, "asset-image-2");
-        Segment imageCaption = buildSegment("seg-b2", AssetType.IMAGE, SegmentType.IMAGE_CAPTION, "db chart", "mysql chart", null, null, "asset-image-2");
+        Segment imageCaption = buildSegment("seg-b2", AssetType.IMAGE, SegmentType.IMAGE_OCR_BLOCK, "db chart", "mysql chart", null, null, "asset-image-2");
 
         when(kbSegmentRepository.vectorSearch(eq(List.of(0.1f, 0.2f)), eq(5), any(SearchFilter.class))).thenReturn(List.of(
                 SegmentHit.builder()

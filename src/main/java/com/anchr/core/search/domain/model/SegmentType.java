@@ -5,6 +5,5 @@ package com.anchr.core.search.domain.model;
  */
 public enum SegmentType {
     TEXT_CHUNK,
-    IMAGE_CAPTION,
     IMAGE_OCR_BLOCK
 }

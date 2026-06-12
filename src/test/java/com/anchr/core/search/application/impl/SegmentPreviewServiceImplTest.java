@@ -176,7 +176,7 @@ class SegmentPreviewServiceImplTest {
                 .segmentId("asset-8:image:1")
                 .assetId("asset-8")
                 .assetType(AssetType.IMAGE)
-                .segmentType(SegmentType.IMAGE_CAPTION)
+                .segmentType(SegmentType.IMAGE_OCR_BLOCK)
                 .title("scan-without-extension")
                 .contentText("image caption")
                 .sourceRef("oss://images/scan-without-extension")

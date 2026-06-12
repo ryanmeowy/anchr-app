@@ -4,7 +4,7 @@ import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
-import com.anchr.core.auth.infrastructure.AesUtil;
+import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
@@ -61,29 +61,29 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     @Override
     public String buildAiImageInput(String objectKey, AiInputValidity validity) {
         long duration = validity == AiInputValidity.SHORT ? SHORT_VALIDITY_MS : MEDIUM_VALIDITY_MS;
-        return buildPresignedUrl(objectKey, HttpMethod.GET, duration);
+        return buildPresignedUrl(objectKey, duration);
     }
 
     @Override
     public String buildDisplayImageUrl(String objectKey) {
-        return buildPresignedUrl(objectKey, HttpMethod.GET, MEDIUM_VALIDITY_MS);
+        return buildPresignedUrl(objectKey, MEDIUM_VALIDITY_MS);
     }
 
     @Override
     public String buildPreviewUrl(String objectKey) {
-        return buildPresignedUrl(objectKey, HttpMethod.GET, SHORT_VALIDITY_MS);
+        return buildPresignedUrl(objectKey, SHORT_VALIDITY_MS);
     }
 
     // ── IngestionObjectStoragePort ───────────────────────────────────────
 
     @Override
     public String buildDownloadUrl(String objectKey) {
-        return buildPresignedUrl(objectKey, HttpMethod.GET, LONG_VALIDITY_MS);
+        return buildPresignedUrl(objectKey, LONG_VALIDITY_MS);
     }
 
     @Override
     public String buildAiImageInput(String objectKey) {
-        return buildPresignedUrl(objectKey, HttpMethod.GET, MEDIUM_VALIDITY_MS);
+        return buildPresignedUrl(objectKey, MEDIUM_VALIDITY_MS);
     }
 
     // ── internal ─────────────────────────────────────────────────────────
@@ -93,12 +93,12 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
                 decrypt(config.getAccessKeyEnc()), decrypt(config.getSecretKeyEnc()));
     }
 
-    private String buildPresignedUrl(String objectKey, HttpMethod method, long durationMs) {
+    private String buildPresignedUrl(String objectKey, long durationMs) {
         StorageConfig config = loadConfig();
         OSS client = buildClient(config);
         try {
             GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(
-                    config.getBucket(), objectKey, method);
+                    config.getBucket(), objectKey, HttpMethod.GET);
             request.setExpiration(new Date(System.currentTimeMillis() + durationMs));
             URL url = client.generatePresignedUrl(request);
             return url.toString();

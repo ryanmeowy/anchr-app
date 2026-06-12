@@ -1,6 +1,6 @@
 package com.anchr.core.kb.domain.repository;
 
-import com.anchr.core.kb.domain.model.DocumentAsset;
+import com.anchr.core.kb.domain.model.Asset;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -9,17 +9,17 @@ import java.util.Optional;
 /**
  * Repository boundary for document assets.
  */
-public interface DocumentAssetRepository {
+public interface AssetRepository {
 
-    void save(DocumentAsset documentAsset);
+    void save(Asset asset);
 
-    Optional<DocumentAsset> findActiveById(String kbId, String assetId);
+    Optional<Asset> findActiveById(String kbId, String assetId);
 
-    List<DocumentAsset> listActive(String kbId, int limit, int offset);
+    List<Asset> listActive(String kbId, int limit, int offset);
 
     long countActive(String kbId);
 
-    Optional<DocumentAsset> findActiveByHash(String kbId, String fileHash);
+    Optional<Asset> findActiveByHash(String kbId, String fileHash);
 
     boolean updateStatuses(String kbId, String assetId,
                            String parseStatus, String indexStatus, String updatedBy, LocalDateTime updatedAt);

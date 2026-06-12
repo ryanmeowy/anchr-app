@@ -457,7 +457,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private boolean isImageCaptionSegment(Segment segment) {
-        return segment != null && segment.getSegmentType() == SegmentType.IMAGE_CAPTION;
+        return segment != null && segment.getSegmentType() == SegmentType.IMAGE_OCR_BLOCK;
     }
 
     private boolean hasTagHit(Segment segment, String keyword, Map<String, String> highlights) {

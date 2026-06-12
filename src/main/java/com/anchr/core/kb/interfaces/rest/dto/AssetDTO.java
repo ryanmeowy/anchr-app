@@ -1,6 +1,6 @@
 package com.anchr.core.kb.interfaces.rest.dto;
 
-import com.anchr.core.kb.domain.model.DocumentAsset;
+import com.anchr.core.kb.domain.model.Asset;
 import lombok.Builder;
 import lombok.Value;
 
@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
  */
 @Value
 @Builder
-public class DocumentAssetDTO {
+public class AssetDTO {
 
     String id;
     String kbId;
@@ -33,8 +33,8 @@ public class DocumentAssetDTO {
     LocalDateTime createdAt;
     LocalDateTime updatedAt;
 
-    public static DocumentAssetDTO from(DocumentAsset document) {
-        return DocumentAssetDTO.builder()
+    public static AssetDTO from(Asset document) {
+        return AssetDTO.builder()
                 .id(document.getId())
                 .kbId(document.getKbId())
                 .fileName(document.getFileName())

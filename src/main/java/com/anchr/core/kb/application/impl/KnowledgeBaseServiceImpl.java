@@ -6,11 +6,11 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
-import com.anchr.core.kb.domain.model.DocumentAsset;
+import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
-import com.anchr.core.kb.domain.repository.DocumentAssetRepository;
+import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +35,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private static final int MAX_SIZE = 100;
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
-    private final DocumentAssetRepository documentAssetRepository;
+    private final AssetRepository assetRepository;
     private final IdGen idGen;
     private final SegmentRepository kbSegmentRepository;
 
@@ -123,23 +123,23 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    public PagedResult<DocumentAsset> listDocuments(String kbId, int page, int size) {
+    public PagedResult<Asset> listDocuments(String kbId, int page, int size) {
         String id = requireId(kbId, "kbId");
         get(id);
         PageBounds bounds = normalizePage(page, size);
         return new PagedResult<>(
-                documentAssetRepository.listActive(id, bounds.size(), bounds.offset()),
-                documentAssetRepository.countActive(id),
+                assetRepository.listActive(id, bounds.size(), bounds.offset()),
+                assetRepository.countActive(id),
                 bounds.page(),
                 bounds.size());
     }
 
     @Override
-    public DocumentAsset getDocument(String kbId, String assetId) {
+    public Asset getDocument(String kbId, String assetId) {
         String id = requireId(kbId, "kbId");
         RequestUserContext context = UserContextHolder.get();
         get(id);
-        return documentAssetRepository.findActiveById(id, requireId(assetId, "assetId"))
+        return assetRepository.findActiveById(id, requireId(assetId, "assetId"))
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
     }
 
@@ -150,7 +150,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         String documentId = requireId(assetId, "assetId");
         RequestUserContext context = UserContextHolder.get();
         get(id);
-        boolean deleted = documentAssetRepository.markDeleted(
+        boolean deleted = assetRepository.markDeleted(
                 id, documentId, context.userId(), LocalDateTime.now());
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);

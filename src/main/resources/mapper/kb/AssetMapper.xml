@@ -2,9 +2,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.anchr.core.kb.infrastructure.persistence.DocumentAssetMapper">
+<mapper namespace="com.anchr.core.kb.infrastructure.persistence.AssetMapper">
 
-    <resultMap id="DocumentAssetRecordMap" type="com.anchr.core.kb.infrastructure.persistence.DocumentAssetRecord">
+    <resultMap id="AssetRecordMap" type="com.anchr.core.kb.infrastructure.persistence.AssetRecord">
         <id property="id" column="id"/>
         <result property="kbId" column="kb_id"/>
         <result property="fileName" column="file_name"/>
@@ -30,16 +30,16 @@
         <result property="deletedAt" column="deleted_at"/>
     </resultMap>
 
-    <sql id="DocumentAssetColumns">
+    <sql id="AssetColumns">
         id, kb_id, file_name, title, file_type, mime_type,
         size_bytes, file_hash, object_key, preview_object_key, thumbnail_key,
         source_url, parse_status, index_status, segment_count, embedding_profile,
         error_code, error_message, created_by, updated_by, created_at, updated_at, deleted_at
     </sql>
 
-    <insert id="insert" parameterType="com.anchr.core.kb.infrastructure.persistence.DocumentAssetRecord">
-        insert into document_asset (
-            <include refid="DocumentAssetColumns"/>
+    <insert id="insert" parameterType="com.anchr.core.kb.infrastructure.persistence.AssetRecord">
+        insert into asset (
+            <include refid="AssetColumns"/>
         ) values (
             #{id}, #{kbId}, #{fileName}, #{title}, #{fileType}, #{mimeType},
             #{sizeBytes}, #{fileHash}, #{objectKey}, #{previewObjectKey}, #{thumbnailKey},
@@ -48,19 +48,19 @@
         )
     </insert>
 
-    <select id="findActiveById" resultMap="DocumentAssetRecordMap">
+    <select id="findActiveById" resultMap="AssetRecordMap">
         select
-            <include refid="DocumentAssetColumns"/>
-        from document_asset
+            <include refid="AssetColumns"/>
+        from asset
         where id = #{assetId}
           and kb_id = #{kbId}
           and deleted_at is null
     </select>
 
-    <select id="listActive" resultMap="DocumentAssetRecordMap">
+    <select id="listActive" resultMap="AssetRecordMap">
         select
-            <include refid="DocumentAssetColumns"/>
-        from document_asset
+            <include refid="AssetColumns"/>
+        from asset
         where kb_id = #{kbId}
           and deleted_at is null
         order by created_at desc, id desc
@@ -69,15 +69,15 @@
 
     <select id="countActive" resultType="long">
         select count(1)
-        from document_asset
+        from asset
         where kb_id = #{kbId}
           and deleted_at is null
     </select>
 
-    <select id="findActiveByHash" resultMap="DocumentAssetRecordMap">
+    <select id="findActiveByHash" resultMap="AssetRecordMap">
         select
-            <include refid="DocumentAssetColumns"/>
-        from document_asset
+            <include refid="AssetColumns"/>
+        from asset
         where kb_id = #{kbId}
           and file_hash = #{fileHash}
           and deleted_at is null
@@ -86,7 +86,7 @@
     </select>
 
     <update id="updateStatuses">
-        update document_asset
+        update asset
         set parse_status = #{parseStatus},
             index_status = #{indexStatus},
             error_code = null,
@@ -99,7 +99,7 @@
     </update>
 
     <update id="updateIngestionResult">
-        update document_asset
+        update asset
         set parse_status = #{parseStatus},
             index_status = #{indexStatus},
             segment_count = #{segmentCount},
@@ -113,7 +113,7 @@
     </update>
 
     <update id="markDeleted">
-        update document_asset
+        update asset
         set updated_by = #{updatedBy},
             updated_at = #{updatedAt},
             deleted_at = #{updatedAt}

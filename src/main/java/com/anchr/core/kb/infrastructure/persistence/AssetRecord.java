@@ -5,10 +5,10 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * Persistence record for the document_asset table.
+ * Persistence record for the asset table.
  */
 @Data
-public class DocumentAssetRecord {
+public class AssetRecord {
 
     private String id;
     private String kbId;

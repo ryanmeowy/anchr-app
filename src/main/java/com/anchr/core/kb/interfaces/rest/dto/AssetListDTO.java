@@ -10,9 +10,9 @@ import java.util.List;
  */
 @Value
 @Builder
-public class DocumentAssetListDTO {
+public class AssetListDTO {
 
-    List<DocumentAssetDTO> items;
+    List<AssetDTO> items;
     long total;
     int page;
     int size;

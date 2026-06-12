@@ -1,6 +1,6 @@
 package com.anchr.core.ingestion.infrastructure.persistence.es;
 
-import com.anchr.core.ingestion.domain.model.TextChunk;
+import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.repository.TextSegmentRepository;
 import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.Segment;
@@ -21,7 +21,7 @@ public class TextSegmentIndexWriter implements TextSegmentRepository {
     private final SegmentBulkWriter kbSegmentBulkWriter;
 
     @Override
-    public void save(String assetId, List<TextChunk> chunks) {
+    public void save(String assetId, List<Chunk> chunks) {
         if (!StringUtils.hasText(assetId) || chunks == null || chunks.isEmpty()) {
             return;
         }

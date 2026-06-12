@@ -10,7 +10,7 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.application.IngestionApplicationService;
-import com.anchr.core.kb.domain.model.DocumentAsset;
+import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
@@ -21,7 +21,7 @@ import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
-import com.anchr.core.kb.domain.repository.DocumentAssetRepository;
+import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import lombok.RequiredArgsConstructor;
@@ -49,7 +49,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
     private static final int MAX_BATCH_ITEMS = 50;
 
     private final KnowledgeBaseService knowledgeBaseService;
-    private final DocumentAssetRepository documentAssetRepository;
+    private final AssetRepository assetRepository;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final IngestionTaskRepository ingestionTaskRepository;
     private final IngestionCapabilityService ingestionCapabilityService;
@@ -141,7 +141,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private IngestionTask createDocumentMaintenanceTask(String kbId, String assetId,
                                                         IngestionSourceType sourceType, IngestionStage stage) {
-        DocumentAsset document = knowledgeBaseService.getDocument(kbId, assetId);
+        Asset document = knowledgeBaseService.getDocument(kbId, assetId);
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
         String taskId = idGen.nextIdStr();
@@ -165,10 +165,10 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
                 task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
         if (sourceType == IngestionSourceType.REPARSE) {
-            documentAssetRepository.updateStatuses(kbId, document.getId(),
+            assetRepository.updateStatuses(kbId, document.getId(),
                     DocumentParseStatus.PENDING.name(), DocumentIndexStatus.PENDING.name(), context.userId(), now);
         } else {
-            documentAssetRepository.updateStatuses(kbId, document.getId(),
+            assetRepository.updateStatuses(kbId, document.getId(),
                     document.getParseStatus().name(), DocumentIndexStatus.PENDING.name(), context.userId(), now);
         }
         submitAfterCommit(kbId, task.getId(), context.userId());
@@ -204,8 +204,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
                         "UNSUPPORTED_FILE_TYPE", "Unsupported URL file type.", now);
             }
-            DocumentAsset document = createDocument(context, kbId, command, fileName, fileType, now);
-            documentAssetRepository.save(document);
+            Asset document = createDocument(context, kbId, command, fileName, fileType, now);
+            assetRepository.save(document);
             return IngestionTaskItem.builder()
                     .id(idGen.nextIdStr())
                     .taskId(taskId)
@@ -227,14 +227,14 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                     "UNSUPPORTED_FILE_TYPE", "Unsupported file type.", now);
         }
         if (StringUtils.hasText(command.fileHash()) && dedupeStrategy == DedupeStrategy.SKIP) {
-            var existing = documentAssetRepository.findActiveByHash(kbId, command.fileHash().trim());
+            var existing = assetRepository.findActiveByHash(kbId, command.fileHash().trim());
             if (existing.isPresent()) {
                 return skippedItem(kbId, taskId, existing.get(), now);
             }
         }
 
-        DocumentAsset document = createDocument(context, kbId, command, fileName, fileType, now);
-        documentAssetRepository.save(document);
+        Asset document = createDocument(context, kbId, command, fileName, fileType, now);
+        assetRepository.save(document);
         return IngestionTaskItem.builder()
                 .id(idGen.nextIdStr())
                 .taskId(taskId)
@@ -252,9 +252,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .build();
     }
 
-    private DocumentAsset createDocument(RequestUserContext context, String kbId, IngestionCreateItemCommand command,
-                                         String fileName, String fileType, LocalDateTime now) {
-        return DocumentAsset.builder()
+    private Asset createDocument(RequestUserContext context, String kbId, IngestionCreateItemCommand command,
+                                 String fileName, String fileType, LocalDateTime now) {
+        return Asset.builder()
                 .id(idGen.nextIdStr())
                 .kbId(kbId)
                 .fileName(fileName)
@@ -323,7 +323,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .build();
     }
 
-    private IngestionTaskItem skippedItem(String kbId, String taskId, DocumentAsset existing, LocalDateTime now) {
+    private IngestionTaskItem skippedItem(String kbId, String taskId, Asset existing, LocalDateTime now) {
         return IngestionTaskItem.builder()
                 .id(idGen.nextIdStr())
                 .taskId(taskId)

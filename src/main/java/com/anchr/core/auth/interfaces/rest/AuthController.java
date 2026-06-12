@@ -1,6 +1,6 @@
 package com.anchr.core.auth.interfaces.rest;
 
-import com.anchr.core.auth.infrastructure.AesUtil;
+import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.model.Result;

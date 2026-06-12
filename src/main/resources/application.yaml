@@ -72,3 +72,7 @@ management:
     web:
       exposure:
         include: health,info,metrics
+
+  docling:
+    base-url: ${APP_DOCLING_BASE_URL:http://127.0.0.1:8091}
+    oss-encrypt-key: ${ANCHR_DOCLING_OSS_ENCRYPT_KEY:}

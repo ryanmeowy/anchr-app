@@ -15,7 +15,7 @@ create table if not exists knowledge_base (
 
 create index idx_kb_updated_at on knowledge_base(updated_at);
 
-create table if not exists document_asset (
+create table if not exists asset (
   id bigint primary key,
   kb_id bigint not null,
   file_name varchar(512) not null,
@@ -41,9 +41,9 @@ create table if not exists document_asset (
   deleted_at timestamp null
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
 
-create index idx_doc_kb_status on document_asset(kb_id, parse_status, index_status);
-create index idx_doc_hash on document_asset(kb_id, file_hash);
-create index idx_doc_created_at on document_asset(kb_id, created_at);
+create index idx_doc_kb_status on asset(kb_id, parse_status, index_status);
+create index idx_doc_hash on asset(kb_id, file_hash);
+create index idx_doc_created_at on asset(kb_id, created_at);
 
 create table if not exists ingestion_task (
   id bigint primary key,

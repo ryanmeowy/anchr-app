@@ -6,11 +6,11 @@ import lombok.Value;
 import java.time.LocalDateTime;
 
 /**
- * Document asset metadata inside a knowledge base.
+ * asset metadata inside a knowledge base.
  */
 @Value
 @Builder(toBuilder = true)
-public class DocumentAsset {
+public class Asset {
 
     String id;
     String kbId;

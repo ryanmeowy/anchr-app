@@ -1,6 +1,6 @@
 package com.anchr.core.kb.application;
 
-import com.anchr.core.kb.domain.model.DocumentAsset;
+import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 
@@ -25,9 +25,9 @@ public interface KnowledgeBaseService {
 
     KnowledgeBaseStats getStats(String kbId);
 
-    PagedResult<DocumentAsset> listDocuments(String kbId, int page, int size);
+    PagedResult<Asset> listDocuments(String kbId, int page, int size);
 
-    DocumentAsset getDocument(String kbId, String assetId);
+    Asset getDocument(String kbId, String assetId);
 
     void deleteDocument(String kbId, String assetId);
 

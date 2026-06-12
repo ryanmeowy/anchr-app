@@ -11,20 +11,20 @@ import java.util.Optional;
  * MyBatis mapper for document_asset persistence.
  */
 @Mapper
-public interface DocumentAssetMapper {
+public interface AssetMapper {
 
-    int insert(DocumentAssetRecord record);
+    int insert(AssetRecord record);
 
-    Optional<DocumentAssetRecord> findActiveById(@Param("kbId") String kbId,
+    Optional<AssetRecord> findActiveById(@Param("kbId") String kbId,
                                                   @Param("assetId") String assetId);
 
-    List<DocumentAssetRecord> listActive(@Param("kbId") String kbId,
+    List<AssetRecord> listActive(@Param("kbId") String kbId,
                                          @Param("limit") int limit,
                                          @Param("offset") int offset);
 
     long countActive(@Param("kbId") String kbId);
 
-    Optional<DocumentAssetRecord> findActiveByHash(@Param("kbId") String kbId,
+    Optional<AssetRecord> findActiveByHash(@Param("kbId") String kbId,
                                                     @Param("fileHash") String fileHash);
 
     int updateStatuses(@Param("kbId") String kbId,

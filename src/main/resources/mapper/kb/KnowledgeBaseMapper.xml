@@ -115,13 +115,13 @@
         update knowledge_base
         set document_count = (
                 select count(1)
-                from document_asset da
+                from asset da
                 where da.kb_id = #{id}
                   and da.deleted_at is null
             ),
             segment_count = (
                 select coalesce(sum(da.segment_count), 0)
-                from document_asset da
+                from asset da
                 where da.kb_id = #{id}
                   and da.deleted_at is null
             ),

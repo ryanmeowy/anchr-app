@@ -3,10 +3,10 @@ package com.anchr.core.kb.interfaces.rest;
 import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.kb.application.KnowledgeBaseService;
-import com.anchr.core.kb.domain.model.DocumentAsset;
+import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
-import com.anchr.core.kb.interfaces.rest.dto.DocumentAssetDTO;
-import com.anchr.core.kb.interfaces.rest.dto.DocumentAssetListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.AssetDTO;
+import com.anchr.core.kb.interfaces.rest.dto.AssetListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseCreateRequestDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseListDTO;
@@ -99,13 +99,13 @@ public class KnowledgeBaseController {
 
     @RequireAuth
     @GetMapping("/{kbId}/documents")
-    public Result<DocumentAssetListDTO> listDocuments(
+    public Result<AssetListDTO> listDocuments(
             @PathVariable @NotBlank String kbId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        KnowledgeBaseService.PagedResult<DocumentAsset> result = knowledgeBaseService.listDocuments(kbId, page, size);
-        return Result.success(DocumentAssetListDTO.builder()
-                .items(result.items().stream().map(DocumentAssetDTO::from).toList())
+        KnowledgeBaseService.PagedResult<Asset> result = knowledgeBaseService.listDocuments(kbId, page, size);
+        return Result.success(AssetListDTO.builder()
+                .items(result.items().stream().map(AssetDTO::from).toList())
                 .total(result.total())
                 .page(result.page())
                 .size(result.size())
@@ -114,9 +114,9 @@ public class KnowledgeBaseController {
 
     @RequireAuth
     @GetMapping("/{kbId}/documents/{assetId}")
-    public Result<DocumentAssetDTO> getDocument(@PathVariable @NotBlank String kbId,
+    public Result<AssetDTO> getDocument(@PathVariable @NotBlank String kbId,
                                                 @PathVariable @NotBlank String assetId) {
-        return Result.success(DocumentAssetDTO.from(knowledgeBaseService.getDocument(kbId, assetId)));
+        return Result.success(AssetDTO.from(knowledgeBaseService.getDocument(kbId, assetId)));
     }
 
     @RequireAuth

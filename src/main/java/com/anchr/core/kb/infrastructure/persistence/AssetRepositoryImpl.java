@@ -1,9 +1,9 @@
 package com.anchr.core.kb.infrastructure.persistence;
 
-import com.anchr.core.kb.domain.model.DocumentAsset;
+import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
-import com.anchr.core.kb.domain.repository.DocumentAssetRepository;
+import com.anchr.core.kb.domain.repository.AssetRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
@@ -16,22 +16,22 @@ import java.util.Optional;
  */
 @Repository
 @RequiredArgsConstructor
-public class DocumentAssetRepositoryImpl implements DocumentAssetRepository {
+public class AssetRepositoryImpl implements AssetRepository {
 
-    private final DocumentAssetMapper mapper;
+    private final AssetMapper mapper;
 
     @Override
-    public void save(DocumentAsset documentAsset) {
-        mapper.insert(toRecord(documentAsset));
+    public void save(Asset asset) {
+        mapper.insert(toRecord(asset));
     }
 
     @Override
-    public Optional<DocumentAsset> findActiveById(String kbId, String assetId) {
+    public Optional<Asset> findActiveById(String kbId, String assetId) {
         return mapper.findActiveById(kbId, assetId).map(this::toDomain);
     }
 
     @Override
-    public List<DocumentAsset> listActive(String kbId, int limit, int offset) {
+    public List<Asset> listActive(String kbId, int limit, int offset) {
         return mapper.listActive(kbId, limit, offset).stream()
                 .map(this::toDomain)
                 .toList();
@@ -43,7 +43,7 @@ public class DocumentAssetRepositoryImpl implements DocumentAssetRepository {
     }
 
     @Override
-    public Optional<DocumentAsset> findActiveByHash(String kbId, String fileHash) {
+    public Optional<Asset> findActiveByHash(String kbId, String fileHash) {
         return mapper.findActiveByHash(kbId, fileHash).map(this::toDomain);
     }
 
@@ -69,8 +69,8 @@ public class DocumentAssetRepositoryImpl implements DocumentAssetRepository {
         return mapper.markDeleted(kbId, assetId, updatedBy, updatedAt) > 0;
     }
 
-    private DocumentAsset toDomain(DocumentAssetRecord record) {
-        return DocumentAsset.builder()
+    private Asset toDomain(AssetRecord record) {
+        return Asset.builder()
                 .id(record.getId())
                 .kbId(record.getKbId())
                 .fileName(record.getFileName())
@@ -97,31 +97,31 @@ public class DocumentAssetRepositoryImpl implements DocumentAssetRepository {
                 .build();
     }
 
-    private DocumentAssetRecord toRecord(DocumentAsset documentAsset) {
-        DocumentAssetRecord record = new DocumentAssetRecord();
-        record.setId(documentAsset.getId());
-        record.setKbId(documentAsset.getKbId());
-        record.setFileName(documentAsset.getFileName());
-        record.setTitle(documentAsset.getTitle());
-        record.setFileType(documentAsset.getFileType());
-        record.setMimeType(documentAsset.getMimeType());
-        record.setSizeBytes(documentAsset.getSizeBytes());
-        record.setFileHash(documentAsset.getFileHash());
-        record.setObjectKey(documentAsset.getObjectKey());
-        record.setPreviewObjectKey(documentAsset.getPreviewObjectKey());
-        record.setThumbnailKey(documentAsset.getThumbnailKey());
-        record.setSourceUrl(documentAsset.getSourceUrl());
-        record.setParseStatus(documentAsset.getParseStatus().name());
-        record.setIndexStatus(documentAsset.getIndexStatus().name());
-        record.setSegmentCount(documentAsset.getSegmentCount());
-        record.setEmbeddingProfile(documentAsset.getEmbeddingProfile());
-        record.setErrorCode(documentAsset.getErrorCode());
-        record.setErrorMessage(documentAsset.getErrorMessage());
-        record.setCreatedBy(documentAsset.getCreatedBy());
-        record.setUpdatedBy(documentAsset.getUpdatedBy());
-        record.setCreatedAt(documentAsset.getCreatedAt());
-        record.setUpdatedAt(documentAsset.getUpdatedAt());
-        record.setDeletedAt(documentAsset.getDeletedAt());
+    private AssetRecord toRecord(Asset asset) {
+        AssetRecord record = new AssetRecord();
+        record.setId(asset.getId());
+        record.setKbId(asset.getKbId());
+        record.setFileName(asset.getFileName());
+        record.setTitle(asset.getTitle());
+        record.setFileType(asset.getFileType());
+        record.setMimeType(asset.getMimeType());
+        record.setSizeBytes(asset.getSizeBytes());
+        record.setFileHash(asset.getFileHash());
+        record.setObjectKey(asset.getObjectKey());
+        record.setPreviewObjectKey(asset.getPreviewObjectKey());
+        record.setThumbnailKey(asset.getThumbnailKey());
+        record.setSourceUrl(asset.getSourceUrl());
+        record.setParseStatus(asset.getParseStatus().name());
+        record.setIndexStatus(asset.getIndexStatus().name());
+        record.setSegmentCount(asset.getSegmentCount());
+        record.setEmbeddingProfile(asset.getEmbeddingProfile());
+        record.setErrorCode(asset.getErrorCode());
+        record.setErrorMessage(asset.getErrorMessage());
+        record.setCreatedBy(asset.getCreatedBy());
+        record.setUpdatedBy(asset.getUpdatedBy());
+        record.setCreatedAt(asset.getCreatedAt());
+        record.setUpdatedAt(asset.getUpdatedAt());
+        record.setDeletedAt(asset.getDeletedAt());
         return record;
     }
 

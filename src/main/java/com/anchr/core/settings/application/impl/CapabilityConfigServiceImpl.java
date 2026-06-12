@@ -1,6 +1,6 @@
 package com.anchr.core.settings.application.impl;
 
-import com.anchr.core.auth.infrastructure.AesUtil;
+import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.integration.ai.EmbeddingClient;

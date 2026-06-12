@@ -1,6 +1,6 @@
 package com.anchr.core.integration.ai;
 
-import com.anchr.core.auth.infrastructure.AesUtil;
+import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.search.domain.port.SearchRerankPort;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
