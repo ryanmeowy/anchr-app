@@ -5,6 +5,7 @@ import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.integration.ai.EmbeddingClient;
 import com.anchr.core.integration.ai.GenerationClient;
+import com.anchr.core.integration.ai.MultiEmbeddingClient;
 import com.anchr.core.integration.ai.RerankClient;
 import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
@@ -89,6 +90,16 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                         .success(result.success())
                         .latencyMs(result.latencyMs())
                         .message(result.message())
+                        .build();
+            }
+            case CAPABILITY_MULTI_EMBEDDING -> {
+                var client = new MultiEmbeddingClient(request.getBaseUrl(), request.getApiKey());
+                var result = client.testConnection(request.getModelName());
+                yield CapabilityConnectionTestResultDTO.builder()
+                        .success(result.success())
+                        .latencyMs(result.latencyMs())
+                        .message(result.message())
+                        .dimension(result.dimension())
                         .build();
             }
             default -> {

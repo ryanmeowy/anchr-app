@@ -102,6 +102,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private void processTask( String kbId, String taskId, String userId) {
+        // Instance-level lock; use a distributed lock for multi-instance deployments.
         ReentrantLock lock = taskLocks.computeIfAbsent(TASK_LOCK_PREFIX + taskId, key -> new ReentrantLock());
         if (!lock.tryLock()) {
             return;

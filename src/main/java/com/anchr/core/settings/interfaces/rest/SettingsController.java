@@ -122,6 +122,34 @@ public class SettingsController {
                 .build());
     }
 
+    // ── multi embedding ──────────────────────────────────────────────────
+
+    @RequireAuth
+    @GetMapping("/multi-embedding")
+    public Result<CapabilityConfigDTO> getMultiEmbeddingConfig() {
+        return capabilityConfigService.get(CapabilityConfigService.CAPABILITY_MULTI_EMBEDDING)
+                .map(Result::success)
+                .orElse(Result.success(null));
+    }
+
+    @RequireAuth
+    @PatchMapping("/multi-embedding")
+    public Result<CapabilityConfigDTO> updateMultiEmbeddingConfig(
+            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
+        return Result.success(capabilityConfigService.save(
+                CapabilityConfigService.CAPABILITY_MULTI_EMBEDDING, request));
+    }
+
+    @GetMapping("/multi-embedding/params")
+    public Result<CapabilityParamsDTO> multiEmbeddingParams() {
+        return Result.success(CapabilityParamsDTO.builder()
+                .params(EmbedParamEnum.all().stream()
+                        .map(p -> CapabilityParamsDTO.ParamItem.builder()
+                                .key(p.getKey()).label(p.getLabel()).build())
+                        .toList())
+                .build());
+    }
+
     // ── test connection ──────────────────────────────────────────────────
 
     @RequireAuth

@@ -5,13 +5,11 @@ import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -55,17 +53,5 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
         } catch (Exception e) {
             throw new IllegalStateException("Failed to decrypt embedding apiKey.", e);
         }
-    }
-
-    static List<Float> parseEmbeddingVector(JsonNode root) {
-        JsonNode data = root.path("data");
-        if (!data.isArray() || data.isEmpty()) {
-            throw new OpenAiClient.OpenAiException(-1, "Empty embedding response.");
-        }
-        List<Float> vector = new ArrayList<>();
-        for (JsonNode val : data.get(0).path("embedding")) {
-            vector.add((float) val.asDouble());
-        }
-        return vector;
     }
 }

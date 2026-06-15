@@ -15,6 +15,7 @@ public interface CapabilityConfigService {
     String CAPABILITY_EMBEDDING = "EMBEDDING";
     String CAPABILITY_GENERATION = "GENERATION";
     String CAPABILITY_RERANK = "RERANK";
+    String CAPABILITY_MULTI_EMBEDDING = "MULTI_EMBEDDING";
 
     Optional<CapabilityConfigDTO> get(String capability);
 
