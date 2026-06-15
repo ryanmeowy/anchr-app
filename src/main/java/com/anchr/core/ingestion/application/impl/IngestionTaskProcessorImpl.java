@@ -4,11 +4,7 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
-import com.anchr.core.ingestion.domain.model.Chunk;
-import com.anchr.core.ingestion.domain.model.IngestionStage;
-import com.anchr.core.ingestion.domain.model.IngestionTask;
-import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
-import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
+import com.anchr.core.ingestion.domain.model.*;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
@@ -38,16 +34,12 @@ import org.springframework.util.StringUtils;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 /**
  * Async executor for DB-backed knowledge base ingestion tasks.
@@ -83,9 +75,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     @Value("${app.embedding.ingestion-min-interval-ms:1500}")
     private long embeddingMinIntervalMs;
-
-    @Value("${app.docling.oss-encrypt-key:}")
-    private String doclingOssEncryptKey;
 
     @Value("${app.embedding.ingestion-rate-limit-max-attempts:5}")
     private int embeddingRateLimitMaxAttempts;
@@ -180,13 +169,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private ParseRequest.Oss buildOssConfig() {
-        if (!StringUtils.hasText(doclingOssEncryptKey)) {
+        Optional<StorageConfig> configOpt = storageConfigRepository.find();
+        if (configOpt.isEmpty()) {
             return null;
         }
-        StorageConfig config = storageConfigRepository.find().orElse(null);
-        if (config == null) {
-            return null;
-        }
+        StorageConfig config = configOpt.get();
         try {
             StorageTokenIssuer issuer = new StorageTokenIssuer();
             String accessKey = aesUtil.decrypt(config.getAccessKeyEnc());
@@ -200,8 +187,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     config.getEndpoint(),
                     config.getBucket(),
                     config.getPrefix(),
-                    Map.of(
-                            "iv", Base64.getEncoder().encodeToString(iv),
+                    Map.of("iv", Base64.getEncoder().encodeToString(iv),
                             "ciphertext", encrypt));
         } catch (Exception e) {
             log.warn("Failed to build OSS credentials for docling: {}", e.getMessage());

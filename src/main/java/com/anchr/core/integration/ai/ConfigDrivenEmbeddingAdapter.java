@@ -42,7 +42,7 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
     }
 
     private CapabilityConfig loadConfig() {
-        return configRepository.findByCapability("EMBEDDING")
+        return configRepository.findByCapability("EMBEDDING").stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException(
                         "Embedding is not configured. Save config via PATCH /api/v1/settings/embedding."));
     }

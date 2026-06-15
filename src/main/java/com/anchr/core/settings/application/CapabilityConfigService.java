@@ -5,6 +5,7 @@ import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigUpdateRequest
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestRequestDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResultDTO;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -17,9 +18,11 @@ public interface CapabilityConfigService {
     String CAPABILITY_RERANK = "RERANK";
     String CAPABILITY_MULTI_EMBEDDING = "MULTI_EMBEDDING";
 
-    Optional<CapabilityConfigDTO> get(String capability);
+    List<CapabilityConfigDTO> get(String capability);
 
     CapabilityConfigDTO save(String capability, CapabilityConfigUpdateRequestDTO request);
 
     CapabilityConnectionTestResultDTO test(CapabilityConnectionTestRequestDTO request);
+
+    void del(String capability, Long id);
 }

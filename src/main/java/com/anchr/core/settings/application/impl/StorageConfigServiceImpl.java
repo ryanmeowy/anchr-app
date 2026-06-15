@@ -67,7 +67,7 @@ public class StorageConfigServiceImpl implements StorageConfigService {
                 .prefix(request.getPrefix())
                 .roleArn(request.getRoleArn())
                 .enabled(true)
-                .updatedBy(parseUserId(UserContextHolder.get().userId()))
+                .updatedBy(UserContextHolder.get().userId())
                 .updatedAt(LocalDateTime.now())
                 .build();
 
@@ -125,9 +125,4 @@ public class StorageConfigServiceImpl implements StorageConfigService {
         }
     }
 
-    private static long parseUserId(String userId) {
-        if (userId == null || userId.isBlank()) return 0L;
-        try { return Long.parseLong(userId); }
-        catch (NumberFormatException e) { return 0L; }
-    }
 }

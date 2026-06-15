@@ -7,24 +7,13 @@ import com.anchr.core.integration.ai.GenParamEnum;
 import com.anchr.core.integration.ai.RerankParamEnum;
 import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.application.StorageConfigService;
-import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigDTO;
-import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigUpdateRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResultDTO;
-import com.anchr.core.settings.interfaces.rest.dto.CapabilityParamsDTO;
-import com.anchr.core.settings.interfaces.rest.dto.StorageConfigDTO;
-import com.anchr.core.settings.interfaces.rest.dto.StorageConfigUpdateRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.StorageConnectionTestRequestDTO;
-import com.anchr.core.settings.interfaces.rest.dto.StorageConnectionTestResultDTO;
+import com.anchr.core.settings.interfaces.rest.dto.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * Settings APIs for capability configuration.
@@ -38,119 +27,52 @@ public class SettingsController {
     private final CapabilityConfigService capabilityConfigService;
     private final StorageConfigService storageConfigService;
 
-    // ── embedding ────────────────────────────────────────────────────────
+    // ── capability config ──────────────────────────────────────────────────
 
     @RequireAuth
-    @GetMapping("/embedding")
-    public Result<CapabilityConfigDTO> getEmbeddingConfig() {
-        return capabilityConfigService.get(CapabilityConfigService.CAPABILITY_EMBEDDING)
-                .map(Result::success)
-                .orElse(Result.success(null));
+    @GetMapping("/{capability}")
+    public Result<List<CapabilityConfigDTO>> getConfig(@PathVariable String capability) {
+        return Result.success(capabilityConfigService.get(capability.toUpperCase()));
     }
 
     @RequireAuth
-    @PatchMapping("/embedding")
-    public Result<CapabilityConfigDTO> updateEmbeddingConfig(
+    @PatchMapping("/{capability}")
+    public Result<CapabilityConfigDTO> updateConfig(
+            @PathVariable String capability,
             @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
-        return Result.success(capabilityConfigService.save(
-                CapabilityConfigService.CAPABILITY_EMBEDDING, request));
+        return Result.success(capabilityConfigService.save(capability.toUpperCase(), request));
     }
 
-    @GetMapping("/embedding/params")
-    public Result<CapabilityParamsDTO> embeddingParams() {
+    @RequireAuth
+    @DeleteMapping("/{capability}/{id}")
+    public Result<Void> deleteConfig(@PathVariable String capability, @PathVariable Long id) {
+        capabilityConfigService.del(capability, id);
+        return Result.success(null);
+    }
+
+    @GetMapping("/{capability}/params")
+    public Result<CapabilityParamsDTO> params(@PathVariable String capability) {
         return Result.success(CapabilityParamsDTO.builder()
-                .params(EmbedParamEnum.all().stream()
-                        .map(p -> CapabilityParamsDTO.ParamItem.builder()
-                                .key(p.getKey()).label(p.getLabel()).build())
-                        .toList())
+                .params(toParamItems(capability.toUpperCase()))
                 .build());
     }
 
-    // ── generation ───────────────────────────────────────────────────────
-
-    @RequireAuth
-    @GetMapping("/generation")
-    public Result<CapabilityConfigDTO> getGenerationConfig() {
-        return capabilityConfigService.get(CapabilityConfigService.CAPABILITY_GENERATION)
-                .map(Result::success)
-                .orElse(Result.success(null));
+    private List<CapabilityParamsDTO.ParamItem> toParamItems(String capability) {
+        return switch (capability) {
+            case CapabilityConfigService.CAPABILITY_GENERATION ->
+                GenParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();
+            case CapabilityConfigService.CAPABILITY_RERANK ->
+                RerankParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();
+            default ->
+                EmbedParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();
+        };
     }
 
-    @RequireAuth
-    @PatchMapping("/generation")
-    public Result<CapabilityConfigDTO> updateGenerationConfig(
-            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
-        return Result.success(capabilityConfigService.save(
-                CapabilityConfigService.CAPABILITY_GENERATION, request));
+    private static CapabilityParamsDTO.ParamItem item(String key, String label) {
+        return CapabilityParamsDTO.ParamItem.builder().key(key).label(label).build();
     }
 
-    @GetMapping("/generation/params")
-    public Result<CapabilityParamsDTO> generationParams() {
-        return Result.success(CapabilityParamsDTO.builder()
-                .params(GenParamEnum.all().stream()
-                        .map(p -> CapabilityParamsDTO.ParamItem.builder()
-                                .key(p.getKey()).label(p.getLabel()).build())
-                        .toList())
-                .build());
-    }
-
-    // ── rerank ───────────────────────────────────────────────────────────
-
-    @RequireAuth
-    @GetMapping("/rerank")
-    public Result<CapabilityConfigDTO> getRerankConfig() {
-        return capabilityConfigService.get(CapabilityConfigService.CAPABILITY_RERANK)
-                .map(Result::success)
-                .orElse(Result.success(null));
-    }
-
-    @RequireAuth
-    @PatchMapping("/rerank")
-    public Result<CapabilityConfigDTO> updateRerankConfig(
-            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
-        return Result.success(capabilityConfigService.save(
-                CapabilityConfigService.CAPABILITY_RERANK, request));
-    }
-
-    @GetMapping("/rerank/params")
-    public Result<CapabilityParamsDTO> rerankParams() {
-        return Result.success(CapabilityParamsDTO.builder()
-                .params(RerankParamEnum.all().stream()
-                        .map(p -> CapabilityParamsDTO.ParamItem.builder()
-                                .key(p.getKey()).label(p.getLabel()).build())
-                        .toList())
-                .build());
-    }
-
-    // ── multi embedding ──────────────────────────────────────────────────
-
-    @RequireAuth
-    @GetMapping("/multi-embedding")
-    public Result<CapabilityConfigDTO> getMultiEmbeddingConfig() {
-        return capabilityConfigService.get(CapabilityConfigService.CAPABILITY_MULTI_EMBEDDING)
-                .map(Result::success)
-                .orElse(Result.success(null));
-    }
-
-    @RequireAuth
-    @PatchMapping("/multi-embedding")
-    public Result<CapabilityConfigDTO> updateMultiEmbeddingConfig(
-            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
-        return Result.success(capabilityConfigService.save(
-                CapabilityConfigService.CAPABILITY_MULTI_EMBEDDING, request));
-    }
-
-    @GetMapping("/multi-embedding/params")
-    public Result<CapabilityParamsDTO> multiEmbeddingParams() {
-        return Result.success(CapabilityParamsDTO.builder()
-                .params(EmbedParamEnum.all().stream()
-                        .map(p -> CapabilityParamsDTO.ParamItem.builder()
-                                .key(p.getKey()).label(p.getLabel()).build())
-                        .toList())
-                .build());
-    }
-
-    // ── test connection ──────────────────────────────────────────────────
+    // ── test connection ────────────────────────────────────────────────────
 
     @RequireAuth
     @PostMapping("/test-connection")

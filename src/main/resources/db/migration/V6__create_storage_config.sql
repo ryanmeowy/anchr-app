@@ -8,6 +8,6 @@ create table if not exists storage_config (
   prefix          varchar(256),
   role_arn        varchar(256),
   enabled         boolean not null default true,
-  updated_by bigint not null default 0,
+  updated_by varchar(64) not null default 'system',
   updated_at      timestamp not null
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci;

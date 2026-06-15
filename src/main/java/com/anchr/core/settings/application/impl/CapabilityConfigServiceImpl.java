@@ -1,7 +1,7 @@
 package com.anchr.core.settings.application.impl;
 
-import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.integration.ai.EmbeddingClient;
 import com.anchr.core.integration.ai.GenerationClient;
@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
+import java.util.List;
 
 /**
  * Default implementation for capability configuration.
@@ -34,14 +34,15 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     private final IdGen idGen;
 
     @Override
-    public Optional<CapabilityConfigDTO> get(String capability) {
-        return repository.findByCapability(capability)
-                .map(config -> CapabilityConfigDTO.from(config, maskApiKey(config.getApiKeyEnc())));
+    public List<CapabilityConfigDTO> get(String capability) {
+        return repository.findByCapability(capability).stream()
+                .map(config -> CapabilityConfigDTO.from(config, maskApiKey(config.getApiKeyEnc())))
+                .toList();
     }
 
     @Override
     public CapabilityConfigDTO save(String capability, CapabilityConfigUpdateRequestDTO request) {
-        CapabilityConfig existing = repository.findByCapability(capability).orElse(null);
+        CapabilityConfig existing = repository.findByCapability(capability).stream().findFirst().orElse(null);
         String apiKeyEnc;
 
         if (StringUtils.hasText(request.getApiKey())) {
@@ -60,7 +61,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                 .modelName(request.getModelName())
                 .extraConfig(extraConfigJson(request.getExtraConfig()))
                 .enabled(true)
-                .updatedBy(parseUserId(UserContextHolder.get().userId()))
+                .updatedBy(UserContextHolder.get().userId())
                 .updatedAt(LocalDateTime.now())
                 .build();
 
@@ -115,12 +116,19 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         };
     }
 
+    @Override
+    public void del(String capability, Long id) {
+        repository.del(capability, id);
+    }
+
 
     private String extraConfigJson(java.util.Map<String, Object> extraConfig) {
         if (extraConfig == null || extraConfig.isEmpty()) return null;
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(extraConfig);
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String maskApiKey(String apiKeyEnc) {
@@ -135,9 +143,4 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         }
     }
 
-    private static long parseUserId(String userId) {
-        if (userId == null || userId.isBlank()) return 0L;
-        try { return Long.parseLong(userId); }
-        catch (NumberFormatException e) { return 0L; }
-    }
 }

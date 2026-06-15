@@ -29,7 +29,7 @@ public class ConfigDrivenGenerationAdapter implements ConversationRewritePort {
     }
 
     private CapabilityConfig loadConfig() {
-        return configRepository.findByCapability("GENERATION")
+        return configRepository.findByCapability("GENERATION").stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException(
                         "Generation is not configured. Save config via PATCH /api/v1/settings/generation."));
     }

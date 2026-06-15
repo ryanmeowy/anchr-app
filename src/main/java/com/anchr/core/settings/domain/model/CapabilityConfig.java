@@ -19,6 +19,6 @@ public class CapabilityConfig {
     String modelName;
     String extraConfig;
     boolean enabled;
-    Long updatedBy;
+    String updatedBy;
     LocalDateTime updatedAt;
 }

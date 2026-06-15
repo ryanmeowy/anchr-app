@@ -18,6 +18,6 @@ public class StorageConfigRecord {
     private String prefix;
     private String roleArn;
     private boolean enabled;
-    private Long updatedBy;
+    private String updatedBy;
     private LocalDateTime updatedAt;
 }

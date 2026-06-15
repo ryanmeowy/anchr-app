@@ -41,7 +41,7 @@ public class ConfigDrivenRerankAdapter implements SearchRerankPort {
     }
 
     private CapabilityConfig loadConfig() {
-        return configRepository.findByCapability("RERANK")
+        return configRepository.findByCapability("RERANK").stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException(
                         "Rerank is not configured. Save config via PATCH /api/v1/settings/rerank."));
     }

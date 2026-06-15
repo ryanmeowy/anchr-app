@@ -6,8 +6,7 @@ import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
-import java.util.Optional;
+import java.util.List;
 
 /**
  * MyBatis implementation for capability config repository.
@@ -17,11 +16,10 @@ import java.util.Optional;
 public class CapabilityConfigRepositoryImpl implements CapabilityConfigRepository {
 
     private final CapabilityConfigMapper mapper;
-    private final IdGen idGen;
 
     @Override
-    public Optional<CapabilityConfig> findByCapability(String capability) {
-        return mapper.findByCapability(capability).map(this::toDomain);
+    public List<CapabilityConfig> findByCapability(String capability) {
+        return mapper.findByCapability(capability).stream().map(this::toDomain).toList();
     }
 
     @Override
@@ -29,6 +27,11 @@ public class CapabilityConfigRepositoryImpl implements CapabilityConfigRepositor
         CapabilityConfigRecord record = toRecord(config);
         mapper.upsert(record);
         return toDomain(record);
+    }
+
+    @Override
+    public void del(String capability, Long id) {
+        mapper.del(capability, id);
     }
 
     private CapabilityConfigRecord toRecord(CapabilityConfig config) {

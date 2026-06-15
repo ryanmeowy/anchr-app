@@ -20,6 +20,6 @@ public class StorageConfig {
     String prefix;
     String roleArn;
     boolean enabled;
-    Long updatedBy;
+    String updatedBy;
     LocalDateTime updatedAt;
 }

@@ -36,7 +36,7 @@ app:
     ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
     ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
-  kb-segment:
+  segment:
     index-name: ${APP_KB_SEGMENT_INDEX_NAME:kb_segment}
     indexVersion: ${APP_KB_SEGMENT_INDEX_VERSION:v1}
     read-alias: ${APP_KB_SEGMENT_READ_ALIAS:kb_segment_read}
@@ -75,4 +75,3 @@ management:
 
   docling:
     base-url: ${APP_DOCLING_BASE_URL:http://127.0.0.1:8091}
-    oss-encrypt-key: ${ANCHR_DOCLING_OSS_ENCRYPT_KEY:}

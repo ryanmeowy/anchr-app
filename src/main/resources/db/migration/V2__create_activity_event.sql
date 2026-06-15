@@ -1,6 +1,6 @@
 create table if not exists activity_event (
   id bigint primary key,
-  user_id bigint not null default 0,
+  user_id varchar(32) not null default 'system',
   event_type varchar(64) not null,
   resource_type varchar(64),
   resource_id varchar(128),

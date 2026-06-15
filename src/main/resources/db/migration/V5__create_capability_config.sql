@@ -6,7 +6,7 @@ create table if not exists capability_config (
   model_name      varchar(128),
   extra_config    json,
   enabled         boolean not null default true,
-  updated_by bigint not null default 0,
+  updated_by varchar(64) not null default 'system',
   updated_at      timestamp not null,
   unique key uk_capability (capability)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci;

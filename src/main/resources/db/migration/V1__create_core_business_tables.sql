@@ -6,8 +6,8 @@ create table if not exists knowledge_base (
   document_count int not null default 0,
   segment_count int not null default 0,
   last_ingested_at timestamp null,
-  created_by bigint not null default 0,
-  updated_by bigint not null default 0,
+  created_by varchar(64) not null default 'system',
+  updated_by varchar(64) not null default 'system',
   created_at timestamp not null,
   updated_at timestamp not null,
   deleted_at timestamp null
@@ -34,8 +34,8 @@ create table if not exists asset (
   embedding_profile varchar(128),
   error_code varchar(128),
   error_message text,
-  created_by bigint not null default 0,
-  updated_by bigint not null default 0,
+  created_by varchar(64) not null default 'system',
+  updated_by varchar(64) not null default 'system',
   created_at timestamp not null,
   updated_at timestamp not null,
   deleted_at timestamp null
@@ -54,8 +54,8 @@ create table if not exists ingestion_task (
   success_count int not null default 0,
   failure_count int not null default 0,
   running_count int not null default 0,
-  created_by bigint not null default 0,
-  updated_by bigint not null default 0,
+  created_by varchar(64) not null default 'system',
+  updated_by varchar(64) not null default 'system',
   created_at timestamp not null,
   updated_at timestamp not null,
   finished_at timestamp null

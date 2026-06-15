@@ -14,7 +14,7 @@ import java.util.Map;
 @Builder
 public class CapabilityConfigDTO {
     private static final ObjectMapper objectMapper = new ObjectMapper();
-
+    Long id;
     String baseUrl;
     String modelName;
     Map<String, Object> extraConfig;
@@ -23,6 +23,7 @@ public class CapabilityConfigDTO {
 
     public static CapabilityConfigDTO from(CapabilityConfig config, String apiKeyMasked) {
         return CapabilityConfigDTO.builder()
+                .id(config.getId())
                 .baseUrl(config.getBaseUrl())
                 .modelName(config.getModelName())
                 .extraConfig(parseExtraConfig(config.getExtraConfig()))

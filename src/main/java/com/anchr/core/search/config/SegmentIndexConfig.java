@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
  */
 @Data
 @Configuration
-@ConfigurationProperties(prefix = "app.segment-index")
+@ConfigurationProperties(prefix = "app.segment")
 public class SegmentIndexConfig {
 
     private String indexName = "kb_segment";
