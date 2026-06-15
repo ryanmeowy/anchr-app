@@ -1,11 +1,10 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.search.application.SegmentPreviewService;
 import com.anchr.core.search.application.support.PreviewAccessCache;
-import com.anchr.core.common.model.Bbox;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
@@ -128,26 +127,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return PreviewAnchorDTO.builder()
                 .pageNo(segment.getPageNo())
                 .chunkOrder(segment.getChunkOrder())
-                .bbox(toBbox(segment.getBbox()))
+                .bbox(segment.getBbox())
                 .imageWidth(segment.getImageWidth())
                 .imageHeight(segment.getImageHeight())
-                .build();
-    }
-
-    private PreviewAnchorDTO.BboxDTO toBbox(Bbox source) {
-        if (source == null) {
-            return null;
-        }
-        if (source.getX() == null || source.getY() == null || source.getWidth() == null || source.getHeight() == null
-                || source.getX() < 0 || source.getY() < 0 || source.getWidth() <= 0 || source.getHeight() <= 0) {
-            return null;
-        }
-        return PreviewAnchorDTO.BboxDTO.builder()
-                .x(source.getX())
-                .y(source.getY())
-                .width(source.getWidth())
-                .height(source.getHeight())
-                .unit(source.getUnit())
                 .build();
     }
 

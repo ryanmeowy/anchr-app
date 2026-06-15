@@ -108,22 +108,9 @@ public class ConversationResultCardMapper {
         return PreviewAnchorDTO.builder()
                 .pageNo(source.getPageNo() == null ? candidate.getPageNo() : source.getPageNo())
                 .chunkOrder(source.getChunkOrder())
-                .bbox(toBbox(source.getBbox()))
+                .bbox(source.getBbox())
                 .imageWidth(source.getImageWidth())
                 .imageHeight(source.getImageHeight())
-                .build();
-    }
-
-    private PreviewAnchorDTO.BboxDTO toBbox(ConversationRetrievalCandidate.Bbox source) {
-        if (source == null) {
-            return null;
-        }
-        return PreviewAnchorDTO.BboxDTO.builder()
-                .x(source.getX())
-                .y(source.getY())
-                .width(source.getWidth())
-                .height(source.getHeight())
-                .unit(source.getUnit())
                 .build();
     }
 

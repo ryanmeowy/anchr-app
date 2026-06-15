@@ -1,6 +1,7 @@
 package com.anchr.core.integration.ai;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 
@@ -26,7 +27,8 @@ public record ParseResponse(
             String textPlain,
             List<Integer> pageRange,
             Integer charCount,
-            String source
+            String source,
+            List<BboxInfo> bboxes
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -34,4 +36,10 @@ public record ParseResponse(
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Warning(String code, String message, String blockId) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BboxInfo(int pageNo, Bbox bbox){}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Bbox(double l, double t, double r, double b, @JsonProperty("coord_origin") String coordOrigin){}
 }

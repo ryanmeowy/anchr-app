@@ -9,7 +9,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * OpenAI-compatible rerank adapter backed by capability_config.
@@ -27,7 +29,7 @@ public class ConfigDrivenRerankAdapter implements SearchRerankPort {
     public List<RerankItem> rerank(String query, List<String> documents, Integer topN) {
         CapabilityConfig config = loadConfig();
 
-        java.util.Map<String, Object> extraConfig = new java.util.LinkedHashMap<>();
+        Map<String, Object> extraConfig = new LinkedHashMap<>();
         if (topN != null) extraConfig.put("top_n", topN);
 
         RerankClient client = new RerankClient(config.getBaseUrl(), decrypt(config.getApiKeyEnc()));

@@ -4,7 +4,6 @@ import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.common.model.Bbox;
 import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
@@ -177,22 +176,9 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
         return ConversationRetrievalCandidate.Anchor.builder()
                 .pageNo(source.getPageNo())
                 .chunkOrder(source.getChunkOrder())
-                .bbox(toCandidateBbox(source.getBbox()))
+                .bbox(source.getBbox())
                 .imageWidth(source.getImageWidth())
                 .imageHeight(source.getImageHeight())
-                .build();
-    }
-
-    private ConversationRetrievalCandidate.Bbox toCandidateBbox(Bbox source) {
-        if (source == null) {
-            return null;
-        }
-        return ConversationRetrievalCandidate.Bbox.builder()
-                .x(source.getX())
-                .y(source.getY())
-                .width(source.getWidth())
-                .height(source.getHeight())
-                .unit(source.getUnit())
                 .build();
     }
 

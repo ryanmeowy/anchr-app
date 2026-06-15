@@ -1,6 +1,6 @@
 package com.anchr.core.search.infrastructure.persistence.es.document;
 
-import com.anchr.core.common.model.Bbox;
+import com.anchr.core.common.model.BboxInfo;
 import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.elasticsearch.annotations.Document;
@@ -48,7 +48,7 @@ public class SegmentDocument {
     private Integer chunkOrder;
 
     @Field(type = FieldType.Object)
-    private Bbox bbox;
+    private List<BboxInfo> bbox;
 
     @Field(type = FieldType.Integer)
     private Integer imageWidth;

@@ -1,10 +1,10 @@
 package com.anchr.core.search.domain.model;
 
+import com.anchr.core.common.model.BboxInfo;
 import lombok.Builder;
 import lombok.Value;
 
 import java.util.List;
-import com.anchr.core.common.model.Bbox;
 
 /**
  * Unified retrieval unit for both text and image assets.
@@ -23,7 +23,7 @@ public class Segment {
     String ocrText;
     Integer pageNo;
     Integer chunkOrder;
-    Bbox bbox;
+    List<BboxInfo> bbox;
     Integer imageWidth;
     Integer imageHeight;
     List<Float> embedding;

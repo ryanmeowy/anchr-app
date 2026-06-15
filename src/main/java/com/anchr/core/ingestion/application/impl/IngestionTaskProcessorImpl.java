@@ -218,7 +218,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private List<Segment> buildSegments(Asset asset, List<Chunk> chunks) {
-        String title = StringUtils.hasText(asset.getTitle()) ? asset.getTitle() : asset.getFileName();
         return chunks.stream()
                 .filter(Objects::nonNull)
                 .filter(chunk -> StringUtils.hasText(chunk.getSegmentId()))
@@ -228,13 +227,14 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                         .assetId(asset.getId())
                         .assetType(isImage(asset) ? AssetType.IMAGE : AssetType.TEXT)
                         .segmentType(isImage(asset) ? SegmentType.IMAGE_OCR_BLOCK : SegmentType.TEXT_CHUNK)
-                        .title(title)
+                        .title(chunk.getTitle())
                         .contentText(chunk.getChunkText())
                         .embedding(chunk.getEmbedding())
                         .pageNo(chunk.getPageNo())
                         .chunkOrder(chunk.getChunkOrder())
                         .sourceRef(chunk.getSourceRef())
                         .createdAt(System.currentTimeMillis())
+                        .bbox(chunk.getBboxInfos())
                         .build())
                 .toList();
 

@@ -1,6 +1,6 @@
 package com.anchr.core.search.interfaces.rest.dto;
 
-import com.anchr.core.common.model.Bbox;
+import com.anchr.core.common.model.BboxInfo;
 import lombok.Builder;
 import lombok.Data;
 
@@ -44,7 +44,7 @@ public class SearchResultDTO implements Serializable {
     public static class Anchor implements Serializable {
         private Integer pageNo;
         private Integer chunkOrder;
-        private Bbox bbox;
+        private List<BboxInfo> bbox;
         private Integer imageWidth;
         private Integer imageHeight;
     }

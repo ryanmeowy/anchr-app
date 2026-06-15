@@ -1,8 +1,8 @@
 package com.anchr.core.ingestion.domain.model;
 
+import com.anchr.core.common.model.BboxInfo;
 import lombok.Builder;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.util.List;
 
@@ -21,5 +21,5 @@ public class Chunk {
     private Integer chunkOrder;
     private String sourceRef;
     private List<Float> embedding;
-
+    private List<BboxInfo> bboxInfos;
 }

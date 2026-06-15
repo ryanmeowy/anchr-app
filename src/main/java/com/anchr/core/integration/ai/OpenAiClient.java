@@ -88,7 +88,7 @@ public class OpenAiClient {
         return post("/chat/completions", body);
     }
 
-    /** POST /rerank */
+    /** only for aliyun */
     public JsonNode rerank(String model, String query, List<String> documents,
                            Map<String, Object> extraConfig) {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -98,7 +98,18 @@ public class OpenAiClient {
         if (extraConfig != null) {
             body.putAll(extraConfig);
         }
-        return post("/rerank", body);
+        return post("", body);
+    }
+
+    /** only for aliyun */
+    public JsonNode multiEmbeddings(String model, Map<String, Object> input, Map<String, Object> extraConfig) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("input", input);
+        if (extraConfig != null) {
+            body.putAll(extraConfig);
+        }
+        return post("", body);
     }
 
     // ── error type ──────────────────────────────────────────────────────
