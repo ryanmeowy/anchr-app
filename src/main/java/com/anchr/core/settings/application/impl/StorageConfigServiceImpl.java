@@ -76,11 +76,29 @@ public class StorageConfigServiceImpl implements StorageConfigService {
 
     @Override
     public StorageConnectionTestResultDTO test(StorageConnectionTestRequestDTO request) {
+        String accessKey = request.getAccessKey();
+        String secretKey = request.getSecretKey();
+        if (request.getConfigId() != null) {
+            StorageConfig existing = repository.find().orElse(null);
+            if (existing == null) {
+                throw new IllegalArgumentException("Storage config not found.");
+            }
+            try {
+                accessKey = aesUtil.decrypt(existing.getAccessKeyEnc());
+                secretKey = aesUtil.decrypt(existing.getSecretKeyEnc());
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Failed to decrypt stored credentials.", e);
+            }
+        }
+        if (!StringUtils.hasText(accessKey) || !StringUtils.hasText(secretKey)) {
+            return StorageConnectionTestResultDTO.builder()
+                    .success(false).latencyMs(0).message("accessKey and secretKey are required.").build();
+        }
+
         long start = System.currentTimeMillis();
         OSS client = null;
         try {
-            client = new OSSClientBuilder().build(
-                    request.getEndpoint(), request.getAccessKey(), request.getSecretKey());
+            client = new OSSClientBuilder().build(request.getEndpoint(), accessKey, secretKey);
             boolean exists = client.doesBucketExist(request.getBucket());
             long latencyMs = System.currentTimeMillis() - start;
             return StorageConnectionTestResultDTO.builder()

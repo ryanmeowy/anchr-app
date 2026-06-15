@@ -36,17 +36,39 @@ public class SettingsController {
     }
 
     @RequireAuth
-    @PatchMapping("/{capability}")
-    public Result<CapabilityConfigDTO> updateConfig(
+    @GetMapping("/{capability}/all")
+    public Result<List<CapabilityConfigDTO>> getAllConfigs(@PathVariable String capability) {
+        return Result.success(capabilityConfigService.findAll(capability.toUpperCase()));
+    }
+
+    @RequireAuth
+    @PostMapping("/{capability}")
+    public Result<CapabilityConfigDTO> createConfig(
             @PathVariable String capability,
             @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
-        return Result.success(capabilityConfigService.save(capability.toUpperCase(), request));
+        return Result.success(capabilityConfigService.create(capability.toUpperCase(), request));
+    }
+
+    @RequireAuth
+    @PatchMapping("/{capability}/{id}")
+    public Result<CapabilityConfigDTO> updateConfig(
+            @PathVariable String capability,
+            @PathVariable Long id,
+            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
+        return Result.success(capabilityConfigService.update(capability.toUpperCase(), id, request));
+    }
+
+    @RequireAuth
+    @PutMapping("/{capability}/{id}/select")
+    public Result<Void> selectConfig(@PathVariable String capability, @PathVariable Long id) {
+        capabilityConfigService.select(capability.toUpperCase(), id);
+        return Result.success(null);
     }
 
     @RequireAuth
     @DeleteMapping("/{capability}/{id}")
     public Result<Void> deleteConfig(@PathVariable String capability, @PathVariable Long id) {
-        capabilityConfigService.del(capability, id);
+        capabilityConfigService.del(capability.toUpperCase(), id);
         return Result.success(null);
     }
 

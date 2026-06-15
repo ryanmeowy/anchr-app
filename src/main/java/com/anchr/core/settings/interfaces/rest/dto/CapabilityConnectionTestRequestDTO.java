@@ -19,10 +19,12 @@ public class CapabilityConnectionTestRequestDTO {
     @Size(max = 512)
     private String baseUrl;
 
-    @NotBlank
     @Size(max = 256)
     private String apiKey;
 
     @Size(max = 128)
     private String modelName;
+
+    /** When set, use the stored key of this config instead of {@link #apiKey}. */
+    private Long configId;
 }

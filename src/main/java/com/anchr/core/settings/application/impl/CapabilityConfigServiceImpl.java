@@ -14,6 +14,7 @@ import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigUpdateRequestDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestRequestDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResultDTO;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -28,6 +29,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class CapabilityConfigServiceImpl implements CapabilityConfigService {
 
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final CapabilityConfigRepository repository;
     private final AesUtil aesUtil;
@@ -41,42 +43,75 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     }
 
     @Override
-    public CapabilityConfigDTO save(String capability, CapabilityConfigUpdateRequestDTO request) {
-        CapabilityConfig existing = repository.findByCapability(capability).stream().findFirst().orElse(null);
-        String apiKeyEnc;
+    public List<CapabilityConfigDTO> findAll(String capability) {
+        return repository.findAllByCapability(capability).stream()
+                .map(config -> CapabilityConfigDTO.from(config, maskApiKey(config.getApiKeyEnc())))
+                .toList();
+    }
 
-        if (StringUtils.hasText(request.getApiKey())) {
-            apiKeyEnc = aesUtil.encrypt(request.getApiKey());
-        } else if (existing != null) {
-            apiKeyEnc = existing.getApiKeyEnc();
-        } else {
+    @Override
+    public CapabilityConfigDTO create(String capability, CapabilityConfigUpdateRequestDTO request) {
+        if (!StringUtils.hasText(request.getApiKey())) {
             throw new IllegalArgumentException("apiKey is required for new configuration.");
         }
-
         CapabilityConfig config = CapabilityConfig.builder()
-                .id(existing != null ? existing.getId() : idGen.nextId())
+                .id(idGen.nextId())
+                .capability(capability)
+                .baseUrl(request.getBaseUrl())
+                .apiKeyEnc(aesUtil.encrypt(request.getApiKey()))
+                .modelName(request.getModelName())
+                .extraConfig(extraConfigJson(request.getExtraConfig()))
+                .enabled(false)
+                .updatedBy(UserContextHolder.get().userId())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        CapabilityConfig saved = repository.insert(config);
+        return CapabilityConfigDTO.from(saved, maskApiKey(saved.getApiKeyEnc()));
+    }
+
+    @Override
+    public CapabilityConfigDTO update(String capability, Long id, CapabilityConfigUpdateRequestDTO request) {
+        CapabilityConfig existing = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Config not found: " + id));
+        String apiKeyEnc = existing.getApiKeyEnc();
+        if (StringUtils.hasText(request.getApiKey())) {
+            apiKeyEnc = aesUtil.encrypt(request.getApiKey());
+        }
+        CapabilityConfig config = CapabilityConfig.builder()
+                .id(id)
                 .capability(capability)
                 .baseUrl(request.getBaseUrl())
                 .apiKeyEnc(apiKeyEnc)
                 .modelName(request.getModelName())
                 .extraConfig(extraConfigJson(request.getExtraConfig()))
-                .enabled(true)
+                .enabled(existing.isEnabled())
                 .updatedBy(UserContextHolder.get().userId())
                 .updatedAt(LocalDateTime.now())
                 .build();
-
-        CapabilityConfig saved = repository.upsert(config);
-        return CapabilityConfigDTO.from(saved, maskApiKey(saved.getApiKeyEnc()));
+        CapabilityConfig updated = repository.update(config);
+        return CapabilityConfigDTO.from(updated, maskApiKey(updated.getApiKeyEnc()));
     }
 
     @Override
     public CapabilityConnectionTestResultDTO test(CapabilityConnectionTestRequestDTO request) {
         String capability = request.getCapability() != null
                 ? request.getCapability().toUpperCase() : CAPABILITY_EMBEDDING;
+        String apiKey = request.getApiKey();
+        if (request.getConfigId() != null) {
+            apiKey = repository.findById(request.getConfigId())
+                    .map(c -> {
+                        try { return aesUtil.decrypt(c.getApiKeyEnc()); }
+                        catch (Exception e) { return null; }
+                    })
+                    .orElse(null);
+        }
+        if (!StringUtils.hasText(apiKey)) {
+            throw new IllegalArgumentException("apiKey is required for testing.");
+        }
 
         return switch (capability) {
             case CAPABILITY_GENERATION -> {
-                var client = new GenerationClient(request.getBaseUrl(), request.getApiKey());
+                var client = new GenerationClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
                         .success(result.success())
@@ -85,7 +120,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                         .build();
             }
             case CAPABILITY_RERANK -> {
-                var client = new RerankClient(request.getBaseUrl(), request.getApiKey());
+                var client = new RerankClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
                         .success(result.success())
@@ -94,7 +129,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                         .build();
             }
             case CAPABILITY_MULTI_EMBEDDING -> {
-                var client = new MultiEmbeddingClient(request.getBaseUrl(), request.getApiKey());
+                var client = new MultiEmbeddingClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
                         .success(result.success())
@@ -104,7 +139,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                         .build();
             }
             default -> {
-                var client = new EmbeddingClient(request.getBaseUrl(), request.getApiKey());
+                var client = new EmbeddingClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
                         .success(result.success())
@@ -117,15 +152,25 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     }
 
     @Override
+    public void select(String capability, Long id) {
+        repository.select(capability, id);
+        // embedding types are mutually exclusive
+        if (CAPABILITY_EMBEDDING.equals(capability)) {
+            repository.disableAll(CAPABILITY_MULTI_EMBEDDING);
+        } else if (CAPABILITY_MULTI_EMBEDDING.equals(capability)) {
+            repository.disableAll(CAPABILITY_EMBEDDING);
+        }
+    }
+
+    @Override
     public void del(String capability, Long id) {
         repository.del(capability, id);
     }
 
-
     private String extraConfigJson(java.util.Map<String, Object> extraConfig) {
         if (extraConfig == null || extraConfig.isEmpty()) return null;
         try {
-            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(extraConfig);
+            return objectMapper.writeValueAsString(extraConfig);
         } catch (Exception e) {
             return null;
         }
@@ -142,5 +187,4 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
             return "****";
         }
     }
-
 }

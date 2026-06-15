@@ -11,6 +11,7 @@ import lombok.Value;
 @Builder
 public class StorageConfigDTO {
 
+    Long id;
     String endpoint;
     String bucket;
     String region;
@@ -22,6 +23,7 @@ public class StorageConfigDTO {
 
     public static StorageConfigDTO from(StorageConfig config, String accessKeyMasked, String secretKeyMasked) {
         return StorageConfigDTO.builder()
+                .id(config.getId())
                 .endpoint(config.getEndpoint())
                 .bucket(config.getBucket())
                 .region(config.getRegion())

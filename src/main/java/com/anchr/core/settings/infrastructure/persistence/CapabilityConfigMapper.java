@@ -13,7 +13,17 @@ public interface CapabilityConfigMapper {
 
     List<CapabilityConfigRecord> findByCapability(@Param("capability") String capability);
 
-    int upsert(CapabilityConfigRecord record);
+    List<CapabilityConfigRecord> findAllByCapability(@Param("capability") String capability);
 
-    void del(@Param("capability")String capability, @Param("id") Long id);
+    int insert(CapabilityConfigRecord record);
+
+    int update(CapabilityConfigRecord record);
+
+    int select(@Param("capability") String capability, @Param("id") Long id);
+
+    int disableAll(@Param("capability") String capability);
+
+    void del(@Param("capability") String capability, @Param("id") Long id);
+
+    CapabilityConfigRecord findById(@Param("id") Long id);
 }

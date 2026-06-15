@@ -25,6 +25,7 @@
     <select id="find" resultMap="StorageConfigRecordMap">
         select <include refid="storageConfigColumns"/>
         from storage_config
+        where enabled = true
         limit 1
     </select>
 

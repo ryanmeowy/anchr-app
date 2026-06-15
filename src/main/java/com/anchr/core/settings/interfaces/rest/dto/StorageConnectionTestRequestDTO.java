@@ -15,11 +15,9 @@ public class StorageConnectionTestRequestDTO {
     @Size(max = 512)
     private String endpoint;
 
-    @NotBlank
     @Size(max = 256)
     private String accessKey;
 
-    @NotBlank
     @Size(max = 256)
     private String secretKey;
 
@@ -32,4 +30,7 @@ public class StorageConnectionTestRequestDTO {
 
     @Size(max = 256)
     private String roleArn;
+
+    /** When set, use the stored credentials of this config instead of {@link #accessKey} / {@link #secretKey}. */
+    private Long configId;
 }

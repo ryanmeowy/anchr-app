@@ -10,6 +10,7 @@
         <result property="baseUrl" column="base_url"/>
         <result property="apiKeyEnc" column="api_key_enc"/>
         <result property="modelName" column="model_name"/>
+        <result property="extraConfig" column="extra_config"/>
         <result property="enabled" column="enabled"/>
         <result property="updatedBy" column="updated_by"/>
         <result property="updatedAt" column="updated_at"/>
@@ -24,21 +25,62 @@
         select <include refid="capabilityConfigColumns"/>
         from capability_config
         where capability = #{capability}
+          and enabled = true
+          and deleted_at is null
     </select>
 
-    <insert id="upsert" parameterType="com.anchr.core.settings.infrastructure.persistence.CapabilityConfigRecord">
+    <select id="findAllByCapability" resultMap="CapabilityConfigRecordMap">
+        select <include refid="capabilityConfigColumns"/>
+        from capability_config
+        where capability = #{capability}
+          and deleted_at is null
+    </select>
+
+    <select id="findById" resultMap="CapabilityConfigRecordMap">
+        select <include refid="capabilityConfigColumns"/>
+        from capability_config
+        where id = #{id}
+          and deleted_at is null
+    </select>
+
+    <insert id="insert" parameterType="com.anchr.core.settings.infrastructure.persistence.CapabilityConfigRecord">
         insert into capability_config (
             <include refid="capabilityConfigColumns"/>
         ) values (
             #{id}, #{capability}, #{baseUrl}, #{apiKeyEnc}, #{modelName},
             #{extraConfig}, #{enabled}, #{updatedBy}, #{updatedAt}
-        ) on duplicate key update
-            base_url = values(base_url),
-            api_key_enc = values(api_key_enc),
-            model_name = values(model_name),
-            extra_config = values(extra_config),
-            enabled = values(enabled),
-            updated_by = values(updated_by),
-            updated_at = values(updated_at)
+        )
     </insert>
+
+    <update id="update" parameterType="com.anchr.core.settings.infrastructure.persistence.CapabilityConfigRecord">
+        update capability_config
+        set base_url = #{baseUrl},
+            api_key_enc = #{apiKeyEnc},
+            model_name = #{modelName},
+            extra_config = #{extraConfig},
+            enabled = #{enabled},
+            updated_by = #{updatedBy},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and deleted_at is null
+    </update>
+
+    <update id="select">
+        update capability_config
+        set enabled = (case when id = #{id} then true else false end)
+        where capability = #{capability}
+          and deleted_at is null
+    </update>
+
+    <update id="disableAll">
+        update capability_config set enabled = false
+        where capability = #{capability}
+          and deleted_at is null
+    </update>
+
+    <update id="del">
+        update capability_config
+        set deleted_at = now()
+        where capability = #{capability} and id = #{id}
+    </update>
 </mapper>

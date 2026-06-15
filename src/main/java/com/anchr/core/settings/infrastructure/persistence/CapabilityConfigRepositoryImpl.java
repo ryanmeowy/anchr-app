@@ -1,12 +1,12 @@
 package com.anchr.core.settings.infrastructure.persistence;
 
-import com.anchr.core.common.util.IdGen;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * MyBatis implementation for capability config repository.
@@ -23,10 +23,35 @@ public class CapabilityConfigRepositoryImpl implements CapabilityConfigRepositor
     }
 
     @Override
-    public CapabilityConfig upsert(CapabilityConfig config) {
-        CapabilityConfigRecord record = toRecord(config);
-        mapper.upsert(record);
-        return toDomain(record);
+    public List<CapabilityConfig> findAllByCapability(String capability) {
+        return mapper.findAllByCapability(capability).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public Optional<CapabilityConfig> findById(Long id) {
+        return Optional.ofNullable(mapper.findById(id)).map(this::toDomain);
+    }
+
+    @Override
+    public CapabilityConfig insert(CapabilityConfig config) {
+        mapper.insert(toRecord(config));
+        return config;
+    }
+
+    @Override
+    public CapabilityConfig update(CapabilityConfig config) {
+        mapper.update(toRecord(config));
+        return config;
+    }
+
+    @Override
+    public void select(String capability, Long id) {
+        mapper.select(capability, id);
+    }
+
+    @Override
+    public void disableAll(String capability) {
+        mapper.disableAll(capability);
     }
 
     @Override
