@@ -206,65 +206,33 @@
 
     <update id="refreshSummary">
         update ingestion_task it
-        set it.total_count = (
-                select count(1)
-                from ingestion_task_item iti
-                where iti.task_id = #{taskId}
-            ),
-            it.success_count = (
-                select count(1)
-                from ingestion_task_item iti
-                where iti.task_id = #{taskId}
-                  and iti.status in ('SUCCESS', 'SKIPPED')
-            ),
-            it.failure_count = (
-                select count(1)
-                from ingestion_task_item iti
-                where iti.task_id = #{taskId}
-                  and iti.status = 'FAILED'
-            ),
-            it.running_count = (
-                select count(1)
-                from ingestion_task_item iti
-                where iti.task_id = #{taskId}
-                  and iti.status = 'RUNNING'
-            ),
+        inner join (
+            select
+                task_id,
+                count(1) as total_count,
+                sum(case when status in ('SUCCESS', 'SKIPPED') then 1 else 0 end) as success_count,
+                sum(case when status = 'FAILED' then 1 else 0 end) as failure_count,
+                sum(case when status = 'RUNNING' then 1 else 0 end) as running_count,
+                sum(case when status = 'PENDING' then 1 else 0 end) as pending_count
+            from ingestion_task_item
+            where task_id = #{taskId}
+            group by task_id
+        ) summary on summary.task_id = it.id
+        set it.total_count = summary.total_count,
+            it.success_count = summary.success_count,
+            it.failure_count = summary.failure_count,
+            it.running_count = summary.running_count,
             it.status = case
-                when (
-                    select count(1)
-                    from ingestion_task_item iti
-                    where iti.task_id = #{taskId}
-                      and iti.status = 'RUNNING'
-                ) > 0 then 'RUNNING'
-                when (
-                    select count(1)
-                    from ingestion_task_item iti
-                    where iti.task_id = #{taskId}
-                      and iti.status = 'PENDING'
-                ) > 0 then 'PENDING'
-                when (
-                    select count(1)
-                    from ingestion_task_item iti
-                    where iti.task_id = #{taskId}
-                      and iti.status = 'FAILED'
-                ) = 0 then 'SUCCESS'
-                when (
-                    select count(1)
-                    from ingestion_task_item iti
-                    where iti.task_id = #{taskId}
-                      and iti.status in ('SUCCESS', 'SKIPPED')
-                ) = 0 then 'FAILED'
+                when summary.running_count > 0 then 'RUNNING'
+                when summary.pending_count > 0 then 'PENDING'
+                when summary.failure_count = 0 then 'SUCCESS'
+                when summary.success_count = 0 then 'FAILED'
                 else 'PARTIAL_SUCCESS'
             end,
             it.updated_by = #{updatedBy},
             it.updated_at = #{updatedAt},
             it.finished_at = case
-                when (
-                    select count(1)
-                    from ingestion_task_item iti
-                    where iti.task_id = #{taskId}
-                      and iti.status in ('RUNNING', 'PENDING')
-                ) > 0 then null
+                when summary.running_count > 0 or summary.pending_count > 0 then null
                 else #{updatedAt}
             end
         where it.id = #{taskId}

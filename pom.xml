@@ -39,7 +39,6 @@
         <hutool.version>5.8.40</hutool.version>
         <aspectjrt.version>1.9.21</aspectjrt.version>
         <aspectjweaver.version>1.9.21</aspectjweaver.version>
-        <redisson.version>3.39.0</redisson.version>
         <mybatis-spring-boot.version>3.0.4</mybatis-spring-boot.version>
     </properties>
     <dependencies>
@@ -161,11 +160,6 @@
             <version>${aspectjweaver.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.redisson</groupId>
-            <artifactId>redisson</artifactId>
-            <version>${redisson.version}</version>
-        </dependency>
         <!--↑↑ tools ↑↑-->
 
     </dependencies>

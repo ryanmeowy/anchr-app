@@ -31,8 +31,6 @@ import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.google.gson.Gson;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -45,9 +43,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Async executor for DB-backed knowledge base ingestion tasks.
@@ -64,6 +64,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private static final int STAGE_DONE_PROGRESS = 100;
     private static final int ERROR_MESSAGE_MAX_LENGTH = 1000;
 
+    private final Map<String, ReentrantLock> taskLocks = new ConcurrentHashMap<>();
     private final Object embeddingPaceLock = new Object();
     private long nextEmbeddingCallAt;
 
@@ -76,7 +77,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final AesUtil aesUtil;
     private final SegmentBulkWriter segmentBulkWriter;
     private final IngestionObjectStoragePort objectStoragePort;
-    private final RedissonClient redissonClient;
     private final StorageConfigRepository storageConfigRepository;
     private final DoclingChunkMapper doclingChunkMapper;
     private final Gson gson;
@@ -102,7 +102,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private void processTask( String kbId, String taskId, String userId) {
-        RLock lock = redissonClient.getLock(TASK_LOCK_PREFIX + taskId);
+        ReentrantLock lock = taskLocks.computeIfAbsent(TASK_LOCK_PREFIX + taskId, key -> new ReentrantLock());
         if (!lock.tryLock()) {
             return;
         }
@@ -118,9 +118,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             }
         } finally {
             refreshTask(kbId, taskId, userId);
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+            lock.unlock();
+            taskLocks.remove(TASK_LOCK_PREFIX + taskId);
         }
     }
 

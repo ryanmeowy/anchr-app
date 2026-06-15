@@ -112,23 +112,23 @@
     </update>
 
     <update id="refreshDocumentStats">
-        update knowledge_base
-        set document_count = (
-                select count(1)
-                from asset da
-                where da.kb_id = #{id}
-                  and da.deleted_at is null
-            ),
-            segment_count = (
-                select coalesce(sum(da.segment_count), 0)
-                from asset da
-                where da.kb_id = #{id}
-                  and da.deleted_at is null
-            ),
-            updated_by = #{updatedBy},
-            updated_at = #{updatedAt}
-        where id = #{id}
-          and deleted_at is null
+        update knowledge_base kb
+        left join (
+            select
+                kb_id,
+                count(1) as document_count,
+                coalesce(sum(segment_count), 0) as segment_count
+            from asset
+            where kb_id = #{id}
+              and deleted_at is null
+            group by kb_id
+        ) stats on stats.kb_id = kb.id
+        set kb.document_count = coalesce(stats.document_count, 0),
+            kb.segment_count = coalesce(stats.segment_count, 0),
+            kb.updated_by = #{updatedBy},
+            kb.updated_at = #{updatedAt}
+        where kb.id = #{id}
+          and kb.deleted_at is null
     </update>
 
     <select id="searchActive" resultMap="KnowledgeBaseRecordMap">
