@@ -1,11 +1,18 @@
 package com.anchr.core.common.model;
 
 import com.anchr.core.integration.ai.ParseResponse;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class BboxInfo {
     private Bbox bbox;
     private int pageNo;
@@ -13,11 +20,15 @@ public class BboxInfo {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Bbox{
         private double l;
         private double t;
         private double r;
         private double b;
+        @JsonAlias("coord_origin")
         private String coordOrigin;
     }
 

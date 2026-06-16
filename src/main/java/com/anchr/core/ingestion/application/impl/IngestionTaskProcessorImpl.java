@@ -10,7 +10,7 @@ import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
 import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
-import com.anchr.core.integration.ai.DoclingClient;
+import com.anchr.core.integration.ai.client.DoclingClient;
 import com.anchr.core.integration.ai.ParseRequest;
 import com.anchr.core.integration.ai.ParseResponse;
 import com.anchr.core.integration.storage.StorageTokenIssuer;
@@ -284,11 +284,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private List<Float> embedTextWithRetry(String text) {
-        return callEmbeddingWithRetry(() -> embeddingPort.embedText(text), "text");
+        return callEmbeddingWithRetry(() -> embeddingPort.embed(text, "text"), "text");
     }
 
     private List<Float> embedImageWithRetry(String imageInput) {
-        return callEmbeddingWithRetry(() -> embeddingPort.embedImage(imageInput), "image");
+        return callEmbeddingWithRetry(() -> embeddingPort.embed(imageInput, "image"), "image");
     }
 
     private List<Float> callEmbeddingWithRetry(Supplier<List<Float>> call, String inputType) {

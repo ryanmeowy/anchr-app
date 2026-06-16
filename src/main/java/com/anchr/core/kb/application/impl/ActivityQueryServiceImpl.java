@@ -8,8 +8,12 @@ import com.anchr.core.kb.domain.model.ActivityEventType;
 import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentDocumentDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentDocumentListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentSearchDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentSearchListDTO;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -75,6 +79,42 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 .build();
     }
 
+    @Override
+    public RecentSearchListDTO recentSearch(Integer limit, String cursor) {
+        int boundedLimit = normalizeLimit(limit);
+        int offset = decodeOffset(cursor);
+        List<ActivityEvent> events = listEvents(ActivityEventType.SEARCH_EXECUTED, boundedLimit + 1, offset);
+        List<ActivityEvent> pageEvents = events.stream()
+                .limit(boundedLimit)
+                .toList();
+        Map<String, String> knowledgeBaseNamesById = loadKnowledgeBaseNamesByListPayload(pageEvents, "kbIds");
+        List<RecentSearchDTO> items = pageEvents.stream()
+                .map(event -> toRecentSearch(event, knowledgeBaseNamesById))
+                .toList();
+        return RecentSearchListDTO.builder()
+                .items(items)
+                .nextCursor(events.size() > boundedLimit ? encodeOffset(offset + boundedLimit) : null)
+                .build();
+    }
+
+    @Override
+    public RecentDocumentListDTO recentDocument(Integer limit, String cursor) {
+        int boundedLimit = normalizeLimit(limit);
+        int offset = decodeOffset(cursor);
+        List<ActivityEvent> events = listEvents(ActivityEventType.DOCUMENT_IMPORTED, boundedLimit + 1, offset);
+        List<ActivityEvent> pageEvents = events.stream()
+                .limit(boundedLimit)
+                .toList();
+        Map<String, String> knowledgeBaseNamesById = loadKnowledgeBaseNamesByScalarPayload(pageEvents, "kbId");
+        List<RecentDocumentDTO> items = pageEvents.stream()
+                .map(event -> toRecentDocument(event, knowledgeBaseNamesById))
+                .toList();
+        return RecentDocumentListDTO.builder()
+                .items(items)
+                .nextCursor(events.size() > boundedLimit ? encodeOffset(offset + boundedLimit) : null)
+                .build();
+    }
+
     private List<ActivityEvent> listEvents(ActivityEventType eventType, int limit, int offset) {
         RequestUserContext context = UserContextHolder.get();
         return activityEventRepository.listByType(context.userId(), eventType, limit, offset);
@@ -101,6 +141,26 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 .flatMap(event -> readStringList(parsePayload(event), "kbScope").stream())
                 .filter(StringUtils::hasText)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+        return loadKnowledgeBaseNamesById(kbIds);
+    }
+
+    private Map<String, String> loadKnowledgeBaseNamesByListPayload(List<ActivityEvent> events, String listKey) {
+        Set<String> kbIds = events.stream()
+                .flatMap(event -> readStringList(parsePayload(event), listKey).stream())
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return loadKnowledgeBaseNamesById(kbIds);
+    }
+
+    private Map<String, String> loadKnowledgeBaseNamesByScalarPayload(List<ActivityEvent> events, String scalarKey) {
+        Set<String> kbIds = events.stream()
+                .map(event -> readString(parsePayload(event), scalarKey, null))
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return loadKnowledgeBaseNamesById(kbIds);
+    }
+
+    private Map<String, String> loadKnowledgeBaseNamesById(Set<String> kbIds) {
         if (kbIds.isEmpty()) {
             return Map.of();
         }
@@ -125,6 +185,41 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 .snippet(readString(payload, "snippet", null))
                 .citationReason(readString(payload, "citationReason", null))
                 .openedAt(event.getCreatedAt())
+                .build();
+    }
+
+    private RecentSearchDTO toRecentSearch(ActivityEvent event, Map<String, String> knowledgeBaseNamesById) {
+        Map<String, Object> payload = parsePayload(event);
+        List<String> kbIds = readStringList(payload, "kbIds");
+        return RecentSearchDTO.builder()
+                .query(readString(payload, "query", null))
+                .kbIds(kbIds)
+                .knowledgeBaseNames(kbIds.stream()
+                        .map(knowledgeBaseNamesById::get)
+                        .filter(StringUtils::hasText)
+                        .toList())
+                .total(readInt(payload, "total", 0))
+                .searchedAt(event.getCreatedAt())
+                .assetTypes(readStringList(payload, "assetTypes"))
+                .dateRange(readDateRange(payload, "dateRange"))
+                .withAnswer(readBoolean(payload, "withAnswer"))
+                .answerMode(readString(payload, "answerMode", null))
+                .build();
+    }
+
+    private RecentDocumentDTO toRecentDocument(ActivityEvent event, Map<String, String> knowledgeBaseNamesById) {
+        Map<String, Object> payload = parsePayload(event);
+        String kbId = readString(payload, "kbId", null);
+        return RecentDocumentDTO.builder()
+                .taskId(readString(payload, "taskId", event.getResourceId()))
+                .kbId(kbId)
+                .knowledgeBaseName(StringUtils.hasText(kbId) ? knowledgeBaseNamesById.get(kbId) : null)
+                .status(readString(payload, "status", null))
+                .totalCount(readInt(payload, "totalCount", 0))
+                .successCount(readInt(payload, "successCount", 0))
+                .failureCount(readInt(payload, "failureCount", 0))
+                .runningCount(readInt(payload, "runningCount", 0))
+                .importedAt(event.getCreatedAt())
                 .build();
     }
 
@@ -158,6 +253,61 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 .map(String::valueOf)
                 .filter(StringUtils::hasText)
                 .toList();
+    }
+
+    private int readInt(Map<String, Object> payload, String key, int fallback) {
+        Object value = payload.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private Boolean readBoolean(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        if (value instanceof Boolean b) {
+            return b;
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private RecentSearchDTO.DateRange readDateRange(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        if (!(value instanceof Map<?, ?> raw)) {
+            return null;
+        }
+        Map<String, Object> map = (Map<String, Object>) raw;
+        Long from = toLong(map.get("from"));
+        Long to = toLong(map.get("to"));
+        if (from == null && to == null) {
+            return null;
+        }
+        return RecentSearchDTO.DateRange.builder()
+                .from(from)
+                .to(to)
+                .build();
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private int normalizeLimit(Integer limit) {

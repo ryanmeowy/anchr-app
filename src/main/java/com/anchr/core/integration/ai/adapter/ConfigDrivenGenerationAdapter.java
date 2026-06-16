@@ -1,7 +1,8 @@
-package com.anchr.core.integration.ai;
+package com.anchr.core.integration.ai.adapter;
 
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.conversation.domain.port.ConversationRewritePort;
+import com.anchr.core.integration.ai.client.GenerationClient;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import lombok.RequiredArgsConstructor;
@@ -9,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import java.util.Map;
 
 @Slf4j

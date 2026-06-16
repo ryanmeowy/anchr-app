@@ -9,12 +9,14 @@ import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.util.IdGen;
+import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -70,12 +72,21 @@ public class ActivityEventServiceImpl implements ActivityEventService {
     }
 
     @Override
-    public void recordSearchExecuted(String query, List<String> kbIds, int total) {
-        saveEvent(ActivityEventType.SEARCH_EXECUTED, "SEARCH", null, Map.of(
-                "query", valueOrEmpty(query),
-                "kbIds", kbIds == null ? List.of() : kbIds,
-                "total", total
-        ));
+    public void recordSearchExecuted(SearchQueryDTO query, int total) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("query", valueOrEmpty(query.getQuery()));
+        payload.put("kbIds", query.getKbIds() == null ? List.of() : query.getKbIds());
+        payload.put("total", total);
+        payload.put("assetTypes", query.getAssetTypes() == null ? List.of() : query.getAssetTypes());
+        if (query.getDateRange() != null) {
+            Map<String, Long> dateRange = new LinkedHashMap<>();
+            dateRange.put("from", query.getDateRange().getFrom());
+            dateRange.put("to", query.getDateRange().getTo());
+            payload.put("dateRange", dateRange);
+        }
+        payload.put("withAnswer", query.getWithAnswer());
+        payload.put("answerMode", valueOrEmpty(query.getAnswerMode()));
+        saveEvent(ActivityEventType.SEARCH_EXECUTED, "SEARCH", null, payload);
     }
 
     private void saveEvent(ActivityEventType eventType, String resourceType, String resourceId, Map<String, Object> payload) {

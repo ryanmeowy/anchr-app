@@ -1,4 +1,4 @@
-package com.anchr.core.integration.ai;
+package com.anchr.core.integration.ai.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,7 +17,7 @@ import java.util.Map;
  * Lightweight OpenAI-compatible HTTP client shared by embedding, generation, and rerank.
  */
 @Slf4j
-public class OpenAiClient {
+public class AiClient {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final HttpClient httpClient = HttpClient.newBuilder()
@@ -27,7 +27,7 @@ public class OpenAiClient {
     private final String baseUrl;
     private final String apiKey;
 
-    public OpenAiClient(String baseUrl, String apiKey) {
+    public AiClient(String baseUrl, String apiKey) {
         this.baseUrl = baseUrl.replaceAll("/$", "");
         this.apiKey = apiKey;
     }

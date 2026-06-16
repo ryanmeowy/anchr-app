@@ -1,4 +1,4 @@
-package com.anchr.core.integration.ai;
+package com.anchr.core.integration.ai.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.collect.Lists;
@@ -9,30 +9,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Embedding capability backed by {@link OpenAiClient}.
+ * Embedding capability backed by {@link AiClient}.
  */
-public class MultiEmbeddingClient {
+public class MultiEmbeddingClient implements EmbeddingClient {
 
-    private final OpenAiClient client;
+    private final AiClient client;
 
     public MultiEmbeddingClient(String baseUrl, String apiKey) {
-        this.client = new OpenAiClient(baseUrl, apiKey);
+        this.client = new AiClient(baseUrl, apiKey);
     }
 
-    public EmbeddingResult multiEmbed(String modelName, Map<String, Object> extraConfig, Map<String, Object> contents) {
-        Map<String, Object> inputMap = new HashMap<>();
-        inputMap.put("contents", Lists.newArrayList(contents));
-        return embed(modelName, extraConfig, inputMap);
-    }
-
-    /**
-     * Embed multiple texts in one request.
-     */
-    public EmbeddingResult embed(String modelName, Map<String, Object> extraConfig, Map<String, Object> input) {
-        JsonNode root = client.multiEmbeddings(modelName, input, extraConfig);
+    @Override
+    public EmbeddingResult embed(EmbedContext context) {
+        JsonNode root = client.multiEmbeddings(context.modelName(), context.contentMap(), context.extraConfig());
         JsonNode data = root.path("output").path("embeddings");
         if (!data.isArray() || data.isEmpty()) {
-            throw new OpenAiClient.OpenAiException(-1, "Empty embedding response.");
+            throw new AiClient.OpenAiException(-1, "Empty embedding response.");
         }
         JsonNode firstEmbedding = data.get(0).path("embedding");
         List<Float> vector = new ArrayList<>();
@@ -50,7 +42,10 @@ public class MultiEmbeddingClient {
         try {
             Map<String, Object> map = new HashMap<>();
             map.put("text", "测试");
-            EmbeddingResult result = multiEmbed(modelName, null, map);
+            Map<String, Object> contentsMap = new HashMap<>();
+            contentsMap.put("contents", Lists.newArrayList(map));
+            EmbedContext context = EmbedContext.builder().modelName(modelName).contentMap(contentsMap).build();
+            EmbeddingResult result = embed(context);
             long latency = System.currentTimeMillis() - start;
             return new ConnectionTestResult(true, latency,
                     "连接成功, 向量维度 " + result.dimension(), result.dimension());
@@ -60,9 +55,4 @@ public class MultiEmbeddingClient {
                     "连接失败: " + e.getMessage(), null);
         }
     }
-
-    public record EmbeddingResult(List<Float> vector, int dimension) {}
-
-    public record ConnectionTestResult(boolean success, long latencyMs, String message, Integer dimension) {}
-
 }

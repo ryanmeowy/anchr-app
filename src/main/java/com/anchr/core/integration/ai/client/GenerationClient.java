@@ -1,4 +1,4 @@
-package com.anchr.core.integration.ai;
+package com.anchr.core.integration.ai.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -6,14 +6,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Generation capability backed by {@link OpenAiClient}.
+ * Generation capability backed by {@link AiClient}.
  */
 public class GenerationClient {
 
-    private final OpenAiClient client;
+    private final AiClient client;
 
     public GenerationClient(String baseUrl, String apiKey) {
-        this.client = new OpenAiClient(baseUrl, apiKey);
+        this.client = new AiClient(baseUrl, apiKey);
     }
 
     /**
@@ -24,7 +24,7 @@ public class GenerationClient {
         JsonNode root = client.chatCompletions(modelName, messages, extraConfig);
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
-            throw new OpenAiClient.OpenAiException(-1, "Empty generation response.");
+            throw new AiClient.OpenAiException(-1, "Empty generation response.");
         }
         String content = choices.get(0).path("message").path("content").asText();
         JsonNode usage = root.path("usage");

@@ -2,7 +2,9 @@ package com.anchr.core.kb.interfaces.rest;
 
 import com.anchr.core.kb.application.ActivityQueryService;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentDocumentListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentSearchListDTO;
 import com.anchr.core.auth.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import lombok.RequiredArgsConstructor;
@@ -35,5 +37,21 @@ public class ActivityController {
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) String cursor) {
         return Result.success(activityQueryService.recentCitations(limit, cursor));
+    }
+
+    @RequireAuth
+    @GetMapping("/recent-search")
+    public Result<RecentSearchListDTO> recentSearch(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor) {
+        return Result.success(activityQueryService.recentSearch(limit, cursor));
+    }
+
+    @RequireAuth
+    @GetMapping("/recent-document")
+    public Result<RecentDocumentListDTO> recentDocument(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor) {
+        return Result.success(activityQueryService.recentDocument(limit, cursor));
     }
 }

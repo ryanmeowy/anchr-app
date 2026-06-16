@@ -3,10 +3,10 @@ package com.anchr.core.settings.application.impl;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
-import com.anchr.core.integration.ai.EmbeddingClient;
-import com.anchr.core.integration.ai.GenerationClient;
-import com.anchr.core.integration.ai.MultiEmbeddingClient;
-import com.anchr.core.integration.ai.RerankClient;
+import com.anchr.core.integration.ai.client.TextEmbeddingClient;
+import com.anchr.core.integration.ai.client.GenerationClient;
+import com.anchr.core.integration.ai.client.MultiEmbeddingClient;
+import com.anchr.core.integration.ai.client.RerankClient;
 import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
@@ -139,7 +139,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                         .build();
             }
             default -> {
-                var client = new EmbeddingClient(request.getBaseUrl(), apiKey);
+                var client = new TextEmbeddingClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
                         .success(result.success())

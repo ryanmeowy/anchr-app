@@ -7,19 +7,6 @@ import java.util.List;
  */
 public interface IngestionEmbeddingPort {
 
-    /**
-     * Embed image input to vector.
-     *
-     * @param imageInput image url/data input
-     * @return image embedding
-     */
-    List<Float> embedImage(String imageInput);
+    List<Float> embed(String source, String sourceType);
 
-    /**
-     * Embed plain text input to vector.
-     *
-     * @param text text content
-     * @return text embedding
-     */
-    List<Float> embedText(String text);
 }

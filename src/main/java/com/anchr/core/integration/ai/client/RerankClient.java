@@ -1,4 +1,4 @@
-package com.anchr.core.integration.ai;
+package com.anchr.core.integration.ai.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -7,14 +7,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Rerank capability backed by {@link OpenAiClient}.
+ * Rerank capability backed by {@link AiClient}.
  */
 public class RerankClient {
 
-    private final OpenAiClient client;
+    private final AiClient client;
 
     public RerankClient(String baseUrl, String apiKey) {
-        this.client = new OpenAiClient(baseUrl, apiKey);
+        this.client = new AiClient(baseUrl, apiKey);
     }
 
     /**

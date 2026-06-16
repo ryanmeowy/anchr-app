@@ -131,7 +131,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         if (query == null) {
             return;
         }
-        activityEventService.recordSearchExecuted(query.getQuery(), query.getKbIds(), Math.toIntExact(Math.min(total, Integer.MAX_VALUE)));
+        activityEventService.recordSearchExecuted(query, Math.toIntExact(Math.min(total, Integer.MAX_VALUE)));
     }
 
     private List<SegmentRerankCandidate> fuseCandidates(List<SegmentHit> textHits,

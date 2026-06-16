@@ -1,38 +1,27 @@
-package com.anchr.core.integration.ai;
+package com.anchr.core.integration.ai.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Embedding capability backed by {@link OpenAiClient}.
+ * Embedding capability backed by {@link AiClient}.
  */
-public class EmbeddingClient {
+public class TextEmbeddingClient implements EmbeddingClient {
 
-    private final OpenAiClient client;
+    private final AiClient client;
 
-    public EmbeddingClient(String baseUrl, String apiKey) {
-        this.client = new OpenAiClient(baseUrl, apiKey);
+    public TextEmbeddingClient(String baseUrl, String apiKey) {
+        this.client = new AiClient(baseUrl, apiKey);
     }
 
-    /**
-     * Embed a single text.
-     */
-    public EmbeddingResult embedText(String modelName, Map<String, Object> extraConfig, String text) {
-        return embedTexts(modelName, extraConfig, List.of(text));
-    }
-
-    /**
-     * Embed multiple texts in one request.
-     */
-    public EmbeddingResult embedTexts(String modelName, Map<String, Object> extraConfig, List<String> texts) {
-        JsonNode root = client.embeddings(modelName, texts, extraConfig);
+    @Override
+    public EmbeddingResult embed(EmbedContext context) {
+        JsonNode root = client.embeddings(context.modelName(), context.texts(), context.extraConfig());
         JsonNode data = root.path("data");
         if (!data.isArray() || data.isEmpty()) {
-            throw new OpenAiClient.OpenAiException(-1, "Empty embedding response.");
+            throw new AiClient.OpenAiException(-1, "Empty embedding response.");
         }
         JsonNode firstEmbedding = data.get(0).path("embedding");
         List<Float> vector = new ArrayList<>();
@@ -48,7 +37,8 @@ public class EmbeddingClient {
     public ConnectionTestResult testConnection(String modelName) {
         long start = System.currentTimeMillis();
         try {
-            EmbeddingResult result = embedText(modelName, null, "test");
+            EmbedContext context = EmbedContext.builder().modelName(modelName).texts(List.of("test")).build();
+            EmbeddingResult result = embed(context);
             long latency = System.currentTimeMillis() - start;
             return new ConnectionTestResult(true, latency,
                     "连接成功, 向量维度 " + result.dimension(), result.dimension());
@@ -58,9 +48,5 @@ public class EmbeddingClient {
                     "连接失败: " + e.getMessage(), null);
         }
     }
-
-    public record EmbeddingResult(List<Float> vector, int dimension) {}
-
-    public record ConnectionTestResult(boolean success, long latencyMs, String message, Integer dimension) {}
 
 }

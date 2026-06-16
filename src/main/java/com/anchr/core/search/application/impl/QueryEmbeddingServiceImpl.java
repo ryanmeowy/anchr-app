@@ -25,7 +25,7 @@ public class QueryEmbeddingServiceImpl implements QueryEmbeddingService {
         if (!StringUtils.hasText(query)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
-        List<Float> embedding = searchEmbeddingPort.embedText(query.trim());
+        List<Float> embedding = searchEmbeddingPort.embed(query.trim(), "text");
         if (CollectionUtils.isEmpty(embedding)) {
             throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
         }

@@ -6,7 +6,9 @@ import com.anchr.core.kb.domain.model.ActivityEvent;
 import com.anchr.core.kb.domain.model.ActivityEventType;
 import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentDocumentListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.RecentSearchListDTO;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
@@ -72,6 +74,61 @@ class ActivityQueryServiceImplTest {
         assertThat(result.getItems().getFirst().getSegmentId()).isEqualTo("seg-1");
         assertThat(result.getItems().getFirst().getFileName()).isEqualTo("合同.pdf");
         assertThat(result.getItems().getFirst().getCitationReason()).isEqualTo("该片段包含付款期限。");
+        assertThat(result.getNextCursor()).isNull();
+    }
+
+    @Test
+    void recentSearch_shouldMapSearchPayload() {
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
+        ActivityEvent event = event(ActivityEventType.SEARCH_EXECUTED, null,
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-1\",\"kb-2\"],\"total\":12,"
+                        + "\"assetTypes\":[\"PDF\",\"IMAGE\"],"
+                        + "\"dateRange\":{\"from\":1715678900,\"to\":1715765300},"
+                        + "\"withAnswer\":true,"
+                        + "\"answerMode\":\"BRIEF\"}");
+        when(activityEventRepository.listByType("user-a", ActivityEventType.SEARCH_EXECUTED, 11, 0))
+                .thenReturn(List.of(event));
+        when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1", "kb-2")))
+                .thenReturn(List.of(kb("kb-1", "合同知识库"), kb("kb-2", "制度知识库")));
+
+        RecentSearchListDTO result = service.recentSearch(10, null);
+
+        assertThat(result.getItems()).hasSize(1);
+        assertThat(result.getItems().getFirst().getQuery()).isEqualTo("付款期限");
+        assertThat(result.getItems().getFirst().getKbIds()).containsExactly("kb-1", "kb-2");
+        assertThat(result.getItems().getFirst().getKnowledgeBaseNames()).containsExactly("合同知识库", "制度知识库");
+        assertThat(result.getItems().getFirst().getTotal()).isEqualTo(12);
+        assertThat(result.getItems().getFirst().getAssetTypes()).containsExactly("PDF", "IMAGE");
+        assertThat(result.getItems().getFirst().getDateRange()).isNotNull();
+        assertThat(result.getItems().getFirst().getDateRange().getFrom()).isEqualTo(1715678900L);
+        assertThat(result.getItems().getFirst().getDateRange().getTo()).isEqualTo(1715765300L);
+        assertThat(result.getItems().getFirst().getWithAnswer()).isTrue();
+        assertThat(result.getItems().getFirst().getAnswerMode()).isEqualTo("BRIEF");
+        assertThat(result.getNextCursor()).isNull();
+    }
+
+    @Test
+    void recentDocument_shouldMapDocumentImportedPayload() {
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
+        ActivityEvent event = event(ActivityEventType.DOCUMENT_IMPORTED, "task-1",
+                "{\"taskId\":\"task-1\",\"kbId\":\"kb-1\",\"status\":\"COMPLETED\","
+                        + "\"totalCount\":3,\"successCount\":2,\"failureCount\":1,\"runningCount\":0}");
+        when(activityEventRepository.listByType("user-a", ActivityEventType.DOCUMENT_IMPORTED, 11, 0))
+                .thenReturn(List.of(event));
+        when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1")))
+                .thenReturn(List.of(kb("kb-1", "合同知识库")));
+
+        RecentDocumentListDTO result = service.recentDocument(10, null);
+
+        assertThat(result.getItems()).hasSize(1);
+        assertThat(result.getItems().getFirst().getTaskId()).isEqualTo("task-1");
+        assertThat(result.getItems().getFirst().getKbId()).isEqualTo("kb-1");
+        assertThat(result.getItems().getFirst().getKnowledgeBaseName()).isEqualTo("合同知识库");
+        assertThat(result.getItems().getFirst().getStatus()).isEqualTo("COMPLETED");
+        assertThat(result.getItems().getFirst().getTotalCount()).isEqualTo(3);
+        assertThat(result.getItems().getFirst().getSuccessCount()).isEqualTo(2);
+        assertThat(result.getItems().getFirst().getFailureCount()).isEqualTo(1);
+        assertThat(result.getItems().getFirst().getRunningCount()).isZero();
         assertThat(result.getNextCursor()).isNull();
     }
 
