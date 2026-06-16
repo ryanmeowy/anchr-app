@@ -72,7 +72,7 @@ public class SegmentBulkWriter {
         document.setSegmentId(segment.getSegmentId());
         document.setKbId(segment.getKbId());
         document.setAssetId(segment.getAssetId());
-        document.setAssetType(segment.getAssetType() == null ? null : segment.getAssetType().name());
+        document.setAssetType(segment.getAssetType());
         document.setSegmentType(segment.getSegmentType() == null ? null : segment.getSegmentType().name());
         document.setTitle(segment.getTitle());
         document.setContentText(segment.getContentText());

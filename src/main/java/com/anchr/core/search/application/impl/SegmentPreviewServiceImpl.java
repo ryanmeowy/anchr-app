@@ -83,10 +83,10 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
                 .kbId(segment.getKbId())
-                .assetType(toCode(segment.getAssetType()))
+                .assetType(segment.getAssetType())
                 .segmentType(toCode(segment.getSegmentType()))
                 .fileName(resolveFileName(segment))
-                .previewType(resolvePreviewType(segment))
+                .previewType(segment.getAssetType())
                 .previewUrl(previewAccess.url())
                 .expiresAt(previewAccess.expiresAt())
                 .sourceRef(segment.getSourceRef())
@@ -252,48 +252,6 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
             objectKey = objectKey.substring(1);
         }
         return objectKey;
-    }
-
-    private String resolvePreviewType(Segment segment) {
-        String extension = resolveExtension(resolveFileName(segment));
-        if (StringUtils.hasText(extension)) {
-            String type = previewTypeFromExtension(extension);
-            if (type != null) {
-                return type;
-            }
-        }
-        if (segment.getAssetType() != null) {
-            return switch (segment.getAssetType()) {
-                case IMAGE -> "IMAGE";
-                case TEXT -> "TXT";
-            };
-        }
-        if (segment.getSegmentType() != null && segment.getSegmentType().name().startsWith("IMAGE_")) {
-            return "IMAGE";
-        }
-        return "TXT";
-    }
-
-    private String resolveExtension(String fileName) {
-        if (!StringUtils.hasText(fileName)) {
-            return null;
-        }
-        String normalized = fileName.trim();
-        int dotIndex = normalized.lastIndexOf('.');
-        if (dotIndex < 0 || dotIndex == normalized.length() - 1) {
-            return null;
-        }
-        return normalized.substring(dotIndex + 1).toLowerCase();
-    }
-
-    private String previewTypeFromExtension(String extension) {
-        return switch (extension) {
-            case "pdf" -> "PDF";
-            case "txt" -> "TXT";
-            case "md", "markdown" -> "MD";
-            case "png", "jpg", "jpeg", "webp", "gif", "bmp" -> "IMAGE";
-            default -> null;
-        };
     }
 
     private String resolveSnippet(Segment segment) {

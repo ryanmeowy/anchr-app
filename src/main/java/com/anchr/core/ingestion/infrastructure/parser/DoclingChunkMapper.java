@@ -26,27 +26,38 @@ public class DoclingChunkMapper {
 
     private final IdGen idgen;
 
-    public List<Chunk> toTextChunks(Asset asset, List<ParseResponse.Chunk> chunks) {
+    public List<Chunk> toTextChunks(Asset asset, ParseResponse response) {
+        List<ParseResponse.Chunk> chunks = response.chunks();
+        boolean isImg = isImage(response.fileType());
+
         if (CollectionUtils.isEmpty(chunks)) return Lists.newArrayList();
         return chunks.stream()
                 .filter(Objects::nonNull)
-                .map(chunk -> convert2Chunk(chunk, asset))
+                .map(chunk -> convert2Chunk(chunk, asset, isImg))
                 .toList();
     }
 
-    private Chunk convert2Chunk(ParseResponse.Chunk chunk, Asset asset) {
-        return Chunk.builder()
+    private Chunk convert2Chunk(ParseResponse.Chunk chunk, Asset asset, boolean isImg) {
+        Chunk res = Chunk.builder()
                 .segmentId(idgen.nextIdStr())
                 .kbId(asset.getKbId())
                 .assetId(asset.getId())
                 .title(StringUtils.hasText(asset.getTitle()) ? asset.getTitle() : asset.getFileName())
                 .pageNo(CollectionUtils.isEmpty(chunk.pageRange()) ? 0 : chunk.pageRange().getFirst())
-                .chunkText(chunk.textPlain())
                 .chunkOrder(parseChunkId(chunk.chunkId()))
                 .sourceRef(asset.getObjectKey())
                 .bboxInfos(Optional.ofNullable(chunk.bboxes()).orElse(Lists.newArrayList()).stream().map(BboxInfo::convert2BboxInfo).toList())
-                .embedding(null)
                 .build();
+        if (isImg) {
+            res.setOcrText(chunk.textPlain());
+        } else {
+            res.setChunkText(chunk.textPlain());
+        }
+        return res;
+    }
+
+    private boolean isImage(String fileType) {
+        return "image".equalsIgnoreCase(fileType);
     }
 
     private Integer parseChunkId(String chunkId) {

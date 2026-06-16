@@ -16,7 +16,7 @@ public class Segment {
     String segmentId;
     String kbId;
     String assetId;
-    AssetType assetType;
+    String assetType;
     SegmentType segmentType;
     String title;
     String contentText;

@@ -11,6 +11,7 @@ public record ParseResponse(
         String parser,
         String format,
         String text,
+        String fileType,
         List<Page> pages,
         List<Chunk> chunks,
         List<Image> images,

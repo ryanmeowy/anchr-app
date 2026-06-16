@@ -11,7 +11,6 @@ public record ParseRequest(
         String requestId,
         String sourceUrl,
         String fileName,
-        String mimeType,
         Options options,
         Oss oss
 ) {

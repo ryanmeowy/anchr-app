@@ -243,7 +243,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .segmentType(toCode(segment.getSegmentType()))
                 .content(content)
                 .resultType(toCode(segment.getSegmentType()))
-                .assetType(toCode(segment.getAssetType()))
+                .assetType(segment.getAssetType())
                 .snippet(snippet)
                 .pageNo(segment.getPageNo())
                 .score(candidate.score())
@@ -252,8 +252,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .assetId(segment.getAssetId())
                 .sourceRef(segment.getSourceRef())
                 .anchor(anchor)
-                .thumbnail(resolveThumbnail(segment))
-                .ocrSummary(resolveOcrSummary(segment))
                 .explain(buildExplain(segment, strategyCode, hitSources, candidate.vectorHit(), titleHit, contentHit, ocrHit, tagHit))
                 .build();
     }
@@ -424,26 +422,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             return segment.getTitle();
         }
         return "";
-    }
-
-    private String resolveThumbnail(Segment segment) {
-        if (segment == null || segment.getAssetType() != AssetType.IMAGE) {
-            return null;
-        }
-        if (StringUtils.hasText(segment.getThumbnail())) {
-            return segment.getThumbnail();
-        }
-        return segment.getSourceRef();
-    }
-
-    private String resolveOcrSummary(Segment segment) {
-        if (segment == null || segment.getAssetType() != AssetType.IMAGE) {
-            return null;
-        }
-        if (StringUtils.hasText(segment.getOcrSummary())) {
-            return segment.getOcrSummary();
-        }
-        return clip(segment.getOcrText(), 180);
     }
 
     private boolean isTextSegment(Segment segment) {

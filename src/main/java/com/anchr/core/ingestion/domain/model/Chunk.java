@@ -18,6 +18,7 @@ public class Chunk {
     private String title;
     private Integer pageNo;
     private String chunkText;
+    private String ocrText;
     private Integer chunkOrder;
     private String sourceRef;
     private List<Float> embedding;

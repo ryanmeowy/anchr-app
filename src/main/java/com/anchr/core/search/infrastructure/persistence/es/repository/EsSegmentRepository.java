@@ -310,7 +310,7 @@ public class EsSegmentRepository implements SegmentRepository {
                 .segmentId(doc.getSegmentId())
                 .kbId(doc.getKbId())
                 .assetId(doc.getAssetId())
-                .assetType(parseAssetType(doc.getAssetType()))
+                .assetType(doc.getAssetType())
                 .segmentType(parseSegmentType(doc.getSegmentType()))
                 .title(doc.getTitle())
                 .contentText(doc.getContentText())
@@ -327,13 +327,6 @@ public class EsSegmentRepository implements SegmentRepository {
                 .tags(doc.getTags())
                 .createdAt(doc.getCreatedAt())
                 .build();
-    }
-
-    private AssetType parseAssetType(String assetType) {
-        if (!StringUtils.hasText(assetType)) {
-            return null;
-        }
-        return AssetType.valueOf(assetType.trim().toUpperCase());
     }
 
     private SegmentType parseSegmentType(String segmentType) {

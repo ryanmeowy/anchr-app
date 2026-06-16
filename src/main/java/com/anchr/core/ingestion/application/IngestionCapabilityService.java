@@ -2,11 +2,13 @@ package com.anchr.core.ingestion.application;
 
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
+import com.anchr.core.search.domain.model.AssetType;
 import lombok.Builder;
 import lombok.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * Provides ingestion capability declarations for frontend import pages.
@@ -19,14 +21,7 @@ public class IngestionCapabilityService {
 
     public IngestionCapabilities getCapabilities() {
         return IngestionCapabilities.builder()
-                .supportedFormats(List.of(
-                        SupportedFormat.of("PDF", List.of("pdf"), List.of("application/pdf"), true, "P0"),
-                        SupportedFormat.of("IMAGE", List.of("png", "jpg", "jpeg", "webp"),
-                                List.of("image/png", "image/jpeg", "image/webp"), true, "P0"),
-                        SupportedFormat.of("TXT", List.of("txt"), List.of("text/plain"), true, "P0"),
-                        SupportedFormat.of("MARKDOWN", List.of("md", "markdown"),
-                                List.of("text/markdown", "text/x-markdown"), true, "P0")
-                ))
+                .supportedFormats(Stream.of(AssetType.PDF, AssetType.TXT, AssetType.IMAGE, AssetType.MARKDOWN).map(SupportedFormat::of).toList())
                 .maxFileSizeBytes(MAX_FILE_SIZE_BYTES)
                 .maxFilesPerBatch(MAX_FILES_PER_BATCH)
                 .dedupeStrategies(List.of(DedupeStrategy.SKIP, DedupeStrategy.OVERWRITE, DedupeStrategy.VERSIONED))
@@ -61,14 +56,13 @@ public class IngestionCapabilityService {
         boolean enabled;
         String priority;
 
-        public static SupportedFormat of(String fileType, List<String> extensions, List<String> mimeTypes,
-                                         boolean enabled, String priority) {
+        public static SupportedFormat of(AssetType type) {
             return SupportedFormat.builder()
-                    .fileType(fileType)
-                    .extensions(extensions)
-                    .mimeTypes(mimeTypes)
-                    .enabled(enabled)
-                    .priority(priority)
+                    .fileType(type.getFileType())
+                    .extensions(type.getExtensions())
+                    .mimeTypes(type.getMimeTypes())
+                    .enabled(type.isEnabled())
+                    .priority(type.getPriority())
                     .build();
         }
     }

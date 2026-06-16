@@ -19,7 +19,6 @@ import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.settings.domain.model.StorageConfig;
@@ -132,17 +131,18 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 DocumentParseStatus.RUNNING.name(), DocumentIndexStatus.PENDING.name(), userId, LocalDateTime.now());
 
         DoclingClient docling = new DoclingClient(doclingBaseUrl);
-        ParseResponse parsed = docling.parse(buildParseRequest(asset, taskId, item.getId()));
+        String downloadUrl = objectStoragePort.buildDownloadUrl(asset.getObjectKey());
+        ParseResponse parsed = docling.parse(buildParseRequest(asset, taskId, item.getId(), downloadUrl));
         if (parsed.chunks() == null || parsed.chunks().isEmpty()) {
             throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "docling returned empty chunks.");
         }
 
-        List<Chunk> chunks = doclingChunkMapper.toTextChunks(asset, parsed.chunks());
+        List<Chunk> chunks = doclingChunkMapper.toTextChunks(asset, parsed);
 
         updateRunning(kbId, taskId, item.getId(), IngestionStage.EMBED, STAGE_EMBED_PROGRESS, userId);
         // TODO Image vector capability is pending support.
         if (!isImage(asset)) {
-            enrichTextEmbeddings(chunks);
+            enrichTextEmbeddings(chunks, downloadUrl);
         }
         updateRunning(kbId, taskId, item.getId(), IngestionStage.INDEX, STAGE_INDEX_PROGRESS, userId);
         assetRepository.updateStatuses(kbId, asset.getId(),
@@ -152,11 +152,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         completeItem(kbId, taskId, item.getId(), asset.getId(), chunks.size(), userId);
     }
 
-    private ParseRequest buildParseRequest(Asset asset, String taskId, String itemId) {
+    private ParseRequest buildParseRequest(Asset asset, String taskId, String itemId, String downloadUrl) {
         return ParseRequest.builder()
                 .requestId(buildRequestId(taskId, itemId))
                 .fileName(asset.getFileName())
-                .sourceUrl(objectStoragePort.buildDownloadUrl(asset.getObjectKey()))
+                .sourceUrl(downloadUrl)
                 .options(ParseRequest.Options.chunkModel())
                 .oss(buildOssConfig())
                 .build();
@@ -211,10 +211,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                         .segmentId(chunk.getSegmentId())
                         .kbId(chunk.getKbId())
                         .assetId(asset.getId())
-                        .assetType(isImage(asset) ? AssetType.IMAGE : AssetType.TEXT)
+                        .assetType(asset.getFileType())
                         .segmentType(isImage(asset) ? SegmentType.IMAGE_OCR_BLOCK : SegmentType.TEXT_CHUNK)
                         .title(chunk.getTitle())
                         .contentText(chunk.getChunkText())
+                        .ocrText(chunk.getOcrText())
                         .embedding(chunk.getEmbedding())
                         .pageNo(chunk.getPageNo())
                         .chunkOrder(chunk.getChunkOrder())
@@ -267,7 +268,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         return "IMAGE".equalsIgnoreCase(asset.getFileType());
     }
 
-    private void enrichTextEmbeddings(List<Chunk> chunks) {
+    private void enrichTextEmbeddings(List<Chunk> chunks, String downloadUrl) {
         if (chunks == null || chunks.isEmpty()) {
             return;
         }
