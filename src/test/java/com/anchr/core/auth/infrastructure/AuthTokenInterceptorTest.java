@@ -1,6 +1,8 @@
 package com.anchr.core.auth.infrastructure;
 
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +34,11 @@ class AuthTokenInterceptorTest {
         interceptor = new AuthTokenInterceptor(redisTemplate, new ObjectMapper());
     }
 
+    @AfterEach
+    void tearDown() {
+        UserContextHolder.clear();
+    }
+
     @Test
     void preHandle_shouldPassThrough_whenHandlerIsNotHandlerMethod() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
@@ -53,6 +60,7 @@ class AuthTokenInterceptorTest {
 
         assertThat(allowed).isTrue();
         assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(UserContextHolder.get().accessTokenHash()).isNull();
     }
 
     @Test
@@ -68,12 +76,30 @@ class AuthTokenInterceptorTest {
 
         assertThat(allowed).isTrue();
         assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(UserContextHolder.get().accessTokenHash())
+                .isNotBlank()
+                .isNotEqualTo("token-123");
     }
 
     @Test
     void preHandle_shouldRejectWith401_whenTokenMismatchOnRequireAuthMethod() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Access-Token", "wrong-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "protectedApi");
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(TOKEN_CACHE_PREFIX)).thenReturn("server-token");
+
+        boolean allowed = interceptor.preHandle(request, response, handlerMethod);
+
+        assertThat(allowed).isFalse();
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("token is invalid or expired");
+    }
+
+    @Test
+    void preHandle_shouldRejectWith401_whenTokenMissingOnRequireAuthMethod() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
         HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "protectedApi");
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);

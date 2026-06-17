@@ -15,6 +15,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.AsyncHandlerInterceptor;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.UUID;
 
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
@@ -40,7 +44,8 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
         }
 
         try {
-            if (hm.getMethodAnnotation(RequireAuth.class) != null) {
+            RequireAuth requireAuth = hm.getMethodAnnotation(RequireAuth.class);
+            if (requireAuth != null) {
                 String clientToken = request.getHeader("X-Access-Token");
                 String serverToken = redisTemplate.opsForValue().get(TOKEN_CACHE_PREFIX);
                 if (serverToken == null || !serverToken.equals(clientToken)) {
@@ -55,8 +60,8 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
                     }
                     return false;
                 }
-            }
-            if (UserContextHolder.get() == null) {
+                UserContextHolder.set(RequestUserContext.systemDefault(tokenHash(clientToken)));
+            } else {
                 UserContextHolder.set(RequestUserContext.systemDefault());
             }
             return true;
@@ -79,5 +84,15 @@ public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
                                                @NonNull HttpServletResponse response,
                                                @NonNull Object handler) {
         UserContextHolder.clear();
+    }
+
+    private String tokenHash(String accessToken) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashed = digest.digest(accessToken.trim().getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hashed);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm is unavailable.", e);
+        }
     }
 }

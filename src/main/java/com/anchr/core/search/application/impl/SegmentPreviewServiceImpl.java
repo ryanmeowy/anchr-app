@@ -2,6 +2,7 @@ package com.anchr.core.search.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.search.application.SegmentPreviewService;
 import com.anchr.core.search.application.support.PreviewAccessCache;
@@ -41,26 +42,25 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private final ActivityEventService activityEventService;
 
     @Override
-    public PreviewSegmentDTO getSegmentPreview(String segmentId, String accessToken) {
+    public PreviewSegmentDTO getSegmentPreview(String segmentId) {
         if (!StringUtils.hasText(segmentId)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "segmentId cannot be blank.");
         }
-        if (!StringUtils.hasText(accessToken)) {
-            throw new BusinessException(ApiError.UNAUTHORIZED, "X-Access-Token is required.");
-        }
+        String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        PreviewSegmentDTO preview = toPreview(segment, accessToken);
+        PreviewSegmentDTO preview = toPreview(segment, accessTokenHash);
         recordCitationOpened(preview);
         return preview;
     }
 
     @Override
-    public PreviewSegmentDTO refreshSegmentPreview(String segmentId, String accessToken) {
+    public PreviewSegmentDTO refreshSegmentPreview(String segmentId) {
+        String accessTokenHash = currentAccessTokenHash();
         if (StringUtils.hasText(segmentId)) {
-            previewAccessCache.evict(segmentId.trim(), accessToken);
+            previewAccessCache.evict(segmentId.trim(), accessTokenHash);
         }
-        return getSegmentPreview(segmentId, accessToken);
+        return getSegmentPreview(segmentId);
     }
 
     @Override
@@ -77,8 +77,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
-    private PreviewSegmentDTO toPreview(Segment segment, String accessToken) {
-        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessToken);
+    private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash) {
+        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessTokenHash);
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
@@ -198,7 +198,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return RELATION_NEXT;
     }
 
-    private PreviewAccessCache.PreviewAccess buildPreviewAccess(Segment segment, String accessToken) {
+    private PreviewAccessCache.PreviewAccess buildPreviewAccess(Segment segment, String accessTokenHash) {
         String sourceRef = segment.getSourceRef();
         if (!StringUtils.hasText(sourceRef)) {
             return new PreviewAccessCache.PreviewAccess(null, null);
@@ -209,7 +209,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         }
         String segmentId = segment.getSegmentId();
         if (StringUtils.hasText(segmentId)) {
-            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(segmentId, accessToken);
+            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(segmentId, accessTokenHash);
             if (cached.isPresent()) {
                 return cached.get();
             }
@@ -227,9 +227,17 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 System.currentTimeMillis() + PREVIEW_URL_TTL_MILLIS
         );
         if (StringUtils.hasText(segmentId)) {
-            previewAccessCache.save(segmentId, accessToken, previewAccess);
+            previewAccessCache.save(segmentId, accessTokenHash, previewAccess);
         }
         return previewAccess;
+    }
+
+    private String currentAccessTokenHash() {
+        String accessTokenHash = UserContextHolder.get().accessTokenHash();
+        if (!StringUtils.hasText(accessTokenHash)) {
+            throw new BusinessException(ApiError.UNAUTHORIZED, "Authenticated token context is required.");
+        }
+        return accessTokenHash;
     }
 
     private String signPreviewUrl(String objectKey) {

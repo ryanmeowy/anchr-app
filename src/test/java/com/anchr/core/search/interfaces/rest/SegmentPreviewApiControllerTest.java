@@ -1,6 +1,5 @@
 package com.anchr.core.search.interfaces.rest;
 
-import com.anchr.core.common.exception.GlobalExceptionHandler;
 import com.anchr.core.search.application.SegmentPreviewService;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
@@ -33,7 +32,6 @@ class PreviewControllerTest {
     void setUp() {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new PreviewController(segmentPreviewService))
-                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 
@@ -61,7 +59,7 @@ class PreviewControllerTest {
                         .relation("current")
                         .build()))
                 .build();
-        when(segmentPreviewService.getSegmentPreview(eq("seg-001"), eq("token-a"))).thenReturn(preview);
+        when(segmentPreviewService.getSegmentPreview(eq("seg-001"))).thenReturn(preview);
 
         mockMvc.perform(get("/api/v1/preview/segments/seg-001")
                         .header("X-Access-Token", "token-a"))
@@ -71,13 +69,5 @@ class PreviewControllerTest {
                 .andExpect(jsonPath("$.data.previewUrl").value("https://preview.example.com/mysql.pdf"))
                 .andExpect(jsonPath("$.data.anchor.pageNo").value(3))
                 .andExpect(jsonPath("$.data.surroundingChunks[0].relation").value("current"));
-    }
-
-    @Test
-    void getSegmentPreview_shouldRejectWhenTokenMissing() throws Exception {
-        mockMvc.perform(get("/api/v1/preview/segments/seg-001"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(401))
-                .andExpect(jsonPath("$.message").value("X-Access-Token is required."));
     }
 }
