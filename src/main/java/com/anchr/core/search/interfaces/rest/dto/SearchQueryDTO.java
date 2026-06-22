@@ -22,25 +22,12 @@ public class SearchQueryDTO {
     private String query;
 
     /**
-     * Recall candidate size for each route.
-     */
-    @Min(value = 1, message = "topK must be greater than 0")
-    @Max(value = 200, message = "topK cannot exceed 200")
-    private Integer topK;
-
-    /**
-     * Final response size upper bound.
+     * Final response size upper bound. The recall candidate size for each
+     * route is derived from this value by the search service.
      */
     @Min(value = 1, message = "limit must be greater than 0")
     @Max(value = 200, message = "limit cannot exceed 200")
     private Integer limit;
-
-    /**
-     * Retrieval strategy selector.
-     * Current supported values: KB_RRF / KB_RRF_RERANK.
-     */
-    @Size(max = 32, message = "strategy length cannot exceed 32")
-    private String strategy;
 
     @Size(max = 100, message = "kbIds cannot exceed 100")
     private List<String> kbIds;

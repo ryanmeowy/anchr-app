@@ -10,9 +10,7 @@ import java.util.List;
 public interface ConversationRetrievalOrchestrator {
 
     ConversationRetrievalResult retrieve(String rewrittenQuery,
-                                         Integer topK,
                                          Integer limit,
-                                         String strategy,
                                          List<String> kbIds,
                                          List<String> preferredModalities);
 }

@@ -71,7 +71,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         SearchResult result = searchInternal(query, decodeCursorOffset(query == null ? null : query.getCursor()));
         List<SearchResultDTO> pageItems = result.items();
         int offset = result.offset();
-        int limit = result.limit();
         String nextCursor = result.total() > offset + pageItems.size()
                 ? encodeCursorOffset(offset + pageItems.size())
                 : null;
@@ -90,12 +89,9 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
         String keyword = query.getQuery().trim();
-        int requestTopK = resolveTopK(query.getTopK());
-        int limit = resolveLimit(query.getLimit(), requestTopK);
+        int limit = resolveLimit(query.getLimit());
         int pageEnd = Math.max(0, offset) + limit;
-        int recallTopK = resolveRecallTopK(requestTopK, pageEnd);
-        String requestedStrategyCode = resolveStrategy(query.getStrategy());
-        boolean rerankRequested = STRATEGY_CODE_RERANK.equals(requestedStrategyCode);
+        int recallTopK = resolveRecallTopK(pageEnd);
         SearchFilter filter = buildFilter(query);
         if (filter.getKbIds().isEmpty()) {
             return new SearchResult(List.of(), List.of(), 0, Math.max(0, offset), limit);
@@ -104,19 +100,17 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         List<Float> queryVector = kbQueryEmbeddingService.embedQuery(keyword);
         List<SegmentHit> textHits = kbSegmentRepository.textSearch(keyword, recallTopK, filter);
         List<SegmentHit> vectorHits = kbSegmentRepository.vectorSearch(queryVector, recallTopK, filter);
-        log.info("kb search recall completed, keyword={}, strategy={}, rerankRequested={}, recallTopK={}, textHits={}, vectorHits={}",
-                keyword, requestedStrategyCode, rerankRequested, recallTopK, textHits.size(), vectorHits.size());
+        log.info("kb search recall completed, keyword={}, recallTopK={}, textHits={}, vectorHits={}",
+                keyword, recallTopK, textHits.size(), vectorHits.size());
 
         List<SegmentRerankCandidate> candidates = fuseCandidates(
                 textHits,
                 vectorHits,
                 appSearchProperties.getRrf().getRankConstant()
         );
-        boolean rerankEnabled = rerankRequested && appSearchProperties.getRerank().isEnabled();
-        List<SegmentRerankCandidate> rankedCandidates = rerankEnabled
-                ? applyRerank(keyword, candidates, limit)
-                : candidates;
-        String effectiveStrategyCode = rerankEnabled ? STRATEGY_CODE_RERANK : STRATEGY_CODE;
+        RerankOutcome rerankOutcome = applyRerank(keyword, candidates, limit);
+        List<SegmentRerankCandidate> rankedCandidates = rerankOutcome.candidates();
+        String effectiveStrategyCode = rerankOutcome.applied() ? STRATEGY_CODE_RERANK : STRATEGY_CODE;
 
         List<SearchResultDTO> segmentResults = rankedCandidates.stream()
                 .map(candidate -> toResult(candidate, keyword, effectiveStrategyCode))
@@ -458,15 +452,15 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 && text.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT));
     }
 
-    private List<SegmentRerankCandidate> applyRerank(String keyword,
-                                                     List<SegmentRerankCandidate> candidates,
-                                                     int limit) {
-        if (!appSearchProperties.getRerank().isEnabled() || !StringUtils.hasText(keyword) || candidates.isEmpty()) {
-            return candidates;
+    private RerankOutcome applyRerank(String keyword,
+                                      List<SegmentRerankCandidate> candidates,
+                                      int limit) {
+        if (!StringUtils.hasText(keyword) || candidates.isEmpty()) {
+            return new RerankOutcome(candidates, false);
         }
         int windowSize = resolveRerankWindowSize(limit, candidates.size());
         if (windowSize <= 0) {
-            return candidates;
+            return new RerankOutcome(candidates, false);
         }
 
         List<SegmentRerankCandidate> rerankWindow = new ArrayList<>(candidates.subList(0, windowSize));
@@ -483,7 +477,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .register(meterRegistry));
         if (rerankResults == null || rerankResults.isEmpty()) {
             meterRegistry.counter("kb.search.rerank.fallback", "reason", "empty_result").increment();
-            return candidates;
+            return new RerankOutcome(candidates, false);
         }
 
         Map<Integer, Double> rerankScoreByIndex = new HashMap<>();
@@ -498,7 +492,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             rerankScoreByIndex.put(index, normalizeRerankScore(item.score()));
         }
         if (rerankScoreByIndex.isEmpty()) {
-            return candidates;
+            return new RerankOutcome(candidates, false);
         }
 
         WeightPair weightPair = resolveFusionWeights();
@@ -515,7 +509,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         merged.addAll(untouchedTail);
         log.info("kb search rerank applied, candidates={}, windowSize={}, scored={}, limit={}, alpha={}, beta={}",
                 candidates.size(), windowSize, rerankScoreByIndex.size(), limit, weightPair.alpha(), weightPair.beta());
-        return merged;
+        return new RerankOutcome(merged, true);
     }
 
     private List<WindowRankItem> buildAndSortWindow(List<SegmentRerankCandidate> rerankWindow,
@@ -551,11 +545,10 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return items;
     }
 
-    private int resolveRecallTopK(int requestTopK, int limit) {
+    private int resolveRecallTopK(int limit) {
         int multiplier = Math.max(1, appSearchProperties.getRrf().getCandidateMultiplier());
         int maxCandidates = Math.max(1, appSearchProperties.getRrf().getMaxCandidates());
-        int recallByLimit = Math.max(1, limit) * multiplier;
-        int recallSize = Math.max(requestTopK, recallByLimit);
+        int recallSize = Math.max(1, limit) * multiplier;
         return Math.min(recallSize, maxCandidates);
     }
 
@@ -635,16 +628,9 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         sb.append(field).append(": ").append(value);
     }
 
-    private int resolveTopK(Integer topK) {
-        if (topK == null || topK <= 0) {
-            return EmbeddingConstant.DEFAULT_TOP_K;
-        }
-        return Math.min(topK, 200);
-    }
-
-    private int resolveLimit(Integer limit, int topK) {
+    private int resolveLimit(Integer limit) {
         if (limit == null || limit <= 0) {
-            return topK;
+            return EmbeddingConstant.DEFAULT_TOP_K;
         }
         return Math.min(limit, 200);
     }
@@ -724,17 +710,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .encodeToString(String.valueOf(Math.max(0, offset)).getBytes(StandardCharsets.UTF_8));
     }
 
-    private String resolveStrategy(String strategy) {
-        if (!StringUtils.hasText(strategy)) {
-            return STRATEGY_CODE;
-        }
-        String normalized = strategy.trim().toUpperCase(Locale.ROOT);
-        if (STRATEGY_CODE.equals(normalized) || STRATEGY_CODE_RERANK.equals(normalized)) {
-            return normalized;
-        }
-        throw new BusinessException(ApiError.INVALID_REQUEST, "unsupported strategy: " + strategy);
-    }
-
     private String toCode(Enum<?> value) {
         return value == null ? null : value.name();
     }
@@ -778,5 +753,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                                   double retrievalScore,
                                   double rerankScore,
                                   double fusedScore) {
+    }
+
+    private record RerankOutcome(List<SegmentRerankCandidate> candidates, boolean applied) {
     }
 }

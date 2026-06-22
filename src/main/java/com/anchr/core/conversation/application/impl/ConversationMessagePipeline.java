@@ -37,9 +37,7 @@ public class ConversationMessagePipeline {
         RewriteResult rewriteResult = queryRewriteService.rewrite(sessionId, request.getQuery().trim());
         ConversationRetrievalResult retrievalResult = conversationRetrievalOrchestrator.retrieve(
                 rewriteResult.getRewrittenQuery(),
-                request.getTopK(),
                 request.getLimit(),
-                request.getStrategy(),
                 request.getKbIds(),
                 rewriteResult.getPreferredModalities()
         );

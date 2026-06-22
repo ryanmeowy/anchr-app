@@ -18,16 +18,9 @@ public class ConversationMessageRequestDTO {
     @Size(max = 200, message = "query length cannot exceed 200")
     private String query;
 
-    @Min(value = 1, message = "topK must be greater than 0")
-    @Max(value = 200, message = "topK cannot exceed 200")
-    private Integer topK;
-
     @Min(value = 1, message = "limit must be greater than 0")
     @Max(value = 200, message = "limit cannot exceed 200")
     private Integer limit;
-
-    @Size(max = 32, message = "strategy length cannot exceed 32")
-    private String strategy;
 
     @Size(max = 100, message = "kbIds cannot exceed 100")
     private List<String> kbIds;

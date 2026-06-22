@@ -28,9 +28,7 @@ public class ConversationRetrievalTraceBuilder {
                                  ConversationRetrievalResult retrievalResult,
                                  AnswerGenerationResult answerGenerationResult) {
         Map<String, Object> trace = new LinkedHashMap<>();
-        trace.put("topK", request.getTopK());
         trace.put("limit", request.getLimit());
-        trace.put("strategy", request.getStrategy());
         trace.put("kbIds", request.getKbIds());
         trace.put("answerMode", request.getAnswerMode());
         trace.put("rewriteReason", rewriteResult.getRewriteReason());
@@ -56,10 +54,8 @@ public class ConversationRetrievalTraceBuilder {
                                                                           ConversationRetrievalResult retrievalResult,
                                                                           AnswerGenerationResult answerGenerationResult) {
         ConversationMessageResponseDTO.RetrievalTraceDTO traceDTO = new ConversationMessageResponseDTO.RetrievalTraceDTO();
-        traceDTO.setTopK(request.getTopK());
         traceDTO.setLimit(request.getLimit());
-        traceDTO.setStrategy(request.getStrategy());
-        traceDTO.setStrategyEffective(resolveStrategyEffective(retrievalResult, request.getStrategy()));
+        traceDTO.setStrategyEffective(resolveStrategyEffective(retrievalResult));
         traceDTO.setRewriteReason(rewriteResult.getRewriteReason());
         traceDTO.setRewriteConfidence(rewriteResult.getConfidence());
         traceDTO.setRewriteFallback(rewriteResult.isFallbackUsed());
@@ -120,9 +116,9 @@ public class ConversationRetrievalTraceBuilder {
                 .toList();
     }
 
-    private String resolveStrategyEffective(ConversationRetrievalResult retrievalResult, String fallbackStrategy) {
+    private String resolveStrategyEffective(ConversationRetrievalResult retrievalResult) {
         if (retrievalResult.getTopCandidates() == null || retrievalResult.getTopCandidates().isEmpty()) {
-            return fallbackStrategy;
+            return null;
         }
         for (ConversationRetrievalCandidate candidate : retrievalResult.getTopCandidates()) {
             if (candidate == null || candidate.getExplain() == null) {
@@ -133,7 +129,7 @@ public class ConversationRetrievalTraceBuilder {
                 return strategyEffective.trim();
             }
         }
-        return fallbackStrategy;
+        return null;
     }
 
     private String safeSegmentId(ConversationRetrievalCandidate item) {

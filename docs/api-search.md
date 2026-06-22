@@ -2,15 +2,14 @@
 
 ## POST /api/v1/search/kb
 
-知识库统一检索。文本 + 图片混合召回，RRF 融合排序，可选 cross-encoder 重排和 LLM 回答。
+知识库统一检索。文本 + 图片混合召回，RRF 融合排序，cross-encoder 重排和 LLM 回答。
 
 ### Request
 
 ```json
 {
   "query": "string",           // 必填，≤200字
-  "topK": 50,                  // 可选，1~200，每路召回数
-  "limit": 10,                 // 可选，1~200，最终返回条数
+  "limit": 10,                 // 可选，1~200，最终返回条数（每路召回数由后端基于 limit 计算）
   "strategy": "KB_RRF_RERANK", // 可选 ≤32字，KB_RRF | KB_RRF_RERANK
   "kbIds": ["kb_1", "kb_2"],   // 可选，≤100个，空=全部知识库
   "assetTypes": ["PDF"],       // 可选，≤20个，资产类型过滤

@@ -36,18 +36,14 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
 
     @Override
     public ConversationRetrievalResult retrieve(String rewrittenQuery,
-                                                Integer topK,
                                                 Integer limit,
-                                                String strategy,
                                                 List<String> kbIds,
                                                 List<String> preferredModalities) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             SearchQueryDTO query = new SearchQueryDTO();
             query.setQuery(rewrittenQuery);
-            query.setTopK(topK);
             query.setLimit(limit);
-            query.setStrategy(strategy);
             query.setKbIds(kbIds);
 
             List<SearchResultDTO> rawResults = unifiedSearchService.search(query);

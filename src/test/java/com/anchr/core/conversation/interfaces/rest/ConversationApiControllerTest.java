@@ -111,7 +111,7 @@ class ConversationControllerTest {
     void createMessage_shouldRejectWhenQueryMissing() throws Exception {
         mockMvc.perform(post("/api/conversations/cvs_test_001/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"topK\":60,\"limit\":20,\"strategy\":\"KB_RRF_RERANK\"}"))
+                        .content("{\"limit\":20}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("Invalid request parameters."));
@@ -160,9 +160,8 @@ class ConversationControllerTest {
         card.setAdditionalHits(List.of());
         response.setResultCards(List.of(card));
         ConversationMessageResponseDTO.RetrievalTraceDTO trace = new ConversationMessageResponseDTO.RetrievalTraceDTO();
-        trace.setTopK(60);
         trace.setLimit(20);
-        trace.setStrategy("KB_RRF_RERANK");
+        trace.setStrategyEffective("KB_RRF_RERANK");
         trace.setRewriteReason("rewrite_by_model");
         trace.setRetrievedCount(3);
         response.setRetrievalTrace(trace);
@@ -170,9 +169,7 @@ class ConversationControllerTest {
 
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("那 InnoDB 呢");
-        request.setTopK(60);
         request.setLimit(20);
-        request.setStrategy("KB_RRF_RERANK");
         when(conversationService.createMessage(eq("cvs_test_001"), eq(request))).thenReturn(response);
 
         mockMvc.perform(post("/api/conversations/cvs_test_001/messages")
@@ -180,9 +177,7 @@ class ConversationControllerTest {
                         .content("""
                                 {
                                   "query": "那 InnoDB 呢",
-                                  "topK": 60,
-                                  "limit": 20,
-                                  "strategy": "KB_RRF_RERANK"
+                                  "limit": 20
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -191,7 +186,6 @@ class ConversationControllerTest {
                 .andExpect(jsonPath("$.data.resultCards[0].assetId").value("asset_001"))
                 .andExpect(jsonPath("$.data.resultCards[0].primaryHit.segmentId").value("seg_text_001"))
                 .andExpect(jsonPath("$.data.resultCards[0].primaryHit.anchor.pageNo").value(3))
-                .andExpect(jsonPath("$.data.retrievalTrace.topK").value(60))
                 .andExpect(jsonPath("$.data.retrievalTrace.rewriteReason").value("rewrite_by_model"))
                 .andExpect(jsonPath("$.data.retrievalTrace.retrievedCount").value(3));
     }
