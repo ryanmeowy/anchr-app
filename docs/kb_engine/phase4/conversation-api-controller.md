@@ -106,10 +106,18 @@ single_user
 | `limit` | integer | 否 | 1-200 | 返回或送入回答链路的结果数量 |
 | `strategy` | string | 否 | 最长 32 | 检索策略，如 `KB_RRF_RERANK` |
 | `kbIds` | string[] | 否 | 最多 100 个 | 本次消息指定的知识库范围 |
-| `answerMode` | string | 否 | 最长 32 | 回答模式；为空时保存为 `STRICT` |
+| `answerMode` | string | 否 | 最长 32 | 回答模式；支持 `STRICT`、`SUMMARY`、`EXPLORE`；为空或非法值降级为 `STRICT` |
 | `preferredModalities` | string[] | 否 | 最多 10 个 | 偏好模态，如 `TEXT`、`IMAGE`、`MIXED` |
 | `debug` | boolean | 否 | - | 调试开关；当前由下游链路消费 |
 | `stream` | boolean | 否 | - | 请求侧标记；是否流式由接口路径决定 |
+
+回答模式说明：
+
+| 模式 | 说明 |
+|---|---|
+| `STRICT` | 默认模式；证据门槛最高，只基于证据回答，证据不足时拒答 |
+| `SUMMARY` | 摘要模式；仍只基于证据回答，但输出更短，最多保留 3 条核心证据 |
+| `EXPLORE` | 探索模式；证据门槛较低，允许单独标注“可能方向/建议”，但事实性结论仍需引用证据 |
 
 ### 2.3 ConversationMessageResponseDTO
 
@@ -529,7 +537,7 @@ Content-Type: application/json
 1. 发送消息前会校验会话存在。
 2. 如果请求没有传 `kbIds`，且会话创建时绑定了 `kbScope`，本轮会沿用会话范围。
 3. 如果请求传了 `kbIds`，会按当前 workspace 可见 ACTIVE 知识库重新解析，实际范围通过响应 `kbScope` 返回。
-4. 如果 `answerMode` 为空，turn 快照中的 `answerMode` 为 `STRICT`。
+4. `answerMode` 大小写不敏感，响应和 turn 快照统一保存为大写枚举名；为空或非法值降级为 `STRICT`。
 5. 若会话标题为空且这是第一轮消息，服务会用 `rewrittenQuery` 或原始 `query` 自动生成标题，最长 128 字符。
 6. 本轮消息会持久化 query、rewrittenQuery、answer、kbScope、answerMode、citations、resultCards、retrievalTrace。
 7. 历史回放中的 `resultCards` 来自 turn 快照，不触发二次检索。
@@ -556,7 +564,7 @@ text/event-stream;charset=UTF-8
 
 ```text
 event: trace
-data: {"stage":"retrieval","message":"started"}
+data: {"stage":"retrieval","message":"started","answerMode":"STRICT"}
 
 event: delta
 data: {"text":"合同约定付款应在验收合格后30日内完成。"}
@@ -565,7 +573,7 @@ event: citations
 data: [{"fileName":"合同.pdf","pageNo":3,"snippet":"甲方应在验收合格后30日内完成付款。","hitType":"TEXT_CHUNK","assetId":"asset_001","segmentId":"seg_001"}]
 
 event: done
-data: {"turnId":"turn_52e65d6f7db14256bc9384e40d2e7db2","kbScope":["kb_001"]}
+data: {"turnId":"turn_52e65d6f7db14256bc9384e40d2e7db2","kbScope":["kb_001"],"answerMode":"STRICT"}
 ```
 
 错误事件：
@@ -579,9 +587,10 @@ data: {"code":"CONVERSATION_SESSION_NOT_FOUND","message":"Conversation session n
 
 1. 当前实现复用同步消息链路：先完整执行检索和回答，再将完整 answer 按 48 字符切分为多个 `delta` 事件。
 2. 成功时事件顺序为 `trace` -> `delta` 零到多次 -> `citations` -> `done`。
-3. `done` 事件返回 `turnId` 和本轮 `kbScope`。
-4. 业务异常会发送 `error` 事件并结束 SSE。
-5. SSE 接口直接返回事件流，不使用 `Result<T>` 包装。
+3. `trace` 和 `done` 事件均返回规范化后的 `answerMode`。
+4. `done` 事件返回 `turnId`、本轮 `kbScope` 和规范化后的 `answerMode`。
+5. 业务异常会发送 `error` 事件并结束 SSE。
+6. SSE 接口直接返回事件流，不使用 `Result<T>` 包装。
 
 ### 5.3 查询会话消息
 

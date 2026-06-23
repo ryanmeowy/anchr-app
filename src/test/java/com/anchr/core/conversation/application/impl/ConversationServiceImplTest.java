@@ -11,6 +11,7 @@ import com.anchr.core.conversation.application.assembler.ConversationCitationMap
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
+import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
@@ -137,9 +138,9 @@ class ConversationServiceImplTest {
                 eq("mysql 架构中的 InnoDB 作用"), eq(20), anyList(), anyList()
         )).thenReturn(secondRetrieval);
 
-        when(answerGenerationService.generate(eq("mysql 架构是什么"), eq("mysql 架构是什么 核心组件"), anyList(), anyList()))
+        when(answerGenerationService.generate(eq("mysql 架构是什么"), eq("mysql 架构是什么 核心组件"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("MySQL 架构通常由连接层、SQL 层、存储引擎层组成。[1]", false, null, List.of("seg_text_1")));
-        when(answerGenerationService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), anyList(), anyList()))
+        when(answerGenerationService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("InnoDB 是默认事务引擎，支持行级锁与崩溃恢复。[1]", false, null, List.of("seg_text_2")));
         when(followUpQuestionService.generate(eq("mysql 架构是什么"), eq("mysql 架构是什么 核心组件"), anyList()))
                 .thenReturn(List.of("《mysql-notes.pdf》里还有哪些和“mysql”直接相关的内容？", "“mysql”和“InnoDB”之间的关系是什么？"));
@@ -211,7 +212,11 @@ class ConversationServiceImplTest {
                 eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), eq(20), anyList(), anyList()
         )).thenReturn(buildRetrievalResult(List.of()));
         when(answerGenerationService.generate(
-                eq("它和 buffer pool 有什么关系"), eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), anyList(), anyList()
+                eq("它和 buffer pool 有什么关系"),
+                eq("mysql 架构中 InnoDB 与 buffer pool 的关系"),
+                eq(AnswerMode.STRICT),
+                anyList(),
+                anyList()
         )).thenReturn(buildAnswer("未找到足够内容支持该问题。请尝试缩小范围或补充关键词。", true, "no_evidence", List.of()));
         when(followUpQuestionService.generate(eq("它和 buffer pool 有什么关系"), eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), anyList()))
                 .thenReturn(List.of());
@@ -261,7 +266,7 @@ class ConversationServiceImplTest {
                 buildResult("seg_asset_3", "asset_3", "TEXT_CHUNK", "oss://bucket/mysql-3.pdf", "全文索引用于文本匹配", 3),
                 buildResult("seg_asset_4", "asset_4", "TEXT_CHUNK", "oss://bucket/mysql-4.pdf", "空间索引用于地理数据", 4)
         )));
-        when(answerGenerationService.generate(eq("mysql 索引有哪些"), eq("mysql 索引 类型 适用场景"), anyList(), anyList()))
+        when(answerGenerationService.generate(eq("mysql 索引有哪些"), eq("mysql 索引 类型 适用场景"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("MySQL 常见索引包括 BTree、Hash 和全文索引。[1][2][3]", false, null,
                         List.of("seg_asset_1", "seg_asset_2", "seg_asset_3")));
         when(followUpQuestionService.generate(eq("mysql 索引有哪些"), eq("mysql 索引 类型 适用场景"), anyList()))
@@ -278,6 +283,7 @@ class ConversationServiceImplTest {
         verify(answerGenerationService).generate(
                 eq("mysql 索引有哪些"),
                 eq("mysql 索引 类型 适用场景"),
+                eq(AnswerMode.STRICT),
                 candidatesCaptor.capture(),
                 citationsCaptor.capture()
         );
@@ -305,7 +311,7 @@ class ConversationServiceImplTest {
                 buildResult("seg_redo_1", "asset_redo_1", "TEXT_CHUNK", "oss://bucket/mysql-redo.pdf", "redo log 保障崩溃恢复", 8),
                 buildResult("seg_redo_2", "asset_redo_2", "TEXT_CHUNK", "oss://bucket/mysql-log.pdf", "redo log 先写日志再刷盘", 9)
         )));
-        when(answerGenerationService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), anyList(), anyList()))
+        when(answerGenerationService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("根据当前知识库，先给出可确认的信息：", true, "model_unavailable",
                         List.of("seg_redo_1", "seg_redo_2")));
         when(followUpQuestionService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), anyList()))
@@ -338,7 +344,7 @@ class ConversationServiceImplTest {
                 buildResult("seg_pool_1", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 缓存数据页", 3),
                 buildResult("seg_pool_2", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 使用 LRU 链表", 4)
         )));
-        when(answerGenerationService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), anyList(), anyList()))
+        when(answerGenerationService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("Buffer pool 用于缓存数据页和索引页。[1]", false, null, List.of("seg_pool_1")));
         when(followUpQuestionService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), anyList()))
                 .thenReturn(List.of());
@@ -350,6 +356,79 @@ class ConversationServiceImplTest {
         assertThat(card.getPrimaryHit().getSegmentId()).isEqualTo("seg_pool_1");
         assertThat(card.getAdditionalHits()).hasSize(1);
         assertThat(card.getAdditionalHits().getFirst().getSegmentId()).isEqualTo("seg_pool_2");
+    }
+
+    @Test
+    void createMessage_shouldNormalizeAnswerModeAndPassItToGenerator() throws Exception {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        String sessionId = session.getSessionId();
+        RewriteResult rewriteResult = buildRewrite(
+                "mysql 总结一下",
+                "mysql 总结 核心机制",
+                "rewrite_by_model",
+                false
+        );
+        when(queryRewriteService.rewrite(eq(sessionId), eq("mysql 总结一下"))).thenReturn(rewriteResult);
+        when(conversationRetrievalOrchestrator.retrieve(
+                eq("mysql 总结 核心机制"), eq(20), anyList(), anyList()
+        )).thenReturn(buildRetrievalResult(List.of(
+                buildResult("seg_summary_1", "asset_summary", "TEXT_CHUNK", "oss://bucket/mysql-summary.pdf", "MySQL 包含 SQL 层和存储引擎层", 1)
+        )));
+        when(answerGenerationService.generate(
+                eq("mysql 总结一下"),
+                eq("mysql 总结 核心机制"),
+                eq(AnswerMode.SUMMARY),
+                anyList(),
+                anyList()
+        )).thenReturn(buildAnswer("MySQL 可概括为 SQL 层和存储引擎层。[1]", false, null, List.of("seg_summary_1")));
+        when(followUpQuestionService.generate(eq("mysql 总结一下"), eq("mysql 总结 核心机制"), anyList()))
+                .thenReturn(List.of());
+        ConversationMessageRequestDTO request = buildMessageRequest("mysql 总结一下");
+        request.setAnswerMode("summary");
+
+        ConversationMessageResponseDTO response = service.createMessage(sessionId, request);
+
+        assertThat(response.getAnswerMode()).isEqualTo("SUMMARY");
+        assertThat(request.getAnswerMode()).isEqualTo("SUMMARY");
+        ConversationTurn storedTurn = repository.findRecentTurns(sessionId, 10).getFirst();
+        assertThat(storedTurn.getAnswerMode()).isEqualTo("SUMMARY");
+        Map<String, Object> trace = objectMapper.readValue(storedTurn.getRetrievalTraceJson(), new TypeReference<>() {
+        });
+        assertThat(trace.get("answerMode")).isEqualTo("SUMMARY");
+    }
+
+    @Test
+    void createMessage_shouldFallbackToStrictWhenAnswerModeIsUnsupported() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        String sessionId = session.getSessionId();
+        RewriteResult rewriteResult = buildRewrite(
+                "mysql 自由发挥",
+                "mysql 自由发挥",
+                "rewrite_by_model",
+                false
+        );
+        when(queryRewriteService.rewrite(eq(sessionId), eq("mysql 自由发挥"))).thenReturn(rewriteResult);
+        when(conversationRetrievalOrchestrator.retrieve(
+                eq("mysql 自由发挥"), eq(20), anyList(), anyList()
+        )).thenReturn(buildRetrievalResult(List.of(
+                buildResult("seg_strict_1", "asset_strict", "TEXT_CHUNK", "oss://bucket/mysql.pdf", "MySQL 是关系型数据库", 1)
+        )));
+        when(answerGenerationService.generate(
+                eq("mysql 自由发挥"),
+                eq("mysql 自由发挥"),
+                eq(AnswerMode.STRICT),
+                anyList(),
+                anyList()
+        )).thenReturn(buildAnswer("MySQL 是关系型数据库。[1]", false, null, List.of("seg_strict_1")));
+        when(followUpQuestionService.generate(eq("mysql 自由发挥"), eq("mysql 自由发挥"), anyList()))
+                .thenReturn(List.of());
+        ConversationMessageRequestDTO request = buildMessageRequest("mysql 自由发挥");
+        request.setAnswerMode("creative");
+
+        ConversationMessageResponseDTO response = service.createMessage(sessionId, request);
+
+        assertThat(response.getAnswerMode()).isEqualTo("STRICT");
+        assertThat(request.getAnswerMode()).isEqualTo("STRICT");
     }
 
     @Test
@@ -418,7 +497,7 @@ class ConversationServiceImplTest {
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_text_2", "asset_1", "TEXT_CHUNK", "oss://bucket/mysql-notes.pdf", "InnoDB 支持事务与行锁", 12)
         )));
-        when(answerGenerationService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), anyList(), anyList()))
+        when(answerGenerationService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("InnoDB 是默认事务引擎，支持行级锁与崩溃恢复。[1]", false, null, List.of("seg_text_2")));
         when(followUpQuestionService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), anyList()))
                 .thenReturn(List.of("在《mysql-notes.pdf》第12页，关于“InnoDB”还有哪些关键点？", "有没有“InnoDB”对应的结构图或示意图可对照理解？"));

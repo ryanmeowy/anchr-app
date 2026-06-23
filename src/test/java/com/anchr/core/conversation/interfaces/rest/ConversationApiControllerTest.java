@@ -20,9 +20,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -188,6 +190,22 @@ class ConversationControllerTest {
                 .andExpect(jsonPath("$.data.resultCards[0].primaryHit.anchor.pageNo").value(3))
                 .andExpect(jsonPath("$.data.retrievalTrace.rewriteReason").value("rewrite_by_model"))
                 .andExpect(jsonPath("$.data.retrievalTrace.retrievedCount").value(3));
+    }
+
+    @Test
+    void streamMessage_shouldPassAnswerModeToService() {
+        ConversationController controller = new ConversationController(conversationService);
+        ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
+        request.setQuery("总结一下 MySQL");
+        request.setLimit(20);
+        request.setAnswerMode("summary");
+        SseEmitter emitter = new SseEmitter();
+        when(conversationService.streamMessage(eq("cvs_test_001"), eq(request))).thenReturn(emitter);
+
+        SseEmitter response = controller.streamMessage("cvs_test_001", request);
+
+        assertThat(response).isSameAs(emitter);
+        verify(conversationService).streamMessage(eq("cvs_test_001"), eq(request));
     }
 
     @Test
