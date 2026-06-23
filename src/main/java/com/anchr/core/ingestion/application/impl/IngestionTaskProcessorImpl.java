@@ -21,6 +21,7 @@ import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
+import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.google.gson.Gson;
@@ -67,6 +68,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final IngestionEmbeddingPort embeddingPort;
     private final AesUtil aesUtil;
     private final SegmentBulkWriter segmentBulkWriter;
+    private final SegmentRepository segmentRepository;
     private final IngestionObjectStoragePort objectStoragePort;
     private final StorageConfigRepository storageConfigRepository;
     private final DoclingChunkMapper doclingChunkMapper;
@@ -150,6 +152,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         List<Segment> segments = buildSegments(asset, chunks);
         segmentBulkWriter.write(segments);
         completeItem(kbId, taskId, item.getId(), asset.getId(), chunks.size(), userId);
+        cleanupOverwrittenAsset(kbId, item, userId);
     }
 
     private ParseRequest buildParseRequest(Asset asset, String taskId, String itemId, String downloadUrl) {
@@ -243,6 +246,26 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         ingestionTaskRepository.markItemSuccess(kbId, taskId, itemId,
                 IngestionStage.ASKABLE.name(), STAGE_DONE_PROGRESS, now);
         ingestionTaskRepository.refreshSummary(kbId, taskId, userId, now);
+    }
+
+    private void cleanupOverwrittenAsset(String kbId, IngestionTaskItem item, String userId) {
+        if (item.getDedupeResult() != DedupeResult.OVERWRITTEN
+                || !StringUtils.hasText(item.getDuplicateAssetId())
+                || item.getDuplicateAssetId().equals(item.getAssetId())) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        String oldAssetId = item.getDuplicateAssetId().trim();
+        try {
+            boolean deleted = assetRepository.markDeleted(kbId, oldAssetId, userId, now);
+            if (!deleted) {
+                log.warn("overwritten asset cleanup skipped, old asset not found, kbId={}, oldAssetId={}", kbId, oldAssetId);
+                return;
+            }
+            segmentRepository.deleteByAssetId(oldAssetId);
+        } catch (Exception e) {
+            log.warn("overwritten asset cleanup failed, kbId={}, oldAssetId={}", kbId, oldAssetId, e);
+        }
     }
 
     private void failItem(String kbId, String taskId, IngestionTaskItem item,

@@ -48,6 +48,12 @@ public class AssetRepositoryImpl implements AssetRepository {
     }
 
     @Override
+    public int findMaxVersionNo(String kbId, String versionGroupId) {
+        Integer maxVersionNo = mapper.findMaxVersionNo(kbId, versionGroupId);
+        return maxVersionNo == null ? 0 : maxVersionNo;
+    }
+
+    @Override
     public boolean updateStatuses(String kbId, String assetId,
                                   String parseStatus, String indexStatus,
                                   String updatedBy, LocalDateTime updatedAt) {
@@ -79,6 +85,9 @@ public class AssetRepositoryImpl implements AssetRepository {
                 .mimeType(record.getMimeType())
                 .sizeBytes(record.getSizeBytes())
                 .fileHash(record.getFileHash())
+                .versionGroupId(record.getVersionGroupId())
+                .versionNo(record.getVersionNo())
+                .previousAssetId(record.getPreviousAssetId())
                 .objectKey(record.getObjectKey())
                 .previewObjectKey(record.getPreviewObjectKey())
                 .thumbnailKey(record.getThumbnailKey())
@@ -107,6 +116,9 @@ public class AssetRepositoryImpl implements AssetRepository {
         record.setMimeType(asset.getMimeType());
         record.setSizeBytes(asset.getSizeBytes());
         record.setFileHash(asset.getFileHash());
+        record.setVersionGroupId(asset.getVersionGroupId());
+        record.setVersionNo(asset.getVersionNo());
+        record.setPreviousAssetId(asset.getPreviousAssetId());
         record.setObjectKey(asset.getObjectKey());
         record.setPreviewObjectKey(asset.getPreviewObjectKey());
         record.setThumbnailKey(asset.getThumbnailKey());

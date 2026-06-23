@@ -1,10 +1,11 @@
 package com.anchr.core.integration.ai.adapter;
 
-import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.conversation.domain.port.ConversationRewritePort;
+import com.anchr.core.integration.ai.client.CapabilityClientFactory;
+import com.anchr.core.integration.ai.client.CapabilityResolver;
+import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.GenerationClient;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
-import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
@@ -18,24 +19,22 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ConfigDrivenGenerationAdapter implements ConversationRewritePort {
 
-    private final CapabilityConfigRepository configRepository;
-    private final AesUtil aesUtil;
+    private final ClientCacheManager cacheManager;
+    private final CapabilityClientFactory clientFactory;
+    private final CapabilityResolver configResolver;
 
     @Override
     public String generateText(String prompt) {
-        CapabilityConfig config = loadConfig();
-        GenerationClient client = new GenerationClient(config.getBaseUrl(), decrypt(config.getApiKeyEnc()));
-        return client.generate(config.getModelName(), Map.of(), prompt).content();
+        ClientCacheManager.ResolvedClient resolved = cacheManager.getOrBuild(
+                CapabilityResolver.SLOT_GENERATION, this::resolve);
+        GenerationClient client = (GenerationClient) resolved.client();
+        return client.generate(resolved.config().getModelName(), Map.of(), prompt).content();
     }
 
-    private CapabilityConfig loadConfig() {
-        return configRepository.findByCapability("GENERATION").stream().findFirst()
+    private ClientCacheManager.ResolvedClient resolve() {
+        CapabilityConfig config = configResolver.activeForSlot(CapabilityResolver.SLOT_GENERATION)
                 .orElseThrow(() -> new IllegalStateException(
                         "Generation is not configured. Save config via PATCH /api/v1/settings/generation."));
-    }
-
-    private String decrypt(String encrypted) {
-        try { return aesUtil.decrypt(encrypted); }
-        catch (Exception e) { throw new IllegalStateException("Failed to decrypt generation apiKey.", e); }
+        return new ClientCacheManager.ResolvedClient(clientFactory.build(config), config);
     }
 }

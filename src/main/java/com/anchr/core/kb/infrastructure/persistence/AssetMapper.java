@@ -27,6 +27,9 @@ public interface AssetMapper {
     Optional<AssetRecord> findActiveByHash(@Param("kbId") String kbId,
                                                     @Param("fileHash") String fileHash);
 
+    Integer findMaxVersionNo(@Param("kbId") String kbId,
+                             @Param("versionGroupId") String versionGroupId);
+
     int updateStatuses(@Param("kbId") String kbId,
                        @Param("assetId") String assetId,
                        @Param("parseStatus") String parseStatus,

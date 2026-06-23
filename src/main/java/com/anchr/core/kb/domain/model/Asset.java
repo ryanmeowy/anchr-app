@@ -20,6 +20,9 @@ public class Asset {
     String mimeType;
     Long sizeBytes;
     String fileHash;
+    String versionGroupId;
+    Integer versionNo;
+    String previousAssetId;
     String objectKey;
     String previewObjectKey;
     String thumbnailKey;

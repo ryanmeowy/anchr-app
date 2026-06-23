@@ -22,7 +22,9 @@ public class IngestionTaskItem {
     IngestionStage stage;
     IngestionTaskItemStatus status;
     int progress;
+    DedupeStrategy dedupeStrategy;
     DedupeResult dedupeResult;
+    String duplicateAssetId;
     String errorCode;
     String errorMessage;
     LocalDateTime createdAt;

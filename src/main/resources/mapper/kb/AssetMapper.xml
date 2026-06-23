@@ -13,6 +13,9 @@
         <result property="mimeType" column="mime_type"/>
         <result property="sizeBytes" column="size_bytes"/>
         <result property="fileHash" column="file_hash"/>
+        <result property="versionGroupId" column="version_group_id"/>
+        <result property="versionNo" column="version_no"/>
+        <result property="previousAssetId" column="previous_asset_id"/>
         <result property="objectKey" column="object_key"/>
         <result property="previewObjectKey" column="preview_object_key"/>
         <result property="thumbnailKey" column="thumbnail_key"/>
@@ -32,7 +35,8 @@
 
     <sql id="AssetColumns">
         id, kb_id, file_name, title, file_type, mime_type,
-        size_bytes, file_hash, object_key, preview_object_key, thumbnail_key,
+        size_bytes, file_hash, version_group_id, version_no, previous_asset_id,
+        object_key, preview_object_key, thumbnail_key,
         source_url, parse_status, index_status, segment_count, embedding_profile,
         error_code, error_message, created_by, updated_by, created_at, updated_at, deleted_at
     </sql>
@@ -42,7 +46,8 @@
             <include refid="AssetColumns"/>
         ) values (
             #{id}, #{kbId}, #{fileName}, #{title}, #{fileType}, #{mimeType},
-            #{sizeBytes}, #{fileHash}, #{objectKey}, #{previewObjectKey}, #{thumbnailKey},
+            #{sizeBytes}, #{fileHash}, #{versionGroupId}, #{versionNo}, #{previousAssetId},
+            #{objectKey}, #{previewObjectKey}, #{thumbnailKey},
             #{sourceUrl}, #{parseStatus}, #{indexStatus}, #{segmentCount}, #{embeddingProfile},
             #{errorCode}, #{errorMessage}, #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{deletedAt}
         )
@@ -83,6 +88,13 @@
           and deleted_at is null
         order by created_at desc, id desc
         limit 1
+    </select>
+
+    <select id="findMaxVersionNo" resultType="int">
+        select coalesce(max(version_no), 0)
+        from asset
+        where kb_id = #{kbId}
+          and version_group_id = #{versionGroupId}
     </select>
 
     <update id="updateStatuses">

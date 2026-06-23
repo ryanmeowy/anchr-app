@@ -18,6 +18,9 @@ public class AssetRecord {
     private String mimeType;
     private Long sizeBytes;
     private String fileHash;
+    private String versionGroupId;
+    private Integer versionNo;
+    private String previousAssetId;
     private String objectKey;
     private String previewObjectKey;
     private String thumbnailKey;

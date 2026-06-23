@@ -21,6 +21,8 @@ public interface AssetRepository {
 
     Optional<Asset> findActiveByHash(String kbId, String fileHash);
 
+    int findMaxVersionNo(String kbId, String versionGroupId);
+
     boolean updateStatuses(String kbId, String assetId,
                            String parseStatus, String indexStatus, String updatedBy, LocalDateTime updatedAt);
 

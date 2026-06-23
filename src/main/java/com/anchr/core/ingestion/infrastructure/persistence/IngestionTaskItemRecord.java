@@ -20,7 +20,9 @@ public class IngestionTaskItemRecord {
     private String stage;
     private String status;
     private Integer progress;
+    private String dedupeStrategy;
     private String dedupeResult;
+    private String duplicateAssetId;
     private String errorCode;
     private String errorMessage;
     private LocalDateTime createdAt;

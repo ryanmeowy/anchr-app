@@ -1,6 +1,7 @@
 package com.anchr.core.ingestion.infrastructure.persistence;
 
 import com.anchr.core.ingestion.domain.model.DedupeResult;
+import com.anchr.core.ingestion.domain.model.DedupeStrategy;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
@@ -137,7 +138,9 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         record.setStage(item.getStage().name());
         record.setStatus(item.getStatus().name());
         record.setProgress(item.getProgress());
+        record.setDedupeStrategy(item.getDedupeStrategy() == null ? null : item.getDedupeStrategy().name());
         record.setDedupeResult(item.getDedupeResult() == null ? null : item.getDedupeResult().name());
+        record.setDuplicateAssetId(item.getDuplicateAssetId());
         record.setErrorCode(item.getErrorCode());
         record.setErrorMessage(item.getErrorMessage());
         record.setCreatedAt(item.getCreatedAt());
@@ -177,7 +180,9 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .stage(IngestionStage.valueOf(record.getStage()))
                 .status(IngestionTaskItemStatus.valueOf(record.getStatus()))
                 .progress(defaultInt(record.getProgress()))
+                .dedupeStrategy(parseDedupeStrategy(record.getDedupeStrategy()))
                 .dedupeResult(parseDedupeResult(record.getDedupeResult()))
+                .duplicateAssetId(record.getDuplicateAssetId())
                 .errorCode(record.getErrorCode())
                 .errorMessage(record.getErrorMessage())
                 .createdAt(record.getCreatedAt())
@@ -188,6 +193,10 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
 
     private DedupeResult parseDedupeResult(String value) {
         return value == null ? null : DedupeResult.valueOf(value);
+    }
+
+    private DedupeStrategy parseDedupeStrategy(String value) {
+        return value == null ? null : DedupeStrategy.valueOf(value);
     }
 
     private int defaultInt(Integer value) {

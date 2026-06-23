@@ -21,7 +21,9 @@ public class IngestionTaskItemDTO {
     String stage;
     String status;
     int progress;
+    String dedupeStrategy;
     String dedupeResult;
+    String duplicateAssetId;
     String errorCode;
     String errorMessage;
     LocalDateTime updatedAt;
@@ -37,7 +39,9 @@ public class IngestionTaskItemDTO {
                 .stage(item.getStage().name())
                 .status(item.getStatus().name())
                 .progress(item.getProgress())
+                .dedupeStrategy(item.getDedupeStrategy() == null ? null : item.getDedupeStrategy().name())
                 .dedupeResult(item.getDedupeResult() == null ? null : item.getDedupeResult().name())
+                .duplicateAssetId(item.getDuplicateAssetId())
                 .errorCode(item.getErrorCode())
                 .errorMessage(item.getErrorMessage())
                 .updatedAt(item.getUpdatedAt())

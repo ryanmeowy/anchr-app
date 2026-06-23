@@ -31,7 +31,9 @@
         <result property="stage" column="stage"/>
         <result property="status" column="status"/>
         <result property="progress" column="progress"/>
+        <result property="dedupeStrategy" column="dedupe_strategy"/>
         <result property="dedupeResult" column="dedupe_result"/>
+        <result property="duplicateAssetId" column="duplicate_asset_id"/>
         <result property="errorCode" column="error_code"/>
         <result property="errorMessage" column="error_message"/>
         <result property="createdAt" column="created_at"/>
@@ -46,7 +48,8 @@
 
     <sql id="IngestionTaskItemColumns">
         id, task_id, kb_id, asset_id, file_name, file_hash, source_url, stage, status,
-        progress, dedupe_result, error_code, error_message, created_at, updated_at, finished_at
+        progress, dedupe_strategy, dedupe_result, duplicate_asset_id,
+        error_code, error_message, created_at, updated_at, finished_at
     </sql>
 
     <insert id="insertTask" parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskRecord">
@@ -63,7 +66,8 @@
             <include refid="IngestionTaskItemColumns"/>
         ) values (
             #{id}, #{taskId}, #{kbId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl}, #{stage}, #{status},
-            #{progress}, #{dedupeResult}, #{errorCode}, #{errorMessage}, #{createdAt}, #{updatedAt}, #{finishedAt}
+            #{progress}, #{dedupeStrategy}, #{dedupeResult}, #{duplicateAssetId},
+            #{errorCode}, #{errorMessage}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
     </insert>
 
@@ -106,7 +110,8 @@
     <select id="listFailedItems" resultMap="IngestionTaskItemRecordMap">
         select
             iti.id, iti.task_id, iti.kb_id, iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
-            iti.stage, iti.status, iti.progress, iti.dedupe_result, iti.error_code, iti.error_message,
+            iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result, iti.duplicate_asset_id,
+            iti.error_code, iti.error_message,
             iti.created_at, iti.updated_at, iti.finished_at
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
@@ -119,7 +124,8 @@
     <select id="findItem" resultMap="IngestionTaskItemRecordMap">
         select
             iti.id, iti.task_id, iti.kb_id, iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
-            iti.stage, iti.status, iti.progress, iti.dedupe_result, iti.error_code, iti.error_message,
+            iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result, iti.duplicate_asset_id,
+            iti.error_code, iti.error_message,
             iti.created_at, iti.updated_at, iti.finished_at
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id

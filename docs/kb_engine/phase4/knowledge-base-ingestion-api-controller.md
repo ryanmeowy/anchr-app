@@ -109,8 +109,10 @@ X-Access-Token: <access-token>
 | 值 | 说明 |
 |---|---|
 | `SKIP` | 同知识库内相同 `fileHash` 已存在时跳过 |
-| `OVERWRITE` | 标记为覆盖导入，当前创建 item 时 `dedupeResult=OVERWRITTEN` |
-| `VERSIONED` | 标记为版本化导入，当前创建 item 时 `dedupeResult=VERSIONED` |
+| `OVERWRITE` | 同知识库内相同 `fileHash` 已存在时创建新 asset；新 asset 成功入库后软删旧 asset 并删除旧 segments |
+| `VERSIONED` | 同知识库内相同 `fileHash` 已存在时保留旧 asset，创建新 asset 作为新版本 |
+
+`dedupeStrategy` 不传时默认按 `SKIP` 处理；传非法枚举值时返回统一错误响应 `code=400`，不会静默降级。
 
 ### 2.2 IngestionTaskCreateItemDTO
 
@@ -122,7 +124,7 @@ X-Access-Token: <access-token>
 | `mimeType` | string | 否 | 最大 128 | MIME type |
 | `sizeBytes` | long | 否 | - | 文件大小 |
 | `objectKey` | string | 条件必填 | 最大 1024 | OSS object key；上传文件导入通常必填，图片处理必填 |
-| `fileHash` | string | 否 | 最大 128 | 文件指纹；`SKIP` 去重依赖该字段 |
+| `fileHash` | string | 否 | 最大 128 | 文件指纹；三种去重策略均依赖该字段 |
 | `sourceUrl` | string | 条件必填 | - | URL 导入必填 |
 
 当前支持类型以 `/api/v1/ingestion/capabilities` 为准。当前静态能力包含：
@@ -173,7 +175,9 @@ X-Access-Token: <access-token>
 | `stage` | string | 当前阶段 |
 | `status` | string | item 状态 |
 | `progress` | integer | 进度百分比，0 到 100 |
+| `dedupeStrategy` | string/null | 本 item 使用的去重策略 |
 | `dedupeResult` | string/null | 去重结果 |
+| `duplicateAssetId` | string/null | 命中的重复 asset ID；无重复时为空 |
 | `errorCode` | string/null | 失败错误码 |
 | `errorMessage` | string/null | 失败错误信息 |
 | `updatedAt` | string | 更新时间 |
@@ -204,10 +208,10 @@ item 状态：
 
 | 值 | 说明 |
 |---|---|
-| `NEW` | 新文档 |
+| `NEW` | 未命中重复，按新文档入库 |
 | `SKIPPED` | 命中 `SKIP` 去重并跳过 |
-| `OVERWRITTEN` | 覆盖导入标记 |
-| `VERSIONED` | 版本化导入标记 |
+| `OVERWRITTEN` | 命中 `OVERWRITE`，新 asset 成功后替换旧 asset |
+| `VERSIONED` | 命中 `VERSIONED`，保留旧 asset 并创建新版本 |
 
 ### 2.5 IngestionTaskListDTO
 
@@ -320,7 +324,8 @@ Content-Type: application/json
 | `fileName` | 为空时可使用 `sourceUrl` 兜底；两者都为空会返回 `INVALID_REQUEST` |
 | URL 导入 | `sourceType=URL` 时必须提供 `sourceUrl` |
 | 上传导入 | 常规文件应提供 `objectKey`；图片处理阶段会强制要求 `objectKey` 非空 |
-| `SKIP` 去重 | 同知识库内相同 `fileHash` 已存在时，item 返回 `SKIPPED`、`progress=100`、`dedupeResult=SKIPPED` |
+| 去重策略 | 有 `fileHash` 时，`SKIP`、`OVERWRITE`、`VERSIONED` 均按同知识库 active asset 查重；无 `fileHash` 时不查重，`dedupeResult=NEW` |
+| 去重结果 | `dedupeResult` 表示实际结果；未命中重复时即使选择 `OVERWRITE` 或 `VERSIONED` 也返回 `NEW` |
 | 不支持类型 | 不阻止整批任务创建，该 item 会以 `FAILED` 返回，`errorCode=UNSUPPORTED_FILE_TYPE` |
 | 异步执行 | 任务保存后在事务提交后提交异步处理 |
 

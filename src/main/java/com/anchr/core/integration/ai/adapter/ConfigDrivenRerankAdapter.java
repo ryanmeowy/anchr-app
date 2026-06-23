@@ -1,10 +1,11 @@
 package com.anchr.core.integration.ai.adapter;
 
-import com.anchr.core.common.util.AesUtil;
+import com.anchr.core.integration.ai.client.CapabilityClientFactory;
+import com.anchr.core.integration.ai.client.CapabilityResolver;
+import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.RerankClient;
 import com.anchr.core.search.domain.port.SearchRerankPort;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
-import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
@@ -23,32 +24,31 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ConfigDrivenRerankAdapter implements SearchRerankPort {
 
-    private final CapabilityConfigRepository configRepository;
-    private final AesUtil aesUtil;
+    private final ClientCacheManager cacheManager;
+    private final CapabilityClientFactory clientFactory;
+    private final CapabilityResolver configResolver;
 
     @Override
     public List<RerankItem> rerank(String query, List<String> documents, Integer topN) {
-        CapabilityConfig config = loadConfig();
+        ClientCacheManager.ResolvedClient resolved = cacheManager.getOrBuild(
+                CapabilityResolver.SLOT_RERANK, this::resolve);
+        RerankClient client = (RerankClient) resolved.client();
 
         Map<String, Object> extraConfig = new LinkedHashMap<>();
         if (topN != null) extraConfig.put("top_n", topN);
 
-        RerankClient client = new RerankClient(config.getBaseUrl(), decrypt(config.getApiKeyEnc()));
-        RerankClient.RerankResult result = client.rerank(config.getModelName(), query, documents, extraConfig);
+        RerankClient.RerankResult result = client.rerank(
+                resolved.config().getModelName(), query, documents, extraConfig);
 
         return result.items().stream()
                 .map(item -> new RerankItem(item.index(), item.relevanceScore()))
                 .toList();
     }
 
-    private CapabilityConfig loadConfig() {
-        return configRepository.findByCapability("RERANK").stream().findFirst()
+    private ClientCacheManager.ResolvedClient resolve() {
+        CapabilityConfig config = configResolver.activeForSlot(CapabilityResolver.SLOT_RERANK)
                 .orElseThrow(() -> new IllegalStateException(
                         "Rerank is not configured. Save config via PATCH /api/v1/settings/rerank."));
-    }
-
-    private String decrypt(String encrypted) {
-        try { return aesUtil.decrypt(encrypted); }
-        catch (Exception e) { throw new IllegalStateException("Failed to decrypt rerank apiKey.", e); }
+        return new ClientCacheManager.ResolvedClient(clientFactory.build(config), config);
     }
 }

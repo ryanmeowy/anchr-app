@@ -156,7 +156,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .stage(stage)
                 .status(IngestionTaskItemStatus.PENDING)
                 .progress(stage == IngestionStage.EMBED ? 60 : 20)
+                .dedupeStrategy(null)
                 .dedupeResult(null)
+                .duplicateAssetId(null)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -202,9 +204,13 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
             requireText(command.sourceUrl(), "sourceUrl");
             if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
                 return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
-                        "UNSUPPORTED_FILE_TYPE", "Unsupported URL file type.", now);
+                        dedupeStrategy, null, "UNSUPPORTED_FILE_TYPE", "Unsupported URL file type.", now);
             }
-            Asset document = createDocument(context, kbId, command, fileName, fileType, now);
+            DedupeDecision decision = resolveDedupeDecision(kbId, dedupeStrategy, command.fileHash());
+            if (decision.result() == DedupeResult.SKIPPED) {
+                return skippedItem(kbId, taskId, decision.existingAsset(), dedupeStrategy, now);
+            }
+            Asset document = createDocument(context, kbId, command, fileName, fileType, decision, now);
             assetRepository.save(document);
             return IngestionTaskItem.builder()
                     .id(idGen.nextIdStr())
@@ -217,23 +223,23 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                     .stage(IngestionStage.PARSE)
                     .status(IngestionTaskItemStatus.PENDING)
                     .progress(10)
-                    .dedupeResult(resolveNewDedupeResult(dedupeStrategy))
+                    .dedupeStrategy(dedupeStrategy)
+                    .dedupeResult(decision.result())
+                    .duplicateAssetId(decision.duplicateAssetId())
                     .createdAt(now)
                     .updatedAt(now)
                     .build();
         }
         if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
             return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
-                    "UNSUPPORTED_FILE_TYPE", "Unsupported file type.", now);
+                    dedupeStrategy, null, "UNSUPPORTED_FILE_TYPE", "Unsupported file type.", now);
         }
-        if (StringUtils.hasText(command.fileHash()) && dedupeStrategy == DedupeStrategy.SKIP) {
-            var existing = assetRepository.findActiveByHash(kbId, command.fileHash().trim());
-            if (existing.isPresent()) {
-                return skippedItem(kbId, taskId, existing.get(), now);
-            }
+        DedupeDecision decision = resolveDedupeDecision(kbId, dedupeStrategy, command.fileHash());
+        if (decision.result() == DedupeResult.SKIPPED) {
+            return skippedItem(kbId, taskId, decision.existingAsset(), dedupeStrategy, now);
         }
 
-        Asset document = createDocument(context, kbId, command, fileName, fileType, now);
+        Asset document = createDocument(context, kbId, command, fileName, fileType, decision, now);
         assetRepository.save(document);
         return IngestionTaskItem.builder()
                 .id(idGen.nextIdStr())
@@ -246,14 +252,16 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .stage(IngestionStage.UPLOAD)
                 .status(IngestionTaskItemStatus.PENDING)
                 .progress(0)
-                .dedupeResult(resolveNewDedupeResult(dedupeStrategy))
+                .dedupeStrategy(dedupeStrategy)
+                .dedupeResult(decision.result())
+                .duplicateAssetId(decision.duplicateAssetId())
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
     }
 
     private Asset createDocument(RequestUserContext context, String kbId, IngestionCreateItemCommand command,
-                                 String fileName, String fileType, LocalDateTime now) {
+                                 String fileName, String fileType, DedupeDecision decision, LocalDateTime now) {
         return Asset.builder()
                 .id(idGen.nextIdStr())
                 .kbId(kbId)
@@ -263,6 +271,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .mimeType(trimToNull(command.mimeType()))
                 .sizeBytes(command.sizeBytes())
                 .fileHash(trimToNull(command.fileHash()))
+                .versionGroupId(decision.versionGroupId())
+                .versionNo(decision.versionNo())
+                .previousAssetId(decision.previousAssetId())
                 .objectKey(trimToNull(command.objectKey()))
                 .sourceUrl(trimToNull(command.sourceUrl()))
                 .parseStatus(DocumentParseStatus.PENDING)
@@ -302,7 +313,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
     }
 
     private IngestionTaskItem failedItem(String kbId, String taskId, String fileName, String fileHash,
-                                         String sourceUrl, String errorCode, String errorMessage,
+                                         String sourceUrl, DedupeStrategy dedupeStrategy, String duplicateAssetId,
+                                         String errorCode, String errorMessage,
                                          LocalDateTime now) {
         return IngestionTaskItem.builder()
                 .id(idGen.nextIdStr())
@@ -314,7 +326,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .stage(IngestionStage.UPLOAD)
                 .status(IngestionTaskItemStatus.FAILED)
                 .progress(0)
+                .dedupeStrategy(dedupeStrategy)
                 .dedupeResult(null)
+                .duplicateAssetId(duplicateAssetId)
                 .errorCode(errorCode)
                 .errorMessage(errorMessage)
                 .createdAt(now)
@@ -323,7 +337,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .build();
     }
 
-    private IngestionTaskItem skippedItem(String kbId, String taskId, Asset existing, LocalDateTime now) {
+    private IngestionTaskItem skippedItem(String kbId, String taskId, Asset existing,
+                                          DedupeStrategy dedupeStrategy, LocalDateTime now) {
         return IngestionTaskItem.builder()
                 .id(idGen.nextIdStr())
                 .taskId(taskId)
@@ -335,7 +350,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .stage(IngestionStage.ASKABLE)
                 .status(IngestionTaskItemStatus.SKIPPED)
                 .progress(100)
+                .dedupeStrategy(dedupeStrategy)
                 .dedupeResult(DedupeResult.SKIPPED)
+                .duplicateAssetId(existing.getId())
                 .createdAt(now)
                 .updatedAt(now)
                 .finishedAt(now)
@@ -381,14 +398,27 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         });
     }
 
-    private DedupeResult resolveNewDedupeResult(DedupeStrategy strategy) {
+    private DedupeDecision resolveDedupeDecision(String kbId, DedupeStrategy strategy, String fileHash) {
+        if (!StringUtils.hasText(fileHash)) {
+            return DedupeDecision.newAsset(null, 1);
+        }
+        var existing = assetRepository.findActiveByHash(kbId, fileHash.trim());
+        if (existing.isEmpty()) {
+            return DedupeDecision.newAsset(null, 1);
+        }
+        Asset existingAsset = existing.get();
+        if (strategy == DedupeStrategy.SKIP) {
+            return DedupeDecision.skipped(existingAsset);
+        }
         if (strategy == DedupeStrategy.OVERWRITE) {
-            return DedupeResult.OVERWRITTEN;
+            return DedupeDecision.overwritten(existingAsset);
         }
-        if (strategy == DedupeStrategy.VERSIONED) {
-            return DedupeResult.VERSIONED;
-        }
-        return DedupeResult.NEW;
+        String versionGroupId = StringUtils.hasText(existingAsset.getVersionGroupId())
+                ? existingAsset.getVersionGroupId()
+                : existingAsset.getId();
+        int nextVersionNo = Math.max(existingAsset.getVersionNo() == null ? 1 : existingAsset.getVersionNo(),
+                assetRepository.findMaxVersionNo(kbId, versionGroupId)) + 1;
+        return DedupeDecision.versioned(existingAsset, versionGroupId, nextVersionNo);
     }
 
     private int normalizeLimit(int limit) {
@@ -421,5 +451,33 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private record DedupeDecision(DedupeResult result,
+                                  Asset existingAsset,
+                                  String duplicateAssetId,
+                                  String versionGroupId,
+                                  Integer versionNo,
+                                  String previousAssetId) {
+
+        private static DedupeDecision newAsset(String versionGroupId, Integer versionNo) {
+            return new DedupeDecision(DedupeResult.NEW, null, null, versionGroupId, versionNo, null);
+        }
+
+        private static DedupeDecision skipped(Asset existingAsset) {
+            return new DedupeDecision(DedupeResult.SKIPPED, existingAsset, existingAsset.getId(), null, null, null);
+        }
+
+        private static DedupeDecision overwritten(Asset existingAsset) {
+            return new DedupeDecision(DedupeResult.OVERWRITTEN, existingAsset, existingAsset.getId(),
+                    existingAsset.getVersionGroupId(),
+                    existingAsset.getVersionNo() == null ? 1 : existingAsset.getVersionNo(),
+                    existingAsset.getPreviousAssetId());
+        }
+
+        private static DedupeDecision versioned(Asset existingAsset, String versionGroupId, Integer versionNo) {
+            return new DedupeDecision(DedupeResult.VERSIONED, existingAsset, existingAsset.getId(),
+                    versionGroupId, versionNo, existingAsset.getId());
+        }
     }
 }

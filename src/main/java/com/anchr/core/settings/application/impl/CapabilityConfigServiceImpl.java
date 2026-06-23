@@ -3,6 +3,9 @@ package com.anchr.core.settings.application.impl;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
+import com.anchr.core.integration.ai.client.CapabilityClientFactory;
+import com.anchr.core.integration.ai.client.CapabilityResolver;
+import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.TextEmbeddingClient;
 import com.anchr.core.integration.ai.client.GenerationClient;
 import com.anchr.core.integration.ai.client.MultiEmbeddingClient;
@@ -34,6 +37,9 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     private final CapabilityConfigRepository repository;
     private final AesUtil aesUtil;
     private final IdGen idGen;
+    private final CapabilityClientFactory clientFactory;
+    private final CapabilityResolver configResolver;
+    private final ClientCacheManager clientCacheManager;
 
     @Override
     public List<CapabilityConfigDTO> get(String capability) {
@@ -66,6 +72,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                 .updatedAt(LocalDateTime.now())
                 .build();
         CapabilityConfig saved = repository.insert(config);
+        refreshSlot(capability);
         return CapabilityConfigDTO.from(saved, maskApiKey(saved.getApiKeyEnc()));
     }
 
@@ -89,6 +96,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                 .updatedAt(LocalDateTime.now())
                 .build();
         CapabilityConfig updated = repository.update(config);
+        refreshSlot(capability);
         return CapabilityConfigDTO.from(updated, maskApiKey(updated.getApiKeyEnc()));
     }
 
@@ -160,11 +168,32 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         } else if (CAPABILITY_MULTI_EMBEDDING.equals(capability)) {
             repository.disableAll(CAPABILITY_EMBEDDING);
         }
+        // Both EMBEDDING and MULTI_EMBEDDING map to the EMBEDDING slot, so a single
+        // refresh covers the mutual-exclusion toggle as well as GENERATION/RERANK.
+        refreshSlot(capability);
     }
 
     @Override
     public void del(String capability, Long id) {
         repository.del(capability, id);
+        refreshSlot(capability);
+    }
+
+    /**
+     * Write-through cache refresh: after a config mutation, re-resolve the active
+     * config for the affected slot and replace the cached client. If no active
+     * config remains (e.g. the last one was deleted), invalidate the slot so the
+     * next read re-queries the DB and surfaces the "not configured" error.
+     */
+    private void refreshSlot(String capability) {
+        String slot = CapabilityResolver.slotFor(capability);
+        java.util.Optional<CapabilityConfig> active = configResolver.activeForSlot(slot);
+        if (active.isPresent()) {
+            clientCacheManager.put(slot,
+                    new ClientCacheManager.ResolvedClient(clientFactory.build(active.get()), active.get()));
+        } else {
+            clientCacheManager.invalidate(slot);
+        }
     }
 
     private String extraConfigJson(java.util.Map<String, Object> extraConfig) {
