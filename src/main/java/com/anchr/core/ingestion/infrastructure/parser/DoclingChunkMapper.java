@@ -42,7 +42,7 @@ public class DoclingChunkMapper {
                 .segmentId(idgen.nextIdStr())
                 .kbId(asset.getKbId())
                 .assetId(asset.getId())
-                .title(StringUtils.hasText(asset.getTitle()) ? asset.getTitle() : asset.getFileName())
+                .title(CollectionUtils.isEmpty(chunk.headings()) ? asset.getFileName() : chunk.headings().getFirst())
                 .pageNo(CollectionUtils.isEmpty(chunk.pageRange()) ? 0 : chunk.pageRange().getFirst())
                 .chunkOrder(parseChunkId(chunk.chunkId()))
                 .sourceRef(asset.getObjectKey())

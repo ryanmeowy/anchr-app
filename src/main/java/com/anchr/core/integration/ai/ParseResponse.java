@@ -29,7 +29,8 @@ public record ParseResponse(
             List<Integer> pageRange,
             Integer charCount,
             String source,
-            List<BboxInfo> bboxes
+            List<BboxInfo> bboxes,
+            List<String> headings
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
