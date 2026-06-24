@@ -71,7 +71,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         ingestionTaskRepository.save(task);
         activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
                 task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
-        knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), now);
+        knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), false);
         submitAfterCommit(kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
     }
@@ -279,6 +279,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .parseStatus(DocumentParseStatus.PENDING)
                 .indexStatus(DocumentIndexStatus.PENDING)
                 .segmentCount(0)
+                .indexedSegmentCount(0)
                 .createdBy(context.userId())
                 .updatedBy(context.userId())
                 .createdAt(now)

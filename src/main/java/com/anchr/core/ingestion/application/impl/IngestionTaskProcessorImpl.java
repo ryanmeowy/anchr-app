@@ -118,7 +118,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         Asset asset = findAsset(kbId, item);
         try {
             processAsset(kbId, taskId, item, asset, userId);
-            knowledgeBaseRepository.refreshDocumentStats(kbId, userId, LocalDateTime.now());
+            // freshIngest=true: real ingest — refresh counts and stamp last_ingested_at.
+            knowledgeBaseRepository.refreshDocumentStats(kbId, userId, true);
         } catch (Exception e) {
             log.warn("knowledge base ingestion item failed, taskId={}, itemId={}, assetId={}: {}",
                     taskId, item.getId(), item.getAssetId(), e.getMessage());
@@ -241,7 +242,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                               String assetId, int segmentCount, String userId) {
         LocalDateTime now = LocalDateTime.now();
         assetRepository.updateIngestionResult(kbId, assetId,
-                DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.SUCCESS.name(), segmentCount,
+                DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.SUCCESS.name(), segmentCount, segmentCount,
                 null, null, userId, now);
         ingestionTaskRepository.markItemSuccess(kbId, taskId, itemId,
                 IngestionStage.ASKABLE.name(), STAGE_DONE_PROGRESS, now);
@@ -276,7 +277,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 : ApiError.INTERNAL_ERROR.name();
         String errorMessage = clip(e.getMessage(), ERROR_MESSAGE_MAX_LENGTH);
         assetRepository.updateIngestionResult(kbId, asset.getId(),
-                DocumentParseStatus.FAILED.name(), DocumentIndexStatus.FAILED.name(), asset.getSegmentCount(),
+                DocumentParseStatus.FAILED.name(), DocumentIndexStatus.FAILED.name(), asset.getSegmentCount(), asset.getIndexedSegmentCount(),
                 errorCode, errorMessage, userId, now);
         ingestionTaskRepository.markItemFailed(kbId, taskId, item.getId(),
                 item.getStage().name(), item.getProgress(), errorCode, errorMessage, now);

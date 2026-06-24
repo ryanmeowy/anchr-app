@@ -24,6 +24,10 @@ public interface AssetMapper {
 
     long countActive(@Param("kbId") String kbId);
 
+    AssetHealthStatsRecord healthStats(@Param("kbId") String kbId);
+
+    List<SourceTypeCountRecord> countByFileType(@Param("kbId") String kbId);
+
     Optional<AssetRecord> findActiveByHash(@Param("kbId") String kbId,
                                                     @Param("fileHash") String fileHash);
 
@@ -42,6 +46,7 @@ public interface AssetMapper {
                               @Param("parseStatus") String parseStatus,
                               @Param("indexStatus") String indexStatus,
                               @Param("segmentCount") int segmentCount,
+                              @Param("indexedSegmentCount") int indexedSegmentCount,
                               @Param("errorCode") String errorCode,
                               @Param("errorMessage") String errorMessage,
                               @Param("updatedBy") String updatedBy,

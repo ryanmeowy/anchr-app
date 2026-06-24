@@ -72,13 +72,18 @@ public class KnowledgeBaseRepositoryImpl implements KnowledgeBaseRepository {
     }
 
     @Override
-    public void refreshDocumentStats(String id, String updatedBy, LocalDateTime updatedAt) {
-        mapper.refreshDocumentStats( id, updatedBy, updatedAt);
+    public void refreshDocumentStats(String id, String updatedBy, boolean freshIngest) {
+        LocalDateTime now = LocalDateTime.now();
+        // When freshIngest is true (a document was just ingested), stamp last_ingested_at
+        // alongside updated_at; otherwise leave last_ingested_at untouched.
+        mapper.refreshDocumentStats( id, updatedBy, now, freshIngest ? now : null);
     }
 
     @Override
-    public Optional<KnowledgeBaseStats> findStats(String id) {
-        return mapper.findStats( id).map(this::toStats);
+    public List<KnowledgeBaseStats> findStats(List<String> kbIds) {
+        return mapper.findStats(kbIds).stream()
+                .map(this::toStats)
+                .toList();
     }
 
     private KnowledgeBaseRecord toRecord(KnowledgeBase knowledgeBase) {
@@ -122,6 +127,10 @@ public class KnowledgeBaseRepositoryImpl implements KnowledgeBaseRepository {
                 .segmentCount(defaultInt(record.getSegmentCount()))
                 .lastIngestedAt(record.getLastIngestedAt())
                 .lastIngestionStatus(record.getLastIngestionStatus())
+                .lastIngestionTotalCount(defaultInt(record.getLastIngestionTotalCount()))
+                .lastIngestionSuccessCount(defaultInt(record.getLastIngestionSuccessCount()))
+                .lastIngestionFailureCount(defaultInt(record.getLastIngestionFailureCount()))
+                .lastIngestionRunningCount(defaultInt(record.getLastIngestionRunningCount()))
                 .updatedAt(record.getUpdatedAt())
                 .build();
     }

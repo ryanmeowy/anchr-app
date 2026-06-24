@@ -18,6 +18,10 @@ public class KnowledgeBaseStatsDTO {
     int segmentCount;
     LocalDateTime lastIngestedAt;
     String lastIngestionStatus;
+    int lastIngestionTotalCount;
+    int lastIngestionSuccessCount;
+    int lastIngestionFailureCount;
+    int lastIngestionRunningCount;
     LocalDateTime updatedAt;
 
     public static KnowledgeBaseStatsDTO from(KnowledgeBaseStats stats) {
@@ -27,6 +31,10 @@ public class KnowledgeBaseStatsDTO {
                 .segmentCount(stats.getSegmentCount())
                 .lastIngestedAt(stats.getLastIngestedAt())
                 .lastIngestionStatus(stats.getLastIngestionStatus())
+                .lastIngestionTotalCount(stats.getLastIngestionTotalCount())
+                .lastIngestionSuccessCount(stats.getLastIngestionSuccessCount())
+                .lastIngestionFailureCount(stats.getLastIngestionFailureCount())
+                .lastIngestionRunningCount(stats.getLastIngestionRunningCount())
                 .updatedAt(stats.getUpdatedAt())
                 .build();
     }

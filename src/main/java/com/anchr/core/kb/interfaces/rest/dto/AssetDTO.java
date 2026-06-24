@@ -27,6 +27,7 @@ public class AssetDTO {
     String parseStatus;
     String indexStatus;
     int segmentCount;
+    int indexedSegmentCount;
     String embeddingProfile;
     String errorCode;
     String errorMessage;
@@ -49,6 +50,7 @@ public class AssetDTO {
                 .parseStatus(document.getParseStatus().name())
                 .indexStatus(document.getIndexStatus().name())
                 .segmentCount(document.getSegmentCount())
+                .indexedSegmentCount(document.getIndexedSegmentCount())
                 .embeddingProfile(document.getEmbeddingProfile())
                 .errorCode(document.getErrorCode())
                 .errorMessage(document.getErrorMessage())

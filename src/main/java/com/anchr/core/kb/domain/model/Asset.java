@@ -30,6 +30,7 @@ public class Asset {
     DocumentParseStatus parseStatus;
     DocumentIndexStatus indexStatus;
     int segmentCount;
+    int indexedSegmentCount;
     String embeddingProfile;
     String errorCode;
     String errorMessage;

@@ -28,6 +28,7 @@ public class AssetRecord {
     private String parseStatus;
     private String indexStatus;
     private Integer segmentCount;
+    private Integer indexedSegmentCount;
     private String embeddingProfile;
     private String errorCode;
     private String errorMessage;

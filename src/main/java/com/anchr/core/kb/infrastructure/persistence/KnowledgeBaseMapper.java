@@ -45,7 +45,8 @@ public interface KnowledgeBaseMapper {
 
     int refreshDocumentStats(@Param("id") String id,
                              @Param("updatedBy") String updatedBy,
-                             @Param("updatedAt") LocalDateTime updatedAt);
+                             @Param("updatedAt") LocalDateTime updatedAt,
+                             @Param("lastIngestedAt") LocalDateTime lastIngestedAt);
 
-    Optional<KnowledgeBaseStatsRecord> findStats(@Param("id") String id);
+    List<KnowledgeBaseStatsRecord> findStats(@Param("kbIds") List<String> kbIds);
 }

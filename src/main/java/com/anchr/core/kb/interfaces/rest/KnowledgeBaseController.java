@@ -9,8 +9,10 @@ import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.interfaces.rest.dto.AssetDTO;
 import com.anchr.core.kb.interfaces.rest.dto.AssetListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KbQueryRequestDTO;
+import com.anchr.core.kb.interfaces.rest.dto.KbStatsRequestDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseCreateRequestDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseDTO;
+import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseHealthDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseStatsDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseUpdateRequestDTO;
@@ -31,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 
 /**
  * Knowledge base product APIs.
@@ -88,9 +91,17 @@ public class KnowledgeBaseController {
     }
 
     @RequireAuth
-    @GetMapping("/{kbId}/stats")
-    public Result<KnowledgeBaseStatsDTO> stats(@PathVariable @NotBlank String kbId) {
-        return Result.success(KnowledgeBaseStatsDTO.from(knowledgeBaseService.getStats(kbId)));
+    @PostMapping("/stats")
+    public Result<List<KnowledgeBaseStatsDTO>> stats(@RequestBody KbStatsRequestDTO request) {
+        return Result.success(knowledgeBaseService.getStats(request.getKbIds()).stream()
+                .map(KnowledgeBaseStatsDTO::from)
+                .toList());
+    }
+
+    @RequireAuth
+    @GetMapping("/{kbId}/health")
+    public Result<KnowledgeBaseHealthDTO> health(@PathVariable @NotBlank String kbId) {
+        return Result.success(KnowledgeBaseHealthDTO.from(knowledgeBaseService.getHealth(kbId)));
     }
 
     @RequireAuth

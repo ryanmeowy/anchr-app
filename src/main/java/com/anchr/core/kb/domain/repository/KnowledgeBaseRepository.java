@@ -32,7 +32,7 @@ public interface KnowledgeBaseRepository {
 
     boolean archive(String id, String updatedBy, LocalDateTime updatedAt);
 
-    void refreshDocumentStats(String id, String updatedBy, LocalDateTime updatedAt);
+    void refreshDocumentStats(String id, String updatedBy, boolean freshIngest);
 
-    Optional<KnowledgeBaseStats> findStats(String id);
+    List<KnowledgeBaseStats> findStats(List<String> kbIds);
 }

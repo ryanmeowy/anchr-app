@@ -2,6 +2,7 @@ package com.anchr.core.kb.application;
 
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.domain.model.KnowledgeBaseHealth;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 
 import java.time.LocalDateTime;
@@ -24,7 +25,9 @@ public interface KnowledgeBaseService {
 
     void archive(String kbId);
 
-    KnowledgeBaseStats getStats(String kbId);
+    List<KnowledgeBaseStats> getStats(List<String> kbIds);
+
+    KnowledgeBaseHealth getHealth(String kbId);
 
     PagedResult<Asset> listDocuments(String kbId, Integer page, Integer size);
 

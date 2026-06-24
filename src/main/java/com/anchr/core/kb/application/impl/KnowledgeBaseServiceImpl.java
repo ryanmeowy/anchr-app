@@ -7,9 +7,13 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
+import com.anchr.core.kb.domain.model.AssetHealthStats;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.domain.model.KnowledgeBaseHealth;
+import com.anchr.core.kb.domain.model.KnowledgeBaseHealthScore;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
+import com.anchr.core.kb.domain.model.SourceTypeCount;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.repository.SegmentRepository;
@@ -109,9 +113,57 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    public KnowledgeBaseStats getStats(String kbId) {
-        return knowledgeBaseRepository.findStats(requireId(kbId, "kbId"))
+    public List<KnowledgeBaseStats> getStats(List<String> kbIds) {
+        if (kbIds == null || kbIds.isEmpty()) {
+            return List.of();
+        }
+        return knowledgeBaseRepository.findStats(kbIds);
+    }
+
+    @Override
+    public KnowledgeBaseHealth getHealth(String kbId) {
+        String id = requireId(kbId, "kbId");
+        KnowledgeBase kb = knowledgeBaseRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ApiError.KNOWLEDGE_BASE_NOT_FOUND));
+
+        AssetHealthStats stats = assetRepository.healthStats(id);
+        List<SourceTypeCount> sourceTypeCounts = assetRepository.countByFileType(id);
+        int documentTotal = stats.documentTotal();
+
+        List<KnowledgeBaseHealth.SourceTypeHealth> sourceTypes = sourceTypeCounts.stream()
+                .map(st -> KnowledgeBaseHealth.SourceTypeHealth.builder()
+                        .type(st.type())
+                        .label(st.type())
+                        .count(st.count())
+                        .percentage(documentTotal > 0
+                                ? (int) Math.round(st.count() * 100.0 / documentTotal)
+                                : 0)
+                        .build())
+                .toList();
+
+        int score = KnowledgeBaseHealthScore.compute(
+                kb.getStatus(),
+                documentTotal, stats.documentIndexed(), stats.documentFailed(),
+                stats.segmentTotal(), stats.segmentIndexed(),
+                kb.getLastIngestedAt(), LocalDateTime.now());
+
+        return KnowledgeBaseHealth.builder()
+                .kbId(kb.getId())
+                .kbName(kb.getName())
+                .status(kb.getStatus().name())
+                .score(score)
+                .documents(KnowledgeBaseHealth.DocumentHealth.builder()
+                        .total(documentTotal)
+                        .indexed(stats.documentIndexed())
+                        .pending(stats.documentPending())
+                        .failed(stats.documentFailed())
+                        .build())
+                .segments(KnowledgeBaseHealth.SegmentHealth.builder()
+                        .total(stats.segmentTotal())
+                        .indexed(stats.segmentIndexed())
+                        .build())
+                .sourceTypes(sourceTypes)
+                .build();
     }
 
     @Override
@@ -147,7 +199,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
-        knowledgeBaseRepository.refreshDocumentStats(id, context.userId(), LocalDateTime.now());
+        knowledgeBaseRepository.refreshDocumentStats(id, context.userId(), false);
         try {
             kbSegmentRepository.deleteByAssetId(documentId);
         } catch (BusinessException e) {
