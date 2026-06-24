@@ -5,8 +5,10 @@ import com.anchr.core.common.model.Result;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.interfaces.rest.dto.AssetDTO;
 import com.anchr.core.kb.interfaces.rest.dto.AssetListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.KbQueryRequestDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseCreateRequestDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseListDTO;
@@ -15,6 +17,7 @@ import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseUpdateRequestDTO;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,7 +29,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 
 /**
  * Knowledge base product APIs.
@@ -47,21 +51,13 @@ public class KnowledgeBaseController {
     }
 
     @RequireAuth
-    @GetMapping("/search")
-    public Result<List<KnowledgeBaseDTO>> search(
-            @RequestParam("q") String query,
-            @RequestParam(defaultValue = "20") int limit) {
-        return Result.success(knowledgeBaseService.search(query, limit).stream()
-                .map(KnowledgeBaseDTO::from)
-                .toList());
-    }
-
-    @RequireAuth
-    @GetMapping
-    public Result<KnowledgeBaseListDTO> list(
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        KnowledgeBaseService.PagedResult<KnowledgeBase> result = knowledgeBaseService.list(page, size);
+    @PostMapping("/search")
+    public Result<KnowledgeBaseListDTO> listKbs(@RequestBody KbQueryRequestDTO request) {
+        String status = parseStatus(request.getStatus());
+        LocalDateTime after = parseDateTimeParam(request.getUpdateAfter());
+        LocalDateTime before = parseDateTimeParam(request.getUpdateBefore());
+        KnowledgeBaseService.PagedResult<KnowledgeBase> result =
+                knowledgeBaseService.listKbs(trimToNull(request.getKeyword()), status, after, before, request.getPage(), request.getSize());
         return Result.success(KnowledgeBaseListDTO.builder()
                 .items(result.items().stream().map(KnowledgeBaseDTO::from).toList())
                 .total(result.total())
@@ -101,8 +97,8 @@ public class KnowledgeBaseController {
     @GetMapping("/{kbId}/documents")
     public Result<AssetListDTO> listDocuments(
             @PathVariable @NotBlank String kbId,
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "20") Integer size) {
         KnowledgeBaseService.PagedResult<Asset> result = knowledgeBaseService.listDocuments(kbId, page, size);
         return Result.success(AssetListDTO.builder()
                 .items(result.items().stream().map(AssetDTO::from).toList())
@@ -125,5 +121,37 @@ public class KnowledgeBaseController {
                                        @PathVariable @NotBlank String assetId) {
         knowledgeBaseService.deleteDocument(kbId, assetId);
         return Result.success();
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    private static String parseStatus(String status) {
+        if (StringUtils.hasText(status)) {
+            KnowledgeBaseStatus knowledgeBaseStatus = KnowledgeBaseStatus.fetchByCode(status);
+            return null == knowledgeBaseStatus ? null : knowledgeBaseStatus.name();
+        }
+        return null;
+    }
+
+    private static LocalDateTime parseDateTimeParam(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            if (value.chars().allMatch(Character::isDigit)) {
+                return LocalDateTime.ofInstant(
+                        java.time.Instant.ofEpochMilli(Long.parseLong(value)),
+                        java.time.ZoneOffset.UTC);
+            }
+            return LocalDateTime.parse(value);
+        } catch (DateTimeParseException | NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

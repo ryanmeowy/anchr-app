@@ -20,11 +20,12 @@ public interface KnowledgeBaseRepository {
 
     List<KnowledgeBase> listActiveByIds(List<String> ids);
 
-    List<KnowledgeBase> listActive(int limit, int offset);
+    List<KnowledgeBase> searchKbs(String q, String status,
+                                  LocalDateTime updatedAfter, LocalDateTime updatedBefore,
+                                  int limit, int offset);
 
-    long countActive();
-
-    List<KnowledgeBase> searchActive(String query, int limit);
+    long countKbs(String q, String status,
+                  LocalDateTime updatedAfter, LocalDateTime updatedBefore);
 
     boolean updateProfile(String id, String name, String description,
                           String updatedBy, LocalDateTime updatedAt);

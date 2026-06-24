@@ -4,6 +4,7 @@ import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -13,9 +14,9 @@ public interface KnowledgeBaseService {
 
     KnowledgeBase create(String name, String description);
 
-    List<KnowledgeBase> search(String query, int limit);
-
-    PagedResult<KnowledgeBase> list(int page, int size);
+    PagedResult<KnowledgeBase> listKbs(String q, String status,
+                                       LocalDateTime updatedAfter, LocalDateTime updatedBefore,
+                                       Integer page, Integer size);
 
     KnowledgeBase get(String kbId);
 
@@ -25,7 +26,7 @@ public interface KnowledgeBaseService {
 
     KnowledgeBaseStats getStats(String kbId);
 
-    PagedResult<Asset> listDocuments(String kbId, int page, int size);
+    PagedResult<Asset> listDocuments(String kbId, Integer page, Integer size);
 
     Asset getDocument(String kbId, String assetId);
 

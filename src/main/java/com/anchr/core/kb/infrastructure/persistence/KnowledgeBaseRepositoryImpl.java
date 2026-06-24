@@ -46,22 +46,18 @@ public class KnowledgeBaseRepositoryImpl implements KnowledgeBaseRepository {
     }
 
     @Override
-    public List<KnowledgeBase> listActive(int limit, int offset) {
-        return mapper.listActive( limit, offset).stream()
+    public List<KnowledgeBase> searchKbs(String q, String status,
+                                         LocalDateTime updatedAfter, LocalDateTime updatedBefore,
+                                         int limit, int offset) {
+        return mapper.searchKbs(q, status, updatedAfter, updatedBefore, limit, offset).stream()
                 .map(this::toDomain)
                 .toList();
     }
 
     @Override
-    public long countActive() {
-        return mapper.countActive();
-    }
-
-    @Override
-    public List<KnowledgeBase> searchActive(String query, int limit) {
-        return mapper.searchActive( query, limit).stream()
-                .map(this::toDomain)
-                .toList();
+    public long countKbs(String q, String status,
+                         LocalDateTime updatedAfter, LocalDateTime updatedBefore) {
+        return mapper.countKbs(q, status, updatedAfter, updatedBefore);
     }
 
     @Override

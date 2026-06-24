@@ -61,25 +61,17 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         return knowledgeBase;
     }
 
-    private static final int DEFAULT_SEARCH_LIMIT = 20;
-    private static final int MAX_SEARCH_LIMIT = 50;
-
     @Override
-    public List<KnowledgeBase> search(String query, int limit) {
-        if (!StringUtils.hasText(query)) {
-            return List.of();
-        }
-        String trimmed = query.trim();
-        int boundedLimit = limit <= 0 ? DEFAULT_SEARCH_LIMIT : Math.min(limit, MAX_SEARCH_LIMIT);
-        return knowledgeBaseRepository.searchActive(trimmed, boundedLimit);
-    }
-
-    @Override
-    public PagedResult<KnowledgeBase> list(int page, int size) {
+    public PagedResult<KnowledgeBase> listKbs(String q, String status,
+                                              LocalDateTime updatedAfter, LocalDateTime updatedBefore,
+                                              Integer page, Integer size) {
         PageBounds bounds = normalizePage(page, size);
+        String trimmedQ = StringUtils.hasText(q) ? q.trim() : null;
         return new PagedResult<>(
-                knowledgeBaseRepository.listActive(bounds.size(), bounds.offset()),
-                knowledgeBaseRepository.countActive(),
+                knowledgeBaseRepository.searchKbs(trimmedQ, status,
+                        updatedAfter, updatedBefore, bounds.size(), bounds.offset()),
+                knowledgeBaseRepository.countKbs(trimmedQ, status,
+                        updatedAfter, updatedBefore),
                 bounds.page(),
                 bounds.size());
     }
@@ -123,7 +115,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    public PagedResult<Asset> listDocuments(String kbId, int page, int size) {
+    public PagedResult<Asset> listDocuments(String kbId, Integer page, Integer size) {
         String id = requireId(kbId, "kbId");
         get(id);
         PageBounds bounds = normalizePage(page, size);
@@ -185,9 +177,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private PageBounds normalizePage(int page, int size) {
-        int normalizedPage = page <= 0 ? DEFAULT_PAGE : page;
-        int normalizedSize = size <= 0 ? DEFAULT_SIZE : Math.min(size, MAX_SIZE);
+    private PageBounds normalizePage(Integer page, Integer size) {
+        int normalizedPage = null == page ? DEFAULT_PAGE : page;
+        int normalizedSize = null == size ? DEFAULT_SIZE : Math.min(size, MAX_SIZE);
         return new PageBounds(normalizedPage, normalizedSize, (normalizedPage - 1) * normalizedSize);
     }
 

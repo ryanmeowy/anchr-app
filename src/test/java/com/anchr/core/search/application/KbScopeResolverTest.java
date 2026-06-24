@@ -29,7 +29,7 @@ class KbScopeResolverTest {
     @Test
     void resolveVisibleKbIds_shouldReturnAllWhenNoFilter() {
         UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
-        when(knowledgeBaseService.list(1, 100)).thenReturn(
+        when(knowledgeBaseService.listKbs(null, "ACTIVE", null, null, 1, 100)).thenReturn(
                 new KnowledgeBaseService.PagedResult<>(kbs(0, 5), 5, 1, 100));
 
         List<String> result = resolver.resolveVisibleKbIds(null);
@@ -40,7 +40,7 @@ class KbScopeResolverTest {
     @Test
     void resolveVisibleKbIds_shouldFilterByRequestedIds() {
         UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
-        when(knowledgeBaseService.list(1, 100)).thenReturn(
+        when(knowledgeBaseService.listKbs(null, "ACTIVE", null, null, 1, 100)).thenReturn(
                 new KnowledgeBaseService.PagedResult<>(kbs(0, 5), 5, 1, 100));
 
         List<String> result = resolver.resolveVisibleKbIds(List.of("kb-2", "kb-missing"));

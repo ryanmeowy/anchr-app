@@ -48,7 +48,7 @@ public class KbScopeResolver {
         int page = 1;
         while (true) {
             KnowledgeBaseService.PagedResult<KnowledgeBase> result =
-                    knowledgeBaseService.list(page, ACTIVE_KB_PAGE_SIZE);
+                    knowledgeBaseService.listKbs(null, "ACTIVE", null, null, page, ACTIVE_KB_PAGE_SIZE);
             if (result.items().isEmpty()) {
                 break;
             }

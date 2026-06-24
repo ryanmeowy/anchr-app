@@ -21,10 +21,17 @@ public interface KnowledgeBaseMapper {
 
     List<KnowledgeBaseRecord> listActiveByIds(@Param("ids") List<String> ids);
 
-    List<KnowledgeBaseRecord> listActive(@Param("limit") int limit,
-                                         @Param("offset") int offset);
+    List<KnowledgeBaseRecord> searchKbs(@Param("q") String q,
+                                        @Param("status") String status,
+                                        @Param("updatedAfter") LocalDateTime updatedAfter,
+                                        @Param("updatedBefore") LocalDateTime updatedBefore,
+                                        @Param("limit") int limit,
+                                        @Param("offset") int offset);
 
-    long countActive();
+    long countKbs(@Param("q") String q,
+                  @Param("status") String status,
+                  @Param("updatedAfter") LocalDateTime updatedAfter,
+                  @Param("updatedBefore") LocalDateTime updatedBefore);
 
     int updateProfile(@Param("id") String id,
                       @Param("name") String name,
@@ -39,9 +46,6 @@ public interface KnowledgeBaseMapper {
     int refreshDocumentStats(@Param("id") String id,
                              @Param("updatedBy") String updatedBy,
                              @Param("updatedAt") LocalDateTime updatedAt);
-
-    List<KnowledgeBaseRecord> searchActive(@Param("query") String query,
-                                           @Param("limit") int limit);
 
     Optional<KnowledgeBaseStatsRecord> findStats(@Param("id") String id);
 }

@@ -73,21 +73,37 @@
           </foreach>
     </select>
 
-    <select id="listActive" resultMap="KnowledgeBaseRecordMap">
+    <sql id="KbSearchWhere">
+        <where>
+            <if test="status != null">
+                and status = #{status}
+            </if>
+            <if test="q != null and q != ''">
+                and (name like concat('%', #{q}, '%')
+                     or description like concat('%', #{q}, '%'))
+            </if>
+            <if test="updatedAfter != null">
+                and updated_at &gt;= #{updatedAfter}
+            </if>
+            <if test="updatedBefore != null">
+                and updated_at &lt;= #{updatedBefore}
+            </if>
+        </where>
+    </sql>
+
+    <select id="searchKbs" resultMap="KnowledgeBaseRecordMap">
         select
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
-        where status = 'ACTIVE'
-          and deleted_at is null
+        <include refid="KbSearchWhere"/>
         order by updated_at desc, id desc
         limit #{limit} offset #{offset}
     </select>
 
-    <select id="countActive" resultType="long">
+    <select id="countKbs" resultType="long">
         select count(1)
         from knowledge_base
-        where status = 'ACTIVE'
-          and deleted_at is null
+        <include refid="KbSearchWhere"/>
     </select>
 
     <update id="updateProfile">
@@ -130,18 +146,6 @@
             where kb.id = #{id}
               and kb.deleted_at is null
     </update>
-
-    <select id="searchActive" resultMap="KnowledgeBaseRecordMap">
-        select
-            <include refid="KnowledgeBaseColumns"/>
-        from knowledge_base
-        where status = 'ACTIVE'
-          and deleted_at is null
-          and (name like concat('%', #{query}, '%')
-               or description like concat('%', #{query}, '%'))
-        order by updated_at desc, id desc
-        limit #{limit}
-    </select>
 
     <select id="findStats" resultMap="KnowledgeBaseStatsRecordMap">
         select
