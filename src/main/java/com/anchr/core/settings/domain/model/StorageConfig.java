@@ -22,4 +22,5 @@ public class StorageConfig {
     boolean enabled;
     String updatedBy;
     LocalDateTime updatedAt;
+    LocalDateTime deletedAt;
 }

@@ -20,4 +20,5 @@ public class StorageConfigRecord {
     private boolean enabled;
     private String updatedBy;
     private LocalDateTime updatedAt;
+    private LocalDateTime deletedAt;
 }

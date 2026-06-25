@@ -132,4 +132,11 @@ public class SettingsController {
             @Valid @RequestBody StorageConnectionTestRequestDTO request) {
         return Result.success(storageConfigService.test(request));
     }
+
+    @RequireAuth
+    @DeleteMapping("/storage/{id}")
+    public Result<Void> deleteStorage(@PathVariable Long id) {
+        storageConfigService.archive(id);
+        return Result.success();
+    }
 }

@@ -18,6 +18,8 @@ public interface StorageConfigService {
 
     StorageConnectionTestResultDTO test(StorageConnectionTestRequestDTO request);
 
+    void archive(Long id);
+
     String maskAccessKey(StorageConfig config);
 
     String maskSecretKey(StorageConfig config);

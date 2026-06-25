@@ -6,6 +6,7 @@ import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 /**
@@ -28,6 +29,11 @@ public class StorageConfigRepositoryImpl implements StorageConfigRepository {
         return config;
     }
 
+    @Override
+    public boolean archive(Long id, String updatedBy, LocalDateTime updatedAt) {
+        return mapper.archive(id, updatedBy, updatedAt) > 0;
+    }
+
     private StorageConfigRecord toRecord(StorageConfig config) {
         StorageConfigRecord r = new StorageConfigRecord();
         r.setId(config.getId());
@@ -41,6 +47,7 @@ public class StorageConfigRepositoryImpl implements StorageConfigRepository {
         r.setEnabled(config.isEnabled());
         r.setUpdatedBy(config.getUpdatedBy());
         r.setUpdatedAt(config.getUpdatedAt());
+        r.setDeletedAt(config.getDeletedAt());
         return r;
     }
 
@@ -57,6 +64,7 @@ public class StorageConfigRepositoryImpl implements StorageConfigRepository {
                 .enabled(r.isEnabled())
                 .updatedBy(r.getUpdatedBy())
                 .updatedAt(r.getUpdatedAt())
+                .deletedAt(r.getDeletedAt())
                 .build();
     }
 }

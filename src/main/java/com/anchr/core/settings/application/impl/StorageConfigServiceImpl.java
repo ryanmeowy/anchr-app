@@ -75,6 +75,12 @@ public class StorageConfigServiceImpl implements StorageConfigService {
     }
 
     @Override
+    public void archive(Long id) {
+        repository.archive(id,
+                UserContextHolder.get().userId(), LocalDateTime.now());
+    }
+
+    @Override
     public StorageConnectionTestResultDTO test(StorageConnectionTestRequestDTO request) {
         String accessKey = request.getAccessKey();
         String secretKey = request.getSecretKey();

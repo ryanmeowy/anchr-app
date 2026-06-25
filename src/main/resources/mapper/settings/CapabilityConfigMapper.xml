@@ -80,7 +80,8 @@
 
     <update id="del">
         update capability_config
-        set deleted_at = now()
+        set enabled = false,
+            deleted_at = now()
         where capability = #{capability} and id = #{id}
     </update>
 </mapper>
