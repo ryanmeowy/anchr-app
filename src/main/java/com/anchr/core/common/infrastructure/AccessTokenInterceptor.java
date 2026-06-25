@@ -1,4 +1,4 @@
-package com.anchr.core.auth.infrastructure;
+package com.anchr.core.common.infrastructure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.common.application.context.RequestUserContext;
@@ -31,7 +31,7 @@ import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class AuthTokenInterceptor implements AsyncHandlerInterceptor {
+public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;

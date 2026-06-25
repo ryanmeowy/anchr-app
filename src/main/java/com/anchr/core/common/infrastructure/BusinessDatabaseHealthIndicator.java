@@ -1,4 +1,4 @@
-package com.anchr.core.common.infrastructure.db;
+package com.anchr.core.common.infrastructure;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;

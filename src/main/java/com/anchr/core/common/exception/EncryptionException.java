@@ -1,4 +1,4 @@
-package com.anchr.core.auth.infrastructure;
+package com.anchr.core.common.exception;
 
 /**
  * Runtime exception wrapper for encryption-related failures.

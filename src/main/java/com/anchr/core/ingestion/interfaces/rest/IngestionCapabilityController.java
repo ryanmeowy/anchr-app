@@ -1,6 +1,6 @@
 package com.anchr.core.ingestion.interfaces.rest;
 
-import com.anchr.core.auth.infrastructure.RequireAuth;
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.interfaces.rest.dto.IngestionCapabilityDTO;

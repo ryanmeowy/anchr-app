@@ -1,4 +1,4 @@
-package com.anchr.core.auth.infrastructure;
+package com.anchr.core.common.infrastructure;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

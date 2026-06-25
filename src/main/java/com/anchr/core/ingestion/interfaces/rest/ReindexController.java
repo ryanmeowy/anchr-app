@@ -1,6 +1,6 @@
 package com.anchr.core.ingestion.interfaces.rest;
 
-import com.anchr.core.auth.infrastructure.RequireAuth;
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.PostMapping;

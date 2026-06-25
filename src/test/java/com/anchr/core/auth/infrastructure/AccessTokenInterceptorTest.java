@@ -1,6 +1,8 @@
 package com.anchr.core.auth.infrastructure;
 
 import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.common.infrastructure.AccessTokenInterceptor;
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class AuthTokenInterceptorTest {
+class AccessTokenInterceptorTest {
 
     @Mock
     private StringRedisTemplate redisTemplate;
@@ -27,11 +29,11 @@ class AuthTokenInterceptorTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
-    private AuthTokenInterceptor interceptor;
+    private AccessTokenInterceptor interceptor;
 
     @BeforeEach
     void setUp() {
-        interceptor = new AuthTokenInterceptor(redisTemplate, new ObjectMapper());
+        interceptor = new AccessTokenInterceptor(redisTemplate, new ObjectMapper());
     }
 
     @AfterEach

@@ -1,6 +1,6 @@
 package com.anchr.core.conversation.interfaces.rest;
 
-import com.anchr.core.auth.infrastructure.RequireAuth;
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.conversation.application.ConversationService;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;

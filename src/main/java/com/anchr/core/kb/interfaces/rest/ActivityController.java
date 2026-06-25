@@ -5,7 +5,7 @@ import com.anchr.core.kb.interfaces.rest.dto.RecentCitationListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentDocumentListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentSearchListDTO;
-import com.anchr.core.auth.infrastructure.RequireAuth;
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;

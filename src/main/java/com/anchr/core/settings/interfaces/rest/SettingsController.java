@@ -1,6 +1,6 @@
 package com.anchr.core.settings.interfaces.rest;
 
-import com.anchr.core.auth.infrastructure.RequireAuth;
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.integration.ai.EmbedParamEnum;
 import com.anchr.core.integration.ai.GenParamEnum;
