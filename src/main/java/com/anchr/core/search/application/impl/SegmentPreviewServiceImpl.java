@@ -1,14 +1,14 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.activity.application.ActivityEventService;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.search.application.SegmentPreviewService;
 import com.anchr.core.search.application.support.PreviewAccessCache;
-import com.anchr.core.search.domain.model.Bbox;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
-import com.anchr.core.search.domain.repository.KbSegmentRepository;
+import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
@@ -36,32 +36,31 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private static final String RELATION_PREVIOUS = "previous";
     private static final String RELATION_NEXT = "next";
 
-    private final KbSegmentRepository kbSegmentRepository;
+    private final SegmentRepository kbSegmentRepository;
     private final SearchObjectStoragePort objectStoragePort;
     private final PreviewAccessCache previewAccessCache;
     private final ActivityEventService activityEventService;
 
     @Override
-    public PreviewSegmentDTO getSegmentPreview(String segmentId, String accessToken) {
+    public PreviewSegmentDTO getSegmentPreview(String segmentId) {
         if (!StringUtils.hasText(segmentId)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "segmentId cannot be blank.");
         }
-        if (!StringUtils.hasText(accessToken)) {
-            throw new BusinessException(ApiError.UNAUTHORIZED, "X-Access-Token is required.");
-        }
+        String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        PreviewSegmentDTO preview = toPreview(segment, accessToken);
+        PreviewSegmentDTO preview = toPreview(segment, accessTokenHash);
         recordCitationOpened(preview);
         return preview;
     }
 
     @Override
-    public PreviewSegmentDTO refreshSegmentPreview(String segmentId, String accessToken) {
+    public PreviewSegmentDTO refreshSegmentPreview(String segmentId) {
+        String accessTokenHash = currentAccessTokenHash();
         if (StringUtils.hasText(segmentId)) {
-            previewAccessCache.evict(segmentId.trim(), accessToken);
+            previewAccessCache.evict(segmentId.trim(), accessTokenHash);
         }
-        return getSegmentPreview(segmentId, accessToken);
+        return getSegmentPreview(segmentId);
     }
 
     @Override
@@ -78,16 +77,16 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
-    private PreviewSegmentDTO toPreview(Segment segment, String accessToken) {
-        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessToken);
+    private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash) {
+        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessTokenHash);
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
                 .kbId(segment.getKbId())
-                .assetType(toCode(segment.getAssetType()))
+                .assetType(segment.getAssetType())
                 .segmentType(toCode(segment.getSegmentType()))
                 .fileName(resolveFileName(segment))
-                .previewType(resolvePreviewType(segment))
+                .previewType(segment.getAssetType())
                 .previewUrl(previewAccess.url())
                 .expiresAt(previewAccess.expiresAt())
                 .sourceRef(segment.getSourceRef())
@@ -128,26 +127,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return PreviewAnchorDTO.builder()
                 .pageNo(segment.getPageNo())
                 .chunkOrder(segment.getChunkOrder())
-                .bbox(toBbox(segment.getBbox()))
+                .bbox(segment.getBbox())
                 .imageWidth(segment.getImageWidth())
                 .imageHeight(segment.getImageHeight())
-                .build();
-    }
-
-    private PreviewAnchorDTO.BboxDTO toBbox(Bbox source) {
-        if (source == null) {
-            return null;
-        }
-        if (source.getX() == null || source.getY() == null || source.getWidth() == null || source.getHeight() == null
-                || source.getX() < 0 || source.getY() < 0 || source.getWidth() <= 0 || source.getHeight() <= 0) {
-            return null;
-        }
-        return PreviewAnchorDTO.BboxDTO.builder()
-                .x(source.getX())
-                .y(source.getY())
-                .width(source.getWidth())
-                .height(source.getHeight())
-                .unit(source.getUnit())
                 .build();
     }
 
@@ -216,7 +198,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return RELATION_NEXT;
     }
 
-    private PreviewAccessCache.PreviewAccess buildPreviewAccess(Segment segment, String accessToken) {
+    private PreviewAccessCache.PreviewAccess buildPreviewAccess(Segment segment, String accessTokenHash) {
         String sourceRef = segment.getSourceRef();
         if (!StringUtils.hasText(sourceRef)) {
             return new PreviewAccessCache.PreviewAccess(null, null);
@@ -227,7 +209,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         }
         String segmentId = segment.getSegmentId();
         if (StringUtils.hasText(segmentId)) {
-            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(segmentId, accessToken);
+            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(segmentId, accessTokenHash);
             if (cached.isPresent()) {
                 return cached.get();
             }
@@ -245,9 +227,17 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 System.currentTimeMillis() + PREVIEW_URL_TTL_MILLIS
         );
         if (StringUtils.hasText(segmentId)) {
-            previewAccessCache.save(segmentId, accessToken, previewAccess);
+            previewAccessCache.save(segmentId, accessTokenHash, previewAccess);
         }
         return previewAccess;
+    }
+
+    private String currentAccessTokenHash() {
+        String accessTokenHash = UserContextHolder.get().accessTokenHash();
+        if (!StringUtils.hasText(accessTokenHash)) {
+            throw new BusinessException(ApiError.UNAUTHORIZED, "Authenticated token context is required.");
+        }
+        return accessTokenHash;
     }
 
     private String signPreviewUrl(String objectKey) {
@@ -270,48 +260,6 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
             objectKey = objectKey.substring(1);
         }
         return objectKey;
-    }
-
-    private String resolvePreviewType(Segment segment) {
-        String extension = resolveExtension(resolveFileName(segment));
-        if (StringUtils.hasText(extension)) {
-            String type = previewTypeFromExtension(extension);
-            if (type != null) {
-                return type;
-            }
-        }
-        if (segment.getAssetType() != null) {
-            return switch (segment.getAssetType()) {
-                case IMAGE -> "IMAGE";
-                case TEXT -> "TXT";
-            };
-        }
-        if (segment.getSegmentType() != null && segment.getSegmentType().name().startsWith("IMAGE_")) {
-            return "IMAGE";
-        }
-        return "TXT";
-    }
-
-    private String resolveExtension(String fileName) {
-        if (!StringUtils.hasText(fileName)) {
-            return null;
-        }
-        String normalized = fileName.trim();
-        int dotIndex = normalized.lastIndexOf('.');
-        if (dotIndex < 0 || dotIndex == normalized.length() - 1) {
-            return null;
-        }
-        return normalized.substring(dotIndex + 1).toLowerCase();
-    }
-
-    private String previewTypeFromExtension(String extension) {
-        return switch (extension) {
-            case "pdf" -> "PDF";
-            case "txt" -> "TXT";
-            case "md", "markdown" -> "MD";
-            case "png", "jpg", "jpeg", "webp", "gif", "bmp" -> "IMAGE";
-            default -> null;
-        };
     }
 
     private String resolveSnippet(Segment segment) {

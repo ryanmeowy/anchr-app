@@ -17,5 +17,9 @@ public class KnowledgeBaseStats {
     int segmentCount;
     LocalDateTime lastIngestedAt;
     String lastIngestionStatus;
+    int lastIngestionTotalCount;
+    int lastIngestionSuccessCount;
+    int lastIngestionFailureCount;
+    int lastIngestionRunningCount;
     LocalDateTime updatedAt;
 }

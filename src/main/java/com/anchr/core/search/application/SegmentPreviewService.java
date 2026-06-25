@@ -8,9 +8,9 @@ import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
  */
 public interface SegmentPreviewService {
 
-    PreviewSegmentDTO getSegmentPreview(String segmentId, String accessToken);
+    PreviewSegmentDTO getSegmentPreview(String segmentId);
 
-    PreviewSegmentDTO refreshSegmentPreview(String segmentId, String accessToken);
+    PreviewSegmentDTO refreshSegmentPreview(String segmentId);
 
     PreviewNeighborsDTO getSegmentNeighbors(String segmentId, int before, int after);
 }

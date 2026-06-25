@@ -1,7 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.activity.application.ActivityEventService;
+import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -10,6 +10,7 @@ import com.anchr.core.conversation.application.FollowUpQuestionService;
 import com.anchr.core.conversation.application.ConversationService;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
+import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.domain.model.ConversationRole;
 import com.anchr.core.conversation.domain.model.ConversationSession;
@@ -137,6 +138,8 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationSession session = loadSessionOrThrow(sessionId);
         long now = System.currentTimeMillis();
         applyConversationScope(session, request);
+        AnswerMode answerMode = resolveAnswerMode(request);
+        request.setAnswerMode(answerMode.name());
         boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
         ConversationMessagePipelineResult pipelineResult = conversationMessagePipeline.execute(session.getSessionId(), request);
@@ -149,7 +152,7 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setRewrittenQuery(pipelineResult.rewriteResult().getRewrittenQuery());
         turn.setAnswer(pipelineResult.answerGenerationResult().getAnswerText());
         turn.setKbScopeJson(conversationTurnCodec.serializeKbScope(request.getKbIds()));
-        turn.setAnswerMode(resolveAnswerMode(request));
+        turn.setAnswerMode(answerMode.name());
         turn.setCitationsJson(conversationTurnCodec.serializeCitations(pipelineResult.answerCitations()));
         turn.setResultCardsJson(conversationTurnCodec.serializeResultCards(pipelineResult.resultCards()));
         turn.setRetrievalTraceJson(conversationRetrievalTraceBuilder.buildTraceJson(
@@ -210,11 +213,20 @@ public class ConversationServiceImpl implements ConversationService {
         streamExecutor.execute(() -> {
             UserContextHolder.set(context);
             try {
-                sendEvent(emitter, "trace", Map.of("stage", "retrieval", "message", "started"));
+                String answerMode = AnswerMode.from(request.getAnswerMode()).name();
+                sendEvent(emitter, "trace", Map.of(
+                        "stage", "retrieval",
+                        "message", "started",
+                        "answerMode", answerMode
+                ));
                 ConversationMessageResponseDTO response = createMessage(sessionId, request);
                 streamAnswer(emitter, response.getAnswer());
                 sendEvent(emitter, "citations", response.getCitations() == null ? List.of() : response.getCitations());
-                sendEvent(emitter, "done", Map.of("turnId", response.getTurnId(), "kbScope", response.getKbScope()));
+                sendEvent(emitter, "done", Map.of(
+                        "turnId", response.getTurnId(),
+                        "kbScope", response.getKbScope(),
+                        "answerMode", response.getAnswerMode()
+                ));
                 emitter.complete();
             } catch (BusinessException e) {
                 sendError(emitter, e.getError() == null ? ApiError.INTERNAL_ERROR.name() : e.getError().name(), e.getMessage());
@@ -375,8 +387,8 @@ public class ConversationServiceImpl implements ConversationService {
         request.setKbIds(kbScopeResolver.resolveVisibleKbIds(requested));
     }
 
-    private String resolveAnswerMode(ConversationMessageRequestDTO request) {
-        return StringUtils.hasText(request.getAnswerMode()) ? request.getAnswerMode().trim() : "STRICT";
+    private AnswerMode resolveAnswerMode(ConversationMessageRequestDTO request) {
+        return AnswerMode.from(request.getAnswerMode());
     }
 
     private void streamAnswer(SseEmitter emitter, String answer) throws IOException {

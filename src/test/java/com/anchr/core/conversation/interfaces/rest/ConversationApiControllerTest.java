@@ -9,7 +9,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequest
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
-import com.anchr.core.conversation.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,9 +20,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -34,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
-class ConversationApiControllerTest {
+class ConversationControllerTest {
 
     @Mock
     private ConversationService conversationService;
@@ -44,7 +46,7 @@ class ConversationApiControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new ConversationApiController(conversationService))
+                .standaloneSetup(new ConversationController(conversationService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -111,7 +113,7 @@ class ConversationApiControllerTest {
     void createMessage_shouldRejectWhenQueryMissing() throws Exception {
         mockMvc.perform(post("/api/conversations/cvs_test_001/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"topK\":60,\"limit\":20,\"strategy\":\"KB_RRF_RERANK\"}"))
+                        .content("{\"limit\":20}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("Invalid request parameters."));
@@ -145,7 +147,7 @@ class ConversationApiControllerTest {
         primaryHit.setScore(0.91d);
         primaryHit.setPageNo(3);
         primaryHit.setHitType("TEXT_CHUNK");
-        PreviewAnchorDTO anchor = new PreviewAnchorDTO();
+        PreviewAnchorDTO anchor = PreviewAnchorDTO.builder().build();
         anchor.setPageNo(3);
         anchor.setChunkOrder(12);
         primaryHit.setAnchor(anchor);
@@ -160,9 +162,8 @@ class ConversationApiControllerTest {
         card.setAdditionalHits(List.of());
         response.setResultCards(List.of(card));
         ConversationMessageResponseDTO.RetrievalTraceDTO trace = new ConversationMessageResponseDTO.RetrievalTraceDTO();
-        trace.setTopK(60);
         trace.setLimit(20);
-        trace.setStrategy("KB_RRF_RERANK");
+        trace.setStrategyEffective("KB_RRF_RERANK");
         trace.setRewriteReason("rewrite_by_model");
         trace.setRetrievedCount(3);
         response.setRetrievalTrace(trace);
@@ -170,9 +171,7 @@ class ConversationApiControllerTest {
 
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("那 InnoDB 呢");
-        request.setTopK(60);
         request.setLimit(20);
-        request.setStrategy("KB_RRF_RERANK");
         when(conversationService.createMessage(eq("cvs_test_001"), eq(request))).thenReturn(response);
 
         mockMvc.perform(post("/api/conversations/cvs_test_001/messages")
@@ -180,9 +179,7 @@ class ConversationApiControllerTest {
                         .content("""
                                 {
                                   "query": "那 InnoDB 呢",
-                                  "topK": 60,
-                                  "limit": 20,
-                                  "strategy": "KB_RRF_RERANK"
+                                  "limit": 20
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -191,9 +188,24 @@ class ConversationApiControllerTest {
                 .andExpect(jsonPath("$.data.resultCards[0].assetId").value("asset_001"))
                 .andExpect(jsonPath("$.data.resultCards[0].primaryHit.segmentId").value("seg_text_001"))
                 .andExpect(jsonPath("$.data.resultCards[0].primaryHit.anchor.pageNo").value(3))
-                .andExpect(jsonPath("$.data.retrievalTrace.topK").value(60))
                 .andExpect(jsonPath("$.data.retrievalTrace.rewriteReason").value("rewrite_by_model"))
                 .andExpect(jsonPath("$.data.retrievalTrace.retrievedCount").value(3));
+    }
+
+    @Test
+    void streamMessage_shouldPassAnswerModeToService() {
+        ConversationController controller = new ConversationController(conversationService);
+        ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
+        request.setQuery("总结一下 MySQL");
+        request.setLimit(20);
+        request.setAnswerMode("summary");
+        SseEmitter emitter = new SseEmitter();
+        when(conversationService.streamMessage(eq("cvs_test_001"), eq(request))).thenReturn(emitter);
+
+        SseEmitter response = controller.streamMessage("cvs_test_001", request);
+
+        assertThat(response).isSameAs(emitter);
+        verify(conversationService).streamMessage(eq("cvs_test_001"), eq(request));
     }
 
     @Test

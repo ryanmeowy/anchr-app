@@ -39,11 +39,6 @@
         <hutool.version>5.8.40</hutool.version>
         <aspectjrt.version>1.9.21</aspectjrt.version>
         <aspectjweaver.version>1.9.21</aspectjweaver.version>
-        <pdfbox.version>3.0.5</pdfbox.version>
-        <poi.version>5.3.0</poi.version>
-        <commons-csv.version>1.12.0</commons-csv.version>
-        <jsoup.version>1.18.3</jsoup.version>
-        <redisson.version>3.39.0</redisson.version>
         <mybatis-spring-boot.version>3.0.4</mybatis-spring-boot.version>
     </properties>
     <dependencies>
@@ -105,17 +100,6 @@
 
         <!--↓↓ Aliyun ↓↓-->
         <dependency>
-            <groupId>com.alibaba</groupId>
-            <artifactId>dashscope-sdk-java</artifactId>
-            <version>${dashscope-sdk-java.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-simple</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
             <groupId>com.aliyun.oss</groupId>
             <artifactId>aliyun-sdk-oss</artifactId>
             <version>${aliyun-sdk-oss.version}</version>
@@ -146,11 +130,6 @@
             <artifactId>aliyun-java-sdk-sts</artifactId>
             <version>${aliyun-java-sdk-sts.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.aliyun</groupId>
-            <artifactId>ocr_api20210707</artifactId>
-            <version>${aliyun-ocr.version}</version>
-        </dependency>
         <!--↑↑ Aliyun ↑↑-->
 
         <!--↓↓ tools ↓↓-->
@@ -170,26 +149,6 @@
             <version>${hutool.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.pdfbox</groupId>
-            <artifactId>pdfbox</artifactId>
-            <version>${pdfbox.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.poi</groupId>
-            <artifactId>poi-ooxml</artifactId>
-            <version>${poi.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-csv</artifactId>
-            <version>${commons-csv.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.jsoup</groupId>
-            <artifactId>jsoup</artifactId>
-            <version>${jsoup.version}</version>
-        </dependency>
-        <dependency>
             <groupId>org.aspectj</groupId>
             <artifactId>aspectjrt</artifactId>
             <version>${aspectjrt.version}</version>
@@ -201,20 +160,8 @@
             <version>${aspectjweaver.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.redisson</groupId>
-            <artifactId>redisson</artifactId>
-            <version>${redisson.version}</version>
-        </dependency>
         <!--↑↑ tools ↑↑-->
 
-        <!--↓↓ volc ↓↓-->
-        <dependency>
-            <groupId>com.volcengine</groupId>
-            <artifactId>volcengine-java-sdk-ark-runtime</artifactId>
-            <version>LATEST</version>
-        </dependency>
-        <!--↑↑ volc ↑↑-->
     </dependencies>
 
     <build>

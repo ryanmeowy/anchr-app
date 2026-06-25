@@ -27,9 +27,7 @@ public class ConversationMessageResponseDTO implements Serializable {
 
     @Data
     public static class RetrievalTraceDTO implements Serializable {
-        private Integer topK;
         private Integer limit;
-        private String strategy;
         private String strategyEffective;
         private String rewriteReason;
         private Double rewriteConfidence;

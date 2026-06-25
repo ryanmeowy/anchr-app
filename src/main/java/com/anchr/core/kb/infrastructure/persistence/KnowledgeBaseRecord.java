@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 public class KnowledgeBaseRecord {
 
     private String id;
-    private String workspaceId;
     private String name;
     private String description;
     private String status;

@@ -15,5 +15,9 @@ public class KnowledgeBaseStatsRecord {
     private Integer segmentCount;
     private LocalDateTime lastIngestedAt;
     private String lastIngestionStatus;
+    private Integer lastIngestionTotalCount;
+    private Integer lastIngestionSuccessCount;
+    private Integer lastIngestionFailureCount;
+    private Integer lastIngestionRunningCount;
     private LocalDateTime updatedAt;
 }

@@ -23,7 +23,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void handleBusinessException_shouldUseCodeAndMessageFromException() {
-        Result<Void> result = handler.handleBusinessException(new BusinessException(ApiError.CONFLICT));
+        Result<Void> result = handler.handleBusinessException(new BusinessException(ApiError.FORBIDDEN));
 
         assertThat(result.getCode()).isEqualTo(409);
         assertThat(result.getMessage()).isEqualTo("Resource conflict.");
@@ -32,7 +32,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void handleUnexpected_shouldReturn500WithoutLeakingInternalMessage() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.setRequestURI("/api/v1/vision/search");
+        request.setRequestURI("/api/v1/search/kb");
 
         Result<Void> result = handler.handleUnexpected(new RuntimeException("db timeout"), request);
 

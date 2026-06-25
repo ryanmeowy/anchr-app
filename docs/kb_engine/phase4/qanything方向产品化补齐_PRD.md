@@ -271,18 +271,13 @@ GET /api/v1/preview/segments/{segmentId}
 
 #### 入库任务
 
-已有接口：
+统一接口：
 
 ```text
-POST /api/v1/ingestion/text-assets/batch-tasks
-GET  /api/v1/ingestion/text-assets/batch-tasks/{taskId}
-POST /api/v1/ingestion/text-assets/batch-tasks/{taskId}/items/{itemId}/retry
-POST /api/v1/ingestion/text-assets/batch-tasks/{taskId}/retry-failed
-
-POST /api/v1/image/batch-tasks
-GET  /api/v1/image/batch-tasks/{taskId}
-POST /api/v1/image/batch-tasks/{taskId}/items/{itemId}/retry
-POST /api/v1/image/batch-tasks/{taskId}/retry-failed
+POST /api/v1/kbs/{kbId}/ingestion-tasks
+GET  /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}
+POST /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}/items/{itemId}/retry
+POST /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}/retry-failed
 ```
 
 可支撑：
@@ -526,12 +521,12 @@ assetId
 
 #### 兼容策略
 
-第一阶段可以在后端内部复用现有：
+旧文本/图片批任务接口已下线，不再作为兼容入口：
 
 - `/api/v1/ingestion/text-assets/batch-tasks`
 - `/api/v1/image/batch-tasks`
 
-但对前端暴露应逐步收敛到 `/api/v1/kbs/{kbId}/ingestion-tasks`，避免前端感知文本/图片两套任务体系。
+前端和内部编排都应收敛到 `/api/v1/kbs/{kbId}/ingestion-tasks`，避免继续维护文本/图片两套任务体系。
 
 #### 验收标准
 

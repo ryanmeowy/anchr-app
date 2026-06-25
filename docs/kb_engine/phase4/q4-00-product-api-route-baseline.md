@@ -243,9 +243,9 @@ warnings
 
 P0 允许 `recentQuestions` 和 `recentCitations` 返回空数组。
 
-## 4. 旧接口兼容边界
+## 4. 旧接口下线边界
 
-以下接口可继续用于 Streamlit 或兼容验证，但 React/Next.js 正式版不应直接依赖：
+Streamlit 已废弃，以下旧文本/图片批任务接口已下线，不再作为兼容验证入口：
 
 ```text
 POST /api/v1/ingestion/text-assets/batch-tasks

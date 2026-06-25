@@ -4,10 +4,9 @@ import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.search.domain.model.Bbox;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchExplainDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchQueryDTO;
-import com.anchr.core.search.interfaces.rest.dto.KbSearchResultDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -37,22 +36,18 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
 
     @Override
     public ConversationRetrievalResult retrieve(String rewrittenQuery,
-                                                Integer topK,
                                                 Integer limit,
-                                                String strategy,
                                                 List<String> kbIds,
                                                 List<String> preferredModalities) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
-            KbSearchQueryDTO query = new KbSearchQueryDTO();
+            SearchQueryDTO query = new SearchQueryDTO();
             query.setQuery(rewrittenQuery);
-            query.setTopK(topK);
             query.setLimit(limit);
-            query.setStrategy(strategy);
             query.setKbIds(kbIds);
 
-            List<KbSearchResultDTO> rawResults = unifiedSearchService.search(query);
-            List<KbSearchResultDTO> filtered = applyModalityFilter(rawResults, preferredModalities);
+            List<SearchResultDTO> rawResults = unifiedSearchService.search(query);
+            List<SearchResultDTO> filtered = applyModalityFilter(rawResults, preferredModalities);
             List<ConversationRetrievalCandidate> candidates = filtered.stream()
                     .map(this::toCandidate)
                     .filter(Objects::nonNull)
@@ -72,7 +67,7 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
         }
     }
 
-    private List<KbSearchResultDTO> applyModalityFilter(List<KbSearchResultDTO> rawResults, List<String> preferredModalities) {
+    private List<SearchResultDTO> applyModalityFilter(List<SearchResultDTO> rawResults, List<String> preferredModalities) {
         if (rawResults == null || rawResults.isEmpty()) {
             return List.of();
         }
@@ -93,8 +88,8 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
         if (!textOnly && !imageOnly) {
             return rawResults;
         }
-        List<KbSearchResultDTO> filtered = new ArrayList<>();
-        for (KbSearchResultDTO item : rawResults) {
+        List<SearchResultDTO> filtered = new ArrayList<>();
+        for (SearchResultDTO item : rawResults) {
             String segmentType = item == null ? null : item.getSegmentType();
             if (textOnly && isTextSegment(segmentType)) {
                 filtered.add(item);
@@ -150,7 +145,7 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
         return results;
     }
 
-    private ConversationRetrievalCandidate toCandidate(KbSearchResultDTO item) {
+    private ConversationRetrievalCandidate toCandidate(SearchResultDTO item) {
         if (item == null) {
             return null;
         }
@@ -170,38 +165,25 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
                 .build();
     }
 
-    private ConversationRetrievalCandidate.Anchor toCandidateAnchor(KbSearchResultDTO.Anchor source) {
+    private ConversationRetrievalCandidate.Anchor toCandidateAnchor(SearchResultDTO.Anchor source) {
         if (source == null) {
             return null;
         }
         return ConversationRetrievalCandidate.Anchor.builder()
                 .pageNo(source.getPageNo())
                 .chunkOrder(source.getChunkOrder())
-                .bbox(toCandidateBbox(source.getBbox()))
+                .bbox(source.getBbox())
                 .imageWidth(source.getImageWidth())
                 .imageHeight(source.getImageHeight())
                 .build();
     }
 
-    private ConversationRetrievalCandidate.Bbox toCandidateBbox(Bbox source) {
-        if (source == null) {
-            return null;
-        }
-        return ConversationRetrievalCandidate.Bbox.builder()
-                .x(source.getX())
-                .y(source.getY())
-                .width(source.getWidth())
-                .height(source.getHeight())
-                .unit(source.getUnit())
-                .build();
-    }
-
-    private List<ConversationRetrievalCandidate.TopChunk> toCandidateTopChunks(List<KbSearchResultDTO.TopChunk> topChunks) {
+    private List<ConversationRetrievalCandidate.TopChunk> toCandidateTopChunks(List<SearchResultDTO.TopChunk> topChunks) {
         if (topChunks == null || topChunks.isEmpty()) {
             return List.of();
         }
         List<ConversationRetrievalCandidate.TopChunk> candidates = new ArrayList<>();
-        for (KbSearchResultDTO.TopChunk topChunk : topChunks) {
+        for (SearchResultDTO.TopChunk topChunk : topChunks) {
             if (topChunk == null) {
                 continue;
             }
@@ -212,7 +194,7 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
         return candidates;
     }
 
-    private ConversationRetrievalCandidate.Explain toCandidateExplain(KbSearchExplainDTO source) {
+    private ConversationRetrievalCandidate.Explain toCandidateExplain(SearchExplainDTO source) {
         if (source == null) {
             return null;
         }

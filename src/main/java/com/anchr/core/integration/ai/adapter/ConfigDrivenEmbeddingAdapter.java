@@ -1,0 +1,107 @@
+package com.anchr.core.integration.ai.adapter;
+
+import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
+import com.anchr.core.integration.ai.client.CapabilityClientFactory;
+import com.anchr.core.integration.ai.client.CapabilityResolver;
+import com.anchr.core.integration.ai.client.ClientCacheManager;
+import com.anchr.core.integration.ai.client.EmbeddingClient;
+import com.anchr.core.search.domain.port.SearchEmbeddingPort;
+import com.anchr.core.settings.domain.model.CapabilityConfig;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.Lists;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Primary;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * OpenAI-compatible embedding adapter backed by capability_config.
+ */
+@Slf4j
+@Primary
+@Service
+@RequiredArgsConstructor
+public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, IngestionEmbeddingPort {
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    private final ClientCacheManager cacheManager;
+    private final CapabilityClientFactory clientFactory;
+    private final CapabilityResolver configResolver;
+
+    // 1. 文字 + textEmbed        text
+    // 2. 文字 + multiEmbed       {"text":""}
+    // 3. 图片 + textEmbed        null
+    // 4. 图片 + multiEmbed       {"image":""}
+    public List<Float> embed(String source, String sourceType) {
+        ClientCacheManager.ResolvedClient resolved = cacheManager.getOrBuild(
+                CapabilityResolver.SLOT_EMBEDDING, this::resolve);
+        CapabilityConfig config = resolved.config();
+        EmbeddingClient client = (EmbeddingClient) resolved.client();
+        boolean isMulti = "MULTI_EMBEDDING".equals(config.getCapability());
+
+        Map<String, Object> extraMap = new HashMap<>();
+        if (StringUtils.hasText(config.getExtraConfig())) {
+            try {
+                extraMap = objectMapper.readValue(config.getExtraConfig(), new TypeReference<>() {});
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        EmbeddingClient.EmbedContext context = null;
+        if ("text".equals(sourceType)) {
+            if (isMulti) {
+                Map<String, Object> map = new HashMap<>();
+                map.put("text", source);
+                Map<String, Object> contentMap = new HashMap<>();
+                contentMap.put("contents", Lists.newArrayList(map));
+                context = EmbeddingClient.EmbedContext
+                        .builder()
+                        .modelName(config.getModelName())
+                        .extraConfig(extraMap)
+                        .contentMap(contentMap)
+                        .build();
+            } else {
+                context = EmbeddingClient.EmbedContext
+                        .builder()
+                        .modelName(config.getModelName())
+                        .extraConfig(extraMap)
+                        .texts(List.of(source))
+                        .build();
+            }
+        }
+
+        if ("image".equals(sourceType)) {
+            if (isMulti) {
+                Map<String, Object> map = new HashMap<>();
+                map.put("image", source);
+                Map<String, Object> contentMap = new HashMap<>();
+                contentMap.put("contents", Lists.newArrayList(map));
+                context = EmbeddingClient.EmbedContext
+                        .builder()
+                        .modelName(config.getModelName())
+                        .extraConfig(extraMap)
+                        .contentMap(contentMap)
+                        .build();
+            }
+        }
+        if (null == context) {
+            return Lists.newArrayList();
+        }
+        return client.embed(context).vector();
+    }
+
+    private ClientCacheManager.ResolvedClient resolve() {
+        CapabilityConfig config = configResolver.activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Embedding is not configured. Save config via PATCH /api/v1/settings/embedding."));
+        return new ClientCacheManager.ResolvedClient(clientFactory.build(config), config);
+    }
+}

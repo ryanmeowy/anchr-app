@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.settings.infrastructure.persistence.StorageConfigMapper">
+
+    <resultMap id="StorageConfigRecordMap" type="com.anchr.core.settings.infrastructure.persistence.StorageConfigRecord">
+        <id property="id" column="id"/>        <result property="endpoint" column="endpoint"/>
+        <result property="accessKeyEnc" column="access_key_enc"/>
+        <result property="secretKeyEnc" column="secret_key_enc"/>
+        <result property="bucket" column="bucket"/>
+        <result property="region" column="region"/>
+        <result property="prefix" column="prefix"/>
+        <result property="roleArn" column="role_arn"/>
+        <result property="enabled" column="enabled"/>
+        <result property="updatedBy" column="updated_by"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="deletedAt" column="deleted_at"/>
+    </resultMap>
+
+    <sql id="storageConfigColumns">
+        id, endpoint, access_key_enc, secret_key_enc,
+        bucket, region, prefix, role_arn, enabled, updated_by, updated_at, deleted_at
+    </sql>
+
+    <select id="find" resultMap="StorageConfigRecordMap">
+        select <include refid="storageConfigColumns"/>
+        from storage_config
+        where enabled = true
+          and deleted_at is null
+        limit 1
+    </select>
+
+    <insert id="upsert" parameterType="com.anchr.core.settings.infrastructure.persistence.StorageConfigRecord">
+        insert into storage_config (
+            <include refid="storageConfigColumns"/>
+        ) values (
+            #{id}, #{endpoint}, #{accessKeyEnc}, #{secretKeyEnc},
+            #{bucket}, #{region}, #{prefix}, #{roleArn}, #{enabled}, #{updatedBy}, #{updatedAt}, #{deletedAt}
+        ) on duplicate key update
+            endpoint = values(endpoint),
+            access_key_enc = values(access_key_enc),
+            secret_key_enc = values(secret_key_enc),
+            bucket = values(bucket),
+            region = values(region),
+            prefix = values(prefix),
+            role_arn = values(role_arn),
+            enabled = values(enabled),
+            updated_by = values(updated_by),
+            updated_at = values(updated_at),
+            deleted_at = values(deleted_at)
+    </insert>
+
+    <update id="archive">
+        update storage_config
+        set deleted_at = #{updatedAt},
+            enabled = false,
+            updated_by = #{updatedBy},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and deleted_at is null
+    </update>
+</mapper>

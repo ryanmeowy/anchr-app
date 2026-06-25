@@ -1,0 +1,142 @@
+package com.anchr.core.settings.interfaces.rest;
+
+import com.anchr.core.common.infrastructure.RequireAuth;
+import com.anchr.core.common.model.Result;
+import com.anchr.core.integration.ai.EmbedParamEnum;
+import com.anchr.core.integration.ai.GenParamEnum;
+import com.anchr.core.integration.ai.RerankParamEnum;
+import com.anchr.core.settings.application.CapabilityConfigService;
+import com.anchr.core.settings.application.StorageConfigService;
+import com.anchr.core.settings.interfaces.rest.dto.*;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+/**
+ * Settings APIs for capability configuration.
+ */
+@Validated
+@RestController
+@RequestMapping("/api/v1/settings")
+@RequiredArgsConstructor
+public class SettingsController {
+
+    private final CapabilityConfigService capabilityConfigService;
+    private final StorageConfigService storageConfigService;
+
+    // ── capability config ──────────────────────────────────────────────────
+
+    @RequireAuth
+    @GetMapping("/{capability}")
+    public Result<List<CapabilityConfigDTO>> getConfig(@PathVariable String capability) {
+        return Result.success(capabilityConfigService.get(capability.toUpperCase()));
+    }
+
+    @RequireAuth
+    @GetMapping("/{capability}/all")
+    public Result<List<CapabilityConfigDTO>> getAllConfigs(@PathVariable String capability) {
+        return Result.success(capabilityConfigService.findAll(capability.toUpperCase()));
+    }
+
+    @RequireAuth
+    @PostMapping("/{capability}")
+    public Result<CapabilityConfigDTO> createConfig(
+            @PathVariable String capability,
+            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
+        return Result.success(capabilityConfigService.create(capability.toUpperCase(), request));
+    }
+
+    @RequireAuth
+    @PatchMapping("/{capability}/{id}")
+    public Result<CapabilityConfigDTO> updateConfig(
+            @PathVariable String capability,
+            @PathVariable Long id,
+            @Valid @RequestBody CapabilityConfigUpdateRequestDTO request) {
+        return Result.success(capabilityConfigService.update(capability.toUpperCase(), id, request));
+    }
+
+    @RequireAuth
+    @PutMapping("/{capability}/{id}/select")
+    public Result<Void> selectConfig(@PathVariable String capability, @PathVariable Long id) {
+        capabilityConfigService.select(capability.toUpperCase(), id);
+        return Result.success(null);
+    }
+
+    @RequireAuth
+    @DeleteMapping("/{capability}/{id}")
+    public Result<Void> deleteConfig(@PathVariable String capability, @PathVariable Long id) {
+        capabilityConfigService.del(capability.toUpperCase(), id);
+        return Result.success(null);
+    }
+
+    @GetMapping("/{capability}/params")
+    public Result<CapabilityParamsDTO> params(@PathVariable String capability) {
+        return Result.success(CapabilityParamsDTO.builder()
+                .params(toParamItems(capability.toUpperCase()))
+                .build());
+    }
+
+    private List<CapabilityParamsDTO.ParamItem> toParamItems(String capability) {
+        return switch (capability) {
+            case CapabilityConfigService.CAPABILITY_GENERATION ->
+                GenParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();
+            case CapabilityConfigService.CAPABILITY_RERANK ->
+                RerankParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();
+            default ->
+                EmbedParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();
+        };
+    }
+
+    private static CapabilityParamsDTO.ParamItem item(String key, String label) {
+        return CapabilityParamsDTO.ParamItem.builder().key(key).label(label).build();
+    }
+
+    // ── test connection ────────────────────────────────────────────────────
+
+    @RequireAuth
+    @PostMapping("/test-connection")
+    public Result<CapabilityConnectionTestResultDTO> testConnection(
+            @Valid @RequestBody CapabilityConnectionTestRequestDTO request) {
+        return Result.success(capabilityConfigService.test(request));
+    }
+
+    // ── storage ────────────────────────────────────────────────────────────
+
+    @RequireAuth
+    @GetMapping("/storage")
+    public Result<StorageConfigDTO> getStorageConfig() {
+        return storageConfigService.get()
+                .map(config -> StorageConfigDTO.from(config,
+                        storageConfigService.maskAccessKey(config),
+                        storageConfigService.maskSecretKey(config)))
+                .map(Result::success)
+                .orElse(Result.success(null));
+    }
+
+    @RequireAuth
+    @PatchMapping("/storage")
+    public Result<StorageConfigDTO> updateStorageConfig(
+            @Valid @RequestBody StorageConfigUpdateRequestDTO request) {
+        var saved = storageConfigService.save(request);
+        return Result.success(StorageConfigDTO.from(saved,
+                storageConfigService.maskAccessKey(saved),
+                storageConfigService.maskSecretKey(saved)));
+    }
+
+    @RequireAuth
+    @PostMapping("/storage/test")
+    public Result<StorageConnectionTestResultDTO> testStorage(
+            @Valid @RequestBody StorageConnectionTestRequestDTO request) {
+        return Result.success(storageConfigService.test(request));
+    }
+
+    @RequireAuth
+    @DeleteMapping("/storage/{id}")
+    public Result<Void> deleteStorage(@PathVariable Long id) {
+        storageConfigService.archive(id);
+        return Result.success();
+    }
+}

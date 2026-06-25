@@ -1,6 +1,5 @@
 create table if not exists knowledge_base (
-  id varchar(64) primary key,
-  workspace_id varchar(64) not null default 'default',
+  id bigint primary key,
   name varchar(128) not null,
   description text,
   status varchar(32) not null,
@@ -14,13 +13,11 @@ create table if not exists knowledge_base (
   deleted_at timestamp null
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
 
-create index idx_kb_workspace_status on knowledge_base(workspace_id, status);
 create index idx_kb_updated_at on knowledge_base(updated_at);
 
-create table if not exists document_asset (
-  id varchar(64) primary key,
-  workspace_id varchar(64) not null default 'default',
-  kb_id varchar(64) not null,
+create table if not exists asset (
+  id bigint primary key,
+  kb_id bigint not null,
   file_name varchar(512) not null,
   title varchar(512),
   file_type varchar(32) not null,
@@ -44,14 +41,13 @@ create table if not exists document_asset (
   deleted_at timestamp null
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
 
-create index idx_doc_kb_status on document_asset(kb_id, parse_status, index_status);
-create index idx_doc_hash on document_asset(kb_id, file_hash);
-create index idx_doc_created_at on document_asset(kb_id, created_at);
+create index idx_doc_kb_status on asset(kb_id, parse_status, index_status);
+create index idx_doc_hash on asset(kb_id, file_hash);
+create index idx_doc_created_at on asset(kb_id, created_at);
 
 create table if not exists ingestion_task (
-  id varchar(64) primary key,
-  workspace_id varchar(64) not null default 'default',
-  kb_id varchar(64) not null,
+  id bigint primary key,
+  kb_id bigint not null,
   source_type varchar(32) not null,
   status varchar(32) not null,
   total_count int not null default 0,
@@ -69,9 +65,9 @@ create index idx_task_kb_created on ingestion_task(kb_id, created_at);
 create index idx_task_status on ingestion_task(status);
 
 create table if not exists ingestion_task_item (
-  id varchar(64) primary key,
-  task_id varchar(64) not null,
-  kb_id varchar(64) not null,
+  id bigint primary key,
+  task_id bigint not null,
+  kb_id bigint not null,
   asset_id varchar(64),
   file_name varchar(512),
   file_hash varchar(128),

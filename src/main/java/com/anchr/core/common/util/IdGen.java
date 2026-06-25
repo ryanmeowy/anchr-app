@@ -5,7 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -42,6 +42,10 @@ public class IdGen {
         }
         this.cacheKey = String.format("%s:%s", ID_GEN_KEY, System.getenv(PROFILE_KEY_NAME));
         stringRedisTemplate.opsForValue().setIfAbsent(cacheKey, String.valueOf(ID_GEN_MIN_ID));
+    }
+
+    public String nextIdStr() {
+        return String.valueOf(nextId());
     }
 
     public long nextId() {

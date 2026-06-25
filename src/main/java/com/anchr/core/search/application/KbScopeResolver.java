@@ -1,9 +1,7 @@
 package com.anchr.core.search.application;
 
-import com.anchr.core.common.application.context.RequestUserContext;
-import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
-import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -21,11 +19,10 @@ public class KbScopeResolver {
 
     private static final int ACTIVE_KB_PAGE_SIZE = 100;
 
-    private final KnowledgeBaseRepository knowledgeBaseRepository;
+    private final KnowledgeBaseService knowledgeBaseService;
 
     public List<String> resolveVisibleKbIds(List<String> requestedKbIds) {
-        RequestUserContext context = UserContextHolder.get();
-        List<String> activeIds = listAllActiveIds(context.workspaceId());
+        List<String> activeIds = listAllActiveIds();
         if (activeIds.isEmpty()) {
             return List.of();
         }
@@ -46,22 +43,23 @@ public class KbScopeResolver {
         return resolved.stream().toList();
     }
 
-    private List<String> listAllActiveIds(String workspaceId) {
+    private List<String> listAllActiveIds() {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
-        int offset = 0;
+        int page = 1;
         while (true) {
-            List<KnowledgeBase> page = knowledgeBaseRepository.listActive(workspaceId, ACTIVE_KB_PAGE_SIZE, offset);
-            if (page.isEmpty()) {
+            KnowledgeBaseService.PagedResult<KnowledgeBase> result =
+                    knowledgeBaseService.listKbs(null, "ACTIVE", null, null, page, ACTIVE_KB_PAGE_SIZE);
+            if (result.items().isEmpty()) {
                 break;
             }
-            page.stream()
+            result.items().stream()
                     .map(KnowledgeBase::getId)
                     .filter(StringUtils::hasText)
                     .forEach(ids::add);
-            if (page.size() < ACTIVE_KB_PAGE_SIZE) {
+            if (result.items().size() < ACTIVE_KB_PAGE_SIZE) {
                 break;
             }
-            offset += ACTIVE_KB_PAGE_SIZE;
+            page++;
         }
         return ids.stream().toList();
     }

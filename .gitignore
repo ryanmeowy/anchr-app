@@ -1,6 +1,8 @@
 /.env
 /.idea
 /target
+.DS_Store
+**/.DS_Store
 /ui_streamlit/.venv
 /ui_streamlit/venv
 /ui_streamlit/.streamlit

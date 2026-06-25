@@ -37,7 +37,6 @@ public class AppSearchProperties {
 
     @Data
     public static class Rerank {
-        private boolean enabled = true;
         private int maxDocChars = 1200;
         private boolean windowEnabled = true;
         private int windowSize = 40;

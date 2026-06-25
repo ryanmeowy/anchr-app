@@ -1,5 +1,6 @@
 package com.anchr.core.search.domain.model;
 
+import com.anchr.core.common.model.BboxInfo;
 import lombok.Builder;
 import lombok.Value;
 
@@ -15,14 +16,14 @@ public class Segment {
     String segmentId;
     String kbId;
     String assetId;
-    KbAssetTypeEnum assetType;
+    String assetType;
     SegmentType segmentType;
     String title;
     String contentText;
     String ocrText;
     Integer pageNo;
     Integer chunkOrder;
-    Bbox bbox;
+    List<BboxInfo> bbox;
     Integer imageWidth;
     Integer imageHeight;
     List<Float> embedding;

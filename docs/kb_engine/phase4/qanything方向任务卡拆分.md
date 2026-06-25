@@ -69,7 +69,7 @@
 - `Segment` 增加 `kbId`。
 - `KbSegmentDocument` 增加 `kbId` keyword 字段。
 - `es-kb-segment-mapping.json` 增加 `kbId` keyword mapping。
-- `TextSegmentIndexWriter` 和 `ImageSegmentIndexWriter` 写入 segment 时必须携带 `kbId`。
+- 统一 `KbSegmentBulkWriter` 写入 segment 时必须携带 `kbId`。
 - `KbSegmentBulkWriter` 写 ES 文档时透传 `kbId`。
 - 预览、neighbors 查询仍以 `segmentId/assetId` 为主，但后续权限校验必须能从 segment 反查 `kbId`。
 
@@ -124,7 +124,7 @@ POST /api/v1/kbs/{kbId}/ingestion-tasks/{taskId}/retry-failed
 
 - facade 先创建 `ingestion_task` 和 `ingestion_task_item` DB 记录。
 - 为每个文件创建或复用 `document_asset`。
-- 根据文件类型路由到现有 `TextAssetIngestionService` 或 `ImageIngestionService` 的内部处理能力。
+- 根据文件类型路由到统一解析、chunk、embedding、`kb_segment` 写入能力。
 - 每个阶段同步更新 DB：`UPLOAD -> PARSE -> CHUNK -> EMBED -> INDEX -> ASKABLE`。
 - Redis 可继续用于任务锁和执行中瞬时状态，但 DB 是状态查询的权威来源。
 

@@ -3,6 +3,8 @@ package com.anchr.core.conversation.application.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.application.AnswerGenerationService;
+import com.anchr.core.conversation.application.model.AnswerMode;
+import com.anchr.core.conversation.application.model.AnswerModePolicy;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
@@ -27,9 +29,6 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class AnswerGenerationServiceImpl implements AnswerGenerationService {
 
-    private static final int GROUNDING_LIMIT = 5;
-    private static final int MIN_TOTAL_EVIDENCE_CHARS = 80;
-    private static final double MIN_TOP_SCORE_THRESHOLD = 0.12D;
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
     private static final Pattern CITATION_REFERENCE_PATTERN = Pattern.compile("\\[(\\d+)]");
     private static final String NO_EVIDENCE_TEMPLATE = """
@@ -48,20 +47,23 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     @Override
     public AnswerGenerationResult generate(String userQuery,
                                            String rewrittenQuery,
+                                           AnswerMode answerMode,
                                            List<ConversationRetrievalCandidate> topCandidates,
                                            List<ConversationCitation> citations) {
         meterRegistry.counter("answer.generate.count").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<GroundingSegment> groundingSegments = pickGroundingSegments(topCandidates, citations);
+        AnswerMode resolvedMode = answerMode == null ? AnswerMode.STRICT : answerMode;
+        AnswerModePolicy policy = resolvedMode.policy();
+        List<GroundingSegment> groundingSegments = pickGroundingSegments(topCandidates, citations, policy);
         try {
-            String noEvidenceReason = resolveNoEvidenceReason(groundingSegments, topCandidates);
+            String noEvidenceReason = resolveNoEvidenceReason(groundingSegments, topCandidates, policy);
             if (StringUtils.hasText(noEvidenceReason)) {
                 meterRegistry.counter("answer.generate.fallback.count").increment();
                 meterRegistry.counter("no_evidence.answer.rate").increment();
                 return buildNoEvidenceFallback(userQuery, rewrittenQuery, noEvidenceReason);
             }
 
-            String prompt = buildPrompt(userQuery, rewrittenQuery, groundingSegments);
+            String prompt = buildPrompt(userQuery, rewrittenQuery, groundingSegments, resolvedMode, policy);
             String rawText = conversationRewritePort.generateText(prompt);
             String answerText = parseAnswer(rawText);
             if (!StringUtils.hasText(answerText)) {
@@ -90,12 +92,13 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     }
 
     private List<GroundingSegment> pickGroundingSegments(List<ConversationRetrievalCandidate> topCandidates,
-                                                         List<ConversationCitation> citations) {
+                                                         List<ConversationCitation> citations,
+                                                         AnswerModePolicy policy) {
         if (topCandidates == null || topCandidates.isEmpty() || citations == null || citations.isEmpty()) {
             return List.of();
         }
         List<GroundingSegment> segments = new ArrayList<>();
-        int limit = Math.min(Math.min(topCandidates.size(), citations.size()), GROUNDING_LIMIT);
+        int limit = Math.min(Math.min(topCandidates.size(), citations.size()), policy.groundingLimit());
         for (int i = 0; i < limit; i++) {
             ConversationRetrievalCandidate candidate = topCandidates.get(i);
             ConversationCitation citation = citations.get(i);
@@ -134,13 +137,21 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         return null;
     }
 
-    private String buildPrompt(String userQuery, String rewrittenQuery, List<GroundingSegment> segments) {
+    private String buildPrompt(String userQuery,
+                               String rewrittenQuery,
+                               List<GroundingSegment> segments,
+                               AnswerMode answerMode,
+                               AnswerModePolicy policy) {
         StringBuilder builder = new StringBuilder();
         builder.append("你是知识库问答助手。");
         builder.append("只能基于给定证据回答，不得编造。");
         builder.append("输出 JSON：{\"answer\":\"string\"}。");
-        builder.append("回答风格：先给简要结论，再给2-4条要点，结尾保留“参考来源”。");
+        builder.append("回答模式：").append(answerMode.name()).append("。");
+        builder.append(policy.styleInstruction());
         builder.append("引用格式：必须使用 [1] [2] 这种编号，且编号只能引用给定证据。");
+        if (policy.allowSpeculation()) {
+            builder.append("如果提供可能方向或建议，必须单独成段并明确标注为推测。");
+        }
         builder.append("如果证据不足，请直接回答“未找到足够内容支持该问题”。");
         builder.append("用户问题：").append(userQuery).append("。");
         builder.append("检索改写：").append(rewrittenQuery).append("。");
@@ -209,18 +220,19 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     }
 
     private String resolveNoEvidenceReason(List<GroundingSegment> groundingSegments,
-                                           List<ConversationRetrievalCandidate> topCandidates) {
+                                           List<ConversationRetrievalCandidate> topCandidates,
+                                           AnswerModePolicy policy) {
         if (groundingSegments == null || groundingSegments.isEmpty()) {
             return "no_grounding_segment";
         }
         int totalEvidenceChars = groundingSegments.stream()
                 .map(segment -> segment.evidence() == null ? 0 : segment.evidence().length())
                 .reduce(0, Integer::sum);
-        if (totalEvidenceChars < MIN_TOTAL_EVIDENCE_CHARS && groundingSegments.size() < 2) {
+        if (totalEvidenceChars < policy.minEvidenceChars() && groundingSegments.size() < 2) {
             return "evidence_too_short";
         }
         double maxScore = resolveMaxScore(topCandidates);
-        if (maxScore >= 0D && maxScore < MIN_TOP_SCORE_THRESHOLD && groundingSegments.size() < 2) {
+        if (maxScore >= 0D && maxScore < policy.minTopScore() && groundingSegments.size() < 2) {
             return "low_retrieval_score";
         }
         return null;

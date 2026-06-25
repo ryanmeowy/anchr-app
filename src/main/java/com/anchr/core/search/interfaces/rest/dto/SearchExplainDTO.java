@@ -7,34 +7,61 @@ import java.io.Serializable;
 import java.util.List;
 
 /**
- * Structured explanation of why a search result was matched.
+ * Explain payload for kb search result.
  */
 @Data
 @Builder
 public class SearchExplainDTO implements Serializable {
 
     /**
-     * Effective retrieval strategy code, e.g. 0/1/2/3.
+     * Effective strategy marker for diagnostics.
      */
     private String strategyEffective;
 
     /**
-     * Coarse match sources for UI badge display: VECTOR/FILENAME/OCR/TAG/GRAPH.
+     * Coarse match sources.
      */
     private List<String> hitSources;
 
     /**
-     * Fine-grained field match flags.
+     * Field-level match flags.
      */
     private MatchedBy matchedBy;
+
+    /**
+     * Text explain v2 signals.
+     */
+    private TextSignals textSignals;
+
+    /**
+     * Image explain v2 signals.
+     */
+    private ImageSignals imageSignals;
 
     @Data
     @Builder
     public static class MatchedBy implements Serializable {
         private boolean vector;
-        private boolean filename;
+        private boolean title;
+        private boolean content;
         private boolean ocr;
+    }
+
+    @Data
+    @Builder
+    public static class TextSignals implements Serializable {
+        private boolean semantic;
+        private boolean keyword;
+        private boolean pageHit;
+        private boolean chunkHit;
+    }
+
+    @Data
+    @Builder
+    public static class ImageSignals implements Serializable {
+        private boolean vector;
+        private boolean ocr;
+        private boolean caption;
         private boolean tag;
-        private boolean graph;
     }
 }

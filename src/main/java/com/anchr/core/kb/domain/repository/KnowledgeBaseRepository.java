@@ -14,22 +14,25 @@ public interface KnowledgeBaseRepository {
 
     void save(KnowledgeBase knowledgeBase);
 
-    Optional<KnowledgeBase> findById(String workspaceId, String id);
+    Optional<KnowledgeBase> findById(String id);
 
-    Optional<KnowledgeBase> findActiveById(String workspaceId, String id);
+    Optional<KnowledgeBase> findActiveById(String id);
 
-    List<KnowledgeBase> listActiveByIds(String workspaceId, List<String> ids);
+    List<KnowledgeBase> listActiveByIds(List<String> ids);
 
-    List<KnowledgeBase> listActive(String workspaceId, int limit, int offset);
+    List<KnowledgeBase> searchKbs(String q, String status,
+                                  LocalDateTime updatedAfter, LocalDateTime updatedBefore,
+                                  int limit, int offset);
 
-    long countActive(String workspaceId);
+    long countKbs(String q, String status,
+                  LocalDateTime updatedAfter, LocalDateTime updatedBefore);
 
-    boolean updateProfile(String workspaceId, String id, String name, String description,
+    boolean updateProfile(String id, String name, String description,
                           String updatedBy, LocalDateTime updatedAt);
 
-    boolean archive(String workspaceId, String id, String updatedBy, LocalDateTime updatedAt);
+    boolean archive(String id, String updatedBy, LocalDateTime updatedAt);
 
-    void refreshDocumentStats(String workspaceId, String id, String updatedBy, LocalDateTime updatedAt);
+    void refreshDocumentStats(String id, String updatedBy, boolean freshIngest);
 
-    Optional<KnowledgeBaseStats> findStats(String workspaceId, String id);
+    List<KnowledgeBaseStats> findStats(List<String> kbIds);
 }

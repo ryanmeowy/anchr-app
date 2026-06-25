@@ -6,7 +6,6 @@
 
     <resultMap id="KnowledgeBaseRecordMap" type="com.anchr.core.kb.infrastructure.persistence.KnowledgeBaseRecord">
         <id property="id" column="id"/>
-        <result property="workspaceId" column="workspace_id"/>
         <result property="name" column="name"/>
         <result property="description" column="description"/>
         <result property="status" column="status"/>
@@ -26,11 +25,15 @@
         <result property="segmentCount" column="segment_count"/>
         <result property="lastIngestedAt" column="last_ingested_at"/>
         <result property="lastIngestionStatus" column="last_ingestion_status"/>
+        <result property="lastIngestionTotalCount" column="last_ingestion_total_count"/>
+        <result property="lastIngestionSuccessCount" column="last_ingestion_success_count"/>
+        <result property="lastIngestionFailureCount" column="last_ingestion_failure_count"/>
+        <result property="lastIngestionRunningCount" column="last_ingestion_running_count"/>
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
     <sql id="KnowledgeBaseColumns">
-        id, workspace_id, name, description, status,
+        id, name, description, status,
         document_count, segment_count, last_ingested_at,
         created_by, updated_by, created_at, updated_at, deleted_at
     </sql>
@@ -39,7 +42,7 @@
         insert into knowledge_base (
             <include refid="KnowledgeBaseColumns"/>
         ) values (
-            #{id}, #{workspaceId}, #{name}, #{description}, #{status},
+            #{id}, #{name}, #{description}, #{status},
             #{documentCount}, #{segmentCount}, #{lastIngestedAt},
             #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{deletedAt}
         )
@@ -50,7 +53,6 @@
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and deleted_at is null
           and status = 'ACTIVE'
     </select>
@@ -60,7 +62,6 @@
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and deleted_at is null
     </select>
 
@@ -68,8 +69,7 @@
         select
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
-        where workspace_id = #{workspaceId}
-          and status = 'ACTIVE'
+        where status = 'ACTIVE'
           and deleted_at is null
           and id in
           <foreach collection="ids" item="id" open="(" separator="," close=")">
@@ -77,23 +77,37 @@
           </foreach>
     </select>
 
-    <select id="listActive" resultMap="KnowledgeBaseRecordMap">
+    <sql id="KbSearchWhere">
+        <where>
+            <if test="status != null">
+                and status = #{status}
+            </if>
+            <if test="q != null and q != ''">
+                and (name like concat('%', #{q}, '%')
+                     or description like concat('%', #{q}, '%'))
+            </if>
+            <if test="updatedAfter != null">
+                and updated_at &gt;= #{updatedAfter}
+            </if>
+            <if test="updatedBefore != null">
+                and updated_at &lt;= #{updatedBefore}
+            </if>
+        </where>
+    </sql>
+
+    <select id="searchKbs" resultMap="KnowledgeBaseRecordMap">
         select
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
-        where workspace_id = #{workspaceId}
-          and status = 'ACTIVE'
-          and deleted_at is null
+        <include refid="KbSearchWhere"/>
         order by updated_at desc, id desc
         limit #{limit} offset #{offset}
     </select>
 
-    <select id="countActive" resultType="long">
+    <select id="countKbs" resultType="long">
         select count(1)
         from knowledge_base
-        where workspace_id = #{workspaceId}
-          and status = 'ACTIVE'
-          and deleted_at is null
+        <include refid="KbSearchWhere"/>
     </select>
 
     <update id="updateProfile">
@@ -103,7 +117,6 @@
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and status = 'ACTIVE'
           and deleted_at is null
     </update>
@@ -114,32 +127,31 @@
             updated_by = #{updatedBy},
             updated_at = #{updatedAt}
         where id = #{id}
-          and workspace_id = #{workspaceId}
           and status = 'ACTIVE'
           and deleted_at is null
     </update>
 
     <update id="refreshDocumentStats">
-        update knowledge_base
-        set document_count = (
-                select count(1)
-                from document_asset da
-                where da.workspace_id = #{workspaceId}
-                  and da.kb_id = #{id}
-                  and da.deleted_at is null
-            ),
-            segment_count = (
-                select coalesce(sum(da.segment_count), 0)
-                from document_asset da
-                where da.workspace_id = #{workspaceId}
-                  and da.kb_id = #{id}
-                  and da.deleted_at is null
-            ),
-            updated_by = #{updatedBy},
-            updated_at = #{updatedAt}
-        where id = #{id}
-          and workspace_id = #{workspaceId}
-          and deleted_at is null
+            update knowledge_base kb
+            join (
+                select kb_id,
+                    count(1) as document_count,
+                    coalesce(sum(segment_count), 0) as segment_count
+                from asset
+                where kb_id = #{id}
+                  and deleted_at is null
+                group by kb_id
+            ) s on kb.id = s.kb_id
+            set
+                kb.document_count = s.document_count,
+                kb.segment_count = s.segment_count,
+                kb.updated_by = #{updatedBy},
+                kb.updated_at = #{updatedAt}
+                <if test="lastIngestedAt != null">
+                    , kb.last_ingested_at = #{lastIngestedAt}
+                </if>
+            where kb.id = #{id}
+              and kb.deleted_at is null
     </update>
 
     <select id="findStats" resultMap="KnowledgeBaseStatsRecordMap">
@@ -148,18 +160,27 @@
             kb.document_count,
             kb.segment_count,
             kb.last_ingested_at,
-            (
-                select it.status
-                from ingestion_task it
-                where it.workspace_id = kb.workspace_id
-                  and it.kb_id = kb.id
-                order by it.created_at desc, it.id desc
-                limit 1
-            ) as last_ingestion_status,
-            kb.updated_at
+            kb.updated_at,
+            it.status as last_ingestion_status,
+            it.total_count as last_ingestion_total_count,
+            it.success_count as last_ingestion_success_count,
+            it.failure_count as last_ingestion_failure_count,
+            it.running_count as last_ingestion_running_count
         from knowledge_base kb
-        where kb.id = #{id}
-          and kb.workspace_id = #{workspaceId}
+        left join (
+            select it2.kb_id, it2.status, it2.total_count, it2.success_count,
+                   it2.failure_count, it2.running_count
+            from ingestion_task it2
+            inner join (
+                select kb_id, max(created_at) as max_created
+                from ingestion_task
+                where kb_id in
+                <foreach collection="kbIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+                group by kb_id
+            ) latest on it2.kb_id = latest.kb_id and it2.created_at = latest.max_created
+        ) it on kb.id = it.kb_id
+        where kb.id in
+        <foreach collection="kbIds" item="id" open="(" separator="," close=")">#{id}</foreach>
           and kb.deleted_at is null
           and kb.status = 'ACTIVE'
     </select>

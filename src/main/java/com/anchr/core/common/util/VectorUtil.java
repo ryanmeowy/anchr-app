@@ -9,8 +9,6 @@ import java.util.List;
  * Utility class for vector operations
  * Provides methods for vector normalization and other mathematical operations
  *
- * @author Ryan
- * @since 2025/12/26
  */
 
 public class VectorUtil {

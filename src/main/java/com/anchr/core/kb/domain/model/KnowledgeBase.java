@@ -13,7 +13,6 @@ import java.time.LocalDateTime;
 public class KnowledgeBase {
 
     String id;
-    String workspaceId;
     String name;
     String description;
     KnowledgeBaseStatus status;

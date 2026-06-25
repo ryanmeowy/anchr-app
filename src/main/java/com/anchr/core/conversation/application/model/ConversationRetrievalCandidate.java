@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.application.model;
 
+import com.anchr.core.common.model.BboxInfo;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -38,21 +39,9 @@ public class ConversationRetrievalCandidate {
     public static class Anchor {
         private Integer pageNo;
         private Integer chunkOrder;
-        private Bbox bbox;
+        private List<BboxInfo> bbox;
         private Integer imageWidth;
         private Integer imageHeight;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class Bbox {
-        private Integer x;
-        private Integer y;
-        private Integer width;
-        private Integer height;
-        private String unit;
     }
 
     @Data

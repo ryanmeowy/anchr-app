@@ -5,6 +5,7 @@ import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator
 import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
+import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
@@ -37,9 +38,7 @@ public class ConversationMessagePipeline {
         RewriteResult rewriteResult = queryRewriteService.rewrite(sessionId, request.getQuery().trim());
         ConversationRetrievalResult retrievalResult = conversationRetrievalOrchestrator.retrieve(
                 rewriteResult.getRewrittenQuery(),
-                request.getTopK(),
                 request.getLimit(),
-                request.getStrategy(),
                 request.getKbIds(),
                 rewriteResult.getPreferredModalities()
         );
@@ -54,6 +53,7 @@ public class ConversationMessagePipeline {
         AnswerGenerationResult answerGenerationResult = answerGenerationService.generate(
                 request.getQuery().trim(),
                 rewriteResult.getRewrittenQuery(),
+                AnswerMode.from(request.getAnswerMode()),
                 answerCandidates,
                 answerCitations
         );

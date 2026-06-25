@@ -28,43 +28,23 @@ mybatis:
     map-underscore-to-camel-case: true
 
 app:
-  capability-provider:
-    rerank: ${APP_CAPABILITY_PROVIDER_RERANK:aliyun}
-    gen: ${APP_CAPABILITY_PROVIDER_GEN:aliyun}
-    ocr: ${APP_CAPABILITY_PROVIDER_OCR:aliyun}
-    object-storage: ${APP_CAPABILITY_PROVIDER_OBJECT_STORAGE:aliyun}
   security:
     admin-secret: ${APP_ADMIN_SECRET}
     encrypt-key: ${APP_ENCRYPT_KEY}
     encrypt-iv: ${APP_ENCRYPT_IV}
   embedding:
-    backend: ${APP_EMBEDDING_BACKEND:aliyun}
-    model: ${APP_EMBEDDING_MODEL:multimodal-embedding-v1}
-    dimension: ${APP_EMBEDDING_DIMENSION:1024}
-    preprocess-version: ${APP_EMBEDDING_PREPROCESS_VERSION:v1}
-    image-input-mode: ${APP_EMBEDDING_IMAGE_INPUT_MODE:url}
     ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
     ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
-  vector:
-    index-name: ${APP_VECTOR_INDEX_NAME:smart_gallery}
-    indexVersion: ${APP_VECTOR_INDEX_VERSION:v1}
-    read-alias: ${APP_VECTOR_READ_ALIAS:smart_gallery_read}
-    write-alias: ${APP_VECTOR_WRITE_ALIAS:smart_gallery_write}
-    dimension: ${APP_VECTOR_DIMENSION:${APP_EMBEDDING_DIMENSION:1024}}
-  kb-segment:
+  segment:
     index-name: ${APP_KB_SEGMENT_INDEX_NAME:kb_segment}
     indexVersion: ${APP_KB_SEGMENT_INDEX_VERSION:v1}
     read-alias: ${APP_KB_SEGMENT_READ_ALIAS:kb_segment_read}
     write-alias: ${APP_KB_SEGMENT_WRITE_ALIAS:kb_segment_write}
-    dimension: ${APP_KB_SEGMENT_DIMENSION:${APP_EMBEDDING_DIMENSION:1024}}
+    dimension: ${APP_KB_SEGMENT_DIMENSION:1024}
   search:
     quality-absolute-min-score: 0.72
     vector-min-score: 0.6
-    escli:
-      # Optional allowlist for ES CLI accessible indices (supports wildcard '*').
-      # When empty, defaults to vector read/write alias and physical index.
-      allowed-index-patterns: []
     rrf:
       enabled: true
       native-enabled: false
@@ -73,7 +53,6 @@ app:
       max-candidates: 200
     rerank:
       enabled: true
-      model: gte-rerank-v2
       max-doc-chars: 1200
       window-enabled: true
       window-size: 40
@@ -82,20 +61,6 @@ app:
       window-max: 80
       fusion-alpha: 0.6
       fusion-beta: 0.4
-  compare:
-    max-text-length: 500
-    high-threshold: 0.8
-    medium-threshold: 0.6
-  debug:
-    strategy-header-enabled: false
-  settings:
-    connection-test:
-      generation-prompt: ${APP_SETTINGS_TEST_GENERATION_PROMPT:}
-      embedding-text: ${APP_SETTINGS_TEST_EMBEDDING_TEXT:}
-      rerank-query: ${APP_SETTINGS_TEST_RERANK_QUERY:}
-      rerank-document: ${APP_SETTINGS_TEST_RERANK_DOCUMENT:}
-      ocr-image-url: ${APP_SETTINGS_TEST_OCR_IMAGE_URL:}
-      object-storage-object-key: ${APP_SETTINGS_TEST_OBJECT_STORAGE_OBJECT_KEY:}
 
 logging:
   level:
@@ -108,15 +73,5 @@ management:
       exposure:
         include: health,info,metrics
 
-aliyun:
-  oss:
-    endpoint: ${OSS_ENDPOINT:}
-    public-endpoint: ${OSS_PUBLIC_ENDPOINT:}
-    access-key-id: ${ALIYUN_ACCESS_KEY_ID:}
-    access-key-secret: ${ALIYUN_ACCESS_KEY_SECRET:}
-    bucket-name: ${ALIYUN_OSS_BUCKET_NAME:}
-    role-arn: ${ALIYUN_OSS_ROLE_ARN:}
-  ocr:
-    access-key-id: ${ALIYUN_ACCESS_KEY_ID:}
-    access-key-secret: ${ALIYUN_ACCESS_KEY_SECRET:}
-    endpoint: ${OCR_ENDPOINT:}
+  docling:
+    base-url: ${APP_DOCLING_BASE_URL:http://127.0.0.1:8091}

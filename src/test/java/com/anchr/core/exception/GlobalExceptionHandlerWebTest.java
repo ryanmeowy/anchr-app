@@ -83,7 +83,7 @@ class GlobalExceptionHandlerWebTest {
 
         @GetMapping("/test/business")
         public String business() {
-            throw new BusinessException(ApiError.CONFLICT);
+            throw new BusinessException(ApiError.FORBIDDEN);
         }
     }
 }

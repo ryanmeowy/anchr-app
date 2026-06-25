@@ -1,74 +1,66 @@
-
 package com.anchr.core.search.interfaces.rest.dto;
 
+import com.anchr.core.common.model.BboxInfo;
 import lombok.Builder;
 import lombok.Data;
 
 import java.io.Serializable;
 import java.util.List;
-import java.util.Map;
 
 /**
- * image search result model
- *
- * @author Ryan
- * @since 2025/12/15
+ * Unified kb search response item.
  */
 @Data
 @Builder
 public class SearchResultDTO implements Serializable {
-    /**
-     * image ID (ES Doc ID)
-     */
-    private String id;
 
     /**
-     * image access address (OSS URL)
+     * Unified protocol fields (Phase 2 E1).
      */
-    private String url;
-
-    /**
-     * match score (0.0 - 1.0), higher score means more relevant
-     */
+    private String segmentType;
+    private String content;
+    private String resultType;
+    private String assetType;
+    private String snippet;
+    private Integer pageNo;
     private Double score;
-
-    /**
-     * OCR text contained in the image (if any)
-     */
-    private String ocrText;
-
-    /**
-     * Field-level highlight snippets from Elasticsearch, e.g. {"tags": "<em>cat</em>"}.
-     */
-    private Map<String, String> highlights;
-
-    /**
-     * image filename
-     */
-    private String filename;
-
-    /**
-     * Search cursor for pagination
-     */
-    private List<Object> sortValues;
-
-    /**
-     * AI tags
-     */
-    private List<String> tags;
-
-    /**
-     * Graph triples (subject, predicate, object)
-     */
-    private List<GraphTripleDTO> relations;
-
-    /**
-     * Vector hit status (tri-state): VECTOR_ONLY_LIKE / VECTOR_AND_TEXT / TEXT_ONLY.
-     */
-    private String vectorHitStatus;
-
-    /**
-     * Structured explain info for interview/demo oriented observability.
-     */
     private SearchExplainDTO explain;
+    private Anchor anchor;
+    private String thumbnail;
+    private String ocrSummary;
+    private Integer totalHits;
+    private List<TopChunk> topChunks;
+
+    /**
+     * Optional trace fields for callback to original asset.
+     */
+    private String segmentId;
+    private String kbId;
+    private String assetId;
+    private String sourceRef;
+
+    @Data
+    @Builder
+    public static class Anchor implements Serializable {
+        private Integer pageNo;
+        private Integer chunkOrder;
+        private List<BboxInfo> bbox;
+        private Integer imageWidth;
+        private Integer imageHeight;
+    }
+
+    @Data
+    @Builder
+    public static class TopChunk implements Serializable {
+        private String segmentId;
+        private String kbId;
+        private String segmentType;
+        private String snippet;
+        private Double score;
+        private Integer pageNo;
+        private Anchor anchor;
+        private String sourceRef;
+        private String thumbnail;
+        private String ocrSummary;
+    }
 }

@@ -3,8 +3,6 @@ package com.anchr.core.common.constant;
 /**
  * general constant clazz;
  *
- * @author Ryan
- * @since 2025/12/15
  */
 public class CommonConstant {
 
