@@ -25,10 +25,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -41,6 +46,7 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
 
     private static final int DEFAULT_LIMIT = 10;
     private static final int MAX_LIMIT = 50;
+    private static final int DEDUP_BUFFER = 10;
 
     private final ActivityEventRepository activityEventRepository;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
@@ -83,17 +89,32 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
     public RecentSearchListDTO recentSearch(Integer limit, String cursor) {
         int boundedLimit = normalizeLimit(limit);
         int offset = decodeOffset(cursor);
-        List<ActivityEvent> events = listEvents(ActivityEventType.SEARCH_EXECUTED, boundedLimit + 1, offset);
-        List<ActivityEvent> pageEvents = events.stream()
-                .limit(boundedLimit)
-                .toList();
+
+        // Fetch extra rows to account for duplicates removed during dedup
+        int fetchSize = boundedLimit + 1 + DEDUP_BUFFER;
+        List<ActivityEvent> rawEvents = listEvents(ActivityEventType.SEARCH_EXECUTED, fetchSize, offset);
+
+        // Deduplicate in-memory (events are ordered by created_at desc from DB)
+        List<ActivityEvent> uniqueEvents = deduplicate(rawEvents);
+
+        // Take the first boundedLimit unique events as the page
+        List<ActivityEvent> pageEvents = uniqueEvents.size() > boundedLimit
+                ? uniqueEvents.subList(0, boundedLimit)
+                : uniqueEvents;
+
         Map<String, String> knowledgeBaseNamesById = loadKnowledgeBaseNamesByListPayload(pageEvents, "kbIds");
         List<RecentSearchDTO> items = pageEvents.stream()
                 .map(event -> toRecentSearch(event, knowledgeBaseNamesById))
                 .toList();
+
+        // hasNext: more unique items exist, or raw fetch hit the cap (more rows may remain)
+        boolean hasNext = uniqueEvents.size() > boundedLimit
+                || rawEvents.size() >= fetchSize;
+        String nextCursor = hasNext ? encodeOffset(offset + rawEvents.size()) : null;
+
         return RecentSearchListDTO.builder()
                 .items(items)
-                .nextCursor(events.size() > boundedLimit ? encodeOffset(offset + boundedLimit) : null)
+                .nextCursor(nextCursor)
                 .build();
     }
 
@@ -332,5 +353,59 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         } catch (Exception e) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "cursor is invalid.");
         }
+    }
+
+    /**
+     * Deduplicates a list of activity events (assumed ordered by created_at desc).
+     * Two events are considered duplicates if they share the same query and kbIds
+     * (order-independent) and their searchedAt timestamps are within 1000ms.
+     * When duplicates are found, the first (most recent) event is kept.
+     *
+     * @param events raw events from DB, ordered by created_at desc
+     * @return deduplicated events in original order
+     */
+    public List<ActivityEvent> deduplicate(List<ActivityEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return events == null ? List.of() : events;
+        }
+
+        Map<String, ActivityEvent> keyToFirstSeen = new HashMap<>();
+        List<ActivityEvent> result = new ArrayList<>();
+
+        for (ActivityEvent event : events) {
+            Map<String, Object> payload = parsePayload(event);
+            String query = readString(payload, "query", "");
+            List<String> kbIds = readStringList(payload, "kbIds");
+            String dedupKey = buildDedupKey(query, kbIds);
+
+            ActivityEvent firstSeen = keyToFirstSeen.get(dedupKey);
+            if (firstSeen != null && isWithinOneSecond(firstSeen.getCreatedAt(), event.getCreatedAt())) {
+                continue; // duplicate within the time window
+            }
+
+            keyToFirstSeen.put(dedupKey, event);
+            result.add(event);
+        }
+
+        return result;
+    }
+
+    /**
+     * Builds a deterministic dedup key from query and kbIds.
+     * kbIds are sorted alphabetically to make the key order-independent.
+     */
+    private static String buildDedupKey(String query, List<String> kbIds) {
+        String sortedKbIds = kbIds.stream()
+                .filter(Objects::nonNull)
+                .sorted()
+                .collect(Collectors.joining(","));
+        return query + "::" + sortedKbIds;
+    }
+
+    /**
+     * Returns true if the absolute difference between two LocalDateTime values is &lt;= 1000ms.
+     */
+    private static boolean isWithinOneSecond(LocalDateTime a, LocalDateTime b) {
+        return Math.abs(ChronoUnit.MILLIS.between(a, b)) <= 1000;
     }
 }

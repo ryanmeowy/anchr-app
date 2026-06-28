@@ -18,6 +18,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -86,7 +88,7 @@ class ActivityQueryServiceImplTest {
                         + "\"dateRange\":{\"from\":1715678900,\"to\":1715765300},"
                         + "\"withAnswer\":true,"
                         + "\"answerMode\":\"BRIEF\"}");
-        when(activityEventRepository.listByType("user-a", ActivityEventType.SEARCH_EXECUTED, 11, 0))
+        when(activityEventRepository.listByType("user-a", ActivityEventType.SEARCH_EXECUTED, 21, 0))
                 .thenReturn(List.of(event));
         when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1", "kb-2")))
                 .thenReturn(List.of(kb("kb-1", "合同知识库"), kb("kb-2", "制度知识库")));
@@ -144,6 +146,18 @@ class ActivityQueryServiceImplTest {
                 .build();
     }
 
+    private ActivityEvent event(ActivityEventType eventType, String resourceId, String payload, LocalDateTime createdAt) {
+        return ActivityEvent.builder()
+                .id("act-" + resourceId)
+                .userId("user-a")
+                .eventType(eventType)
+                .resourceType("TEST")
+                .resourceId(resourceId)
+                .payload(payload)
+                .createdAt(createdAt)
+                .build();
+    }
+
     private KnowledgeBase kb(String id, String name) {
         LocalDateTime now = LocalDateTime.now();
         return KnowledgeBase.builder()
@@ -153,5 +167,188 @@ class ActivityQueryServiceImplTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
+    }
+
+    // ── deduplicate() direct tests ──
+
+    @Test
+    void deduplicate_noDuplicates_returnsAll() {
+        LocalDateTime now = LocalDateTime.now();
+        ActivityEvent e1 = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"query\":\"a\",\"kbIds\":[\"kb-1\"]}", now);
+        ActivityEvent e2 = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"query\":\"b\",\"kbIds\":[\"kb-1\"]}", now);
+        ActivityEvent e3 = event(ActivityEventType.SEARCH_EXECUTED, "3",
+                "{\"query\":\"a\",\"kbIds\":[\"kb-2\"]}", now);
+
+        List<ActivityEvent> result = service.deduplicate(List.of(e1, e2, e3));
+
+        assertThat(result).hasSize(3);
+    }
+
+    @Test
+    void deduplicate_sameQueryKbIdsWithinOneSecond_removesDuplicate() {
+        LocalDateTime now = LocalDateTime.now();
+        ActivityEvent first = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-1\",\"kb-2\"]}", now);
+        ActivityEvent duplicate = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-1\",\"kb-2\"]}", now.plus(500, ChronoUnit.MILLIS));
+
+        List<ActivityEvent> result = service.deduplicate(List.of(first, duplicate));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getId()).isEqualTo("act-1");
+    }
+
+    @Test
+    void deduplicate_sameQueryKbIdsFarApart_keepsBoth() {
+        LocalDateTime now = LocalDateTime.now();
+        ActivityEvent first = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-1\",\"kb-2\"]}", now);
+        ActivityEvent later = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-1\",\"kb-2\"]}", now.plus(2, ChronoUnit.SECONDS));
+
+        List<ActivityEvent> result = service.deduplicate(List.of(first, later));
+
+        assertThat(result).hasSize(2);
+    }
+
+    @Test
+    void deduplicate_sameKbIdsDifferentOrder_treatedAsDuplicate() {
+        LocalDateTime now = LocalDateTime.now();
+        ActivityEvent first = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-1\",\"kb-2\"]}", now);
+        ActivityEvent reversed = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-2\",\"kb-1\"]}", now.plus(200, ChronoUnit.MILLIS));
+
+        List<ActivityEvent> result = service.deduplicate(List.of(first, reversed));
+
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    void deduplicate_sameQueryDifferentKbIds_keepsBoth() {
+        LocalDateTime now = LocalDateTime.now();
+        ActivityEvent e1 = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-1\"]}", now);
+        ActivityEvent e2 = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"query\":\"付款期限\",\"kbIds\":[\"kb-2\"]}", now.plus(100, ChronoUnit.MILLIS));
+
+        List<ActivityEvent> result = service.deduplicate(List.of(e1, e2));
+
+        assertThat(result).hasSize(2);
+    }
+
+    @Test
+    void deduplicate_nullQuery_handledGracefully() {
+        LocalDateTime now = LocalDateTime.now();
+        ActivityEvent e1 = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"kbIds\":[\"kb-1\"]}", now);
+        ActivityEvent e2 = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"kbIds\":[\"kb-1\"]}", now.plus(300, ChronoUnit.MILLIS));
+
+        List<ActivityEvent> result = service.deduplicate(List.of(e1, e2));
+
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    void deduplicate_emptyKbIds_handledGracefully() {
+        LocalDateTime now = LocalDateTime.now();
+        ActivityEvent e1 = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"query\":\"hello\"}", now);
+        ActivityEvent e2 = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"query\":\"hello\",\"kbIds\":[]}", now.plus(400, ChronoUnit.MILLIS));
+
+        List<ActivityEvent> result = service.deduplicate(List.of(e1, e2));
+
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    void deduplicate_emptyList_returnsEmpty() {
+        assertThat(service.deduplicate(List.of())).isEmpty();
+    }
+
+    @Test
+    void deduplicate_multipleDuplicatesWithinWindow_keepsFirstOnly() {
+        LocalDateTime now = LocalDateTime.now();
+        ActivityEvent e1 = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"query\":\"test\",\"kbIds\":[\"kb-1\"]}", now);
+        ActivityEvent e2 = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"query\":\"test\",\"kbIds\":[\"kb-1\"]}", now.plus(200, ChronoUnit.MILLIS));
+        ActivityEvent e3 = event(ActivityEventType.SEARCH_EXECUTED, "3",
+                "{\"query\":\"test\",\"kbIds\":[\"kb-1\"]}", now.plus(900, ChronoUnit.MILLIS));
+
+        List<ActivityEvent> result = service.deduplicate(List.of(e1, e2, e3));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getId()).isEqualTo("act-1");
+    }
+
+    // ── recentSearch() integration test with duplicates ──
+
+    @Test
+    void recentSearch_withDuplicates_returnsCorrectPage() {
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
+        LocalDateTime now = LocalDateTime.now();
+
+        // 4 unique search concepts, mixed with duplicates within 1s
+        ActivityEvent e1 = event(ActivityEventType.SEARCH_EXECUTED, "1",
+                "{\"query\":\"a\",\"kbIds\":[\"kb-1\"]}", now);
+        ActivityEvent dup1 = event(ActivityEventType.SEARCH_EXECUTED, "dup1",
+                "{\"query\":\"a\",\"kbIds\":[\"kb-1\"]}", now.plus(200, ChronoUnit.MILLIS));
+        ActivityEvent e2 = event(ActivityEventType.SEARCH_EXECUTED, "2",
+                "{\"query\":\"b\",\"kbIds\":[\"kb-1\"]}", now.plus(500, ChronoUnit.MILLIS));
+        ActivityEvent e3 = event(ActivityEventType.SEARCH_EXECUTED, "3",
+                "{\"query\":\"c\",\"kbIds\":[\"kb-2\"]}", now.plus(800, ChronoUnit.MILLIS));
+        ActivityEvent dup2 = event(ActivityEventType.SEARCH_EXECUTED, "dup2",
+                "{\"query\":\"c\",\"kbIds\":[\"kb-2\"]}", now.plus(1000, ChronoUnit.MILLIS));
+        ActivityEvent e4 = event(ActivityEventType.SEARCH_EXECUTED, "4",
+                "{\"query\":\"d\",\"kbIds\":[\"kb-1\"]}", now.plus(1200, ChronoUnit.MILLIS));
+
+        when(activityEventRepository.listByType("user-a", ActivityEventType.SEARCH_EXECUTED, 14, 0))
+                .thenReturn(List.of(e1, dup1, e2, e3, dup2, e4));
+        when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1", "kb-2")))
+                .thenReturn(List.of(kb("kb-1", "KB1"), kb("kb-2", "KB2")));
+
+        RecentSearchListDTO result = service.recentSearch(3, null);
+
+        // 4 unique after dedup, page = first 3
+        assertThat(result.getItems()).hasSize(3);
+        assertThat(result.getItems().get(0).getQuery()).isEqualTo("a");
+        assertThat(result.getItems().get(1).getQuery()).isEqualTo("b");
+        assertThat(result.getItems().get(2).getQuery()).isEqualTo("c");
+        // hasNext: uniqueEvents.size() (4) > boundedLimit (3)
+        assertThat(result.getNextCursor()).isNotBlank();
+    }
+
+    @Test
+    void recentSearch_hasNextTrueWhenRawFetchFull() {
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
+        LocalDateTime now = LocalDateTime.now();
+
+        // limit=1, fetchSize=12. Create 12 events: 11 with query "a", 1 with query "b"
+        // After dedup: 2 unique. hasNext=true because unique=2 > boundedLimit(1)
+        List<ActivityEvent> raw = new ArrayList<>();
+        raw.add(event(ActivityEventType.SEARCH_EXECUTED, "first-a",
+                "{\"query\":\"a\",\"kbIds\":[\"kb-1\"]}", now));
+        for (int i = 0; i < 10; i++) {
+            raw.add(event(ActivityEventType.SEARCH_EXECUTED, "dup-a-" + i,
+                    "{\"query\":\"a\",\"kbIds\":[\"kb-1\"]}", now.plus(100 + i, ChronoUnit.MILLIS)));
+        }
+        raw.add(event(ActivityEventType.SEARCH_EXECUTED, "unique-b",
+                "{\"query\":\"b\",\"kbIds\":[\"kb-1\"]}", now.plus(2000, ChronoUnit.MILLIS)));
+
+        when(activityEventRepository.listByType("user-a", ActivityEventType.SEARCH_EXECUTED, 12, 0))
+                .thenReturn(raw);
+        when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1")))
+                .thenReturn(List.of(kb("kb-1", "KB1")));
+
+        RecentSearchListDTO result = service.recentSearch(1, null);
+
+        assertThat(result.getItems()).hasSize(1);
+        assertThat(result.getItems().getFirst().getQuery()).isEqualTo("a");
+        assertThat(result.getNextCursor()).isNotBlank();
     }
 }
