@@ -3,6 +3,7 @@ package com.anchr.core.kb.infrastructure.persistence;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -16,5 +17,6 @@ public interface ActivityEventMapper {
     List<ActivityEventRecord> listByType(@Param("userId") String userId,
                                          @Param("eventType") String eventType,
                                          @Param("limit") int limit,
-                                         @Param("offset") int offset);
+                                         @Param("offset") int offset,
+                                         @Param("since") LocalDateTime since);
 }

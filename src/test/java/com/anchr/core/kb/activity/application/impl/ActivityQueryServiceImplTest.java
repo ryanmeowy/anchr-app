@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -45,7 +47,7 @@ class ActivityQueryServiceImplTest {
                 "{\"sessionId\":\"sess-1\",\"turnId\":\"turn-1\",\"question\":\"付款期限是什么？\",\"kbScope\":[\"kb-1\"]}");
         ActivityEvent second = event(ActivityEventType.QUESTION_ASKED, "turn-2",
                 "{\"sessionId\":\"sess-2\",\"turnId\":\"turn-2\",\"question\":\"违约金怎么约定？\",\"kbScope\":[\"kb-2\"]}");
-        when(activityEventRepository.listByType("user-a", ActivityEventType.QUESTION_ASKED, 2, 0))
+        when(activityEventRepository.listByType(eq("user-a"), eq(ActivityEventType.QUESTION_ASKED), eq(2), eq(0), any(LocalDateTime.class)))
                 .thenReturn(List.of(first, second));
         when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1")))
                 .thenReturn(List.of(kb("kb-1", "合同知识库")));
@@ -67,7 +69,7 @@ class ActivityQueryServiceImplTest {
                 "{\"segmentId\":\"seg-1\",\"assetId\":\"doc-1\",\"kbId\":\"kb-1\","
                         + "\"fileName\":\"合同.pdf\",\"title\":\"合同\",\"snippet\":\"30日内付款\","
                         + "\"citationReason\":\"该片段包含付款期限。\"}");
-        when(activityEventRepository.listByType("user-a", ActivityEventType.CITATION_OPENED, 11, 0))
+        when(activityEventRepository.listByType(eq("user-a"), eq(ActivityEventType.CITATION_OPENED), eq(11), eq(0), any(LocalDateTime.class)))
                 .thenReturn(List.of(event));
 
         RecentCitationListDTO result = service.recentCitations(10, null);
@@ -88,7 +90,7 @@ class ActivityQueryServiceImplTest {
                         + "\"dateRange\":{\"from\":1715678900,\"to\":1715765300},"
                         + "\"withAnswer\":true,"
                         + "\"answerMode\":\"BRIEF\"}");
-        when(activityEventRepository.listByType("user-a", ActivityEventType.SEARCH_EXECUTED, 21, 0))
+        when(activityEventRepository.listByType(eq("user-a"), eq(ActivityEventType.SEARCH_EXECUTED), eq(21), eq(0), any(LocalDateTime.class)))
                 .thenReturn(List.of(event));
         when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1", "kb-2")))
                 .thenReturn(List.of(kb("kb-1", "合同知识库"), kb("kb-2", "制度知识库")));
@@ -115,7 +117,7 @@ class ActivityQueryServiceImplTest {
         ActivityEvent event = event(ActivityEventType.DOCUMENT_IMPORTED, "task-1",
                 "{\"taskId\":\"task-1\",\"kbId\":\"kb-1\",\"status\":\"COMPLETED\","
                         + "\"totalCount\":3,\"successCount\":2,\"failureCount\":1,\"runningCount\":0}");
-        when(activityEventRepository.listByType("user-a", ActivityEventType.DOCUMENT_IMPORTED, 11, 0))
+        when(activityEventRepository.listByType(eq("user-a"), eq(ActivityEventType.DOCUMENT_IMPORTED), eq(11), eq(0), any(LocalDateTime.class)))
                 .thenReturn(List.of(event));
         when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1")))
                 .thenReturn(List.of(kb("kb-1", "合同知识库")));
@@ -307,7 +309,7 @@ class ActivityQueryServiceImplTest {
         ActivityEvent e4 = event(ActivityEventType.SEARCH_EXECUTED, "4",
                 "{\"query\":\"d\",\"kbIds\":[\"kb-1\"]}", now.plus(1200, ChronoUnit.MILLIS));
 
-        when(activityEventRepository.listByType("user-a", ActivityEventType.SEARCH_EXECUTED, 14, 0))
+        when(activityEventRepository.listByType(eq("user-a"), eq(ActivityEventType.SEARCH_EXECUTED), eq(14), eq(0), any(LocalDateTime.class)))
                 .thenReturn(List.of(e1, dup1, e2, e3, dup2, e4));
         when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1", "kb-2")))
                 .thenReturn(List.of(kb("kb-1", "KB1"), kb("kb-2", "KB2")));
@@ -340,7 +342,7 @@ class ActivityQueryServiceImplTest {
         raw.add(event(ActivityEventType.SEARCH_EXECUTED, "unique-b",
                 "{\"query\":\"b\",\"kbIds\":[\"kb-1\"]}", now.plus(2000, ChronoUnit.MILLIS)));
 
-        when(activityEventRepository.listByType("user-a", ActivityEventType.SEARCH_EXECUTED, 12, 0))
+        when(activityEventRepository.listByType(eq("user-a"), eq(ActivityEventType.SEARCH_EXECUTED), eq(12), eq(0), any(LocalDateTime.class)))
                 .thenReturn(raw);
         when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1")))
                 .thenReturn(List.of(kb("kb-1", "KB1")));

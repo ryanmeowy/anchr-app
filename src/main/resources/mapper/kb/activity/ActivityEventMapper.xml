@@ -32,6 +32,9 @@
         from activity_event
         where user_id = #{userId}
           and event_type = #{eventType}
+        <if test="since != null">
+            and created_at &gt;= #{since}
+        </if>
         order by created_at desc, id desc
         limit #{limit} offset #{offset}
     </select>

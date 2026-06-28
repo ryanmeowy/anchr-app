@@ -138,7 +138,8 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
 
     private List<ActivityEvent> listEvents(ActivityEventType eventType, int limit, int offset) {
         RequestUserContext context = UserContextHolder.get();
-        return activityEventRepository.listByType(context.userId(), eventType, limit, offset);
+        LocalDateTime since = LocalDateTime.now().minusWeeks(1);
+        return activityEventRepository.listByType(context.userId(), eventType, limit, offset, since);
     }
 
     private RecentQuestionDTO toRecentQuestion(ActivityEvent event, Map<String, String> knowledgeBaseNamesById) {
