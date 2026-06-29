@@ -90,9 +90,35 @@
           "kbId": "5678",
           "fileName": "mysql.pdf",
           "pageNo": 3,
-          "snippet": "MySQL 的架构..."
+          "snippet": "MySQL 的架构...",
+          "why": {
+            "score": 0.92,
+            "hitSources": ["VECTOR", "CONTENT"],
+            "matchedBy": { "vector": true, "title": false, "content": true, "ocr": false },
+            "matchSummary": "语义匹配 + 内容关键词命中 (score: 0.92)"
+          }
         }
       ]
+    },
+    "suggestedQuestions": [
+      "MySQL Server 层包含哪些核心组件？",
+      "存储引擎层如何与 Server 层交互？",
+      "InnoDB 和 MyISAM 在架构层面有何区别？"
+    ],
+    "insight": {
+      "pipeline": {
+        "keywordCandidates": 84,
+        "vectorCandidates": 62,
+        "fusedRetained": 38,
+        "rerankAdopted": 8
+      },
+      "relevanceDistribution": { "high": 4, "medium": 3, "low": 1 },
+      "risk": { "lowRelevanceCount": 1 },
+      "hitSourceDistribution": {
+        "vectorCount": 5, "contentCount": 3, "ocrCount": 1, "tagCount": 0, "titleCount": 2
+      },
+      "queryIntent": { "intent": "技术原理解释", "category": "FACTUAL", "fallback": false },
+      "latencyMs": 340
     }
   }
 }
@@ -128,3 +154,36 @@
 | `answer` | object \| null | LLM 回答（仅 withAnswer=true） |
 | `answer.answer` | string | 回答文本 |
 | `answer.citations` | array | 引用来源 |
+| `answer.citations[].why` | object \| null | 引用原因（检索层面，非 LLM） |
+| `answer.citations[].why.score` | double \| null | 相关性分数 |
+| `answer.citations[].why.hitSources` | string[] | 命中路径：VECTOR \| CONTENT \| OCR \| TAG \| TITLE |
+| `answer.citations[].why.matchedBy` | object \| null | 字段级命中明细 |
+| `answer.citations[].why.matchedBy.vector` | boolean | 向量匹配 |
+| `answer.citations[].why.matchedBy.title` | boolean | 标题命中 |
+| `answer.citations[].why.matchedBy.content` | boolean | 内容命中 |
+| `answer.citations[].why.matchedBy.ocr` | boolean | OCR 文本命中 |
+| `answer.citations[].why.matchSummary` | string \| null | 人类可读摘要，如"语义匹配 + 内容关键词命中 (score: 0.92)" |
+| `suggestedQuestions` | string[] \| null | LLM 生成的推荐追问（最多 3 个），失败时为空数组 |
+| `insight` | object \| null | 检索洞察诊断数据 |
+| `insight.pipeline` | object | 检索链路计数 |
+| `insight.pipeline.keywordCandidates` | int | 关键词召回候选数 |
+| `insight.pipeline.vectorCandidates` | int | 语义向量召回候选数 |
+| `insight.pipeline.fusedRetained` | int | RRF 融合去重后保留数 |
+| `insight.pipeline.rerankAdopted` | int | 重排后采纳数 |
+| `insight.relevanceDistribution` | object | 证据相关性分布 |
+| `insight.relevanceDistribution.high` | int | 高相关（score ≥ 0.8） |
+| `insight.relevanceDistribution.medium` | int | 中相关（0.5 ≤ score < 0.8） |
+| `insight.relevanceDistribution.low` | int | 低相关（score < 0.5） |
+| `insight.risk` | object | 证据风险 |
+| `insight.risk.lowRelevanceCount` | int | 低相关证据条数 |
+| `insight.hitSourceDistribution` | object | 命中来源分布统计 |
+| `insight.hitSourceDistribution.vectorCount` | int | 语义命中次数 |
+| `insight.hitSourceDistribution.contentCount` | int | 内容命中次数 |
+| `insight.hitSourceDistribution.ocrCount` | int | OCR 命中次数 |
+| `insight.hitSourceDistribution.tagCount` | int | 标签命中次数 |
+| `insight.hitSourceDistribution.titleCount` | int | 标题命中次数 |
+| `insight.queryIntent` | object \| null | 查询意图（LLM 解析） |
+| `insight.queryIntent.intent` | string \| null | 意图描述，如"技术原理解释" |
+| `insight.queryIntent.category` | string \| null | 意图类别：HOW-TO \| FACTUAL \| DEFINITION \| COMPARISON \| TROUBLESHOOTING \| OTHER |
+| `insight.queryIntent.fallback` | boolean | LLM 解析失败时为 true |
+| `insight.latencyMs` | long | 检索耗时（毫秒） |

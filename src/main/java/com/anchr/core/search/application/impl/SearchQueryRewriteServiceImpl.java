@@ -1,7 +1,7 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.conversation.domain.port.ConversationRewritePort;
 import com.anchr.core.search.application.SearchQueryRewriteService;
+import com.anchr.core.search.domain.port.SearchGenerationPort;
 import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +14,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,7 +31,7 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
 
-    private final ConversationRewritePort conversationRewritePort;
+    private final SearchGenerationPort generationPort;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
@@ -46,7 +47,7 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
             }
             String trimmed = query.trim();
             String prompt = buildPrompt(trimmed);
-            String raw = conversationRewritePort.generateText(prompt);
+            String raw = generationPort.generateText(prompt);
             SearchRewriteResult parsed = parseResult(trimmed, raw);
             if (parsed.getKeywords().isEmpty()) {
                 meterRegistry.counter("search.query.rewrite.fallback.count").increment();
@@ -84,6 +85,15 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
                 return result;
             }
             result.setKeywords(keywords);
+
+            String intent = root.path("intent").asText(null);
+            if (StringUtils.hasText(intent)) {
+                result.setIntent(intent.trim());
+            }
+            String category = root.path("category").asText(null);
+            if (StringUtils.hasText(category)) {
+                result.setIntentCategory(category.trim().toUpperCase(Locale.ROOT));
+            }
             return result;
         } catch (Exception e) {
             log.warn("Failed to parse search rewrite json, rawText={}", rawText);
@@ -124,14 +134,17 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
     private String buildPrompt(String query) {
         return "你是检索关键字提取器。" +
                 "目标：将用户搜索 query 分解为多个精简、准确的检索关键字，用于提升知识库文本检索的召回率。" +
+                "同时判断用户的查询意图和类别。" +
                 "必须只输出 JSON，不要输出解释性文字。" +
-                "JSON schema: {\"keywords\":[\"string\"]}。" +
+                "JSON schema: {\"keywords\":[\"string\"], \"intent\":\"string\", \"category\":\"string\"}。" +
                 "约束：" +
                 "1) 关键字应覆盖 query 中的核心概念、同义词和相关术语。" +
                 "2) 每个关键字尽量简短（1-5 个词），适合全文检索。" +
                 "3) 输出 3-8 个关键字，不要过多。" +
                 "4) 保留原始 query 的完整语义。" +
                 "5) 若 query 已经很精简，keywords 可以只包含原 query。" +
+                "6) intent: 用中文简短描述查询意图（≤10字），如\"交互优化建议\"、\"技术原理解释\"、\"配置方法查询\"。" +
+                "7) category: 从以下选择一个：HOW-TO | FACTUAL | DEFINITION | COMPARISON | TROUBLESHOOTING | OTHER。" +
                 "搜索 query：" + query;
     }
 

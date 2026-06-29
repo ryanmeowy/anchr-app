@@ -5,6 +5,7 @@ import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.GenerationClient;
+import com.anchr.core.search.domain.port.SearchGenerationPort;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +18,7 @@ import java.util.Map;
 @Primary
 @Service
 @RequiredArgsConstructor
-public class ConfigDrivenGenerationAdapter implements ConversationRewritePort {
+public class ConfigDrivenGenerationAdapter implements ConversationRewritePort, SearchGenerationPort {
 
     private final ClientCacheManager cacheManager;
     private final CapabilityClientFactory clientFactory;

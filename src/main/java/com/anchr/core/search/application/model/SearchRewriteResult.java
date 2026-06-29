@@ -13,5 +13,7 @@ public class SearchRewriteResult {
 
     private String originalQuery;
     private List<String> keywords = new ArrayList<>();
+    private String intent;
+    private String intentCategory;
     private boolean fallbackUsed;
 }

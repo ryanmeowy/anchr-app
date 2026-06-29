@@ -20,6 +20,8 @@ public class SearchPageDTO implements Serializable {
     private Map<String, List<FacetItemDTO>> facets;
     private SearchAnswerDTO answer;
     private List<String> rewrittenKeywords;
+    private RetrievalInsightDTO insight;
+    private List<String> suggestedQuestions;
 
     @Data
     @Builder
