@@ -13,5 +13,7 @@ public interface UnifiedSearchService {
 
     List<SearchResultDTO> search(SearchQueryDTO query);
 
-    SearchPageDTO searchPage(SearchQueryDTO query);
+    List<SearchResultDTO> search(SearchQueryDTO query, List<String> keywords);
+
+    SearchPageDTO searchPage(SearchQueryDTO query, List<String> keywords);
 }

@@ -61,14 +61,19 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
     @Override
     public List<SearchResultDTO> search(SearchQueryDTO query) {
-        SearchResult result = searchInternal(query, 0);
+        return search(query, List.of());
+    }
+
+    @Override
+    public List<SearchResultDTO> search(SearchQueryDTO query, List<String> keywords) {
+        SearchResult result = searchInternal(query, 0, keywords);
         recordSearchEvent(query, result.total());
         return result.items();
     }
 
     @Override
-    public SearchPageDTO searchPage(SearchQueryDTO query) {
-        SearchResult result = searchInternal(query, decodeCursorOffset(query == null ? null : query.getCursor()));
+    public SearchPageDTO searchPage(SearchQueryDTO query, List<String> keywords) {
+        SearchResult result = searchInternal(query, decodeCursorOffset(query == null ? null : query.getCursor()), keywords);
         List<SearchResultDTO> pageItems = result.items();
         int offset = result.offset();
         String nextCursor = result.total() > offset + pageItems.size()
@@ -84,7 +89,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return page;
     }
 
-    private SearchResult searchInternal(SearchQueryDTO query, int offset) {
+    private SearchResult searchInternal(SearchQueryDTO query, int offset, List<String> keywords) {
         if (query == null || !StringUtils.hasText(query.getQuery())) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
@@ -98,7 +103,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         }
 
         List<Float> queryVector = kbQueryEmbeddingService.embedQuery(keyword);
-        List<SegmentHit> textHits = kbSegmentRepository.textSearch(keyword, recallTopK, filter);
+        List<String> effectiveKeywords = keywords != null && !keywords.isEmpty() ? keywords : List.of();
+        List<SegmentHit> textHits = kbSegmentRepository.textSearch(keyword, effectiveKeywords, recallTopK, filter);
         List<SegmentHit> vectorHits = kbSegmentRepository.vectorSearch(queryVector, recallTopK, filter);
         log.info("kb search recall completed, keyword={}, recallTopK={}, textHits={}, vectorHits={}",
                 keyword, recallTopK, textHits.size(), vectorHits.size());

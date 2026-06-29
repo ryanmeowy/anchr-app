@@ -16,6 +16,8 @@ public interface SegmentRepository {
 
     List<SegmentHit> textSearch(String query, int limit, SearchFilter filter);
 
+    List<SegmentHit> textSearch(String query, List<String> keywords, int limit, SearchFilter filter);
+
     List<SegmentHit> vectorSearch(List<Float> queryVector, int topK);
 
     List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter);

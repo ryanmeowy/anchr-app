@@ -47,11 +47,16 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public List<SegmentHit> textSearch(String query, int limit, SearchFilter filter) {
-        if (!StringUtils.hasText(query) || limit <= 0) {
+        return textSearch(query, List.of(), limit, filter);
+    }
+
+    @Override
+    public List<SegmentHit> textSearch(String query, List<String> keywords, int limit, SearchFilter filter) {
+        if ((!StringUtils.hasText(query) && (keywords == null || keywords.isEmpty())) || limit <= 0) {
             return List.of();
         }
         try {
-            SearchRequest request = buildTextSearchRequest(query.trim(), limit, filter);
+            SearchRequest request = buildTextSearchRequest(query != null ? query.trim() : "", keywords, limit, filter);
             SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
             return convertHits(response);
         } catch (Exception e) {
@@ -134,16 +139,37 @@ public class EsSegmentRepository implements SegmentRepository {
         }
     }
 
-    private SearchRequest buildTextSearchRequest(String query, int limit, SearchFilter filter) {
+    private SearchRequest buildTextSearchRequest(String query, List<String> keywords, int limit, SearchFilter filter) {
+        boolean hasKeywords = keywords != null && keywords.stream().anyMatch(StringUtils::hasText);
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())
                 .size(limit)
                 .query(q -> q.bool(b -> {
                     applyFilters(b, filter);
-                    b.should(sh -> sh.match(m -> m.field("title").query(query).boost(2.5f)));
-                    b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(4.0f)));
-                    b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(3.0f)));
-                    b.should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)));
+                    if (hasKeywords) {
+                        // Original query as low-weight fallback
+                        if (StringUtils.hasText(query)) {
+                            b.should(sh -> sh.match(m -> m.field("title").query(query).boost(1.0f)));
+                            b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(2.0f)));
+                            b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(1.5f)));
+                        }
+                        // Rewritten keywords with higher weight
+                        for (String kw : keywords) {
+                            if (!StringUtils.hasText(kw)) {
+                                continue;
+                            }
+                            b.should(sh -> sh.match(m -> m.field("title").query(kw).boost(2.5f)));
+                            b.should(sh -> sh.match(m -> m.field("contentText").query(kw).boost(4.0f)));
+                            b.should(sh -> sh.match(m -> m.field("ocrText").query(kw).boost(3.0f)));
+                            b.should(sh -> sh.match(m -> m.field("tags").query(kw).boost(3.2f)));
+                        }
+                    } else {
+                        // No keywords: original query with full weights
+                        b.should(sh -> sh.match(m -> m.field("title").query(query).boost(2.5f)));
+                        b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(4.0f)));
+                        b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(3.0f)));
+                        b.should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)));
+                    }
                     b.minimumShouldMatch("1");
                     return b;
                 }))
