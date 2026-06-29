@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.interfaces.rest.dto;
 
+import com.anchr.core.conversation.domain.model.ConversationCitation;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -30,5 +31,6 @@ public class ConversationTurnDTO implements Serializable {
         private String hitType;
         private String assetId;
         private String segmentId;
+        private ConversationCitation.CitationWhy why;
     }
 }

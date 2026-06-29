@@ -39,6 +39,7 @@ public class ConversationCitationMapper {
             citation.setHitType(resolveHitType(result));
             citation.setAssetId(result.getAssetId());
             citation.setSegmentId(result.getSegmentId());
+            citation.setWhy(buildCitationWhy(result));
             citations.add(citation);
         }
         return citations;
@@ -89,6 +90,19 @@ public class ConversationCitationMapper {
             return path;
         }
         return path.substring(slashIndex + 1);
+    }
+
+    private ConversationCitation.CitationWhy buildCitationWhy(ConversationRetrievalCandidate candidate) {
+        Double score = candidate.getScore();
+        ConversationRetrievalCandidate.Explain explain = candidate.getExplain();
+        List<String> hitSources = explain != null && explain.getHitSources() != null
+                ? List.copyOf(explain.getHitSources()) : List.of();
+        String matchSummary = ConversationCitation.CitationWhy.buildSummary(score, hitSources);
+        return ConversationCitation.CitationWhy.builder()
+                .score(score)
+                .hitSources(hitSources)
+                .matchSummary(matchSummary)
+                .build();
     }
 
     private String safeUpper(String value) {

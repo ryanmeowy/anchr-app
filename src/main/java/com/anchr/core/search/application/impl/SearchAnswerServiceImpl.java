@@ -3,6 +3,7 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.UnifiedSearchService;
 import com.anchr.core.search.interfaces.rest.dto.SearchAnswerDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import lombok.RequiredArgsConstructor;
@@ -72,6 +73,7 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
                     .fileName(resolveFileName(result.getSourceRef()))
                     .pageNo(result.getPageNo())
                     .snippet(result.getSnippet())
+                    .why(buildCitationWhy(result))
                     .build());
             if (citations.size() >= CITATION_LIMIT) {
                 break;
@@ -94,6 +96,30 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
 
     private String resolveAnswerMode(SearchQueryDTO query) {
         return query == null || !StringUtils.hasText(query.getAnswerMode()) ? "STRICT" : query.getAnswerMode().trim();
+    }
+
+    private SearchAnswerDTO.CitationWhy buildCitationWhy(SearchResultDTO result) {
+        Double score = result.getScore();
+        SearchExplainDTO explain = result.getExplain();
+        List<String> hitSources = explain != null && explain.getHitSources() != null
+                ? List.copyOf(explain.getHitSources()) : List.of();
+        SearchAnswerDTO.CitationWhy.MatchedBy matchedBy = null;
+        if (explain != null && explain.getMatchedBy() != null) {
+            SearchExplainDTO.MatchedBy mb = explain.getMatchedBy();
+            matchedBy = SearchAnswerDTO.CitationWhy.MatchedBy.builder()
+                    .vector(mb.isVector())
+                    .title(mb.isTitle())
+                    .content(mb.isContent())
+                    .ocr(mb.isOcr())
+                    .build();
+        }
+        String matchSummary = SearchAnswerDTO.CitationWhy.buildSummary(score, hitSources, matchedBy);
+        return SearchAnswerDTO.CitationWhy.builder()
+                .score(score)
+                .hitSources(hitSources)
+                .matchedBy(matchedBy)
+                .matchSummary(matchSummary)
+                .build();
     }
 
     private String resolveFileName(String sourceRef) {

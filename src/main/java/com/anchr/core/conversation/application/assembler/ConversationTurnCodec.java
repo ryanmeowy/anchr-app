@@ -99,6 +99,7 @@ public class ConversationTurnCodec {
             dto.setHitType(citation.getHitType());
             dto.setAssetId(citation.getAssetId());
             dto.setSegmentId(citation.getSegmentId());
+            dto.setWhy(citation.getWhy());
             citationList.add(dto);
         }
         return citationList;
