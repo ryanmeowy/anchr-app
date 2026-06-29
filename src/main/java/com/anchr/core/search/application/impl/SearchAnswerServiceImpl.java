@@ -25,7 +25,12 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
 
     @Override
     public SearchAnswerDTO answer(SearchQueryDTO query) {
-        List<SearchResultDTO> results = unifiedSearchService.search(query);
+        return answer(query, unifiedSearchService.search(query));
+    }
+
+    @Override
+    public SearchAnswerDTO answer(SearchQueryDTO query, List<SearchResultDTO> existingResults) {
+        List<SearchResultDTO> results = existingResults != null ? existingResults : List.of();
         List<SearchAnswerDTO.CitationDTO> citations = buildCitations(results);
         if (citations.isEmpty()) {
             return SearchAnswerDTO.builder()

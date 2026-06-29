@@ -27,7 +27,7 @@ public class SearchController {
     public Result<SearchPageDTO> searchKb(@Valid @RequestBody SearchQueryDTO query) {
         SearchPageDTO page = unifiedSearchService.searchPage(query);
         if (Boolean.TRUE.equals(query.getWithAnswer())) {
-            page.setAnswer(kbSearchAnswerService.answer(query));
+            page.setAnswer(kbSearchAnswerService.answer(query, page.getItems()));
         }
         return Result.success(page);
     }
