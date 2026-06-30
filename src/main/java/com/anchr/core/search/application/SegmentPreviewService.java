@@ -1,5 +1,6 @@
 package com.anchr.core.search.application;
 
+import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
 
@@ -8,9 +9,9 @@ import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
  */
 public interface SegmentPreviewService {
 
-    PreviewSegmentDTO getSegmentPreview(String segmentId);
+    PreviewSegmentDTO getSegmentPreview(String segmentId, PreviewRequestDTO request);
 
-    PreviewSegmentDTO refreshSegmentPreview(String segmentId);
+    PreviewSegmentDTO refreshSegmentPreview(String segmentId, PreviewRequestDTO request);
 
     PreviewNeighborsDTO getSegmentNeighbors(String segmentId, int before, int after);
 }

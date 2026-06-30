@@ -11,6 +11,7 @@ import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
 import com.anchr.core.search.interfaces.rest.dto.SurroundingChunkDTO;
 import lombok.RequiredArgsConstructor;
@@ -42,25 +43,27 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private final ActivityEventService activityEventService;
 
     @Override
-    public PreviewSegmentDTO getSegmentPreview(String segmentId) {
+    public PreviewSegmentDTO getSegmentPreview(String segmentId, PreviewRequestDTO request) {
         if (!StringUtils.hasText(segmentId)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "segmentId cannot be blank.");
         }
         String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        PreviewSegmentDTO preview = toPreview(segment, accessTokenHash);
-        recordCitationOpened(preview);
+        PreviewSegmentDTO preview = toPreview(segment, accessTokenHash, request);
+        if (!StringUtils.hasText(request.getRecordId())) {
+            recordCitationOpened(preview, request);
+        }
         return preview;
     }
 
     @Override
-    public PreviewSegmentDTO refreshSegmentPreview(String segmentId) {
+    public PreviewSegmentDTO refreshSegmentPreview(String segmentId, PreviewRequestDTO request) {
         String accessTokenHash = currentAccessTokenHash();
         if (StringUtils.hasText(segmentId)) {
             previewAccessCache.evict(segmentId.trim(), accessTokenHash);
         }
-        return getSegmentPreview(segmentId);
+        return getSegmentPreview(segmentId, request);
     }
 
     @Override
@@ -77,8 +80,12 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
-    private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash) {
+    private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash, PreviewRequestDTO request) {
         PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessTokenHash);
+        if (StringUtils.hasText(request.getRecordId())) {
+
+        }
+
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
@@ -100,17 +107,23 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
-    private void recordCitationOpened(PreviewSegmentDTO preview) {
+    private void recordCitationOpened(PreviewSegmentDTO preview, PreviewRequestDTO request) {
         PreviewSegmentDTO.CitationContextDTO citationContext = preview.getCitationContext();
-        activityEventService.recordCitationOpened(
-                preview.getSegmentId(),
-                preview.getAssetId(),
-                preview.getKbId(),
-                preview.getFileName(),
-                preview.getTitle(),
-                preview.getSnippet(),
-                citationContext == null ? null : citationContext.getCitationReason()
-        );
+        PreviewRequestDTO.CitationInfo citationInfo = request.getCitationInfo();
+        ActivityEventService.CitationContext cxt = ActivityEventService.CitationContext.builder()
+                .segmentId(preview.getSegmentId())
+                .assetId(preview.getAssetId())
+                .kbId(preview.getKbId())
+                .fileName(preview.getFileName())
+                .title(preview.getTitle())
+                .snippet(preview.getSnippet())
+                .citationIndex(citationInfo.getCitationIndex())
+                .citationReason(citationContext.getCitationReason())
+                .sourceId(request.getSourceId())
+                .sessionId(request.getSessionId())
+                .sourceType(request.getSourceType())
+                .build();
+        activityEventService.recordCitationOpened(cxt);
     }
 
     private PreviewAnchorDTO toAnchor(Segment segment) {

@@ -10,6 +10,7 @@ import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
+import com.google.common.collect.Maps;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -44,17 +45,23 @@ public class ActivityEventServiceImpl implements ActivityEventService {
     }
 
     @Override
-    public void recordCitationOpened(String segmentId, String assetId, String kbId, String fileName,
-                                     String title, String snippet, String citationReason) {
-        saveEvent(ActivityEventType.CITATION_OPENED, "SEGMENT", segmentId, Map.of(
-                "segmentId", valueOrEmpty(segmentId),
-                "assetId", valueOrEmpty(assetId),
-                "kbId", valueOrEmpty(kbId),
-                "fileName", valueOrEmpty(fileName),
-                "title", valueOrEmpty(title),
-                "snippet", valueOrEmpty(snippet),
-                "citationReason", valueOrEmpty(citationReason)
+    public void recordCitationOpened(ActivityEventService.CitationContext cxt) {
+        Map<String, Object> map = new java.util.HashMap<>(Map.of(
+                "segmentId", valueOrEmpty(cxt.segmentId()),
+                "assetId", valueOrEmpty(cxt.assetId()),
+                "kbId", valueOrEmpty(cxt.kbId()),
+                "fileName", valueOrEmpty(cxt.fileName()),
+                "title", valueOrEmpty(cxt.title()),
+                "snippet", valueOrEmpty(cxt.snippet()),
+                "citationReason", valueOrEmpty(cxt.citationReason()),
+                "citationIndex", valueOrEmpty(cxt.citationIndex()),
+                "sessionId", valueOrEmpty(cxt.sessionId()),
+                "sourceId", valueOrEmpty(cxt.sourceId())
         ));
+        map.put("sourceType", valueOrEmpty(cxt.sourceType()));
+        map.put("question", valueOrEmpty(cxt.question()));
+
+        saveEvent(ActivityEventType.CITATION_OPENED, "SEGMENT", cxt.segmentId(), map);
     }
 
     @Override

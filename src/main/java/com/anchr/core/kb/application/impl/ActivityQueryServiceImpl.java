@@ -90,14 +90,11 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         int boundedLimit = normalizeLimit(limit);
         int offset = decodeOffset(cursor);
 
-        // Fetch extra rows to account for duplicates removed during dedup
         int fetchSize = boundedLimit + 1 + DEDUP_BUFFER;
         List<ActivityEvent> rawEvents = listEvents(ActivityEventType.SEARCH_EXECUTED, fetchSize, offset);
 
-        // Deduplicate in-memory (events are ordered by created_at desc from DB)
         List<ActivityEvent> uniqueEvents = deduplicate(rawEvents);
 
-        // Take the first boundedLimit unique events as the page
         List<ActivityEvent> pageEvents = uniqueEvents.size() > boundedLimit
                 ? uniqueEvents.subList(0, boundedLimit)
                 : uniqueEvents;
@@ -107,7 +104,6 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 .map(event -> toRecentSearch(event, knowledgeBaseNamesById))
                 .toList();
 
-        // hasNext: more unique items exist, or raw fetch hit the cap (more rows may remain)
         boolean hasNext = uniqueEvents.size() > boundedLimit
                 || rawEvents.size() >= fetchSize;
         String nextCursor = hasNext ? encodeOffset(offset + rawEvents.size()) : null;

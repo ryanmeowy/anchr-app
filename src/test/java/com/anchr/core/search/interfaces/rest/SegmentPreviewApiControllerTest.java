@@ -59,7 +59,7 @@ class PreviewControllerTest {
                         .relation("current")
                         .build()))
                 .build();
-        when(segmentPreviewService.getSegmentPreview(eq("seg-001"))).thenReturn(preview);
+        when(segmentPreviewService.getSegmentPreview(eq("seg-001"), null)).thenReturn(preview);
 
         mockMvc.perform(get("/api/v1/preview/segments/seg-001")
                         .header("X-Access-Token", "token-a"))
