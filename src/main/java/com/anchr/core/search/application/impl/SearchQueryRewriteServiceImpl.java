@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
 public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService {
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
-    private static final Duration CACHE_TTL = Duration.ofMinutes(30);
+    private static final Duration CACHE_TTL = Duration.ofHours(3);
 
     private final SearchGenerationPort generationPort;
     private final ObjectMapper objectMapper;
@@ -202,7 +202,7 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
                 "约束：" +
                 "1) 关键字应覆盖 query 中的核心概念、同义词和相关术语。" +
                 "2) 每个关键字尽量简短（1-5 个词），适合全文检索。" +
-                "3) 输出 3-8 个关键字，不要过多。" +
+                "3) 输出 3-5 个关键字，不要过多。" +
                 "4) 保留原始 query 的完整语义。" +
                 "5) 若 query 已经很精简，keywords 可以只包含原 query。" +
                 "6) intent: 用中文简短描述查询意图（≤10字），如\"交互优化建议\"、\"技术原理解释\"、\"配置方法查询\"。" +
