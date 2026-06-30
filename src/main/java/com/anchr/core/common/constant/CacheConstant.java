@@ -6,4 +6,6 @@ public class CacheConstant {
 
     public static final String ID_GEN_KEY = "id:gen";
 
+    public static final String SEARCH_REWRITE_CACHE_PREFIX = "search:rewrite";
+
 }

@@ -1,18 +1,26 @@
 package com.anchr.core.search.application.impl;
 
+import com.anchr.core.common.constant.CacheConstant;
 import com.anchr.core.search.application.SearchQueryRewriteService;
 import com.anchr.core.search.domain.port.SearchGenerationPort;
 import com.anchr.core.search.application.model.SearchRewriteResult;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -22,7 +30,8 @@ import java.util.regex.Pattern;
  * Default search query keyword rewrite service.
  * <p>
  * Rewrites a standalone search query into a list of concise, semantically accurate
- * keywords to improve text-based retrieval recall.
+ * keywords to improve text-based retrieval recall. Results are cached in Redis
+ * to avoid redundant LLM calls for the same query.
  */
 @Slf4j
 @Service
@@ -30,10 +39,12 @@ import java.util.regex.Pattern;
 public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService {
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
+    private static final Duration CACHE_TTL = Duration.ofMinutes(30);
 
     private final SearchGenerationPort generationPort;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final StringRedisTemplate stringRedisTemplate;
 
     @Override
     public SearchRewriteResult rewrite(String query) {
@@ -46,6 +57,15 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
                 return fallback;
             }
             String trimmed = query.trim();
+            String cacheKey = buildCacheKey(trimmed);
+
+            // Check cache
+            SearchRewriteResult cached = getCached(cacheKey);
+            if (cached != null) {
+                meterRegistry.counter("search.query.rewrite.cache.hit").increment();
+                return cached;
+            }
+
             String prompt = buildPrompt(trimmed);
             String raw = generationPort.generateText(prompt);
             SearchRewriteResult parsed = parseResult(trimmed, raw);
@@ -54,6 +74,10 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
                 return fallback;
             }
             parsed.setFallbackUsed(false);
+
+            // Cache successful result
+            setCache(cacheKey, parsed);
+
             return parsed;
         } catch (Exception e) {
             log.warn("Search query rewrite failed, query={}, message={}", query, e.getMessage());
@@ -63,6 +87,44 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
             sample.stop(Timer.builder("search.query.rewrite.latency")
                     .description("Search query rewrite latency.")
                     .register(meterRegistry));
+        }
+    }
+
+    private String buildCacheKey(String query) {
+        String normalized = query.toLowerCase(Locale.ROOT);
+        String hash = md5(normalized);
+        return CacheConstant.SEARCH_REWRITE_CACHE_PREFIX + ":" + hash;
+    }
+
+    private SearchRewriteResult getCached(String cacheKey) {
+        try {
+            String json = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (!StringUtils.hasText(json)) {
+                return null;
+            }
+            return objectMapper.readValue(json, SearchRewriteResult.class);
+        } catch (Exception e) {
+            log.warn("Failed to deserialize cached rewrite result, key={}", cacheKey, e);
+            return null;
+        }
+    }
+
+    private void setCache(String cacheKey, SearchRewriteResult result) {
+        try {
+            String json = objectMapper.writeValueAsString(result);
+            stringRedisTemplate.opsForValue().set(cacheKey, json, CACHE_TTL);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialize rewrite result for cache, key={}", cacheKey, e);
+        }
+    }
+
+    private static String md5(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("MD5 algorithm not available", e);
         }
     }
 
