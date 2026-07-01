@@ -19,4 +19,7 @@ public interface ActivityEventMapper {
                                          @Param("limit") int limit,
                                          @Param("offset") int offset,
                                          @Param("since") LocalDateTime since);
+
+    ActivityEventRecord searchById(@Param("id") String id,
+                                   @Param("eventType") String eventType);
 }

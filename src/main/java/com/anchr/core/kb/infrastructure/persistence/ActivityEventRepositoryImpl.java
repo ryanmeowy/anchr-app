@@ -32,6 +32,12 @@ public class ActivityEventRepositoryImpl implements ActivityEventRepository {
                 .toList();
     }
 
+    @Override
+    public ActivityEvent fetchByIdAndType(String id, ActivityEventType eventType) {
+        ActivityEventRecord record = mapper.searchById(id, eventType.name());
+        return record == null ? null : toDomain(record);
+    }
+
     private ActivityEventRecord toRecord(ActivityEvent event) {
         ActivityEventRecord record = new ActivityEventRecord();
         record.setId(event.getId());

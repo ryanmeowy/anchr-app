@@ -132,6 +132,15 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 .build();
     }
 
+    @Override
+    public RecentCitationDTO fetchCitationsById(String id) {
+        ActivityEvent activityEvent = activityEventRepository.fetchByIdAndType(id, ActivityEventType.CITATION_OPENED);
+        if (activityEvent == null) {
+            return RecentCitationDTO.builder().build();
+        }
+        return toRecentCitation(activityEvent);
+    }
+
     private List<ActivityEvent> listEvents(ActivityEventType eventType, int limit, int offset) {
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime since = LocalDateTime.now().minusWeeks(1);
@@ -202,6 +211,12 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 .title(readString(payload, "title", null))
                 .snippet(readString(payload, "snippet", null))
                 .citationReason(readString(payload, "citationReason", null))
+                .sourceType(readString(payload, "sourceType", null))
+                .sourceId(readString(payload, "sourceId", null))
+                .sessionId(readString(payload, "sessionId", null))
+                .citationIndex(readString(payload, "citationIndex", null))
+                .question(readString(payload, "question", null))
+                .why(readString(payload, "why", null))
                 .openedAt(event.getCreatedAt())
                 .build();
     }

@@ -15,4 +15,6 @@ public interface ActivityEventRepository {
 
     List<ActivityEvent> listByType(String userId, ActivityEventType eventType, int limit, int offset,
                                    LocalDateTime since);
+
+    ActivityEvent fetchByIdAndType(String id, ActivityEventType eventType);
 }

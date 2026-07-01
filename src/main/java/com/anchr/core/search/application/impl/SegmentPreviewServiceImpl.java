@@ -1,9 +1,13 @@
 package com.anchr.core.search.application.impl;
 
+import cn.hutool.json.JSONUtil;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.kb.application.ActivityQueryService;
+import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
+import com.anchr.core.search.application.SearchCitationReasonService;
 import com.anchr.core.search.application.SegmentPreviewService;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
@@ -14,6 +18,7 @@ import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
 import com.anchr.core.search.interfaces.rest.dto.SurroundingChunkDTO;
+import lombok.Builder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -41,6 +46,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private final SearchObjectStoragePort objectStoragePort;
     private final PreviewAccessCache previewAccessCache;
     private final ActivityEventService activityEventService;
+    private final ActivityQueryService  activityQueryService;
+    private final SearchCitationReasonService citationReasonService;
 
     @Override
     public PreviewSegmentDTO getSegmentPreview(String segmentId, PreviewRequestDTO request) {
@@ -82,9 +89,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash, PreviewRequestDTO request) {
         PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessTokenHash);
-        if (StringUtils.hasText(request.getRecordId())) {
-
-        }
+        PreviewInfo previewInfo = fetchCitationInfo(request);
 
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
@@ -103,9 +108,42 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .ocrSummary(segment.getOcrSummary())
                 .anchor(toAnchor(segment))
                 .surroundingChunks(buildSurroundingChunks(segment, SURROUNDING_CHUNK_WINDOW))
-                .citationContext(buildCitationContext(segment))
+                .sourceType(previewInfo.sourceType)
+                .sourceId(previewInfo.sourceId)
+                .sessionId(previewInfo.sessionId)
+                .sourceQuestion(previewInfo.question)
+                .citationContext(buildCitationContext(segment, previewInfo))
                 .build();
     }
+
+    private PreviewInfo fetchCitationInfo(PreviewRequestDTO request) {
+        if (StringUtils.hasText(request.getRecordId())) {
+            RecentCitationDTO recentCitationDTO = activityQueryService.fetchCitationsById(request.getRecordId());
+            return PreviewInfo.builder()
+                    .sourceType(recentCitationDTO.getSourceType())
+                    .sourceId(recentCitationDTO.getSourceId())
+                    .sessionId(recentCitationDTO.getSessionId())
+                    .citationIndex(recentCitationDTO.getCitationIndex())
+                    .why(recentCitationDTO.getWhy())
+                    .question(recentCitationDTO.getQuestion())
+                    .build();
+        }
+
+        PreviewRequestDTO.CitationInfo citationInfo = request.getCitationInfo() == null
+                ? new PreviewRequestDTO.CitationInfo() : request.getCitationInfo();
+        return PreviewInfo.builder()
+                .sourceType(request.getSourceType())
+                .sourceId(request.getSourceId())
+                .sessionId(request.getSessionId())
+                .citationIndex(citationInfo.getCitationIndex())
+                .why(JSONUtil.toJsonStr(citationInfo.getWhy()))
+                .question(request.getQuestion())
+                .build();
+    }
+
+
+    @Builder
+    record PreviewInfo(String sourceType, String sourceId, String sessionId, String citationIndex, String why, String question){}
 
     private void recordCitationOpened(PreviewSegmentDTO preview, PreviewRequestDTO request) {
         PreviewSegmentDTO.CitationContextDTO citationContext = preview.getCitationContext();
@@ -162,13 +200,21 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return chunks.isEmpty() ? buildCurrentChunk(segment) : chunks;
     }
 
-    private PreviewSegmentDTO.CitationContextDTO buildCitationContext(Segment segment) {
+    private PreviewSegmentDTO.CitationContextDTO buildCitationContext(Segment segment, PreviewInfo previewInfo) {
         if (segment == null || !StringUtils.hasText(resolveSnippet(segment))) {
             return null;
         }
         return PreviewSegmentDTO.CitationContextDTO.builder()
-                .citationReason("该片段命中当前检索或问答引用，可作为原文证据查看。")
+                .citationIndex(previewInfo.citationIndex)
+                .citationReason(buildCitationReason(previewInfo.why))
                 .build();
+    }
+
+    private String buildCitationReason(String why) {
+        if (!StringUtils.hasText(why)) {
+            return null;
+        }
+        return citationReasonService.generate(why);
     }
 
     private List<SurroundingChunkDTO> buildCurrentChunk(Segment segment) {

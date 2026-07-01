@@ -38,4 +38,11 @@
         order by created_at desc, id desc
         limit #{limit} offset #{offset}
     </select>
+    <select id="searchById" resultMap="ActivityEventRecordMap">
+        select
+            <include refid="ActivityEventColumns"/>
+        from activity_event
+        where id = #{id}
+        and event_type = #{eventType}
+    </select>
 </mapper>
