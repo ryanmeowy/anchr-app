@@ -160,6 +160,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .sourceId(request.getSourceId())
                 .sessionId(request.getSessionId())
                 .sourceType(request.getSourceType())
+                .question(request.getQuestion())
                 .build();
         activityEventService.recordCitationOpened(cxt);
     }
