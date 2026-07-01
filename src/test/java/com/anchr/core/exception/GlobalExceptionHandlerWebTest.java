@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -63,6 +64,13 @@ class GlobalExceptionHandlerWebTest {
                 .andExpect(jsonPath("$.message").value("Resource conflict."));
     }
 
+    @Test
+    void shouldNotWriteAnErrorResponseWhenClientDisconnects() throws Exception {
+        mockMvc.perform(get("/test/client-disconnect"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(""));
+    }
+
     @RestController
     static class ThrowingController {
 
@@ -84,6 +92,11 @@ class GlobalExceptionHandlerWebTest {
         @GetMapping("/test/business")
         public String business() {
             throw new BusinessException(ApiError.FORBIDDEN);
+        }
+
+        @GetMapping("/test/client-disconnect")
+        public String clientDisconnect() throws AsyncRequestNotUsableException {
+            throw new AsyncRequestNotUsableException("ServletOutputStream failed to flush: Broken pipe");
         }
     }
 }

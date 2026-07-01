@@ -16,6 +16,7 @@ public class PreviewSegmentDTO implements Serializable {
     private String segmentId;
     private String assetId;
     private String kbId;
+    private String kbName;
     private String assetType;
     private String segmentType;
     private String fileName;

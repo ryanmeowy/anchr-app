@@ -6,6 +6,8 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.kb.application.ActivityQueryService;
+import com.anchr.core.kb.application.KnowledgeBaseService;
+import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
 import com.anchr.core.search.application.SearchCitationReasonService;
 import com.anchr.core.search.application.SegmentPreviewService;
@@ -48,6 +50,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private final ActivityEventService activityEventService;
     private final ActivityQueryService  activityQueryService;
     private final SearchCitationReasonService citationReasonService;
+    private final KnowledgeBaseService knowledgeBaseService;
 
     @Override
     public PreviewSegmentDTO getSegmentPreview(String segmentId, PreviewRequestDTO request) {
@@ -80,7 +83,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         }
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        int window = Math.max(1, Math.min(Math.max(before, after), 10));
+        int window = Math.clamp(Math.max(before, after), 1, 10);
         return PreviewNeighborsDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .items(buildSurroundingChunks(segment, window))
@@ -95,6 +98,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
                 .kbId(segment.getKbId())
+                .kbName(Optional.of(knowledgeBaseService.get(segment.getKbId())).map(KnowledgeBase::getName).orElse(null))
                 .assetType(segment.getAssetType())
                 .segmentType(toCode(segment.getSegmentType()))
                 .fileName(resolveFileName(segment))
@@ -191,7 +195,6 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         }
         List<SurroundingChunkDTO> chunks = kbSegmentRepository.findNeighborChunks(
                         segment.getAssetId(),
-                        segment.getPageNo(),
                         segment.getChunkOrder(),
                         window)
                 .stream()

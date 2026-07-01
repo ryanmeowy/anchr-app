@@ -109,12 +109,12 @@ public class EsSegmentRepository implements SegmentRepository {
     }
 
     @Override
-    public List<Segment> findNeighborChunks(String assetId, Integer pageNo, Integer chunkOrder, int window) {
+    public List<Segment> findNeighborChunks(String assetId, Integer chunkOrder, int window) {
         if (!StringUtils.hasText(assetId) || chunkOrder == null || window <= 0) {
             return List.of();
         }
         try {
-            SearchRequest request = buildNeighborChunksRequest(assetId.trim(), pageNo, chunkOrder, window);
+            SearchRequest request = buildNeighborChunksRequest(assetId.trim(), chunkOrder, window);
             SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
             return convertSegmentHits(response);
         } catch (Exception e) {
@@ -261,7 +261,7 @@ public class EsSegmentRepository implements SegmentRepository {
         }
     }
 
-    private SearchRequest buildNeighborChunksRequest(String assetId, Integer pageNo, int chunkOrder, int window) {
+    private SearchRequest buildNeighborChunksRequest(String assetId, int chunkOrder, int window) {
         int from = Math.max(0, chunkOrder - window);
         int to = chunkOrder + window;
         return SearchRequest.of(s -> s
@@ -274,9 +274,6 @@ public class EsSegmentRepository implements SegmentRepository {
                             .field("chunkOrder")
                             .gte((double) from)
                             .lte((double) to))));
-                    if (pageNo != null) {
-                        b.filter(f -> f.term(t -> t.field("pageNo").value(pageNo)));
-                    }
                     return b;
                 }))
                 .sort(sort -> sort.field(f -> f.field("chunkOrder").order(SortOrder.Asc)))

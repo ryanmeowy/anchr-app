@@ -10,6 +10,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -62,6 +63,12 @@ public class GlobalExceptionHandler {
         String traceId = UUID.randomUUID().toString();
         log.warn("Upload too large, traceId={}, message={}", traceId, e.getMessage(), e);
         return Result.error(ApiError.UPLOAD_TOO_LARGE, traceId);
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleClientDisconnect(AsyncRequestNotUsableException e, HttpServletRequest request) {
+        String path = request == null ? "unknown" : request.getRequestURI();
+        log.debug("Client disconnected before response completed, path={}, message={}", path, e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

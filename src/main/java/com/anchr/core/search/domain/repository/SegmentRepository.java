@@ -24,7 +24,7 @@ public interface SegmentRepository {
 
     Optional<Segment> findBySegmentId(String segmentId);
 
-    List<Segment> findNeighborChunks(String assetId, Integer pageNo, Integer chunkOrder, int window);
+    List<Segment> findNeighborChunks(String assetId, Integer chunkOrder, int window);
 
     void deleteByAssetId(String assetId);
 }
