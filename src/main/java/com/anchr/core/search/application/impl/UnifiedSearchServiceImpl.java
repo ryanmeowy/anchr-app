@@ -68,7 +68,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     @Override
     public List<SearchResultDTO> search(SearchQueryDTO query, List<String> keywords) {
         SearchResult result = searchInternal(query, 0, keywords);
-        recordSearchEvent(query, result.total());
         return result.items();
     }
 

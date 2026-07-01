@@ -392,7 +392,7 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
 
             ActivityEvent firstSeen = keyToFirstSeen.get(dedupKey);
             if (firstSeen != null && isWithinOneSecond(firstSeen.getCreatedAt(), event.getCreatedAt())) {
-                continue; // duplicate within the time window
+                continue;
             }
 
             keyToFirstSeen.put(dedupKey, event);
@@ -415,9 +415,9 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
     }
 
     /**
-     * Returns true if the absolute difference between two LocalDateTime values is &lt;= 1000ms.
+     * Returns true if the absolute difference between two LocalDateTime values is &lt;= 10_000ms.
      */
     private static boolean isWithinOneSecond(LocalDateTime a, LocalDateTime b) {
-        return Math.abs(ChronoUnit.MILLIS.between(a, b)) <= 1000;
+        return Math.abs(ChronoUnit.MILLIS.between(a, b)) <= 10_000;
     }
 }

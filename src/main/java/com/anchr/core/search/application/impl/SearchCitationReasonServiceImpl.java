@@ -75,18 +75,14 @@ public class SearchCitationReasonServiceImpl implements SearchCitationReasonServ
     private WhyInfo parseWhy(String json) {
         try {
             JsonNode root = objectMapper.readTree(json);
-            JsonNode whyNode = root.path("why");
-            if (whyNode.isMissingNode()) {
-                return null;
-            }
             WhyInfo info = new WhyInfo();
 
-            JsonNode scoreNode = whyNode.path("score");
+            JsonNode scoreNode = root.path("score");
             if (!scoreNode.isMissingNode()) {
                 info.score = scoreNode.asDouble();
             }
 
-            JsonNode sourcesNode = whyNode.path("hitSources");
+            JsonNode sourcesNode = root.path("hitSources");
             if (sourcesNode.isArray()) {
                 List<String> sources = new ArrayList<>();
                 for (JsonNode s : sourcesNode) {
@@ -98,7 +94,7 @@ public class SearchCitationReasonServiceImpl implements SearchCitationReasonServ
                 info.hitSources = sources;
             }
 
-            JsonNode summaryNode = whyNode.path("matchSummary");
+            JsonNode summaryNode = root.path("matchSummary");
             if (!summaryNode.isMissingNode()) {
                 info.matchSummary = summaryNode.asText(null);
             }
