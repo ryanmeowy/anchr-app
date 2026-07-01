@@ -75,9 +75,10 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         int boundedLimit = normalizeLimit(limit);
         int offset = decodeOffset(cursor);
         List<ActivityEvent> events = listEvents(ActivityEventType.CITATION_OPENED, boundedLimit + 1, offset);
+        Map<String, String> kbMap = loadKnowledgeBaseNamesByScalarPayload(events);
         List<RecentCitationDTO> items = events.stream()
                 .limit(boundedLimit)
-                .map(this::toRecentCitation)
+                .map(event -> toRecentCitation(event, kbMap))
                 .toList();
         return RecentCitationListDTO.builder()
                 .items(items)
@@ -122,7 +123,7 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         List<ActivityEvent> pageEvents = events.stream()
                 .limit(boundedLimit)
                 .toList();
-        Map<String, String> knowledgeBaseNamesById = loadKnowledgeBaseNamesByScalarPayload(pageEvents, "kbId");
+        Map<String, String> knowledgeBaseNamesById = loadKnowledgeBaseNamesByScalarPayload(pageEvents);
         List<RecentDocumentDTO> items = pageEvents.stream()
                 .map(event -> toRecentDocument(event, knowledgeBaseNamesById))
                 .toList();
@@ -138,7 +139,8 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         if (activityEvent == null) {
             return RecentCitationDTO.builder().build();
         }
-        return toRecentCitation(activityEvent);
+        Map<String, String> kbMap = loadKnowledgeBaseNamesByScalarPayload(List.of(activityEvent));
+        return toRecentCitation(activityEvent, kbMap);
     }
 
     private List<ActivityEvent> listEvents(ActivityEventType eventType, int limit, int offset) {
@@ -179,9 +181,9 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         return loadKnowledgeBaseNamesById(kbIds);
     }
 
-    private Map<String, String> loadKnowledgeBaseNamesByScalarPayload(List<ActivityEvent> events, String scalarKey) {
+    private Map<String, String> loadKnowledgeBaseNamesByScalarPayload(List<ActivityEvent> events) {
         Set<String> kbIds = events.stream()
-                .map(event -> readString(parsePayload(event), scalarKey, null))
+                .map(event -> readString(parsePayload(event), "kbId", null))
                 .filter(StringUtils::hasText)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         return loadKnowledgeBaseNamesById(kbIds);
@@ -201,12 +203,14 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 ));
     }
 
-    private RecentCitationDTO toRecentCitation(ActivityEvent event) {
+    private RecentCitationDTO toRecentCitation(ActivityEvent event, Map<String, String> kbMap) {
         Map<String, Object> payload = parsePayload(event);
+        String kbId = readString(payload, "kbId", "");
         return RecentCitationDTO.builder()
                 .segmentId(readString(payload, "segmentId", event.getResourceId()))
                 .assetId(readString(payload, "assetId", null))
-                .kbId(readString(payload, "kbId", null))
+                .kbId(kbId)
+                .kbName(kbMap.get(kbId))
                 .fileName(readString(payload, "fileName", null))
                 .title(readString(payload, "title", null))
                 .snippet(readString(payload, "snippet", null))

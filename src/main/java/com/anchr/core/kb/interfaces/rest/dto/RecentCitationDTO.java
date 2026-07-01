@@ -17,6 +17,7 @@ public class RecentCitationDTO {
     String segmentId;
     String assetId;
     String kbId;
+    String kbName;
     String fileName;
     String title;
     String snippet;
