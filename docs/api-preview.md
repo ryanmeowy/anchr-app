@@ -40,25 +40,27 @@ Base path: `/api/v1/preview`
       "score": "0.84",
       "hitSources": ["VECTOR", "TITLE", "CONTENT"],
       "matchSummary": "语义匹配 + 内容关键词命中 (score: 0.84)"
-    }
+    },
+    "reason": ""
   }
 }
 ```
 
-| 字段 | 类型 | 必填 | 说明                                          |
-|------|------|------|---------------------------------------------|
-| `recordId` | string | 否 | 历史引用记录 ID。传入后从活动事件中还原引用信息，忽略 `citationInfo` |
-| `sourceType` | string | 否 | 来源类型（ASK, SEARCH）                           |
-| `sourceId` | string | 否 | turnId, search没有                            |
-| `sessionId` | string | 否 | 会话 ID , ASK时提供                                    |
-| `question` | string | 否 | 用户原始问题                                      |
-| `citationInfo` | object | 否 | 实时引用信息（`recordId` 为空时生效）                    |
-| `citationInfo.segmentId` | string | 否 | 引用 segment ID                               |
-| `citationInfo.citationIndex` | string | 否 | 引用序号                                        |
-| `citationInfo.why` | object | 否 | 匹配原因                                        |
-| `citationInfo.why.score` | string | 否 | 相关度得分                                       |
-| `citationInfo.why.hitSources` | string[] | 否 | 命中来源列表                                      |
+| 字段                              | 类型 | 必填 | 说明                                          |
+|---------------------------------|------|------|---------------------------------------------|
+| `recordId`                      | string | 否 | 历史引用记录 ID。传入后从活动事件中还原引用信息，忽略 `citationInfo` |
+| `sourceType`                    | string | 否 | 来源类型（ASK, SEARCH）                           |
+| `sourceId`                      | string | 否 | turnId, search没有                            |
+| `sessionId`                     | string | 否 | 会话 ID , ASK时提供                              |
+| `question`                      | string | 否 | 用户原始问题                                      |
+| `citationInfo`                  | object | 否 | 实时引用信息（`recordId` 为空时生效）                    |
+| `citationInfo.segmentId`        | string | 否 | 引用 segment ID                               |
+| `citationInfo.citationIndex`    | string | 否 | 引用序号                                        |
+| `citationInfo.why`              | object | 否 | 匹配原因                                        |
+| `citationInfo.why.score`        | string | 否 | 相关度得分                                       |
+| `citationInfo.why.hitSources`   | string[] | 否 | 命中来源列表                                      |
 | `citationInfo.why.matchSummary` | string | 否 | 匹配摘要                                        |
+| `citationInfo.reason`           | string | 否 | 匹配原因(已总结)                                   |
 
 ### Response
 

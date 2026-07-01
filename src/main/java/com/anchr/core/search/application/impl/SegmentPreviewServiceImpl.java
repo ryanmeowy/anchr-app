@@ -112,7 +112,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .sourceId(previewInfo.sourceId)
                 .sessionId(previewInfo.sessionId)
                 .sourceQuestion(previewInfo.question)
-                .citationContext(buildCitationContext(segment, previewInfo))
+                .citationContext(buildCitationContext(segment, previewInfo, request))
                 .build();
     }
 
@@ -201,13 +201,14 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return chunks.isEmpty() ? buildCurrentChunk(segment) : chunks;
     }
 
-    private PreviewSegmentDTO.CitationContextDTO buildCitationContext(Segment segment, PreviewInfo previewInfo) {
+    private PreviewSegmentDTO.CitationContextDTO buildCitationContext(Segment segment, PreviewInfo previewInfo, PreviewRequestDTO request) {
         if (segment == null || !StringUtils.hasText(resolveSnippet(segment))) {
             return null;
         }
+        String reason = Optional.ofNullable(request.getCitationInfo()).map(PreviewRequestDTO.CitationInfo::getReason).orElse(null);
         return PreviewSegmentDTO.CitationContextDTO.builder()
                 .citationIndex(previewInfo.citationIndex)
-                .citationReason(buildCitationReason(previewInfo.why))
+                .citationReason(null == previewInfo.why ? reason : buildCitationReason(previewInfo.why))
                 .build();
     }
 

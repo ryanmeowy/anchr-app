@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 @Builder
 public class RecentCitationDTO {
 
+    String recordId;
     String segmentId;
     String assetId;
     String kbId;

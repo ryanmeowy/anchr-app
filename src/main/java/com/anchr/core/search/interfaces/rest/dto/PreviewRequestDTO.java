@@ -18,6 +18,7 @@ public class PreviewRequestDTO {
         private String segmentId;
         private String citationIndex;
         private CitationReason why;
+        private String reason;
     }
 
     @Data

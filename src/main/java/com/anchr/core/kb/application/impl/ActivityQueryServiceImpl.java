@@ -207,6 +207,7 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
         Map<String, Object> payload = parsePayload(event);
         String kbId = readString(payload, "kbId", "");
         return RecentCitationDTO.builder()
+                .recordId(event.getId())
                 .segmentId(readString(payload, "segmentId", event.getResourceId()))
                 .assetId(readString(payload, "assetId", null))
                 .kbId(kbId)
