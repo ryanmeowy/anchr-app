@@ -1,5 +1,6 @@
 package com.anchr.core.settings.interfaces.rest;
 
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.integration.ai.EmbedParamEnum;
@@ -32,13 +33,33 @@ public class SettingsController {
     @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/{capability}")
     public Result<List<CapabilityConfigDTO>> getConfig(@PathVariable String capability) {
-        return Result.success(capabilityConfigService.get(capability.toUpperCase()));
+        List<CapabilityConfigDTO> configs = capabilityConfigService.get(capability.toUpperCase());
+        if ("GUEST".equals(UserContextHolder.get().role())) {
+            configs = configs.stream()
+                    .map(c -> CapabilityConfigDTO.builder()
+                            .modelName(c.getModelName())
+                            .enabled(c.isEnabled())
+                            .id(c.getId())
+                            .build())
+                    .toList();
+        }
+        return Result.success(configs);
     }
 
     @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/{capability}/all")
     public Result<List<CapabilityConfigDTO>> getAllConfigs(@PathVariable String capability) {
-        return Result.success(capabilityConfigService.findAll(capability.toUpperCase()));
+        List<CapabilityConfigDTO> configs = capabilityConfigService.findAll(capability.toUpperCase());
+        if ("GUEST".equals(UserContextHolder.get().role())) {
+            configs = configs.stream()
+                    .map(c -> CapabilityConfigDTO.builder()
+                            .modelName(c.getModelName())
+                            .enabled(c.isEnabled())
+                            .id(c.getId())
+                            .build())
+                    .toList();
+        }
+        return Result.success(configs);
     }
 
     @RequireAuth
@@ -72,6 +93,7 @@ public class SettingsController {
         return Result.success(null);
     }
 
+    @RequireAuth
     @GetMapping("/{capability}/params")
     public Result<CapabilityParamsDTO> params(@PathVariable String capability) {
         return Result.success(CapabilityParamsDTO.builder()
@@ -108,12 +130,15 @@ public class SettingsController {
     @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/storage")
     public Result<StorageConfigDTO> getStorageConfig() {
-        return storageConfigService.get()
+        StorageConfigDTO storageConfigDTO = storageConfigService.get()
                 .map(config -> StorageConfigDTO.from(config,
                         storageConfigService.maskAccessKey(config),
                         storageConfigService.maskSecretKey(config)))
-                .map(Result::success)
-                .orElse(Result.success(null));
+                .orElse(null);
+        if ("GUEST".equals(UserContextHolder.get().role()) && null != storageConfigDTO) {
+            return Result.success(StorageConfigDTO.builder().enabled(storageConfigDTO.isEnabled()).build());
+        }
+        return Result.success(storageConfigDTO);
     }
 
     @RequireAuth
