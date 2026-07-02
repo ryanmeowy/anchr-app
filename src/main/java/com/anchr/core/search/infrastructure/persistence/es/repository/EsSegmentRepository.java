@@ -208,6 +208,10 @@ public class EsSegmentRepository implements SegmentRepository {
             builder.filter(f -> f.terms(t -> t.field("kbId").terms(v -> v.value(
                     filter.getKbIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
         }
+        if (!CollectionUtils.isEmpty(filter.getAssetIds())) {
+            builder.filter(f -> f.terms(t -> t.field("assetId").terms(v -> v.value(
+                    filter.getAssetIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
         if (!CollectionUtils.isEmpty(filter.getAssetTypes())) {
             builder.filter(f -> f.terms(t -> t.field("assetType").terms(v -> v.value(
                     filter.getAssetTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
@@ -238,6 +242,10 @@ public class EsSegmentRepository implements SegmentRepository {
         if (!CollectionUtils.isEmpty(filter.getKbIds())) {
             builder.filter(f -> f.terms(t -> t.field("kbId").terms(v -> v.value(
                     filter.getKbIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
+        if (!CollectionUtils.isEmpty(filter.getAssetIds())) {
+            builder.filter(f -> f.terms(t -> t.field("assetId").terms(v -> v.value(
+                    filter.getAssetIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
         }
         if (!CollectionUtils.isEmpty(filter.getAssetTypes())) {
             builder.filter(f -> f.terms(t -> t.field("assetType").terms(v -> v.value(

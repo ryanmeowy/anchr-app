@@ -20,6 +20,7 @@ public class ConversationSession {
     private long updatedAt;
     private long expiresAt;
     private List<String> kbScope;
+    private List<String> assetScope;
 
     public static ConversationSession createActive(String sessionId, String userId, String title, long now, long expiresAt) {
         ConversationSession session = new ConversationSession();

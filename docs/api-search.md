@@ -12,6 +12,7 @@
   "limit": 10,                 // 可选，1~200，最终返回条数（每路召回数由后端基于 limit 计算）
   "strategy": "KB_RRF_RERANK", // 可选 ≤32字，KB_RRF | KB_RRF_RERANK
   "kbIds": ["kb_1", "kb_2"],   // 可选，≤100个，空=全部知识库
+  "assetIdList": ["asset_1"],  // 可选，≤100个，资产 ID 过滤（无命中不降级，不扩大范围）
   "assetTypes": ["PDF"],       // 可选，≤20个，资产类型过滤
   "hitTypes": ["TEXT"],        // 可选，≤20个，命中类型过滤
   "dateRange": {               // 可选，时间范围过滤

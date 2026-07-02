@@ -25,6 +25,9 @@ public class ConversationMessageRequestDTO {
     @Size(max = 100, message = "kbIds cannot exceed 100")
     private List<String> kbIds;
 
+    @Size(max = 100, message = "assetIdList cannot exceed 100")
+    private List<String> assetIdList;
+
     @Size(max = 32, message = "answerMode length cannot exceed 32")
     private String answerMode;
 

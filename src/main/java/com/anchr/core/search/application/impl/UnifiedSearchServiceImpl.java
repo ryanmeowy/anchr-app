@@ -730,6 +730,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private SearchFilter buildFilter(SearchQueryDTO query) {
         return SearchFilter.builder()
                 .kbIds(kbScopeResolver.resolveVisibleKbIds(query.getKbIds()))
+                .assetIds(query.getAssetIdList() == null || query.getAssetIdList().isEmpty() ? null : List.copyOf(query.getAssetIdList()))
                 .assetTypes(normalizeEnums(query.getAssetTypes()))
                 .hitTypes(normalizeEnums(query.getHitTypes()))
                 .createdFrom(query.getDateRange() == null ? null : query.getDateRange().getFrom())

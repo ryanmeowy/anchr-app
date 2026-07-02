@@ -16,4 +16,7 @@ public class ConversationCreateRequestDTO {
 
     @Size(max = 100, message = "kbIds cannot exceed 100")
     private List<String> kbIds;
+
+    @Size(max = 100, message = "assetIdList cannot exceed 100")
+    private List<String> assetIdList;
 }

@@ -32,6 +32,9 @@ public class SearchQueryDTO {
     @Size(max = 100, message = "kbIds cannot exceed 100")
     private List<String> kbIds;
 
+    @Size(max = 100, message = "assetIdList cannot exceed 100")
+    private List<String> assetIdList;
+
     @Size(max = 20, message = "assetTypes cannot exceed 20")
     private List<String> assetTypes;
 

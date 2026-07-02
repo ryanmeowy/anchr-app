@@ -38,13 +38,15 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
     public ConversationRetrievalResult retrieve(String rewrittenQuery,
                                                 Integer limit,
                                                 List<String> kbIds,
-                                                List<String> preferredModalities) {
+                                                List<String> preferredModalities,
+                                                List<String> assetIdList) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             SearchQueryDTO query = new SearchQueryDTO();
             query.setQuery(rewrittenQuery);
             query.setLimit(limit);
             query.setKbIds(kbIds);
+            query.setAssetIdList(assetIdList);
 
             List<SearchResultDTO> rawResults = unifiedSearchService.search(query);
             List<SearchResultDTO> filtered = applyModalityFilter(rawResults, preferredModalities);

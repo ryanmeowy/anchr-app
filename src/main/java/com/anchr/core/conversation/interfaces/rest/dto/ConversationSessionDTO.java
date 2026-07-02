@@ -17,6 +17,7 @@ public class ConversationSessionDTO implements Serializable {
     private String status;
     private String lastMessagePreview;
     private List<String> kbScope;
+    private List<String> assetScope;
     private long createdAt;
     private long updatedAt;
     private long expiresAt;

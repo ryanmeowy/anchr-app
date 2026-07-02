@@ -43,6 +43,14 @@ public class ConversationTurnCodec {
         }
     }
 
+    public String serializeAssetScope(List<String> assetScope) {
+        try {
+            return objectMapper.writeValueAsString(assetScope == null ? List.of() : assetScope);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize asset scope.", e);
+        }
+    }
+
     public List<ConversationTurnDTO.CitationDTO> parseCitations(String citationsJson) {
         if (!StringUtils.hasText(citationsJson)) {
             return List.of();
@@ -78,6 +86,19 @@ public class ConversationTurnCodec {
             CollectionType listType = objectMapper.getTypeFactory()
                     .constructCollectionType(List.class, String.class);
             return objectMapper.readValue(kbScopeJson, listType);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    public List<String> parseAssetScope(String assetScopeJson) {
+        if (!StringUtils.hasText(assetScopeJson)) {
+            return List.of();
+        }
+        try {
+            CollectionType listType = objectMapper.getTypeFactory()
+                    .constructCollectionType(List.class, String.class);
+            return objectMapper.readValue(assetScopeJson, listType);
         } catch (Exception e) {
             return List.of();
         }

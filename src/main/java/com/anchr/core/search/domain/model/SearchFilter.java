@@ -13,6 +13,7 @@ import java.util.List;
 public class SearchFilter {
 
     List<String> kbIds;
+    List<String> assetIds;
     List<String> assetTypes;
     List<String> hitTypes;
     Long createdFrom;
