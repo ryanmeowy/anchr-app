@@ -94,10 +94,16 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
         return client.embed(context).vector();
     }
 
+    @Override
+    public boolean isMulti() {
+        CapabilityConfig config = configResolver.activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
+                .orElseThrow(() -> new IllegalStateException("Embedding is not configured"));
+        return "MULTI_EMBEDDING".equals(config.getCapability());
+    }
+
     private ClientCacheManager.ResolvedClient resolve() {
         CapabilityConfig config = configResolver.activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Embedding is not configured. Save config via PATCH /api/v1/settings/embedding."));
+                .orElseThrow(() -> new IllegalStateException("Embedding is not configured"));
         return new ClientCacheManager.ResolvedClient(clientFactory.build(config), config);
     }
 }

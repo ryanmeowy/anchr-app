@@ -21,6 +21,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.UUID;
 
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 
@@ -62,10 +63,11 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
                 try {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> tokenData = objectMapper.readValue(tokenJson, Map.class);
-                    role = (String) tokenData.getOrDefault("role", "OWNER");
+                    role = (String) tokenData.getOrDefault("role", "");
                 } catch (Exception e) {
-                    log.warn("Failed to parse token JSON, falling back to OWNER", e);
-                    role = "OWNER";
+                    log.warn("Failed to parse token JSON", e);
+                    reject(response, 401, ApiError.AUTH_TOKEN_INVALID);
+                    return false;
                 }
                 String[] allowedRoles = requireAuth.roles();
                 boolean roleAllowed = Arrays.asList(allowedRoles).contains(role);
@@ -116,7 +118,7 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
     private void reject(HttpServletResponse response, int httpStatus, ApiError error) throws Exception {
         response.setStatus(httpStatus);
         response.setContentType("application/json;charset=UTF-8");
-        Result<Void> result = Result.error(error);
+        Result<Void> result = Result.error(error, UUID.randomUUID().toString());
         try {
             response.getWriter().write(objectMapper.writeValueAsString(result));
         } catch (Exception ex) {

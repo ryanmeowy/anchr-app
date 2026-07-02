@@ -1,14 +1,14 @@
 package com.anchr.core.auth.interfaces.rest;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.common.util.AesUtil;
-import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
+import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.integration.storage.StorageTokenIssuer;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +27,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +63,7 @@ public class AuthController {
     @GetMapping("/refresh-token")
     public Result<String> refreshToken(@RequestHeader("X-Admin-Secret") String secret,
                                        @RequestParam(required = false) String code,
-                                       @RequestParam(defaultValue = "OWNER") String role) {
+                                       @RequestParam String role) {
         if (!StringUtils.hasText(adminSecret)) {
             log.error("Admin secret is not configured");
             return Result.error(ApiError.AUTH_ADMIN_SECRET_MISSING);
@@ -96,7 +97,7 @@ public class AuthController {
             log.error("Failed to store token in redis", e);
             return Result.error(ApiError.INTERNAL_ERROR);
         }
-        log.info("Token refreshed: role={}, key={}", normalizedRole, redisKey);
+        log.info("Token refreshed: role={}", normalizedRole);
         return Result.success(newToken);
     }
 
@@ -169,7 +170,7 @@ public class AuthController {
     private Set<String> scanTokenKeys() {
         ScanOptions options = ScanOptions.scanOptions().match(TOKEN_CACHE_PREFIX + "*").build();
         try (Cursor<String> cursor = redisTemplate.scan(options)) {
-            Set<String> keys = new java.util.HashSet<>();
+            Set<String> keys = new HashSet<>();
             cursor.forEachRemaining(keys::add);
             return keys;
         }

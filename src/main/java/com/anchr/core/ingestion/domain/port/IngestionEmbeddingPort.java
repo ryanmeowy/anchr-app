@@ -9,4 +9,6 @@ public interface IngestionEmbeddingPort {
 
     List<Float> embed(String source, String sourceType);
 
+    boolean isMulti();
+
 }
