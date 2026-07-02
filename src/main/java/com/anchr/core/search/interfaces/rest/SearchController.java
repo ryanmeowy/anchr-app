@@ -1,5 +1,6 @@
 package com.anchr.core.search.interfaces.rest;
 
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.SearchFollowUpService;
@@ -39,6 +40,7 @@ public class SearchController {
     private final SearchFollowUpService searchFollowUpService;
     private final Executor searchRewriteExecutor;
 
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @PostMapping("/kb")
     public Result<SearchPageDTO> searchKb(@Valid @RequestBody SearchQueryDTO query) {
         String userQuery = query.getQuery();

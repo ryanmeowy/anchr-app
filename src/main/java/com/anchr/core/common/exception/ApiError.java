@@ -13,6 +13,7 @@ public enum ApiError {
     FORBIDDEN(403, "Forbidden"),
     NOT_FOUND(404, "Resource not found."),
     AUTH_TOKEN_INVALID(401, "The token is invalid or expired, please contact the administrator to refresh it"),
+    AUTH_ROLE_FORBIDDEN(403, "GUEST ACCESS DENIED"),
     AUTH_ADMIN_SECRET_MISSING(500, "Internal error"),
     AUTH_STS_FETCH_FAILED(500, "Failed to fetch STS token"),
     EMBEDDING_FAILED(500, "Failed to generate image embedding, please retry later."),

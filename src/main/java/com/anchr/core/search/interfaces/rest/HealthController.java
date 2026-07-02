@@ -19,7 +19,7 @@ public class HealthController {
 
     private final EsHealthService esHealthService;
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/elasticsearch")
     public Result<EsHealthDTO> esHealth() {
         return Result.success(esHealthService.getEsHealth());

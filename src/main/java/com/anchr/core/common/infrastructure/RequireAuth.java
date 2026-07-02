@@ -11,4 +11,9 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface RequireAuth {
+    /**
+     * Allowed roles. Defaults to OWNER only.
+     * Add GUEST to allow read-only access.
+     */
+    String[] roles() default {"OWNER"};
 }

@@ -29,13 +29,13 @@ public class SettingsController {
 
     // ── capability config ──────────────────────────────────────────────────
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/{capability}")
     public Result<List<CapabilityConfigDTO>> getConfig(@PathVariable String capability) {
         return Result.success(capabilityConfigService.get(capability.toUpperCase()));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/{capability}/all")
     public Result<List<CapabilityConfigDTO>> getAllConfigs(@PathVariable String capability) {
         return Result.success(capabilityConfigService.findAll(capability.toUpperCase()));
@@ -105,7 +105,7 @@ public class SettingsController {
 
     // ── storage ────────────────────────────────────────────────────────────
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/storage")
     public Result<StorageConfigDTO> getStorageConfig() {
         return storageConfigService.get()

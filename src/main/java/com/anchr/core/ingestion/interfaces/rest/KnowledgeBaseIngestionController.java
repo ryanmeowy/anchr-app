@@ -41,7 +41,7 @@ public class KnowledgeBaseIngestionController {
                 ingestionApplicationService.createTask(kbId, toCommand(request))));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/ingestion-tasks")
     public Result<IngestionTaskListDTO> listTasks(@PathVariable @NotBlank String kbId,
                                                   @RequestParam(required = false) IngestionTaskStatus status,
@@ -54,7 +54,7 @@ public class KnowledgeBaseIngestionController {
                 .build());
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/ingestion-tasks/{taskId}")
     public Result<IngestionTaskDTO> getTask(@PathVariable @NotBlank String kbId,
                                             @PathVariable @NotBlank String taskId) {

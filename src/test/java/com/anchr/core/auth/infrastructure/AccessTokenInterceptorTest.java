@@ -72,7 +72,8 @@ class AccessTokenInterceptorTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "protectedApi");
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get(TOKEN_CACHE_PREFIX)).thenReturn("token-123");
+        when(valueOperations.get(TOKEN_CACHE_PREFIX + "token-123"))
+                .thenReturn("{\"role\":\"OWNER\",\"createdAt\":1}");
 
         boolean allowed = interceptor.preHandle(request, response, handlerMethod);
 
@@ -81,16 +82,17 @@ class AccessTokenInterceptorTest {
         assertThat(UserContextHolder.get().accessTokenHash())
                 .isNotBlank()
                 .isNotEqualTo("token-123");
+        assertThat(UserContextHolder.get().role()).isEqualTo("OWNER");
     }
 
     @Test
-    void preHandle_shouldRejectWith401_whenTokenMismatchOnRequireAuthMethod() throws Exception {
+    void preHandle_shouldRejectWith401_whenTokenNotFoundInRedis() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader("X-Access-Token", "wrong-token");
+        request.addHeader("X-Access-Token", "unknown-token");
         MockHttpServletResponse response = new MockHttpServletResponse();
         HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "protectedApi");
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get(TOKEN_CACHE_PREFIX)).thenReturn("server-token");
+        when(valueOperations.get(TOKEN_CACHE_PREFIX + "unknown-token")).thenReturn(null);
 
         boolean allowed = interceptor.preHandle(request, response, handlerMethod);
 
@@ -104,14 +106,46 @@ class AccessTokenInterceptorTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
         HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "protectedApi");
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get(TOKEN_CACHE_PREFIX)).thenReturn("server-token");
 
         boolean allowed = interceptor.preHandle(request, response, handlerMethod);
 
         assertThat(allowed).isFalse();
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(response.getContentAsString()).contains("token is invalid or expired");
+    }
+
+    @Test
+    void preHandle_shouldRejectWith403_whenGuestAccessesOwnerOnlyEndpoint() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Access-Token", "guest-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "ownerOnlyApi");
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(TOKEN_CACHE_PREFIX + "guest-token"))
+                .thenReturn("{\"role\":\"GUEST\",\"createdAt\":1}");
+
+        boolean allowed = interceptor.preHandle(request, response, handlerMethod);
+
+        assertThat(allowed).isFalse();
+        assertThat(response.getStatus()).isEqualTo(403);
+        assertThat(response.getContentAsString()).contains("访客权限");
+    }
+
+    @Test
+    void preHandle_shouldAllow_whenGuestAccessesGuestAllowedEndpoint() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Access-Token", "guest-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        HandlerMethod handlerMethod = new HandlerMethod(new DummyController(), "guestAllowedApi");
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(TOKEN_CACHE_PREFIX + "guest-token"))
+                .thenReturn("{\"role\":\"GUEST\",\"createdAt\":1}");
+
+        boolean allowed = interceptor.preHandle(request, response, handlerMethod);
+
+        assertThat(allowed).isTrue();
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(UserContextHolder.get().role()).isEqualTo("GUEST");
     }
 
     @SuppressWarnings("unused")
@@ -121,6 +155,14 @@ class AccessTokenInterceptorTest {
 
         @RequireAuth
         public void protectedApi() {
+        }
+
+        @RequireAuth
+        public void ownerOnlyApi() {
+        }
+
+        @RequireAuth(roles = {"OWNER", "GUEST"})
+        public void guestAllowedApi() {
         }
     }
 }

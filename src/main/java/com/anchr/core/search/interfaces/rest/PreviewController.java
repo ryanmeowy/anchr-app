@@ -26,7 +26,7 @@ public class PreviewController {
 
     private final SegmentPreviewService segmentPreviewService;
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @PostMapping("/segments/{segmentId}")
     public Result<PreviewSegmentDTO> getSegmentPreview(
             @PathVariable @NotBlank String segmentId,
@@ -34,7 +34,7 @@ public class PreviewController {
         return Result.success(segmentPreviewService.getSegmentPreview(segmentId, request));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/segments/{segmentId}/neighbors")
     public Result<PreviewNeighborsDTO> getSegmentNeighbors(
             @PathVariable @NotBlank String segmentId,
