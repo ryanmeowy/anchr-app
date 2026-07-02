@@ -89,7 +89,7 @@ public class AuthController {
         tokenData.put("createdAt", System.currentTimeMillis());
         try {
             String json = objectMapper.writeValueAsString(tokenData);
-            redisTemplate.opsForValue().set(redisKey, json, 12, TimeUnit.HOURS);
+            redisTemplate.opsForValue().set(redisKey, json, 1, TimeUnit.HOURS);
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize token data", e);
             return Result.error(ApiError.INTERNAL_ERROR);
