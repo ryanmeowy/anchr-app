@@ -36,10 +36,6 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
     private final CapabilityClientFactory clientFactory;
     private final CapabilityResolver configResolver;
 
-    // 1. 文字 + textEmbed        text
-    // 2. 文字 + multiEmbed       {"text":""}
-    // 3. 图片 + textEmbed        null
-    // 4. 图片 + multiEmbed       {"image":""}
     public List<Float> embed(String source, String sourceType) {
         ClientCacheManager.ResolvedClient resolved = cacheManager.getOrBuild(
                 CapabilityResolver.SLOT_EMBEDDING, this::resolve);
