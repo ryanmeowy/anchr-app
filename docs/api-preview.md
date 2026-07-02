@@ -105,21 +105,51 @@ Base path: `/api/v1/preview`
         "chunkOrder": 11,
         "pageNo": 3,
         "content": "上一段正文...",
-        "relation": "previous"
+        "relation": "previous",
+        "bbox": [{
+          "bbox": {
+            "l": 0.00,
+            "t": 0.00,
+            "r": 0.00,
+            "b": 0.00,
+            "coordOrigin": "BOTTOMLEFT"
+          },
+          "pageNo": 3
+        }]
       },
       {
         "segmentId": "asset-001:chunk:12",
         "chunkOrder": 12,
         "pageNo": 3,
         "content": "MySQL 的架构分为 Server 层和存储引擎层...",
-        "relation": "current"
+        "relation": "current",
+        "bbox": [{
+          "bbox": {
+            "l": 0.00,
+            "t": 0.00,
+            "r": 0.00,
+            "b": 0.00,
+            "coordOrigin": "BOTTOMLEFT"
+          },
+          "pageNo": 3
+        }]
       },
       {
         "segmentId": "asset-001:chunk:13",
         "chunkOrder": 13,
         "pageNo": 3,
         "content": "下一段正文...",
-        "relation": "next"
+        "relation": "next",
+        "bbox": [{
+          "bbox": {
+            "l": 0.00,
+            "t": 0.00,
+            "r": 0.00,
+            "b": 0.00,
+            "coordOrigin": "BOTTOMLEFT"
+          },
+          "pageNo": 3
+        }]
       }
     ],
     "citationContext": {
@@ -170,6 +200,13 @@ Base path: `/api/v1/preview`
 | `surroundingChunks[].pageNo` | int \| null | 页码 |
 | `surroundingChunks[].content` | string | 前后文内容，服务端按 UTF-8 字节数截断至 4096 |
 | `surroundingChunks[].relation` | string | `previous` \| `current` \| `next` |
+| `surroundingChunks[].bbox` | array \| null | 图片或页面内定位框，结构同 `anchor.bbox` |
+| `surroundingChunks[].bbox[].bbox.l` | double | 左边界 |
+| `surroundingChunks[].bbox[].bbox.t` | double | 上边界 |
+| `surroundingChunks[].bbox[].bbox.r` | double | 右边界 |
+| `surroundingChunks[].bbox[].bbox.b` | double | 下边界 |
+| `surroundingChunks[].bbox[].bbox.coordOrigin` | string | 坐标原点 |
+| `surroundingChunks[].bbox[].pageNo` | int | 所在页码 |
 | `citationContext` | object \| null | 引用上下文，无 snippet 时为 null |
 | `citationContext.citationIndex` | string \| null | 引用序号 |
 | `citationContext.citationReason` | string \| null | 引用原因（LLM 生成的自然语言解释，失败时降级为 matchSummary） |
@@ -219,14 +256,34 @@ Base path: `/api/v1/preview`
         "chunkOrder": 11,
         "pageNo": 3,
         "content": "上一段正文...",
-        "relation": "previous"
+        "relation": "previous",
+        "bbox": [{
+          "bbox": {
+            "l": 0.00,
+            "t": 0.00,
+            "r": 0.00,
+            "b": 0.00,
+            "coordOrigin": "BOTTOMLEFT"
+          },
+          "pageNo": 3
+        }]
       },
       {
         "segmentId": "asset-001:chunk:12",
         "chunkOrder": 12,
         "pageNo": 3,
         "content": "当前片段正文...",
-        "relation": "current"
+        "relation": "current",
+        "bbox": [{
+          "bbox": {
+            "l": 0.00,
+            "t": 0.00,
+            "r": 0.00,
+            "b": 0.00,
+            "coordOrigin": "BOTTOMLEFT"
+          },
+          "pageNo": 3
+        }]
       }
     ]
   }
@@ -242,6 +299,13 @@ Base path: `/api/v1/preview`
 | `items[].pageNo` | int \| null | 页码 |
 | `items[].content` | string | 段落文本（截断至 4096 字节） |
 | `items[].relation` | string | `previous` \| `current` \| `next` |
+| `items[].bbox` | array \| null | 图片或页面内定位框，结构同 `anchor.bbox` |
+| `items[].bbox[].bbox.l` | double | 左边界 |
+| `items[].bbox[].bbox.t` | double | 上边界 |
+| `items[].bbox[].bbox.r` | double | 右边界 |
+| `items[].bbox[].bbox.b` | double | 下边界 |
+| `items[].bbox[].bbox.coordOrigin` | string | 坐标原点 |
+| `items[].bbox[].pageNo` | int | 所在页码 |
 
 ### Notes
 

@@ -233,6 +233,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .pageNo(segment.getPageNo())
                 .content(truncateUtf8(content.trim(), SURROUNDING_CHUNK_MAX_BYTES))
                 .relation(RELATION_CURRENT)
+                .bbox(segment.getBbox())
                 .build());
     }
 
@@ -247,6 +248,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .pageNo(candidate.getPageNo())
                 .content(truncateUtf8(content.trim(), SURROUNDING_CHUNK_MAX_BYTES))
                 .relation(resolveRelation(current, candidate))
+                .bbox(candidate.getBbox())
                 .build();
     }
 
