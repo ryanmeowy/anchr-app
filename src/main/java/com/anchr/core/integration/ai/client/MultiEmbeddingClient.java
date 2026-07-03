@@ -41,18 +41,18 @@ public class MultiEmbeddingClient implements EmbeddingClient {
         long start = System.currentTimeMillis();
         try {
             Map<String, Object> map = new HashMap<>();
-            map.put("text", "测试");
+            map.put("text", "test");
             Map<String, Object> contentsMap = new HashMap<>();
             contentsMap.put("contents", Lists.newArrayList(map));
             EmbedContext context = EmbedContext.builder().modelName(modelName).contentMap(contentsMap).build();
             EmbeddingResult result = embed(context);
             long latency = System.currentTimeMillis() - start;
             return new ConnectionTestResult(true, latency,
-                    "连接成功, 向量维度 " + result.dimension(), result.dimension());
+                    "Connection successful, vector dimension" + result.dimension(), result.dimension());
         } catch (Exception e) {
             long latency = System.currentTimeMillis() - start;
             return new ConnectionTestResult(false, latency,
-                    "连接失败: " + e.getMessage(), null);
+                    "Connection failed: " + e.getMessage(), null);
         }
     }
 }

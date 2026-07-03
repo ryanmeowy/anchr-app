@@ -41,11 +41,11 @@ public class TextEmbeddingClient implements EmbeddingClient {
             EmbeddingResult result = embed(context);
             long latency = System.currentTimeMillis() - start;
             return new ConnectionTestResult(true, latency,
-                    "连接成功, 向量维度 " + result.dimension(), result.dimension());
+                    "Connection successful, vector dimension" + result.dimension(), result.dimension());
         } catch (Exception e) {
             long latency = System.currentTimeMillis() - start;
             return new ConnectionTestResult(false, latency,
-                    "连接失败: " + e.getMessage(), null);
+                    "Connection failed: " + e.getMessage(), null);
         }
     }
 

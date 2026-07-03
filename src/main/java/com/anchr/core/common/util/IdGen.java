@@ -18,7 +18,7 @@ import static com.anchr.core.common.constant.CacheConstant.ID_GEN_KEY;
 @RequiredArgsConstructor
 public class IdGen {
 
-    @Value("${spring.profiles.active:default}")
+    @Value("${spring.profiles.active:dev}")
     private String activeProfile;
 
     private final StringRedisTemplate stringRedisTemplate;
