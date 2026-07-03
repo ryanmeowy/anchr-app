@@ -90,7 +90,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         if (modelTypeEnum == ModelTypeEnum.EMBEDDING || modelTypeEnum == ModelTypeEnum.MULTI_EMBEDDING) {
             Map<String, Object> extMap = request.getExtraConfig();
             if (null == extMap || null == extMap.get(EmbedParamEnum.DIMENSIONS.getKey())) {
-                throw new IllegalArgumentException("dimensions is required for" + capability);
+                throw new IllegalArgumentException("dimensions is required for " + capability);
             }
         }
     }
