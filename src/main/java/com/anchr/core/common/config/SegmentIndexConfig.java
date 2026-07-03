@@ -1,4 +1,4 @@
-package com.anchr.core.search.config;
+package com.anchr.core.common.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
