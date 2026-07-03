@@ -38,23 +38,14 @@ app:
     ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
     ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
-  segment:
-    index-name: ${APP_KB_SEGMENT_INDEX_NAME:kb_segment}
-    indexVersion: ${APP_KB_SEGMENT_INDEX_VERSION:v1}
-    read-alias: ${APP_KB_SEGMENT_READ_ALIAS:kb_segment_read}
-    write-alias: ${APP_KB_SEGMENT_WRITE_ALIAS:kb_segment_write}
-    dimension: ${APP_KB_SEGMENT_DIMENSION:1024}
+  docling:
+    base-url: ${APP_DOCLING_BASE_URL}
   search:
-#    quality-absolute-min-score: 0.72
-#    vector-min-score: 0.6
     rrf:
-#      enabled: true
-#      native-enabled: false
       rank-constant: 60
       candidate-multiplier: 4
       max-candidates: 200
     rerank:
-#      enabled: true
       max-doc-chars: 1200
       window-enabled: true
       window-size: 40
@@ -63,8 +54,6 @@ app:
       window-max: 80
       fusion-alpha: 0.6
       fusion-beta: 0.4
-  docling:
-    base-url: ${APP_DOCLING_BASE_URL}
 
 logging:
   level:
@@ -76,5 +65,3 @@ management:
     web:
       exposure:
         include: health,info,metrics
-
-
