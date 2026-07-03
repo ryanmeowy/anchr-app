@@ -1,4 +1,4 @@
-package com.anchr.core.integration.ai;
+package com.anchr.core.common.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;

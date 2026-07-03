@@ -3,11 +3,12 @@ package com.anchr.core.settings.interfaces.rest;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
-import com.anchr.core.integration.ai.EmbedParamEnum;
-import com.anchr.core.integration.ai.GenParamEnum;
-import com.anchr.core.integration.ai.RerankParamEnum;
+import com.anchr.core.settings.domain.model.EmbedParamEnum;
+import com.anchr.core.settings.domain.model.GenParamEnum;
+import com.anchr.core.settings.domain.model.RerankParamEnum;
 import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.application.StorageConfigService;
+import com.anchr.core.settings.domain.model.ModelTypeEnum;
 import com.anchr.core.settings.interfaces.rest.dto.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -102,10 +103,11 @@ public class SettingsController {
     }
 
     private List<CapabilityParamsDTO.ParamItem> toParamItems(String capability) {
-        return switch (capability) {
-            case CapabilityConfigService.CAPABILITY_GENERATION ->
+        ModelTypeEnum type = ModelTypeEnum.valueOf(capability.toUpperCase());
+        return switch (type) {
+            case ModelTypeEnum.GENERATION ->
                 GenParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();
-            case CapabilityConfigService.CAPABILITY_RERANK ->
+            case ModelTypeEnum.RERANK ->
                 RerankParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();
             default ->
                 EmbedParamEnum.all().stream().map(p -> item(p.getKey(), p.getLabel())).toList();

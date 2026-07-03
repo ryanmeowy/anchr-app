@@ -1,7 +1,7 @@
 package com.anchr.core.integration.ai.client;
 
-import com.anchr.core.integration.ai.ParseRequest;
-import com.anchr.core.integration.ai.ParseResponse;
+import com.anchr.core.common.model.ParseRequest;
+import com.anchr.core.common.model.ParseResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.URI;

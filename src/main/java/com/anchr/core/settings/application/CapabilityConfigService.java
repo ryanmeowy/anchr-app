@@ -12,11 +12,6 @@ import java.util.List;
  */
 public interface CapabilityConfigService {
 
-    String CAPABILITY_EMBEDDING = "EMBEDDING";
-    String CAPABILITY_GENERATION = "GENERATION";
-    String CAPABILITY_RERANK = "RERANK";
-    String CAPABILITY_MULTI_EMBEDDING = "MULTI_EMBEDDING";
-
     List<CapabilityConfigDTO> get(String capability);
 
     List<CapabilityConfigDTO> findAll(String capability);
