@@ -20,7 +20,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SearchAnswerServiceImpl implements SearchAnswerService {
 
-    private static final int CITATION_LIMIT = 5;
+    private static final int CITATION_LIMIT = 3;
 
     private final UnifiedSearchService unifiedSearchService;
 
