@@ -26,7 +26,7 @@ public class SearchQueryDTO {
      * route is derived from this value by the search service.
      */
     @Min(value = 1, message = "limit must be greater than 0")
-    @Max(value = 200, message = "limit cannot exceed 200")
+    @Max(value = 10, message = "limit cannot exceed 10")
     private Integer limit;
 
     @Size(max = 100, message = "kbIds cannot exceed 100")
