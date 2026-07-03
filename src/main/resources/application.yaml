@@ -63,6 +63,8 @@ app:
       window-max: 80
       fusion-alpha: 0.6
       fusion-beta: 0.4
+  docling:
+    base-url: ${APP_DOCLING_BASE_URL}
 
 logging:
   level:
@@ -75,5 +77,4 @@ management:
       exposure:
         include: health,info,metrics
 
-  docling:
-    base-url: ${APP_DOCLING_BASE_URL}
+

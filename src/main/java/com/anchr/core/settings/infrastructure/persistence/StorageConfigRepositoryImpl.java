@@ -1,6 +1,5 @@
 package com.anchr.core.settings.infrastructure.persistence;
 
-import com.anchr.core.common.util.IdGen;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import lombok.RequiredArgsConstructor;
