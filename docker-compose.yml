@@ -1,13 +1,14 @@
 services:
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.8
+    build: .
     container_name: elasticsearch
     environment:
       - TZ=Asia/Shanghai
       - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms384m -Xmx384m" # 防止扩容导致抖动
-      - bootstrap.memory_lock=true # 内存锁定, 防止swap
-      - xpack.ml.enabled=false # 机器学习模块
+      - ES_JAVA_OPTS=-Xms384m -Xmx384m
+      - bootstrap.memory_lock=true
+      - xpack.ml.enabled=false
+      - ingest.geoip.downloader.enabled=false
       - xpack.security.enabled=true
       - xpack.security.http.ssl.enabled=false
       - ELASTIC_PASSWORD=${ES_PASSWORD}
@@ -19,40 +20,47 @@ services:
         soft: 65536
         hard: 65536
     ports:
-      - "9200:9200"
-      # - "9300:9300"
+      - "127.0.0.1:9200:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
       - es_logs:/usr/share/elasticsearch/logs
-      - ./plugins:/usr/share/elasticsearch/plugins
     logging:
       driver: "json-file"
       options:
         max-size: "50m"
         max-file: "3"
     networks:
-      - es_network
+      - backend_network
     deploy:
       resources:
         limits:
-          memory: 1350M
+          memory: 1024M
 
   redis:
-    image: redis:latest
+    image: redis:7.4.9
     container_name: redis
     environment:
       - TZ=Asia/Shanghai
     ports:
-      - "6379:6379"
-    command: redis-server --requirepass "${REDIS_PASSWORD}" --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+      - "127.0.0.1:6379:6379"
+    command: >
+      redis-server
+      --requirepass "${REDIS_PASSWORD}"
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --rename-command FLUSHALL ""
+      --rename-command FLUSHDB ""
+      --rename-command CONFIG ""
+      --rename-command SHUTDOWN ""
     volumes:
       - redis_data:/data
     networks:
-      - es_network
+      - backend_network
     deploy:
       resources:
         limits:
-          memory: 350M
+          memory: 512M
 
   mysql:
     image: mysql:8.4
@@ -64,7 +72,7 @@ services:
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
@@ -72,7 +80,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
-      - es_network
+      - backend_network
     deploy:
       resources:
         limits:
@@ -80,14 +88,10 @@ services:
 
 volumes:
   es_data:
-    driver: local
   es_logs:
-    driver: local
   redis_data:
-    driver: local
   mysql_data:
-    driver: local
 
 networks:
-  es_network:
+  backend_network:
     driver: bridge

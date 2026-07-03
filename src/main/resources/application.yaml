@@ -9,7 +9,7 @@ spring:
       database: 0
       timeout: 3000ms
   datasource:
-    url: ${MYSQL_URL:jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USER}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -43,16 +43,16 @@ app:
     write-alias: ${APP_KB_SEGMENT_WRITE_ALIAS:kb_segment_write}
     dimension: ${APP_KB_SEGMENT_DIMENSION:1024}
   search:
-    quality-absolute-min-score: 0.72
-    vector-min-score: 0.6
+#    quality-absolute-min-score: 0.72
+#    vector-min-score: 0.6
     rrf:
-      enabled: true
-      native-enabled: false
+#      enabled: true
+#      native-enabled: false
       rank-constant: 60
       candidate-multiplier: 4
       max-candidates: 200
     rerank:
-      enabled: true
+#      enabled: true
       max-doc-chars: 1200
       window-enabled: true
       window-size: 40
@@ -65,7 +65,7 @@ app:
 logging:
   level:
     co.elastic.clients: WARN
-    org.springframework.boot.autoconfigure.elasticsearch: INFO
+    org.springframework.boot.autoconfigure.elasticsearch: WARN
 
 management:
   endpoints:
@@ -74,4 +74,4 @@ management:
         include: health,info,metrics
 
   docling:
-    base-url: ${APP_DOCLING_BASE_URL:http://127.0.0.1:8091}
+    base-url: ${APP_DOCLING_BASE_URL}
