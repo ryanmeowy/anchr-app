@@ -38,4 +38,17 @@ public class ThreadPoolConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean("indexInitExecutor")
+    public Executor indexInitExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(10);
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("index-init-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
 }
