@@ -6,8 +6,10 @@ import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
+import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -25,10 +27,16 @@ public class SegmentBulkWriter {
 
     private final ElasticsearchClient esClient;
     private final SegmentIndexConfig kbSegmentConfig;
+    private final SegmentIndexManager segmentIndexManager;
 
     public void write(List<Segment> segments) {
         if (segments == null || segments.isEmpty()) {
             return;
+        }
+        SegmentIndexStatusDTO status = segmentIndexManager.status();
+        if (!status.isIndexExists() || !"READY".equals(status.getStatus())) {
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                    "Search index is not ready, current status: " + status.getStatus());
         }
         String indexName = kbSegmentConfig.getWriteTargetName();
         try {

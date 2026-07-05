@@ -1,4 +1,10 @@
+server:
+  address: ${SERVER_HOST}
+  port: ${SERVER_PORT}
 spring:
+  devtools:
+    livereload:
+      enabled: false
   profiles:
     active: dev
   application:
@@ -40,6 +46,10 @@ app:
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
   docling:
     base-url: ${APP_DOCLING_BASE_URL}
+  segment:
+    index-name: kb_segment
+    read-alias: kb_segment_read
+    write-alias: kb_segment_write
   search:
     rrf:
       rank-constant: 60

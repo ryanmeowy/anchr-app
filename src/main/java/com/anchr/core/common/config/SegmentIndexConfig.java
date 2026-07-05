@@ -13,17 +13,11 @@ import org.springframework.context.annotation.Configuration;
 public class SegmentIndexConfig {
 
     private String indexName = "kb_segment";
-    private Integer dimension = 1024;
     private String readAlias;
     private String writeAlias;
-    private String indexVersion;
 
     public String getPhysicalIndexName() {
-        if (indexVersion == null || indexVersion.isBlank()) {
-            return indexName;
-        } else {
-            return indexName + "_" + indexVersion;
-        }
+        return indexName;
     }
 
     public String getReadTargetName() {
