@@ -11,12 +11,15 @@ import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.search.application.SegmentIndexManager;
+import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
+import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Repository;
@@ -38,6 +41,24 @@ public class EsSegmentRepository implements SegmentRepository {
 
     private final ElasticsearchClient esClient;
     private final SegmentIndexConfig kbSegmentConfig;
+    private final SegmentIndexManager segmentIndexManager;
+    private final SegmentIndexWriteBarrier indexWriteBarrier;
+
+    private void assertIndexReadable() {
+        SegmentIndexStatusDTO status = segmentIndexManager.status();
+        if (!status.isReadable()) {
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                    "Search index is not readable, current status: " + status.getStatus());
+        }
+    }
+
+    private void assertIndexWritable() {
+        SegmentIndexStatusDTO status = segmentIndexManager.status();
+        if (!status.isWritable()) {
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                    "Search index is not writable, current status: " + status.getStatus());
+        }
+    }
 
     @Override
     public List<SegmentHit> textSearch(String query, int limit) {
@@ -51,6 +72,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public List<SegmentHit> textSearch(String query, List<String> keywords, int limit, SearchFilter filter) {
+        assertIndexReadable();
         if ((!StringUtils.hasText(query) && (keywords == null || keywords.isEmpty())) || limit <= 0) {
             return List.of();
         }
@@ -71,6 +93,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter) {
+        assertIndexReadable();
         if (CollectionUtils.isEmpty(queryVector) || topK <= 0) {
             return List.of();
         }
@@ -86,6 +109,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public Optional<Segment> findBySegmentId(String segmentId) {
+        assertIndexReadable();
         if (!StringUtils.hasText(segmentId)) {
             return Optional.empty();
         }
@@ -109,6 +133,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public List<Segment> findNeighborChunks(String assetId, Integer chunkOrder, int window) {
+        assertIndexReadable();
         if (!StringUtils.hasText(assetId) || chunkOrder == null || window <= 0) {
             return List.of();
         }
@@ -127,10 +152,15 @@ public class EsSegmentRepository implements SegmentRepository {
         if (!StringUtils.hasText(assetId)) {
             return;
         }
+        indexWriteBarrier.withWritePermit(() -> doDeleteByAssetId(assetId.trim()));
+    }
+
+    private void doDeleteByAssetId(String assetId) {
+        assertIndexWritable();
         try {
             DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
                     .index(kbSegmentConfig.getWriteTargetName())
-                    .query(q -> q.term(t -> t.field("assetId").value(assetId.trim()))));
+                    .query(q -> q.term(t -> t.field("assetId").value(assetId))));
             esClient.deleteByQuery(request);
         } catch (Exception e) {
             log.error("kb segment delete by asset failed, assetId={}", assetId, e);

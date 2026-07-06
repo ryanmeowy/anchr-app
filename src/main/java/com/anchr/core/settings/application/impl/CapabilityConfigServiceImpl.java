@@ -3,16 +3,18 @@ package com.anchr.core.settings.application.impl;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
-import com.anchr.core.settings.domain.model.EmbedParamEnum;
 import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
-import com.anchr.core.integration.ai.client.TextEmbeddingClient;
 import com.anchr.core.integration.ai.client.GenerationClient;
 import com.anchr.core.integration.ai.client.MultiEmbeddingClient;
 import com.anchr.core.integration.ai.client.RerankClient;
+import com.anchr.core.integration.ai.client.TextEmbeddingClient;
+import com.anchr.core.search.application.SegmentIndexManager;
+import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
+import com.anchr.core.settings.domain.model.EmbedParamEnum;
 import com.anchr.core.settings.domain.model.ModelTypeEnum;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigDTO;
@@ -27,6 +29,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Default implementation for capability configuration.
@@ -43,6 +46,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     private final CapabilityClientFactory clientFactory;
     private final CapabilityResolver configResolver;
     private final ClientCacheManager clientCacheManager;
+    private final SegmentIndexManager segmentIndexManager;
 
     @Override
     public List<CapabilityConfigDTO> get(String capability) {
@@ -117,6 +121,9 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                 .build();
         CapabilityConfig updated = repository.update(config);
         refreshSlot(capability);
+        if (isEmbeddingCapability(capability) && activeEmbeddingUpdated(id)) {
+            onCapabilityChanged();
+        }
         return CapabilityConfigDTO.from(updated, maskApiKey(updated.getApiKeyEnc()));
     }
 
@@ -195,6 +202,9 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         // Both EMBEDDING and MULTI_EMBEDDING map to the EMBEDDING slot, so a single
         // refresh covers the mutual-exclusion toggle as well as GENERATION/RERANK.
         refreshSlot(capability);
+        if (isEmbeddingCapability(capability)) {
+            onCapabilityChanged();
+        }
     }
 
     @Override
@@ -239,5 +249,22 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         } catch (Exception e) {
             return "****";
         }
+    }
+
+    private void onCapabilityChanged() {
+        SegmentIndexStatusDTO indexStatus = segmentIndexManager.status();
+        if (!indexStatus.isIndexExists()) {
+            segmentIndexManager.asyncCreate();
+        }
+    }
+
+    private boolean isEmbeddingCapability(String capability) {
+        return "EMBEDDING".equals(capability) || "MULTI_EMBEDDING".equals(capability);
+    }
+
+    private boolean activeEmbeddingUpdated(Long id) {
+        return configResolver.activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
+                .map(c -> c.getId().equals(id))
+                .orElse(false);
     }
 }
