@@ -2,6 +2,7 @@ package com.anchr.core.search.interfaces.rest.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
+import com.anchr.core.search.domain.model.SegmentIndexStatus;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -11,12 +12,16 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class SegmentIndexStatusDTO {
 
-    private String status;           // NOT_READY | INITIALIZING | READY | REBUILDING
+    private SegmentIndexStatus status;           // NOT_READY | INITIALIZING | READY | REBUILDING
     private boolean indexExists;
+    private boolean readable;
+    private boolean writable;
     private Integer actualDim;       // from ES mapping
-    private String actualModel;      // from ES settings _meta
+    private String actualModel;      // from ES mapping _meta
+    private String actualProfileFingerprint;
     private Integer expectedDim;     // from active capability config
     private String expectedModel;    // from active capability config
+    private String expectedProfileFingerprint;
     private PendingRebuild pendingRebuild;
     private RebuildProgress rebuildProgress;
     private String lastError;

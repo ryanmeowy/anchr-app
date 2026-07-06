@@ -122,7 +122,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         CapabilityConfig updated = repository.update(config);
         refreshSlot(capability);
         if (isEmbeddingCapability(capability) && activeEmbeddingUpdated(id)) {
-            onCapabilityChanged(capability);
+            onCapabilityChanged();
         }
         return CapabilityConfigDTO.from(updated, maskApiKey(updated.getApiKeyEnc()));
     }
@@ -202,7 +202,9 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         // Both EMBEDDING and MULTI_EMBEDDING map to the EMBEDDING slot, so a single
         // refresh covers the mutual-exclusion toggle as well as GENERATION/RERANK.
         refreshSlot(capability);
-        onCapabilityChanged(capability);
+        if (isEmbeddingCapability(capability)) {
+            onCapabilityChanged();
+        }
     }
 
     @Override
@@ -249,17 +251,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         }
     }
 
-    // ==================== index management triggers ====================
-
-    @Override
-    public Optional<CapabilityConfig> getActiveEmbedding() {
-        return configResolver.activeForSlot(CapabilityResolver.SLOT_EMBEDDING);
-    }
-
-    private void onCapabilityChanged(String capability) {
-        if (!isEmbeddingCapability(capability)) {
-            return;
-        }
+    private void onCapabilityChanged() {
         SegmentIndexStatusDTO indexStatus = segmentIndexManager.status();
         if (!indexStatus.isIndexExists()) {
             segmentIndexManager.asyncCreate();

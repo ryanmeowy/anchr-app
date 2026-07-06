@@ -5,6 +5,7 @@ import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.EmbeddingClient;
+import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -37,8 +38,32 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
     private final CapabilityResolver configResolver;
 
     public List<Float> embed(String source, String sourceType) {
-        ClientCacheManager.ResolvedClient resolved = cacheManager.getOrBuild(
-                CapabilityResolver.SLOT_EMBEDDING, this::resolve);
+        return embed(resolveActiveClient(), source, sourceType);
+    }
+
+    @Override
+    public EmbeddingSession openSession(EmbeddingProfile profile) {
+        ClientCacheManager.ResolvedClient resolved = resolveActiveClient();
+        CapabilityConfig config = resolved.config();
+        EmbeddingProfile activeProfile = CapabilityEmbeddingProfileProvider.createProfile(config)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Active embedding configuration has no valid profile"));
+        if (!activeProfile.fingerprint().equals(profile.fingerprint())) {
+            throw new IllegalStateException(
+                    "Active embedding configuration changed before rebuild session started");
+        }
+        return (source, sourceType) -> embed(resolved, source, sourceType);
+    }
+
+    private ClientCacheManager.ResolvedClient resolveActiveClient() {
+        return cacheManager.getOrBuild(CapabilityResolver.SLOT_EMBEDDING, this::resolve);
+    }
+
+    private List<Float> embed(
+            ClientCacheManager.ResolvedClient resolved,
+            String source,
+            String sourceType
+    ) {
         CapabilityConfig config = resolved.config();
         EmbeddingClient client = (EmbeddingClient) resolved.client();
         boolean isMulti = "MULTI_EMBEDDING".equals(config.getCapability());

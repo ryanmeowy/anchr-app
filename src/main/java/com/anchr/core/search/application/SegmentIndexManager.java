@@ -6,6 +6,7 @@ public interface SegmentIndexManager {
     void asyncCreate();
     void createPendingRebuild(String reason, int expectedDim);
     SegmentIndexStatusDTO status();
+    boolean quickCheck();
     boolean retryCreate();
     boolean confirmRebuild(String taskId);
     String prepareRebuild();
