@@ -27,6 +27,4 @@ public interface CapabilityConfigService {
     void select(String capability, Long id);
 
     void del(String capability, Long id);
-
-    Optional<CapabilityConfig> getActiveEmbedding();
 }
