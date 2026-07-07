@@ -28,6 +28,18 @@ class CapabilityEmbeddingProfileProviderTest {
     }
 
     @Test
+    void createProfileShouldIgnoreNonDimensionExtraConfig() {
+        EmbeddingProfile first = CapabilityEmbeddingProfileProvider.createProfile(
+                config(1L, "https://embedding.example.com", "model-a",
+                        "{\"dimensions\":1024,\"timeout\":30}")).orElseThrow();
+        EmbeddingProfile second = CapabilityEmbeddingProfileProvider.createProfile(
+                config(1L, "https://embedding.example.com", "model-a",
+                        "{\"dimensions\":1024,\"timeout\":60}")).orElseThrow();
+
+        assertEquals(first.fingerprint(), second.fingerprint());
+    }
+
+    @Test
     void createProfileShouldChangeFingerprintWhenModelChanges() {
         EmbeddingProfile first = CapabilityEmbeddingProfileProvider.createProfile(
                 config(1L, "https://embedding.example.com", "model-a",

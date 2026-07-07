@@ -46,12 +46,14 @@ public class CapabilityEmbeddingProfileProvider implements EmbeddingProfileProvi
             if (dimension == null || dimension <= 0) {
                 return Optional.empty();
             }
-            String canonicalExtraConfig = OBJECT_MAPPER.writeValueAsString(extraConfig);
+            String canonicalProfileConfig = OBJECT_MAPPER.writeValueAsString(
+                    Map.of(EmbedParamEnum.DIMENSIONS.getKey(),
+                            extraConfig.get(EmbedParamEnum.DIMENSIONS.getKey())));
             String fingerprint = fingerprint(
                     normalize(config.getCapability()),
                     normalizeBaseUrl(config.getBaseUrl()),
                     normalize(config.getModelName()),
-                    canonicalExtraConfig);
+                    canonicalProfileConfig);
             return Optional.of(new EmbeddingProfile(
                     config.getId(),
                     config.getCapability(),

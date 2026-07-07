@@ -54,7 +54,11 @@ public class IndexController {
     @RequireAuth()
     @PostMapping("/rebuild/prepare")
     public Result<String> prepareRebuild() {
-        String taskId = segmentIndexManager.prepareRebuild();
-        return Result.success(taskId);
+        try {
+            String taskId = segmentIndexManager.prepareRebuild();
+            return Result.success(taskId);
+        } catch (IllegalStateException e) {
+            return Result.error(e.getMessage());
+        }
     }
 }

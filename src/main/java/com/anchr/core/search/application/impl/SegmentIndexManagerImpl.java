@@ -48,6 +48,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 @Slf4j
@@ -64,6 +65,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private static final String META_CAPABILITY = "embeddingCapability";
     private static final String META_MODEL = "embeddingModel";
     private static final String META_DIMENSION = "embeddingDimension";
+    private static final long ALIAS_TOPOLOGY_REFRESH_INTERVAL_MS = 15_000L;
+    private static final String ALIAS_TOPOLOGY_ERROR_PREFIX = "Alias topology invalid: ";
 
     private final ElasticsearchClient esClient;
     private final SegmentIndexConfig kbSegmentConfig;
@@ -80,6 +83,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     private final AtomicReference<SegmentIndexState> stateRef =
             new AtomicReference<>(SegmentIndexState.initial());
+    private final AtomicLong lastAliasTopologyRefreshMs = new AtomicLong(0);
 
     private record SegmentIndexState(
             SegmentIndexStatus status,
@@ -87,6 +91,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             PendingRebuildState pendingRebuild,
             RebuildProgressState rebuildProgress,
             Boolean indexExists,
+            String readIndex,
             boolean readable,
             boolean writable,
             Integer actualDim,
@@ -96,32 +101,47 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         private static SegmentIndexState initial() {
             return new SegmentIndexState(
                     SegmentIndexStatus.NOT_READY, null, null, null,
-                    null, false, false, null, null, null);
+                    null, null, false, false, null, null, null);
         }
 
         private SegmentIndexState withStatus(SegmentIndexStatus newStatus, String newLastError) {
             return new SegmentIndexState(
                     newStatus, newLastError, pendingRebuild, rebuildProgress,
-                    indexExists, readable, writable,
+                    indexExists, readIndex, readable, writable,
                     actualDim, actualModel, actualProfileFingerprint);
         }
 
         private SegmentIndexState withPendingRebuild(PendingRebuildState newPendingRebuild) {
             return new SegmentIndexState(
                     status, lastError, newPendingRebuild, rebuildProgress,
-                    indexExists, readable, writable,
+                    indexExists, readIndex, readable, writable,
+                    actualDim, actualModel, actualProfileFingerprint);
+        }
+
+        private SegmentIndexState withoutPendingRebuild(String newLastError) {
+            return new SegmentIndexState(
+                    status, newLastError, null, null,
+                    indexExists, readIndex, readable, writable,
                     actualDim, actualModel, actualProfileFingerprint);
         }
 
         private SegmentIndexState withRebuildProgress(RebuildProgressState newRebuildProgress) {
             return new SegmentIndexState(
                     status, lastError, pendingRebuild, newRebuildProgress,
-                    indexExists, readable, writable,
+                    indexExists, readIndex, readable, writable,
+                    actualDim, actualModel, actualProfileFingerprint);
+        }
+
+        private SegmentIndexState withLastError(String newLastError) {
+            return new SegmentIndexState(
+                    status, newLastError, pendingRebuild, rebuildProgress,
+                    indexExists, readIndex, readable, writable,
                     actualDim, actualModel, actualProfileFingerprint);
         }
 
         private SegmentIndexState withIndexInfo(
                 boolean newIndexExists,
+                String newReadIndex,
                 boolean newReadable,
                 boolean newWritable,
                 Integer newActualDim,
@@ -131,6 +151,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             return new SegmentIndexState(
                     status, lastError, pendingRebuild, rebuildProgress,
                     newIndexExists,
+                    newReadIndex,
                     newReadable,
                     status == SegmentIndexStatus.READY && newWritable,
                     newActualDim,
@@ -140,22 +161,23 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
         private SegmentIndexState claimRebuild() {
             return new SegmentIndexState(
-                    SegmentIndexStatus.REBUILDING, null, pendingRebuild, rebuildProgress,
-                    indexExists, readable, false,
+                    SegmentIndexStatus.REBUILDING, null, pendingRebuild,
+                    new RebuildProgressState(0, 0, "PREPARING"),
+                    indexExists, readIndex, readable, false,
                     actualDim, actualModel, actualProfileFingerprint);
         }
 
         private SegmentIndexState createSucceeded(EmbeddingProfile profile) {
             return new SegmentIndexState(
                     SegmentIndexStatus.READY, null, null, null,
-                    true, true, true,
+                    true, null, true, true,
                     profile.dimension(), profile.modelName(), profile.fingerprint());
         }
 
         private SegmentIndexState rebuildSucceeded(EmbeddingProfile profile) {
             return new SegmentIndexState(
                     SegmentIndexStatus.READY, null, null, rebuildProgress,
-                    true, true, true,
+                    true, null, true, true,
                     profile.dimension(), profile.modelName(), profile.fingerprint());
         }
 
@@ -169,7 +191,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     : rebuildProgress.withPhase("FAILED");
             return new SegmentIndexState(
                     SegmentIndexStatus.READY, error, pendingRebuild, failedProgress,
-                    indexExists, aliasReadable, aliasWritable,
+                    indexExists, readIndex, aliasReadable, aliasWritable,
                     actualDim, actualModel, actualProfileFingerprint);
         }
     }
@@ -228,7 +250,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     }
 
     void markReadyFromStatus(SegmentIndexStatusDTO status) {
-        stateRef.updateAndGet(current -> {
+        SegmentIndexState updated = stateRef.updateAndGet(current -> {
             if (current.status() != SegmentIndexStatus.NOT_READY) {
                 log.info("markReadyFromStatus skipped: current status is {}", current.status());
                 return current;
@@ -237,12 +259,16 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     .withStatus(SegmentIndexStatus.READY, current.lastError())
                     .withIndexInfo(
                             status.isIndexExists(),
+                            null,
                             status.isReadable(),
                             status.isWritable(),
                             status.getActualDim(),
                             status.getActualModel(),
                             status.getActualProfileFingerprint());
         });
+        if (updated.status() == SegmentIndexStatus.READY && updated.indexExists() != null) {
+            lastAliasTopologyRefreshMs.set(System.currentTimeMillis());
+        }
     }
 
     // ==================== 1a: async create ====================
@@ -329,18 +355,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     // ==================== 1b + 1e: rebuild ====================
 
-    @Override
-    public void createPendingRebuild(String reason, int expectedDim) {
-        EmbeddingProfile profile = embeddingProfileProvider.getActiveEmbeddingProfile()
-                .orElseThrow(() -> new IllegalStateException("No active embedding profile"));
-        if (profile.dimension() != expectedDim) {
-            throw new IllegalStateException(
-                    "Active embedding dimension changed from " + expectedDim
-                            + " to " + profile.dimension());
-        }
-        createPendingRebuildTask(reason, profile);
-    }
-
     private String createPendingRebuildTask(String reason, EmbeddingProfile targetProfile) {
         String readAlias = kbSegmentConfig.getReadAlias();
         String writeAlias = kbSegmentConfig.getWriteAlias();
@@ -368,8 +382,18 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 return existing.taskId();
             }
             if (stateRef.compareAndSet(current, current.withPendingRebuild(pending))) {
-                log.info("Pending rebuild task created: taskId={}, expectedDim={}, reason={}",
-                        taskId, targetProfile.dimension(), reason);
+                if (existing == null) {
+                    log.info("Pending rebuild task created: taskId={}, expectedDim={}, reason={}",
+                            taskId, targetProfile.dimension(), reason);
+                } else {
+                    log.warn("Pending rebuild task replaced: oldTaskId={}, newTaskId={}, oldFingerprint={}, newFingerprint={}, oldReason={}, newReason={}",
+                            existing.taskId(),
+                            taskId,
+                            existing.targetProfile().fingerprint(),
+                            targetProfile.fingerprint(),
+                            existing.reason(),
+                            reason);
+                }
                 return taskId;
             }
         }
@@ -377,7 +401,9 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     @Override
     public boolean confirmRebuild(String taskId) {
-        RebuildClaim claim = tryClaimRebuild(taskId);
+        EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
+                .orElse(null);
+        RebuildClaim claim = tryClaimRebuild(taskId, expectedProfile);
         if (claim == null) {
             log.warn("Rebuild confirm: task not found or mismatched, taskId={}", taskId);
             return false;
@@ -392,13 +418,17 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
     }
 
-    private RebuildClaim tryClaimRebuild(String taskId) {
+    private RebuildClaim tryClaimRebuild(String taskId, EmbeddingProfile expectedProfile) {
         while (true) {
             SegmentIndexState current = stateRef.get();
             PendingRebuildState pending = current.pendingRebuild();
             if (current.status() != SegmentIndexStatus.READY
                     || pending == null
                     || !pending.taskId().equals(taskId)) {
+                return null;
+            }
+            if (!pendingRebuildStillNeeded(current, expectedProfile)) {
+                clearObsoletePendingRebuild(current, expectedProfile);
                 return null;
             }
             SegmentIndexState claimed = current.claimRebuild();
@@ -454,6 +484,30 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private record RebuildClaim(String taskId, EmbeddingProfile targetProfile) {
     }
 
+    private record IndexInspection(
+            boolean readable,
+            boolean writable,
+            String readIndex,
+            String error,
+            MappingProfile mappingProfile
+    ) {
+    }
+
+    private record MappingProfile(
+            boolean loaded,
+            Integer actualDim,
+            String actualModel,
+            String actualProfileFingerprint
+    ) {
+        private static MappingProfile notLoaded() {
+            return new MappingProfile(false, null, null, null);
+        }
+
+        private static MappingProfile empty() {
+            return new MappingProfile(true, null, null, null);
+        }
+    }
+
     private record MigrationDocument(String id, SegmentDocument document) {
     }
 
@@ -486,7 +540,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     oldPhysicalIndex,
                     newPhysicalIndex,
                     totalDocs,
-                    targetProfile.dimension(),
+                    targetProfile,
                     embeddingSession);
 
             // 5. alias 原子切换到新索引
@@ -513,7 +567,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             String oldIndex,
             String newIndex,
             long totalDocs,
-            int expectedDim,
+            EmbeddingProfile targetProfile,
             EmbeddingSession embeddingSession
     ) throws Exception {
         long migrated = 0;
@@ -534,7 +588,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
             while (!hits.isEmpty()) {
                 List<MigrationDocument> batch = prepareMigrationBatch(
-                        hits, expectedDim, embeddingSession);
+                        hits, targetProfile, embeddingSession);
                 writeMigrationBatch(newIndex, batch);
 
                 migrated += batch.size();
@@ -569,7 +623,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     private List<MigrationDocument> prepareMigrationBatch(
             List<Hit<SegmentDocument>> hits,
-            int expectedDim,
+            EmbeddingProfile targetProfile,
             EmbeddingSession embeddingSession
     ) {
         List<MigrationDocument> batch = new ArrayList<>(hits.size());
@@ -589,8 +643,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             }
 
             List<Float> embedding = computeNewEmbedding(
-                    document, documentId, embeddingSession);
-            validateEmbedding(documentId, embedding, expectedDim);
+                    document, documentId, targetProfile, embeddingSession);
+            validateEmbedding(documentId, embedding, targetProfile.dimension());
             document.setEmbedding(embedding);
             batch.add(new MigrationDocument(documentId, document));
         }
@@ -635,9 +689,12 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private List<Float> computeNewEmbedding(
             SegmentDocument doc,
             String documentId,
+            EmbeddingProfile targetProfile,
             EmbeddingSession embeddingSession
     ) {
-        if ("IMAGE".equalsIgnoreCase(doc.getAssetType())) {
+        boolean image = "IMAGE".equalsIgnoreCase(doc.getAssetType());
+        boolean targetSupportsImage = "MULTI_EMBEDDING".equalsIgnoreCase(targetProfile.capability());
+        if (image && targetSupportsImage) {
             if (!StringUtils.hasText(doc.getThumbnail())) {
                 throw new IllegalStateException(
                         "Rebuild IMAGE document " + documentId + " has no thumbnail");
@@ -646,11 +703,15 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     SearchObjectStoragePort.AiInputValidity.SHORT);
             return embeddingSession.embed(imageUrl, "image");
         }
-        if (!StringUtils.hasText(doc.getContentText())) {
+
+        String text = StringUtils.hasText(doc.getContentText())
+                ? doc.getContentText()
+                : doc.getOcrText();
+        if (!StringUtils.hasText(text)) {
             throw new IllegalStateException(
-                    "Rebuild document " + documentId + " has no contentText");
+                    "Rebuild document " + documentId + " has no text content for embedding");
         }
-        return embeddingSession.embed(doc.getContentText(), "text");
+        return embeddingSession.embed(text, "text");
     }
 
     static void validateEmbedding(String documentId, List<Float> embedding, int expectedDim) {
@@ -732,88 +793,195 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private SegmentIndexStatusDTO status(EmbeddingProfile expectedProfile) {
         SegmentIndexState current = stateRef.get();
         if (current.indexExists() != null) {
-            return SegmentIndexStatusDTO.builder()
-                    .status(current.status())
-                    .indexExists(current.indexExists())
-                    .readable(current.readable())
-                    .writable(current.writable())
-                    .actualDim(current.actualDim())
-                    .actualModel(current.actualModel())
-                    .actualProfileFingerprint(current.actualProfileFingerprint())
-                    .expectedDim(expectedProfile == null ? null : expectedProfile.dimension())
-                    .expectedModel(expectedProfile == null ? null : expectedProfile.modelName())
-                    .expectedProfileFingerprint(
-                            expectedProfile == null ? null : expectedProfile.fingerprint())
-                    .pendingRebuild(toPendingRebuildDto(current.pendingRebuild()))
-                    .rebuildProgress(toRebuildProgressDto(current.rebuildProgress()))
-                    .lastError(current.lastError())
-                    .build();
-        }
-        AliasTopology topology = aliasManager.inspect();
-        String targetName = topology.readIndex();
-        boolean exists = topology.readable();
-        Integer actualDim = null;
-        String actualModel = null;
-        String actualProfileFingerprint = null;
-        try {
-            if (exists && StringUtils.hasText(targetName)) {
-                Map<String, IndexMappingRecord> mappings = esClient.indices()
-                        .getMapping(m -> m.index(targetName)).result();
-                for (IndexMappingRecord record : mappings.values()) {
-                    if (record.mappings() != null) {
-                        var embeddingProp = record.mappings().properties().get("embedding");
-                        if (embeddingProp != null && embeddingProp.isDenseVector()) {
-                            actualDim = embeddingProp.denseVector().dims();
-                        }
-                        Map<String, JsonData> metadata = record.mappings().meta();
-                        actualModel = readMetadataString(metadata, META_MODEL);
-                        actualProfileFingerprint =
-                                readMetadataString(metadata, META_PROFILE_FINGERPRINT);
-                        Integer metadataVersion =
-                                readMetadataInteger(metadata, META_PROFILE_VERSION);
-                        Integer metadataDimension =
-                                readMetadataInteger(metadata, META_DIMENSION);
-                        if (!Objects.equals(metadataVersion, 1)
-                                || !Objects.equals(metadataDimension, actualDim)) {
-                            log.warn("Index [{}] has invalid embedding profile metadata", targetName);
-                            actualProfileFingerprint = null;
-                        }
-                    }
-                    break;
-                }
+            if (shouldRefreshAliasTopology(current)) {
+                IndexInspection inspection = inspectIndex(false, current.readIndex());
+                current = mergeInspection(inspection);
             }
-        } catch (Exception e) {
-            log.warn("Failed to query index status via alias [{}]: {}", targetName, e.getMessage());
+            current = clearObsoletePendingRebuild(current, expectedProfile);
+            return toStatusDto(current, expectedProfile);
         }
 
-        boolean resolvedExists = exists;
-        Integer resolvedActualDim = actualDim;
-        String resolvedActualModel = actualModel;
-        String resolvedActualProfileFingerprint = actualProfileFingerprint;
-        SegmentIndexState updated = stateRef.updateAndGet(previous ->
-                previous.withIndexInfo(
-                        resolvedExists,
-                        topology.readable(),
-                        topology.writable(),
-                        resolvedActualDim,
-                        resolvedActualModel,
-                        resolvedActualProfileFingerprint));
+        IndexInspection inspection = inspectIndex(true, null);
+        lastAliasTopologyRefreshMs.set(System.currentTimeMillis());
+        SegmentIndexState updated = mergeInspection(inspection);
+        updated = clearObsoletePendingRebuild(updated, expectedProfile);
+        return toStatusDto(updated, expectedProfile);
+    }
 
+    private SegmentIndexState clearObsoletePendingRebuild(
+            SegmentIndexState observed,
+            EmbeddingProfile expectedProfile
+    ) {
+        SegmentIndexState current = observed;
+        while (hasObsoletePendingRebuild(current, expectedProfile)) {
+            PendingRebuildState pending = current.pendingRebuild();
+            SegmentIndexState updated = current.withoutPendingRebuild(
+                    preserveAliasTopologyError(current.lastError()));
+            if (stateRef.compareAndSet(current, updated)) {
+                log.info("Pending rebuild task cleared: taskId={}, targetFingerprint={}, expectedFingerprint={}, reason={}",
+                        pending.taskId(),
+                        pending.targetProfile().fingerprint(),
+                        expectedProfile == null ? null : expectedProfile.fingerprint(),
+                        pending.reason());
+                return updated;
+            }
+            current = stateRef.get();
+        }
+        return current;
+    }
+
+    private boolean hasObsoletePendingRebuild(
+            SegmentIndexState state,
+            EmbeddingProfile expectedProfile
+    ) {
+        return state.status() == SegmentIndexStatus.READY
+                && state.pendingRebuild() != null
+                && !pendingRebuildStillNeeded(state, expectedProfile);
+    }
+
+    private boolean pendingRebuildStillNeeded(
+            SegmentIndexState state,
+            EmbeddingProfile expectedProfile
+    ) {
+        PendingRebuildState pending = state.pendingRebuild();
+        if (pending == null || expectedProfile == null) {
+            return false;
+        }
+        if (!Objects.equals(
+                pending.targetProfile().fingerprint(),
+                expectedProfile.fingerprint())) {
+            return false;
+        }
+        return !Objects.equals(state.actualDim(), expectedProfile.dimension())
+                || !Objects.equals(
+                state.actualProfileFingerprint(),
+                expectedProfile.fingerprint());
+    }
+
+    private String preserveAliasTopologyError(String lastError) {
+        return lastError != null && lastError.startsWith(ALIAS_TOPOLOGY_ERROR_PREFIX)
+                ? lastError
+                : null;
+    }
+
+    private boolean shouldRefreshAliasTopology(SegmentIndexState current) {
+        if (current.status() != SegmentIndexStatus.READY) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        long previous = lastAliasTopologyRefreshMs.get();
+        if (now - previous < ALIAS_TOPOLOGY_REFRESH_INTERVAL_MS) {
+            return false;
+        }
+        return lastAliasTopologyRefreshMs.compareAndSet(previous, now);
+    }
+
+    private IndexInspection inspectIndex(boolean forceMappingLoad, String currentReadIndex) {
+        AliasTopology topology = aliasManager.inspect();
+        boolean loadMapping = topology.readable()
+                && (forceMappingLoad || !Objects.equals(topology.readIndex(), currentReadIndex));
+        MappingProfile mappingProfile = loadMapping
+                ? inspectMappingProfile(topology.readIndex())
+                : MappingProfile.notLoaded();
+        return new IndexInspection(
+                topology.readable(),
+                topology.writable(),
+                topology.readIndex(),
+                topology.error(),
+                mappingProfile);
+    }
+
+    private SegmentIndexState mergeInspection(IndexInspection inspection) {
+        return stateRef.updateAndGet(previous -> {
+            SegmentIndexState base = previous;
+            if (inspection.readable() && previous.status() == SegmentIndexStatus.NOT_READY) {
+                base = previous.withStatus(SegmentIndexStatus.READY, null);
+            }
+            MappingProfile mappingProfile = inspection.mappingProfile();
+            SegmentIndexState updated = base.withIndexInfo(
+                    inspection.readable(),
+                    inspection.readable() ? inspection.readIndex() : null,
+                    inspection.readable(),
+                    inspection.writable(),
+                    mappingProfile.loaded() ? mappingProfile.actualDim() : previous.actualDim(),
+                    mappingProfile.loaded() ? mappingProfile.actualModel() : previous.actualModel(),
+                    mappingProfile.loaded()
+                            ? mappingProfile.actualProfileFingerprint()
+                            : previous.actualProfileFingerprint());
+            return updated.withLastError(resolveInspectionError(previous.lastError(), inspection));
+        });
+    }
+
+    private String resolveInspectionError(String previousError, IndexInspection inspection) {
+        if (!inspection.readable() || !inspection.writable()) {
+            return ALIAS_TOPOLOGY_ERROR_PREFIX
+                    + (StringUtils.hasText(inspection.error()) ? inspection.error() : "unknown");
+        }
+        if (previousError != null && previousError.startsWith(ALIAS_TOPOLOGY_ERROR_PREFIX)) {
+            return null;
+        }
+        return previousError;
+    }
+
+    private MappingProfile inspectMappingProfile(String indexName) {
+        if (!StringUtils.hasText(indexName)) {
+            return MappingProfile.empty();
+        }
+        try {
+            Map<String, IndexMappingRecord> mappings = esClient.indices()
+                    .getMapping(m -> m.index(indexName)).result();
+            return mappings.values().stream()
+                    .findFirst()
+                    .map(record -> toMappingProfile(indexName, record))
+                    .orElseGet(MappingProfile::empty);
+        } catch (Exception e) {
+            log.warn("Failed to query index status via alias [{}]: {}", indexName, e.getMessage());
+            return MappingProfile.empty();
+        }
+    }
+
+    private MappingProfile toMappingProfile(String indexName, IndexMappingRecord record) {
+        if (record.mappings() == null) {
+            return MappingProfile.empty();
+        }
+        Integer actualDim = null;
+        var embeddingProp = record.mappings().properties().get("embedding");
+        if (embeddingProp != null && embeddingProp.isDenseVector()) {
+            actualDim = embeddingProp.denseVector().dims();
+        }
+
+        Map<String, JsonData> metadata = record.mappings().meta();
+        String actualModel = readMetadataString(metadata, META_MODEL);
+        String actualProfileFingerprint = readMetadataString(metadata, META_PROFILE_FINGERPRINT);
+        Integer metadataVersion = readMetadataInteger(metadata, META_PROFILE_VERSION);
+        Integer metadataDimension = readMetadataInteger(metadata, META_DIMENSION);
+        if (!Objects.equals(metadataVersion, 1)
+                || !Objects.equals(metadataDimension, actualDim)) {
+            log.warn("Index [{}] has invalid embedding profile metadata", indexName);
+            actualProfileFingerprint = null;
+        }
+        return new MappingProfile(true, actualDim, actualModel, actualProfileFingerprint);
+    }
+
+    private SegmentIndexStatusDTO toStatusDto(
+            SegmentIndexState state,
+            EmbeddingProfile expectedProfile
+    ) {
         return SegmentIndexStatusDTO.builder()
-                .status(updated.status())
-                .indexExists(exists)
-                .readable(updated.readable())
-                .writable(updated.writable())
-                .actualDim(actualDim)
-                .actualModel(actualModel)
-                .actualProfileFingerprint(actualProfileFingerprint)
+                .status(state.status())
+                .indexExists(Boolean.TRUE.equals(state.indexExists()))
+                .readable(state.readable())
+                .writable(state.writable())
+                .actualDim(state.actualDim())
+                .actualModel(state.actualModel())
+                .actualProfileFingerprint(state.actualProfileFingerprint())
                 .expectedDim(expectedProfile == null ? null : expectedProfile.dimension())
                 .expectedModel(expectedProfile == null ? null : expectedProfile.modelName())
                 .expectedProfileFingerprint(
                         expectedProfile == null ? null : expectedProfile.fingerprint())
-                .pendingRebuild(toPendingRebuildDto(updated.pendingRebuild()))
-                .rebuildProgress(toRebuildProgressDto(updated.rebuildProgress()))
-                .lastError(updated.lastError())
+                .pendingRebuild(toPendingRebuildDto(state.pendingRebuild()))
+                .rebuildProgress(toRebuildProgressDto(state.rebuildProgress()))
+                .lastError(state.lastError())
                 .build();
     }
 
@@ -849,11 +1017,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             return false;
         }
         return tryScheduleCreate();
-    }
-
-    @Override
-    public boolean quickCheck() {
-        return aliasManager.inspect().readable();
     }
 
     // ==================== helpers ====================
@@ -903,17 +1066,27 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     public String prepareRebuild() {
         EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
                 .orElse(null);
+        if (expectedProfile == null) {
+            log.warn("Prepare rebuild: no active embedding profile");
+            return null;
+        }
+        try {
+            aliasManager.requireValid();
+        } catch (IllegalStateException e) {
+            throw new IllegalStateException("索引 alias 不合法，无法重建：" + e.getMessage(), e);
+        }
         SegmentIndexStatusDTO s = status(expectedProfile);
-        if (!s.isIndexExists() || s.getActualDim() == null || expectedProfile == null) {
+        if (!s.isIndexExists() || !s.isReadable() || !s.isWritable() || s.getActualDim() == null) {
             log.warn("Prepare rebuild: index not ready, indexExists={}, actualDim={}, expectedDim={}",
                     s.isIndexExists(),
                     s.getActualDim(),
-                    expectedProfile == null ? null : expectedProfile.dimension());
+                    expectedProfile.dimension());
             return null;
         }
         if (s.getActualDim().equals(expectedProfile.dimension())) {
             if (Objects.equals(
                     s.getActualProfileFingerprint(), expectedProfile.fingerprint())) {
+                clearObsoletePendingRebuild(stateRef.get(), expectedProfile);
                 log.info("Prepare rebuild: dimensions and model match, no rebuild needed");
                 return null;
             }
@@ -926,15 +1099,22 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     private String buildRebuildReason(SegmentIndexStatusDTO s) {
         boolean dimChanged = !Objects.equals(s.getActualDim(), s.getExpectedDim());
-        boolean modelChanged = !Objects.equals(
+        boolean profileChanged = !Objects.equals(
                 s.getActualProfileFingerprint(), s.getExpectedProfileFingerprint());
-        if (dimChanged && modelChanged) {
-            return "Embedding model and dimension changed: dim " + s.getActualDim() + " -> " + s.getExpectedDim()
-                    + ", model " + s.getActualModel() + " -> " + s.getExpectedModel();
+        boolean modelNameChanged = !Objects.equals(s.getActualModel(), s.getExpectedModel());
+        if (dimChanged && profileChanged) {
+            String modelText = modelNameChanged
+                    ? "，模型 " + s.getActualModel() + " -> " + s.getExpectedModel()
+                    : "，模型 " + s.getExpectedModel();
+            return "Embedding 配置已变化：维度 " + s.getActualDim() + " -> " + s.getExpectedDim()
+                    + modelText;
         }
         if (dimChanged) {
-            return "Embedding dimension changed from " + s.getActualDim() + " to " + s.getExpectedDim();
+            return "Embedding 维度已变化：" + s.getActualDim() + " -> " + s.getExpectedDim();
         }
-        return "Embedding model changed from " + s.getActualModel() + " to " + s.getExpectedModel();
+        if (modelNameChanged) {
+            return "Embedding 模型已变化：" + s.getActualModel() + " -> " + s.getExpectedModel();
+        }
+        return "Embedding 配置已变化：模型 " + s.getExpectedModel();
     }
 }

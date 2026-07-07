@@ -56,14 +56,6 @@ class SegmentIndexAvailabilityTest {
         public void asyncCreate() {}
 
         @Override
-        public void createPendingRebuild(String reason, int expectedDim) {}
-
-        @Override
-        public boolean quickCheck() {
-            return status.isReadable();
-        }
-
-        @Override
         public boolean retryCreate() {
             return false;
         }
