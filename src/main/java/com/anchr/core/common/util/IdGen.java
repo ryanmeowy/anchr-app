@@ -23,6 +23,7 @@ public class IdGen {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    // Instance-level lock for allocating IDs within this JVM; Redis INCR reserves segments across instances.
     private final Lock lock = new ReentrantLock();
 
     private String cacheKey;

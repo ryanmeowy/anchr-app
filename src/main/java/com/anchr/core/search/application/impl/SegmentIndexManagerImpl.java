@@ -79,8 +79,10 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private final SegmentIndexWriteBarrier indexWriteBarrier;
     private final SegmentIndexAliasManager aliasManager;
 
+    // Instance-level lock; use a distributed lock for multi-instance deployments.
     private final ReentrantLock indexOpLock = new ReentrantLock();
 
+    // Instance-local lifecycle state; persist or externalize it before running multiple app instances.
     private final AtomicReference<SegmentIndexState> stateRef =
             new AtomicReference<>(SegmentIndexState.initial());
     private final AtomicLong lastAliasTopologyRefreshMs = new AtomicLong(0);
@@ -226,8 +228,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
     }
 
-    // ==================== Boot ====================
-
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
         SegmentIndexStatusDTO s = status();
@@ -270,8 +270,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             lastAliasTopologyRefreshMs.set(System.currentTimeMillis());
         }
     }
-
-    // ==================== 1a: async create ====================
 
     @Override
     public void asyncCreate() {
@@ -352,8 +350,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             throw e;
         }
     }
-
-    // ==================== 1b + 1e: rebuild ====================
 
     private String createPendingRebuildTask(String reason, EmbeddingProfile targetProfile) {
         String readAlias = kbSegmentConfig.getReadAlias();
@@ -781,8 +777,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
     }
 
-    // ==================== 1c: status ====================
-
     @Override
     public SegmentIndexStatusDTO status() {
         EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
@@ -1007,8 +1001,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         return progress == null ? null : progress.toDto();
     }
 
-    // ==================== 1d: retry create ====================
-
     @Override
     public boolean retryCreate() {
         SegmentIndexState current = stateRef.get();
@@ -1018,8 +1010,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
         return tryScheduleCreate();
     }
-
-    // ==================== helpers ====================
 
     private String loadAndProcessMapping(int dims) throws Exception {
         ClassPathResource resource = new ClassPathResource(MAPPING_PATH);
