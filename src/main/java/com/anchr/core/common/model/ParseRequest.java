@@ -26,7 +26,7 @@ public record ParseRequest(
             Boolean useNativeChunker
     ) {
         public static Options chunkModel() {
-            return new Options("chunks", true, true, true, true, 200, 300, true);
+            return new Options("chunks", true, true, true, true, 200, 500, true);
         }
     }
 

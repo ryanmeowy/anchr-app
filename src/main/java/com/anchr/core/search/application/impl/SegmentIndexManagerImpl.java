@@ -60,7 +60,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     private static final String SETTINGS_PATH = "es-settings.json";
     private static final String MAPPING_PATH = "es-kb-segment-mapping.json";
-    private static final int SCROLL_BATCH_SIZE = 200;
+    private static final int SCROLL_BATCH_SIZE = 50;
     private static final int SCROLL_KEEP_ALIVE_MINUTES = 5;
     private static final int EMBEDDING_RATE_LIMIT_MAX_ATTEMPTS = 5;
     private static final long EMBEDDING_RATE_LIMIT_BACKOFF_MS = 5_000L;
