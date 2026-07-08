@@ -58,7 +58,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     private static final String SETTINGS_PATH = "es-settings.json";
     private static final String MAPPING_PATH = "es-kb-segment-mapping.json";
-    private static final int SCROLL_BATCH_SIZE = 500;
+    private static final int SCROLL_BATCH_SIZE = 200;
     private static final int SCROLL_KEEP_ALIVE_MINUTES = 5;
     private static final String META_PROFILE_VERSION = "embeddingProfileVersion";
     private static final String META_PROFILE_FINGERPRINT = "embeddingProfileFingerprint";

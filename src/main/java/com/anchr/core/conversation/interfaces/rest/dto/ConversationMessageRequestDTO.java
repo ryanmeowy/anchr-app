@@ -15,7 +15,7 @@ import java.util.List;
 public class ConversationMessageRequestDTO {
 
     @NotBlank(message = "query cannot be empty")
-    @Size(max = 200, message = "query length cannot exceed 200")
+    @Size(max = 1000, message = "query length cannot exceed 1000")
     private String query;
 
     @Min(value = 1, message = "limit must be greater than 0")
