@@ -47,9 +47,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 @Slf4j
 @Service
@@ -60,6 +62,9 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private static final String MAPPING_PATH = "es-kb-segment-mapping.json";
     private static final int SCROLL_BATCH_SIZE = 200;
     private static final int SCROLL_KEEP_ALIVE_MINUTES = 5;
+    private static final int EMBEDDING_RATE_LIMIT_MAX_ATTEMPTS = 5;
+    private static final long EMBEDDING_RATE_LIMIT_BACKOFF_MS = 5_000L;
+    private static final long EMBEDDING_CALL_INTERVAL_MS = 500L;
     private static final String META_PROFILE_VERSION = "embeddingProfileVersion";
     private static final String META_PROFILE_FINGERPRINT = "embeddingProfileFingerprint";
     private static final String META_CAPABILITY = "embeddingCapability";
@@ -638,6 +643,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 document.setSegmentId(documentId);
             }
 
+            sleepUninterruptibly(EMBEDDING_CALL_INTERVAL_MS);
             List<Float> embedding = computeNewEmbedding(
                     document, documentId, targetProfile, embeddingSession);
             validateEmbedding(documentId, embedding, targetProfile.dimension());
@@ -697,7 +703,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             }
             String imageUrl = storagePort.buildAiImageInput(doc.getThumbnail(),
                     SearchObjectStoragePort.AiInputValidity.SHORT);
-            return embeddingSession.embed(imageUrl, "image");
+            return callEmbeddingWithRetry(
+                    () -> embeddingSession.embed(imageUrl, "image"), documentId, "image");
         }
 
         String text = StringUtils.hasText(doc.getContentText())
@@ -707,7 +714,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             throw new IllegalStateException(
                     "Rebuild document " + documentId + " has no text content for embedding");
         }
-        return embeddingSession.embed(text, "text");
+        return callEmbeddingWithRetry(
+                () -> embeddingSession.embed(text, "text"), documentId, "text");
     }
 
     static void validateEmbedding(String documentId, List<Float> embedding, int expectedDim) {
@@ -722,6 +730,56 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         if (invalidValue) {
             throw new IllegalStateException(
                     "Rebuild embedding contains non-finite values for document " + documentId);
+        }
+    }
+
+    private List<Float> callEmbeddingWithRetry(
+            Supplier<List<Float>> call, String documentId, String sourceType) {
+        RuntimeException lastError = null;
+        for (int attempt = 1; attempt <= EMBEDDING_RATE_LIMIT_MAX_ATTEMPTS; attempt++) {
+            try {
+                return call.get();
+            } catch (RuntimeException e) {
+                lastError = e;
+                if (!isRateLimitError(e) || attempt >= EMBEDDING_RATE_LIMIT_MAX_ATTEMPTS) {
+                    throw e;
+                }
+                long waitMs = resolveEmbeddingBackoffMs(attempt);
+                log.warn("Rebuild embedding rate limited, documentId={}, sourceType={}, attempt={}/{}, waitMs={}",
+                        documentId, sourceType, attempt, EMBEDDING_RATE_LIMIT_MAX_ATTEMPTS, waitMs);
+                sleepUninterruptibly(waitMs);
+            }
+        }
+        throw lastError == null
+                ? new IllegalStateException("Rebuild embedding failed for document " + documentId)
+                : lastError;
+    }
+
+    private boolean isRateLimitError(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && (message.contains("429")
+                    || message.contains("Throttling")
+                    || message.contains("RateQuota")
+                    || message.toLowerCase().contains("rate limit"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private long resolveEmbeddingBackoffMs(int attempt) {
+        long multiplier = 1L << Math.min(attempt - 1, 4);
+        return EMBEDDING_RATE_LIMIT_BACKOFF_MS * multiplier;
+    }
+
+    private void sleepUninterruptibly(long millis) {
+        try {
+            TimeUnit.MILLISECONDS.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
