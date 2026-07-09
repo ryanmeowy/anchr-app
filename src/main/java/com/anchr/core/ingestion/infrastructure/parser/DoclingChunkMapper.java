@@ -3,7 +3,7 @@ package com.anchr.core.ingestion.infrastructure.parser;
 import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.domain.model.Chunk;
-import com.anchr.core.integration.ai.ParseResponse;
+import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.kb.domain.model.Asset;
 import com.google.common.collect.Lists;
 import lombok.RequiredArgsConstructor;

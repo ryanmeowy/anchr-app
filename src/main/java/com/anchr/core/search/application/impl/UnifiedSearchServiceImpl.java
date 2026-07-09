@@ -17,6 +17,7 @@ import com.anchr.core.search.domain.port.SearchRerankPort;
 import com.anchr.core.search.domain.port.SearchRerankPort.RerankItem;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.search.interfaces.rest.dto.RetrievalInsightDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchPageDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
@@ -61,30 +62,37 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
     @Override
     public List<SearchResultDTO> search(SearchQueryDTO query) {
-        SearchResult result = searchInternal(query, 0);
-        recordSearchEvent(query, result.total());
+        return search(query, List.of());
+    }
+
+    @Override
+    public List<SearchResultDTO> search(SearchQueryDTO query, List<String> keywords) {
+        SearchResult result = searchInternal(query, 0, keywords);
         return result.items();
     }
 
     @Override
-    public SearchPageDTO searchPage(SearchQueryDTO query) {
-        SearchResult result = searchInternal(query, decodeCursorOffset(query == null ? null : query.getCursor()));
+    public SearchPageDTO searchPage(SearchQueryDTO query, List<String> keywords) {
+        SearchResult result = searchInternal(query, decodeCursorOffset(query == null ? null : query.getCursor()), keywords);
         List<SearchResultDTO> pageItems = result.items();
         int offset = result.offset();
         String nextCursor = result.total() > offset + pageItems.size()
                 ? encodeCursorOffset(offset + pageItems.size())
                 : null;
+        RetrievalInsightDTO insight = buildInsight(result);
         SearchPageDTO page = SearchPageDTO.builder()
                 .items(pageItems)
                 .total(result.total())
                 .nextCursor(nextCursor)
                 .facets(buildFacets(result.allItems()))
+                .insight(insight)
                 .build();
         recordSearchEvent(query, result.total());
         return page;
     }
 
-    private SearchResult searchInternal(SearchQueryDTO query, int offset) {
+    private SearchResult searchInternal(SearchQueryDTO query, int offset, List<String> keywords) {
+        long startMs = System.currentTimeMillis();
         if (query == null || !StringUtils.hasText(query.getQuery())) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
@@ -94,22 +102,28 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         int recallTopK = resolveRecallTopK(pageEnd);
         SearchFilter filter = buildFilter(query);
         if (filter.getKbIds().isEmpty()) {
-            return new SearchResult(List.of(), List.of(), 0, Math.max(0, offset), limit);
+            return new SearchResult(List.of(), List.of(), 0, Math.max(0, offset), limit,
+                    0, 0, 0, 0, System.currentTimeMillis() - startMs);
         }
 
         List<Float> queryVector = kbQueryEmbeddingService.embedQuery(keyword);
-        List<SegmentHit> textHits = kbSegmentRepository.textSearch(keyword, recallTopK, filter);
+        List<String> effectiveKeywords = keywords != null && !keywords.isEmpty() ? keywords : List.of();
+        List<SegmentHit> textHits = kbSegmentRepository.textSearch(keyword, effectiveKeywords, recallTopK, filter);
         List<SegmentHit> vectorHits = kbSegmentRepository.vectorSearch(queryVector, recallTopK, filter);
+        int textHitCount = textHits.size();
+        int vectorHitCount = vectorHits.size();
         log.info("kb search recall completed, keyword={}, recallTopK={}, textHits={}, vectorHits={}",
-                keyword, recallTopK, textHits.size(), vectorHits.size());
+                keyword, recallTopK, textHitCount, vectorHitCount);
 
         List<SegmentRerankCandidate> candidates = fuseCandidates(
                 textHits,
                 vectorHits,
                 appSearchProperties.getRrf().getRankConstant()
         );
+        int fusedCount = candidates.size();
         RerankOutcome rerankOutcome = applyRerank(keyword, candidates, limit);
         List<SegmentRerankCandidate> rankedCandidates = rerankOutcome.candidates();
+        int rerankCount = rankedCandidates.size();
         String effectiveStrategyCode = rerankOutcome.applied() ? STRATEGY_CODE_RERANK : STRATEGY_CODE;
 
         List<SearchResultDTO> segmentResults = rankedCandidates.stream()
@@ -118,7 +132,85 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .toList();
         List<SearchResultDTO> allAggregated = aggregateByAsset(segmentResults, pageEnd);
         List<SearchResultDTO> pageItems = page(allAggregated, offset, limit);
-        return new SearchResult(pageItems, allAggregated, allAggregated.size(), Math.max(0, offset), limit);
+        long latencyMs = System.currentTimeMillis() - startMs;
+        return new SearchResult(pageItems, allAggregated, allAggregated.size(), Math.max(0, offset), limit,
+                textHitCount, vectorHitCount, fusedCount, rerankCount, latencyMs);
+    }
+
+    private RetrievalInsightDTO buildInsight(SearchResult result) {
+        List<SearchResultDTO> allItems = result.allItems();
+
+        // Pipeline
+        RetrievalInsightDTO.PipelineDTO pipeline = RetrievalInsightDTO.PipelineDTO.builder()
+                .keywordCandidates(result.textHits())
+                .vectorCandidates(result.vectorHits())
+                .fusedRetained(result.fusedCount())
+                .rerankAdopted(result.rerankCount())
+                .build();
+
+        // Relevance distribution
+        int high = 0, medium = 0, low = 0;
+        for (SearchResultDTO item : allItems) {
+            Double score = item.getScore();
+            if (score == null) {
+                low++;
+            } else if (score >= 0.8) {
+                high++;
+            } else if (score >= 0.5) {
+                medium++;
+            } else {
+                low++;
+            }
+        }
+        RetrievalInsightDTO.RelevanceDistributionDTO relevanceDistribution =
+                RetrievalInsightDTO.RelevanceDistributionDTO.builder()
+                        .high(high)
+                        .medium(medium)
+                        .low(low)
+                        .build();
+
+        // Risk
+        RetrievalInsightDTO.RiskDTO risk = RetrievalInsightDTO.RiskDTO.builder()
+                .lowRelevanceCount(low)
+                .build();
+
+        // Hit source distribution
+        int vectorCount = 0, contentCount = 0, ocrCount = 0, tagCount = 0, titleCount = 0;
+        for (SearchResultDTO item : allItems) {
+            SearchExplainDTO explain = item.getExplain();
+            if (explain == null || explain.getHitSources() == null) {
+                continue;
+            }
+            for (String source : explain.getHitSources()) {
+                if (!StringUtils.hasText(source)) {
+                    continue;
+                }
+                switch (source.toUpperCase(Locale.ROOT)) {
+                    case "VECTOR" -> vectorCount++;
+                    case "CONTENT" -> contentCount++;
+                    case "OCR" -> ocrCount++;
+                    case "TAG" -> tagCount++;
+                    case "TITLE" -> titleCount++;
+                    default -> { /* ignore unknown */ }
+                }
+            }
+        }
+        RetrievalInsightDTO.HitSourceDistributionDTO hitSourceDistribution =
+                RetrievalInsightDTO.HitSourceDistributionDTO.builder()
+                        .vectorCount(vectorCount)
+                        .contentCount(contentCount)
+                        .ocrCount(ocrCount)
+                        .tagCount(tagCount)
+                        .titleCount(titleCount)
+                        .build();
+
+        return RetrievalInsightDTO.builder()
+                .pipeline(pipeline)
+                .relevanceDistribution(relevanceDistribution)
+                .risk(risk)
+                .hitSourceDistribution(hitSourceDistribution)
+                .latencyMs(result.latencyMs())
+                .build();
     }
 
     private void recordSearchEvent(SearchQueryDTO query, long total) {
@@ -638,6 +730,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private SearchFilter buildFilter(SearchQueryDTO query) {
         return SearchFilter.builder()
                 .kbIds(kbScopeResolver.resolveVisibleKbIds(query.getKbIds()))
+                .assetIds(query.getAssetIdList() == null || query.getAssetIdList().isEmpty() ? null : List.copyOf(query.getAssetIdList()))
                 .assetTypes(normalizeEnums(query.getAssetTypes()))
                 .hitTypes(normalizeEnums(query.getHitTypes()))
                 .createdFrom(query.getDateRange() == null ? null : query.getDateRange().getFrom())
@@ -745,7 +838,12 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                                 List<SearchResultDTO> allItems,
                                 long total,
                                 int offset,
-                                int limit) {
+                                int limit,
+                                int textHits,
+                                int vectorHits,
+                                int fusedCount,
+                                int rerankCount,
+                                long latencyMs) {
     }
 
     private record WindowRankItem(int index,

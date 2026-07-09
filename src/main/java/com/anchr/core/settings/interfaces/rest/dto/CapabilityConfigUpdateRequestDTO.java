@@ -4,6 +4,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.Map;
+
 /**
  * Request body for updating a capability config.
  * apiKey can be empty to keep the existing key.
@@ -21,5 +23,5 @@ public class CapabilityConfigUpdateRequestDTO {
     @Size(max = 128)
     private String modelName;
 
-    private java.util.Map<String, Object> extraConfig;
+    private Map<String, Object> extraConfig;
 }

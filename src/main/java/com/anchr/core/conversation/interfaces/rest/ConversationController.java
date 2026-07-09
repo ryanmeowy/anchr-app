@@ -45,7 +45,7 @@ public class ConversationController {
     }
     
     @GetMapping
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     public Result<ConversationSessionListDTO> listSessions(
             @RequestParam(required = false) @Min(1) @Max(50) Integer limit,
             @RequestParam(required = false) String cursor) {
@@ -53,7 +53,7 @@ public class ConversationController {
     }
     
     @GetMapping("/{sessionId}")
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     public Result<ConversationSessionDTO> getSession(@PathVariable @NotBlank String sessionId) {
         return Result.success(conversationService.getSession(sessionId));
     }
@@ -90,7 +90,7 @@ public class ConversationController {
     }
     
     @GetMapping("/{sessionId}/messages")
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     public Result<ConversationTurnListDTO> listMessages(
             @PathVariable @NotBlank String sessionId,
             @RequestParam(required = false) @Min(1) @Max(100) Integer limit,

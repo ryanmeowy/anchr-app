@@ -16,13 +16,15 @@ public interface SegmentRepository {
 
     List<SegmentHit> textSearch(String query, int limit, SearchFilter filter);
 
+    List<SegmentHit> textSearch(String query, List<String> keywords, int limit, SearchFilter filter);
+
     List<SegmentHit> vectorSearch(List<Float> queryVector, int topK);
 
     List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter);
 
     Optional<Segment> findBySegmentId(String segmentId);
 
-    List<Segment> findNeighborChunks(String assetId, Integer pageNo, Integer chunkOrder, int window);
+    List<Segment> findNeighborChunks(String assetId, Integer chunkOrder, int window);
 
     void deleteByAssetId(String assetId);
 }

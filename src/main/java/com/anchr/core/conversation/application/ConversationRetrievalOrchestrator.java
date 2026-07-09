@@ -12,5 +12,6 @@ public interface ConversationRetrievalOrchestrator {
     ConversationRetrievalResult retrieve(String rewrittenQuery,
                                          Integer limit,
                                          List<String> kbIds,
-                                         List<String> preferredModalities);
+                                         List<String> preferredModalities,
+                                         List<String> assetIdList);
 }

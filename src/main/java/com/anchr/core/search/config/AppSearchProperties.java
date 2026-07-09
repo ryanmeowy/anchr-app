@@ -12,27 +12,14 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix = "app.search")
 public class AppSearchProperties {
 
-    private double qualityAbsoluteMinScore = 0.72d;
-    private double vectorMinScore = 0.6d;
-    private final Page page = new Page();
     private final Rrf rrf = new Rrf();
     private final Rerank rerank = new Rerank();
 
     @Data
-    public static class Page {
-        private int defaultPageSize = 10;
-        private int maxWindow = 100;
-        private long sessionTtlSeconds = 900L;
-        private String cursorSecret = "";
-    }
-
-    @Data
     public static class Rrf {
-        private boolean enabled = true;
         private int rankConstant = 60;
         private int candidateMultiplier = 4;
         private int maxCandidates = 200;
-        private boolean nativeEnabled = false;
     }
 
     @Data

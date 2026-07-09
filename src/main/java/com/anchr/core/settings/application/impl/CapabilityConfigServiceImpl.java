@@ -6,12 +6,14 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
-import com.anchr.core.integration.ai.client.TextEmbeddingClient;
 import com.anchr.core.integration.ai.client.GenerationClient;
 import com.anchr.core.integration.ai.client.MultiEmbeddingClient;
 import com.anchr.core.integration.ai.client.RerankClient;
+import com.anchr.core.integration.ai.client.TextEmbeddingClient;
 import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
+import com.anchr.core.settings.domain.model.EmbedParamEnum;
+import com.anchr.core.settings.domain.model.ModelTypeEnum;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigDTO;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigUpdateRequestDTO;
@@ -24,6 +26,8 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Default implementation for capability configuration.
@@ -60,6 +64,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         if (!StringUtils.hasText(request.getApiKey())) {
             throw new IllegalArgumentException("apiKey is required for new configuration.");
         }
+        verifyEmbedModel(capability, request);
         CapabilityConfig config = CapabilityConfig.builder()
                 .id(idGen.nextId())
                 .capability(capability)
@@ -76,8 +81,24 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         return CapabilityConfigDTO.from(saved, maskApiKey(saved.getApiKeyEnc()));
     }
 
+    private void verifyEmbedModel(String capability, CapabilityConfigUpdateRequestDTO request) {
+        ModelTypeEnum modelTypeEnum;
+        try {
+            modelTypeEnum = ModelTypeEnum.valueOf(capability.toUpperCase());
+        }catch (Exception e) {
+            throw new IllegalArgumentException("unsupported capability: " + capability);
+        }
+        if (modelTypeEnum == ModelTypeEnum.EMBEDDING || modelTypeEnum == ModelTypeEnum.MULTI_EMBEDDING) {
+            Map<String, Object> extMap = request.getExtraConfig();
+            if (null == extMap || null == extMap.get(EmbedParamEnum.DIMENSIONS.getKey())) {
+                throw new IllegalArgumentException("dimensions is required for " + capability);
+            }
+        }
+    }
+
     @Override
     public CapabilityConfigDTO update(String capability, Long id, CapabilityConfigUpdateRequestDTO request) {
+        verifyEmbedModel(capability, request);
         CapabilityConfig existing = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Config not found: " + id));
         String apiKeyEnc = existing.getApiKeyEnc();
@@ -102,8 +123,12 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
 
     @Override
     public CapabilityConnectionTestResultDTO test(CapabilityConnectionTestRequestDTO request) {
-        String capability = request.getCapability() != null
-                ? request.getCapability().toUpperCase() : CAPABILITY_EMBEDDING;
+        ModelTypeEnum capability;
+        try {
+            capability = ModelTypeEnum.valueOf(request.getCapability().toUpperCase());
+        }catch (Exception e) {
+            throw new IllegalArgumentException("unsupported capability: " + request.getCapability());
+        }
         String apiKey = request.getApiKey();
         if (request.getConfigId() != null) {
             apiKey = repository.findById(request.getConfigId())
@@ -118,7 +143,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         }
 
         return switch (capability) {
-            case CAPABILITY_GENERATION -> {
+            case GENERATION -> {
                 var client = new GenerationClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
@@ -127,7 +152,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                         .message(result.message())
                         .build();
             }
-            case CAPABILITY_RERANK -> {
+            case RERANK -> {
                 var client = new RerankClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
@@ -136,7 +161,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                         .message(result.message())
                         .build();
             }
-            case CAPABILITY_MULTI_EMBEDDING -> {
+            case MULTI_EMBEDDING -> {
                 var client = new MultiEmbeddingClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
@@ -146,7 +171,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                         .dimension(result.dimension())
                         .build();
             }
-            default -> {
+            case EMBEDDING -> {
                 var client = new TextEmbeddingClient(request.getBaseUrl(), apiKey);
                 var result = client.testConnection(request.getModelName());
                 yield CapabilityConnectionTestResultDTO.builder()
@@ -163,10 +188,10 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     public void select(String capability, Long id) {
         repository.select(capability, id);
         // embedding types are mutually exclusive
-        if (CAPABILITY_EMBEDDING.equals(capability)) {
-            repository.disableAll(CAPABILITY_MULTI_EMBEDDING);
-        } else if (CAPABILITY_MULTI_EMBEDDING.equals(capability)) {
-            repository.disableAll(CAPABILITY_EMBEDDING);
+        if (ModelTypeEnum.EMBEDDING.name().equals(capability)) {
+            repository.disableAll(ModelTypeEnum.MULTI_EMBEDDING.name());
+        } else if (ModelTypeEnum.MULTI_EMBEDDING.name().equals(capability)) {
+            repository.disableAll(ModelTypeEnum.EMBEDDING.name());
         }
         // Both EMBEDDING and MULTI_EMBEDDING map to the EMBEDDING slot, so a single
         // refresh covers the mutual-exclusion toggle as well as GENERATION/RERANK.

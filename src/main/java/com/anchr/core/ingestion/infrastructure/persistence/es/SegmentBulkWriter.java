@@ -3,11 +3,14 @@ package com.anchr.core.ingestion.infrastructure.persistence.es;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
-import com.anchr.core.search.config.SegmentIndexConfig;
+import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.search.application.SegmentIndexManager;
+import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
+import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -25,10 +28,21 @@ public class SegmentBulkWriter {
 
     private final ElasticsearchClient esClient;
     private final SegmentIndexConfig kbSegmentConfig;
+    private final SegmentIndexManager segmentIndexManager;
+    private final SegmentIndexWriteBarrier indexWriteBarrier;
 
     public void write(List<Segment> segments) {
         if (segments == null || segments.isEmpty()) {
             return;
+        }
+        indexWriteBarrier.withWritePermit(() -> doWrite(segments));
+    }
+
+    private void doWrite(List<Segment> segments) {
+        SegmentIndexStatusDTO status = segmentIndexManager.status();
+        if (!status.isWritable()) {
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                    "Search index is not writable, current status: " + status.getStatus());
         }
         String indexName = kbSegmentConfig.getWriteTargetName();
         try {

@@ -1,6 +1,5 @@
 package com.anchr.core.common.model;
 
-import com.anchr.core.integration.ai.ParseResponse;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;

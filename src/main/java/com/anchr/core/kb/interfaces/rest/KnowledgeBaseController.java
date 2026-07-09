@@ -53,7 +53,7 @@ public class KnowledgeBaseController {
                 knowledgeBaseService.create(request.getName(), request.getDescription())));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @PostMapping("/search")
     public Result<KnowledgeBaseListDTO> listKbs(@RequestBody KbQueryRequestDTO request) {
         String status = parseStatus(request.getStatus());
@@ -69,7 +69,7 @@ public class KnowledgeBaseController {
                 .build());
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/{kbId}")
     public Result<KnowledgeBaseDTO> get(@PathVariable @NotBlank String kbId) {
         return Result.success(KnowledgeBaseDTO.from(knowledgeBaseService.get(kbId)));
@@ -90,7 +90,7 @@ public class KnowledgeBaseController {
         return Result.success();
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @PostMapping("/stats")
     public Result<List<KnowledgeBaseStatsDTO>> stats(@RequestBody KbStatsRequestDTO request) {
         return Result.success(knowledgeBaseService.getStats(request.getKbIds()).stream()
@@ -98,13 +98,13 @@ public class KnowledgeBaseController {
                 .toList());
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/{kbId}/health")
     public Result<KnowledgeBaseHealthDTO> health(@PathVariable @NotBlank String kbId) {
         return Result.success(KnowledgeBaseHealthDTO.from(knowledgeBaseService.getHealth(kbId)));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/{kbId}/documents")
     public Result<AssetListDTO> listDocuments(
             @PathVariable @NotBlank String kbId,
@@ -119,7 +119,7 @@ public class KnowledgeBaseController {
                 .build());
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"OWNER", "GUEST"})
     @GetMapping("/{kbId}/documents/{assetId}")
     public Result<AssetDTO> getDocument(@PathVariable @NotBlank String kbId,
                                                 @PathVariable @NotBlank String assetId) {

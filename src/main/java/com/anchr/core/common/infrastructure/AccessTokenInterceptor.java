@@ -1,10 +1,10 @@
 package com.anchr.core.common.infrastructure;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
-import com.anchr.core.common.model.Result;
 import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.model.Result;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +18,9 @@ import org.springframework.web.servlet.AsyncHandlerInterceptor;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.UUID;
 
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
@@ -47,20 +49,37 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
             RequireAuth requireAuth = hm.getMethodAnnotation(RequireAuth.class);
             if (requireAuth != null) {
                 String clientToken = request.getHeader("X-Access-Token");
-                String serverToken = redisTemplate.opsForValue().get(TOKEN_CACHE_PREFIX);
-                if (serverToken == null || !serverToken.equals(clientToken)) {
-                    response.setStatus(401);
-                    response.setContentType("application/json;charset=UTF-8");
-                    Result<Void> result = Result.error(ApiError.AUTH_TOKEN_INVALID, UUID.randomUUID().toString());
-                    try {
-                        response.getWriter().write(objectMapper.writeValueAsString(result));
-                    } catch (Exception ex) {
-                        log.warn("Failed to serialize auth rejection payload, fallback to minimal json", ex);
-                        response.getWriter().write("{\"code\": 401, \"message\": \"The token is invalid or expired, please contact the administrator to refresh it\"}");
-                    }
+                if (clientToken == null || clientToken.isBlank()) {
+                    reject(response, 401, ApiError.AUTH_TOKEN_INVALID);
                     return false;
                 }
-                UserContextHolder.set(RequestUserContext.systemDefault(tokenHash(clientToken)));
+                String redisKey = TOKEN_CACHE_PREFIX + clientToken.trim();
+                String tokenJson = redisTemplate.opsForValue().get(redisKey);
+                if (tokenJson == null) {
+                    reject(response, 401, ApiError.AUTH_TOKEN_INVALID);
+                    return false;
+                }
+                String role;
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> tokenData = objectMapper.readValue(tokenJson, Map.class);
+                    role = (String) tokenData.getOrDefault("role", "");
+                } catch (Exception e) {
+                    log.warn("Failed to parse token JSON", e);
+                    reject(response, 401, ApiError.AUTH_TOKEN_INVALID);
+                    return false;
+                }
+                String[] allowedRoles = requireAuth.roles();
+                boolean roleAllowed = Arrays.asList(allowedRoles).contains(role);
+                if (!roleAllowed) {
+                    reject(response, 403, ApiError.AUTH_ROLE_FORBIDDEN);
+                    return false;
+                }
+                UserContextHolder.set(new RequestUserContext(
+                        RequestUserContext.DEFAULT_USER_ID,
+                        role,
+                        tokenHash(clientToken)
+                ));
             } else {
                 UserContextHolder.set(RequestUserContext.systemDefault());
             }
@@ -93,6 +112,18 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
             return HexFormat.of().formatHex(hashed);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 algorithm is unavailable.", e);
+        }
+    }
+
+    private void reject(HttpServletResponse response, int httpStatus, ApiError error) throws Exception {
+        response.setStatus(httpStatus);
+        response.setContentType("application/json;charset=UTF-8");
+        Result<Void> result = Result.error(error, UUID.randomUUID().toString());
+        try {
+            response.getWriter().write(objectMapper.writeValueAsString(result));
+        } catch (Exception ex) {
+            log.warn("Failed to serialize rejection payload, fallback to minimal json", ex);
+            response.getWriter().write("{\"code\":" + httpStatus + ",\"message\":\"" + error.getMessage() + "\"}");
         }
     }
 }

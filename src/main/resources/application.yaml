@@ -1,4 +1,12 @@
+server:
+  address: ${SERVER_HOST}
+  port: ${SERVER_PORT}
 spring:
+  devtools:
+    livereload:
+      enabled: false
+  profiles:
+    active: dev
   application:
     name: anchr
   data:
@@ -9,7 +17,7 @@ spring:
       database: 0
       timeout: 3000ms
   datasource:
-    url: ${MYSQL_URL:jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai}
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USER}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -36,23 +44,18 @@ app:
     ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
     ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
+  docling:
+    base-url: ${APP_DOCLING_BASE_URL}
   segment:
-    index-name: ${APP_KB_SEGMENT_INDEX_NAME:kb_segment}
-    indexVersion: ${APP_KB_SEGMENT_INDEX_VERSION:v1}
-    read-alias: ${APP_KB_SEGMENT_READ_ALIAS:kb_segment_read}
-    write-alias: ${APP_KB_SEGMENT_WRITE_ALIAS:kb_segment_write}
-    dimension: ${APP_KB_SEGMENT_DIMENSION:1024}
+    index-name: kb_segment
+    read-alias: kb_segment_read
+    write-alias: kb_segment_write
   search:
-    quality-absolute-min-score: 0.72
-    vector-min-score: 0.6
     rrf:
-      enabled: true
-      native-enabled: false
       rank-constant: 60
       candidate-multiplier: 4
       max-candidates: 200
     rerank:
-      enabled: true
       max-doc-chars: 1200
       window-enabled: true
       window-size: 40
@@ -65,13 +68,10 @@ app:
 logging:
   level:
     co.elastic.clients: WARN
-    org.springframework.boot.autoconfigure.elasticsearch: INFO
+    org.springframework.boot.autoconfigure.elasticsearch: WARN
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics
-
-  docling:
-    base-url: ${APP_DOCLING_BASE_URL:http://127.0.0.1:8091}

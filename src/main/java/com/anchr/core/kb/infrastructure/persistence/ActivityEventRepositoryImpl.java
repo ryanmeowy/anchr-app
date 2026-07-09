@@ -6,6 +6,7 @@ import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -24,10 +25,17 @@ public class ActivityEventRepositoryImpl implements ActivityEventRepository {
 
     @Override
     public List<ActivityEvent> listByType(String userId,
-                                          ActivityEventType eventType, int limit, int offset) {
-        return mapper.listByType(userId, eventType.name(), limit, offset).stream()
+                                          ActivityEventType eventType, int limit, int offset,
+                                          LocalDateTime since) {
+        return mapper.listByType(userId, eventType.name(), limit, offset, since).stream()
                 .map(this::toDomain)
                 .toList();
+    }
+
+    @Override
+    public ActivityEvent fetchByIdAndType(String id, ActivityEventType eventType) {
+        ActivityEventRecord record = mapper.searchById(id, eventType.name());
+        return record == null ? null : toDomain(record);
     }
 
     private ActivityEventRecord toRecord(ActivityEvent event) {

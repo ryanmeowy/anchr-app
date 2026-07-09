@@ -40,7 +40,8 @@ public class ConversationMessagePipeline {
                 rewriteResult.getRewrittenQuery(),
                 request.getLimit(),
                 request.getKbIds(),
-                rewriteResult.getPreferredModalities()
+                rewriteResult.getPreferredModalities(),
+                request.getAssetIdList()
         );
         List<ResultCardDTO> resultCards = conversationResultCardMapper.map(retrievalResult.getTopCandidates());
         LinkedHashSet<String> resultCardSegmentIds = collectResultCardSegmentIds(resultCards);

@@ -1,5 +1,6 @@
 package com.anchr.core.kb.application;
 
+import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentDocumentListDTO;
 import com.anchr.core.kb.interfaces.rest.dto.RecentQuestionListDTO;
@@ -17,4 +18,7 @@ public interface ActivityQueryService {
     RecentSearchListDTO recentSearch(Integer limit, String cursor);
 
     RecentDocumentListDTO recentDocument(Integer limit, String cursor);
+
+    RecentCitationDTO fetchCitationsById(String id);
+
 }

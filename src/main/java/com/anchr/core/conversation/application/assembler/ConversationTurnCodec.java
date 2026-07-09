@@ -43,6 +43,14 @@ public class ConversationTurnCodec {
         }
     }
 
+    public String serializeAssetScope(List<String> assetScope) {
+        try {
+            return objectMapper.writeValueAsString(assetScope == null ? List.of() : assetScope);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize asset scope.", e);
+        }
+    }
+
     public List<ConversationTurnDTO.CitationDTO> parseCitations(String citationsJson) {
         if (!StringUtils.hasText(citationsJson)) {
             return List.of();
@@ -83,6 +91,19 @@ public class ConversationTurnCodec {
         }
     }
 
+    public List<String> parseAssetScope(String assetScopeJson) {
+        if (!StringUtils.hasText(assetScopeJson)) {
+            return List.of();
+        }
+        try {
+            CollectionType listType = objectMapper.getTypeFactory()
+                    .constructCollectionType(List.class, String.class);
+            return objectMapper.readValue(assetScopeJson, listType);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
     public List<ConversationTurnDTO.CitationDTO> toCitationDTOs(List<ConversationCitation> citations) {
         if (citations == null || citations.isEmpty()) {
             return List.of();
@@ -99,6 +120,7 @@ public class ConversationTurnCodec {
             dto.setHitType(citation.getHitType());
             dto.setAssetId(citation.getAssetId());
             dto.setSegmentId(citation.getSegmentId());
+            dto.setWhy(citation.getWhy());
             citationList.add(dto);
         }
         return citationList;

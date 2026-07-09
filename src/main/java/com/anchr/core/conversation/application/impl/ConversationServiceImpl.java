@@ -152,6 +152,7 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setRewrittenQuery(pipelineResult.rewriteResult().getRewrittenQuery());
         turn.setAnswer(pipelineResult.answerGenerationResult().getAnswerText());
         turn.setKbScopeJson(conversationTurnCodec.serializeKbScope(request.getKbIds()));
+        turn.setAssetScopeJson(conversationTurnCodec.serializeAssetScope(request.getAssetIdList()));
         turn.setAnswerMode(answerMode.name());
         turn.setCitationsJson(conversationTurnCodec.serializeCitations(pipelineResult.answerCitations()));
         turn.setResultCardsJson(conversationTurnCodec.serializeResultCards(pipelineResult.resultCards()));
@@ -182,6 +183,7 @@ public class ConversationServiceImpl implements ConversationService {
         response.setRewrittenQuery(pipelineResult.rewriteResult().getRewrittenQuery());
         response.setAnswer(turn.getAnswer());
         response.setKbScope(request.getKbIds());
+        response.setAssetScope(request.getAssetIdList());
         response.setAnswerMode(turn.getAnswerMode());
         response.setRetrievalStage("ANSWERED");
         response.setCitations(conversationTurnCodec.toCitationDTOs(pipelineResult.answerCitations()));
@@ -225,6 +227,7 @@ public class ConversationServiceImpl implements ConversationService {
                 sendEvent(emitter, "done", Map.of(
                         "turnId", response.getTurnId(),
                         "kbScope", response.getKbScope(),
+                        "assetScope", response.getAssetScope() == null ? List.of() : response.getAssetScope(),
                         "answerMode", response.getAnswerMode()
                 ));
                 emitter.complete();
@@ -286,6 +289,7 @@ public class ConversationServiceImpl implements ConversationService {
         dto.setTitle(session.getTitle());
         dto.setStatus(session.getStatus().name());
         dto.setKbScope(session.getKbScope() == null ? List.of() : session.getKbScope());
+        dto.setAssetScope(session.getAssetScope() == null ? List.of() : session.getAssetScope());
         dto.setCreatedAt(session.getCreatedAt());
         dto.setUpdatedAt(session.getUpdatedAt());
         dto.setExpiresAt(session.getExpiresAt());
@@ -323,6 +327,7 @@ public class ConversationServiceImpl implements ConversationService {
         dto.setRewrittenQuery(turn.getRewrittenQuery());
         dto.setAnswer(turn.getAnswer());
         dto.setKbScope(conversationTurnCodec.parseKbScope(turn.getKbScopeJson()));
+        dto.setAssetScope(conversationTurnCodec.parseAssetScope(turn.getAssetScopeJson()));
         dto.setAnswerMode(turn.getAnswerMode());
         dto.setCitations(conversationTurnCodec.parseCitations(turn.getCitationsJson()));
         dto.setResultCards(conversationTurnCodec.parseResultCards(turn.getResultCardsJson()));
@@ -382,9 +387,9 @@ public class ConversationServiceImpl implements ConversationService {
         List<String> requested = request.getKbIds();
         if ((requested == null || requested.isEmpty()) && session.getKbScope() != null && !session.getKbScope().isEmpty()) {
             request.setKbIds(session.getKbScope());
-            return;
+        } else {
+            request.setKbIds(kbScopeResolver.resolveVisibleKbIds(requested));
         }
-        request.setKbIds(kbScopeResolver.resolveVisibleKbIds(requested));
     }
 
     private AnswerMode resolveAnswerMode(ConversationMessageRequestDTO request) {

@@ -7,17 +7,19 @@ import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
-import com.anchr.core.search.config.SegmentIndexConfig;
+import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.search.application.SegmentIndexManager;
+import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.SearchFilter;
-import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
+import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Repository;
@@ -39,6 +41,24 @@ public class EsSegmentRepository implements SegmentRepository {
 
     private final ElasticsearchClient esClient;
     private final SegmentIndexConfig kbSegmentConfig;
+    private final SegmentIndexManager segmentIndexManager;
+    private final SegmentIndexWriteBarrier indexWriteBarrier;
+
+    private void assertIndexReadable() {
+        SegmentIndexStatusDTO status = segmentIndexManager.status();
+        if (!status.isReadable()) {
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                    "Search index is not readable, current status: " + status.getStatus());
+        }
+    }
+
+    private void assertIndexWritable() {
+        SegmentIndexStatusDTO status = segmentIndexManager.status();
+        if (!status.isWritable()) {
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                    "Search index is not writable, current status: " + status.getStatus());
+        }
+    }
 
     @Override
     public List<SegmentHit> textSearch(String query, int limit) {
@@ -47,11 +67,17 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public List<SegmentHit> textSearch(String query, int limit, SearchFilter filter) {
-        if (!StringUtils.hasText(query) || limit <= 0) {
+        return textSearch(query, List.of(), limit, filter);
+    }
+
+    @Override
+    public List<SegmentHit> textSearch(String query, List<String> keywords, int limit, SearchFilter filter) {
+        assertIndexReadable();
+        if ((!StringUtils.hasText(query) && (keywords == null || keywords.isEmpty())) || limit <= 0) {
             return List.of();
         }
         try {
-            SearchRequest request = buildTextSearchRequest(query.trim(), limit, filter);
+            SearchRequest request = buildTextSearchRequest(query != null ? query.trim() : "", keywords, limit, filter);
             SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
             return convertHits(response);
         } catch (Exception e) {
@@ -67,6 +93,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter) {
+        assertIndexReadable();
         if (CollectionUtils.isEmpty(queryVector) || topK <= 0) {
             return List.of();
         }
@@ -82,6 +109,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public Optional<Segment> findBySegmentId(String segmentId) {
+        assertIndexReadable();
         if (!StringUtils.hasText(segmentId)) {
             return Optional.empty();
         }
@@ -104,12 +132,13 @@ public class EsSegmentRepository implements SegmentRepository {
     }
 
     @Override
-    public List<Segment> findNeighborChunks(String assetId, Integer pageNo, Integer chunkOrder, int window) {
+    public List<Segment> findNeighborChunks(String assetId, Integer chunkOrder, int window) {
+        assertIndexReadable();
         if (!StringUtils.hasText(assetId) || chunkOrder == null || window <= 0) {
             return List.of();
         }
         try {
-            SearchRequest request = buildNeighborChunksRequest(assetId.trim(), pageNo, chunkOrder, window);
+            SearchRequest request = buildNeighborChunksRequest(assetId.trim(), chunkOrder, window);
             SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
             return convertSegmentHits(response);
         } catch (Exception e) {
@@ -123,10 +152,15 @@ public class EsSegmentRepository implements SegmentRepository {
         if (!StringUtils.hasText(assetId)) {
             return;
         }
+        indexWriteBarrier.withWritePermit(() -> doDeleteByAssetId(assetId.trim()));
+    }
+
+    private void doDeleteByAssetId(String assetId) {
+        assertIndexWritable();
         try {
             DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
                     .index(kbSegmentConfig.getWriteTargetName())
-                    .query(q -> q.term(t -> t.field("assetId").value(assetId.trim()))));
+                    .query(q -> q.term(t -> t.field("assetId").value(assetId))));
             esClient.deleteByQuery(request);
         } catch (Exception e) {
             log.error("kb segment delete by asset failed, assetId={}", assetId, e);
@@ -134,16 +168,37 @@ public class EsSegmentRepository implements SegmentRepository {
         }
     }
 
-    private SearchRequest buildTextSearchRequest(String query, int limit, SearchFilter filter) {
+    private SearchRequest buildTextSearchRequest(String query, List<String> keywords, int limit, SearchFilter filter) {
+        boolean hasKeywords = keywords != null && keywords.stream().anyMatch(StringUtils::hasText);
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())
                 .size(limit)
                 .query(q -> q.bool(b -> {
                     applyFilters(b, filter);
-                    b.should(sh -> sh.match(m -> m.field("title").query(query).boost(2.5f)));
-                    b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(4.0f)));
-                    b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(3.0f)));
-                    b.should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)));
+                    if (hasKeywords) {
+                        // Original query as low-weight fallback
+                        if (StringUtils.hasText(query)) {
+                            b.should(sh -> sh.match(m -> m.field("title").query(query).boost(1.0f)));
+                            b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(2.0f)));
+                            b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(1.5f)));
+                        }
+                        // Rewritten keywords with higher weight
+                        for (String kw : keywords) {
+                            if (!StringUtils.hasText(kw)) {
+                                continue;
+                            }
+                            b.should(sh -> sh.match(m -> m.field("title").query(kw).boost(2.5f)));
+                            b.should(sh -> sh.match(m -> m.field("contentText").query(kw).boost(4.0f)));
+                            b.should(sh -> sh.match(m -> m.field("ocrText").query(kw).boost(3.0f)));
+                            b.should(sh -> sh.match(m -> m.field("tags").query(kw).boost(3.2f)));
+                        }
+                    } else {
+                        // No keywords: original query with full weights
+                        b.should(sh -> sh.match(m -> m.field("title").query(query).boost(2.5f)));
+                        b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(4.0f)));
+                        b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(3.0f)));
+                        b.should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)));
+                    }
                     b.minimumShouldMatch("1");
                     return b;
                 }))
@@ -182,6 +237,10 @@ public class EsSegmentRepository implements SegmentRepository {
             builder.filter(f -> f.terms(t -> t.field("kbId").terms(v -> v.value(
                     filter.getKbIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
         }
+        if (!CollectionUtils.isEmpty(filter.getAssetIds())) {
+            builder.filter(f -> f.terms(t -> t.field("assetId").terms(v -> v.value(
+                    filter.getAssetIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
         if (!CollectionUtils.isEmpty(filter.getAssetTypes())) {
             builder.filter(f -> f.terms(t -> t.field("assetType").terms(v -> v.value(
                     filter.getAssetTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
@@ -213,6 +272,10 @@ public class EsSegmentRepository implements SegmentRepository {
             builder.filter(f -> f.terms(t -> t.field("kbId").terms(v -> v.value(
                     filter.getKbIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
         }
+        if (!CollectionUtils.isEmpty(filter.getAssetIds())) {
+            builder.filter(f -> f.terms(t -> t.field("assetId").terms(v -> v.value(
+                    filter.getAssetIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+        }
         if (!CollectionUtils.isEmpty(filter.getAssetTypes())) {
             builder.filter(f -> f.terms(t -> t.field("assetType").terms(v -> v.value(
                     filter.getAssetTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
@@ -235,7 +298,7 @@ public class EsSegmentRepository implements SegmentRepository {
         }
     }
 
-    private SearchRequest buildNeighborChunksRequest(String assetId, Integer pageNo, int chunkOrder, int window) {
+    private SearchRequest buildNeighborChunksRequest(String assetId, int chunkOrder, int window) {
         int from = Math.max(0, chunkOrder - window);
         int to = chunkOrder + window;
         return SearchRequest.of(s -> s
@@ -248,9 +311,6 @@ public class EsSegmentRepository implements SegmentRepository {
                             .field("chunkOrder")
                             .gte((double) from)
                             .lte((double) to))));
-                    if (pageNo != null) {
-                        b.filter(f -> f.term(t -> t.field("pageNo").value(pageNo)));
-                    }
                     return b;
                 }))
                 .sort(sort -> sort.field(f -> f.field("chunkOrder").order(SortOrder.Asc)))

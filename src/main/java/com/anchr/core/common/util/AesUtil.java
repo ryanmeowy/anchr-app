@@ -10,8 +10,6 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
-import static com.anchr.core.common.constant.CommonConstant.ALGORITHM;
-
 /**
  * Utility class for AES encryption and decryption.
  * This class provides methods to encrypt and decrypt strings using AES algorithm.
@@ -21,6 +19,7 @@ import static com.anchr.core.common.constant.CommonConstant.ALGORITHM;
 @Component
 public class AesUtil {
 
+    private static final String ALGORITHM = "AES/CBC/PKCS5Padding";
     private final String keyBase64;
     private final String ivBase64;
 

@@ -11,8 +11,8 @@ import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
 import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
 import com.anchr.core.integration.ai.client.DoclingClient;
-import com.anchr.core.integration.ai.ParseRequest;
-import com.anchr.core.integration.ai.ParseResponse;
+import com.anchr.core.common.model.ParseRequest;
+import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.integration.storage.StorageTokenIssuer;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
@@ -143,10 +143,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         List<Chunk> chunks = doclingChunkMapper.toTextChunks(asset, parsed);
 
         updateRunning(kbId, taskId, item.getId(), IngestionStage.EMBED, STAGE_EMBED_PROGRESS, userId);
-        // TODO Image vector capability is pending support.
-        if (!isImage(asset)) {
-            enrichTextEmbeddings(chunks, downloadUrl);
-        }
+        enrichTextEmbeddings(asset, chunks, downloadUrl);
         updateRunning(kbId, taskId, item.getId(), IngestionStage.INDEX, STAGE_INDEX_PROGRESS, userId);
         assetRepository.updateStatuses(kbId, asset.getId(),
                 DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.RUNNING.name(), userId, LocalDateTime.now());
@@ -292,15 +289,32 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         return "IMAGE".equalsIgnoreCase(asset.getFileType());
     }
 
-    private void enrichTextEmbeddings(List<Chunk> chunks, String downloadUrl) {
+    private void enrichTextEmbeddings(Asset asset, List<Chunk> chunks, String downloadUrl) {
         if (chunks == null || chunks.isEmpty()) {
             return;
         }
+        boolean multi = embeddingPort.isMulti();
+        boolean isImg = isImage(asset);
+        List<Float> imageEmbedding = List.of();
+        if (isImg && multi) {
+            imageEmbedding = embedImageWithRetry(downloadUrl);
+        }
+
         for (Chunk chunk : chunks) {
             if (chunk == null || !StringUtils.hasText(chunk.getChunkText())) {
                 continue;
             }
-            List<Float> embedding = embedTextWithRetry(chunk.getChunkText());
+            List<Float> embedding;
+            if (!isImg) {
+                embedding = embedTextWithRetry(chunk.getChunkText());
+            } else {
+                if (multi) {
+                    embedding = imageEmbedding;
+                }else {
+                    embedding = embedTextWithRetry(chunk.getOcrText());
+                }
+            }
+
             if (embedding == null || embedding.isEmpty()) {
                 throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
             }

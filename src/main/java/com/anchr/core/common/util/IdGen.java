@@ -1,30 +1,29 @@
 package com.anchr.core.common.util;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import jakarta.annotation.PostConstruct;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static com.anchr.core.common.constant.CacheConstant.ID_GEN_KEY;
-import static com.anchr.core.common.constant.CommonConstant.ID_GEN_MAX_ID;
-import static com.anchr.core.common.constant.CommonConstant.ID_GEN_MAX_STEP;
-import static com.anchr.core.common.constant.CommonConstant.ID_GEN_MIN_ID;
-import static com.anchr.core.common.constant.CommonConstant.ID_GEN_MIN_STEP;
-import static com.anchr.core.common.constant.CommonConstant.ID_GEN_SEGMENT_SIZE;
-import static com.anchr.core.common.constant.CommonConstant.PROFILE_KEY_NAME;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class IdGen {
 
+    @Value("${spring.profiles.active:dev}")
+    private String activeProfile;
+
     private final StringRedisTemplate stringRedisTemplate;
 
+    // Instance-level lock for allocating IDs within this JVM; Redis INCR reserves segments across instances.
     private final Lock lock = new ReentrantLock();
 
     private String cacheKey;
@@ -35,12 +34,22 @@ public class IdGen {
 
     private volatile boolean exhausted = false;
 
+    private static final long ID_GEN_MIN_ID = 1_000_000_000L;
+
+    private static final long ID_GEN_MAX_ID = 9_999_999_999L;
+
+    private static final int ID_GEN_MAX_STEP = 100;
+
+    private static final int ID_GEN_MIN_STEP = 1;
+
+    private static final int ID_GEN_SEGMENT_SIZE = 1000;
+
     @PostConstruct
     public void init() {
         if (ID_GEN_MAX_STEP > ID_GEN_SEGMENT_SIZE) {
             throw new IllegalArgumentException("MAX_STEP MUST be <= SEGMENT_SIZE to prevent duplicate IDs");
         }
-        this.cacheKey = String.format("%s:%s", ID_GEN_KEY, System.getenv(PROFILE_KEY_NAME));
+        this.cacheKey = String.format("%s:%s", ID_GEN_KEY, activeProfile);
         stringRedisTemplate.opsForValue().setIfAbsent(cacheKey, String.valueOf(ID_GEN_MIN_ID));
     }
 

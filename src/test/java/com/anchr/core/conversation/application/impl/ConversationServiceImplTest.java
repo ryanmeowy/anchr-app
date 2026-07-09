@@ -132,10 +132,10 @@ class ConversationServiceImplTest {
                 buildResult("seg_text_2", "asset_1", "TEXT_CHUNK", "oss://bucket/mysql-notes.pdf", "InnoDB 支持事务与行锁", 12)
         ));
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 架构是什么 核心组件"), eq(20), anyList(), anyList()
+                eq("mysql 架构是什么 核心组件"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(firstRetrieval);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 架构中的 InnoDB 作用"), eq(20), anyList(), anyList()
+                eq("mysql 架构中的 InnoDB 作用"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(secondRetrieval);
 
         when(answerGenerationService.generate(eq("mysql 架构是什么"), eq("mysql 架构是什么 核心组件"), eq(AnswerMode.STRICT), anyList(), anyList()))
@@ -209,7 +209,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("它和 buffer pool 有什么关系"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), eq(20), anyList(), anyList()
+                eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of()));
         when(answerGenerationService.generate(
                 eq("它和 buffer pool 有什么关系"),
@@ -247,6 +247,32 @@ class ConversationServiceImplTest {
     }
 
     @Test
+    void createMessage_shouldNotInheritLegacySessionAssetScope() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        ConversationSession storedSession = repository.findSession(session.getSessionId()).orElseThrow();
+        storedSession.setAssetScope(List.of("legacy_asset"));
+        repository.saveSession(storedSession);
+
+        ConversationMessageRequestDTO request = buildMessageRequest("只查询当前消息范围");
+        when(queryRewriteService.rewrite(eq(session.getSessionId()), eq(request.getQuery())))
+                .thenReturn(buildRewrite(request.getQuery(), request.getQuery(), "original_query", true));
+        when(conversationRetrievalOrchestrator.retrieve(
+                eq(request.getQuery()), eq(20), anyList(), anyList(), eq(null)
+        )).thenReturn(buildRetrievalResult(List.of()));
+        when(answerGenerationService.generate(
+                eq(request.getQuery()), eq(request.getQuery()), eq(AnswerMode.STRICT), anyList(), anyList()
+        )).thenReturn(buildAnswer("未找到相关内容。", true, "no_evidence", List.of()));
+        when(followUpQuestionService.generate(eq(request.getQuery()), eq(request.getQuery()), anyList()))
+                .thenReturn(List.of());
+
+        ConversationMessageResponseDTO response = service.createMessage(session.getSessionId(), request);
+
+        assertThat(response.getAssetScope()).isNullOrEmpty();
+        assertThat(service.listMessages(session.getSessionId(), 20, null).getTurns().getFirst().getAssetScope())
+                .isEmpty();
+    }
+
+    @Test
     void createMessage_shouldGenerateAnswerOnlyFromResultCardSegments() {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         String sessionId = session.getSessionId();
@@ -259,7 +285,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("mysql 索引有哪些"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 索引 类型 适用场景"), eq(20), anyList(), anyList()
+                eq("mysql 索引 类型 适用场景"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_asset_1", "asset_1", "TEXT_CHUNK", "oss://bucket/mysql-1.pdf", "BTree 索引适合范围查询", 1),
                 buildResult("seg_asset_2", "asset_2", "TEXT_CHUNK", "oss://bucket/mysql-2.pdf", "Hash 索引适合等值查询", 2),
@@ -306,7 +332,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("mysql redo log 是什么"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql redo log 作用"), eq(20), anyList(), anyList()
+                eq("mysql redo log 作用"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_redo_1", "asset_redo_1", "TEXT_CHUNK", "oss://bucket/mysql-redo.pdf", "redo log 保障崩溃恢复", 8),
                 buildResult("seg_redo_2", "asset_redo_2", "TEXT_CHUNK", "oss://bucket/mysql-log.pdf", "redo log 先写日志再刷盘", 9)
@@ -339,7 +365,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("mysql buffer pool"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql buffer pool 机制"), eq(20), anyList(), anyList()
+                eq("mysql buffer pool 机制"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_pool_1", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 缓存数据页", 3),
                 buildResult("seg_pool_2", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 使用 LRU 链表", 4)
@@ -370,7 +396,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("mysql 总结一下"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 总结 核心机制"), eq(20), anyList(), anyList()
+                eq("mysql 总结 核心机制"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_summary_1", "asset_summary", "TEXT_CHUNK", "oss://bucket/mysql-summary.pdf", "MySQL 包含 SQL 层和存储引擎层", 1)
         )));
@@ -409,7 +435,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("mysql 自由发挥"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 自由发挥"), eq(20), anyList(), anyList()
+                eq("mysql 自由发挥"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_strict_1", "asset_strict", "TEXT_CHUNK", "oss://bucket/mysql.pdf", "MySQL 是关系型数据库", 1)
         )));
@@ -493,7 +519,7 @@ class ConversationServiceImplTest {
         );
         when(queryRewriteService.rewrite(eq(sessionId), eq("那 InnoDB 呢"))).thenReturn(rewriteResult);
         when(conversationRetrievalOrchestrator.retrieve(
-                eq("mysql 架构中的 InnoDB 作用"), eq(20), anyList(), anyList()
+                eq("mysql 架构中的 InnoDB 作用"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of(
                 buildResult("seg_text_2", "asset_1", "TEXT_CHUNK", "oss://bucket/mysql-notes.pdf", "InnoDB 支持事务与行锁", 12)
         )));
