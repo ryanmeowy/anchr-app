@@ -72,6 +72,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final IngestionObjectStoragePort objectStoragePort;
     private final StorageConfigRepository storageConfigRepository;
     private final DoclingChunkMapper doclingChunkMapper;
+    private final DoclingClient doclingClient;
     private final Gson gson;
 
     @Value("${app.embedding.ingestion-min-interval-ms:1500}")
@@ -82,9 +83,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     @Value("${app.embedding.ingestion-rate-limit-backoff-ms:5000}")
     private long embeddingRateLimitBackoffMs;
-
-    @Value("${app.docling.base-url:http://127.0.0.1:8091}")
-    private String doclingBaseUrl;
 
     @Override
     public void submit(String kbId, String taskId, String userId) {
@@ -133,9 +131,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         assetRepository.updateStatuses(kbId, asset.getId(),
                 DocumentParseStatus.RUNNING.name(), DocumentIndexStatus.PENDING.name(), userId, LocalDateTime.now());
 
-        DoclingClient docling = new DoclingClient(doclingBaseUrl);
         String downloadUrl = objectStoragePort.buildDownloadUrl(asset.getObjectKey());
-        ParseResponse parsed = docling.parse(buildParseRequest(asset, taskId, item.getId(), downloadUrl));
+        ParseResponse parsed = doclingClient.parse(buildParseRequest(asset, taskId, item.getId(), downloadUrl));
         if (parsed.chunks() == null || parsed.chunks().isEmpty()) {
             throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "docling returned empty chunks.");
         }

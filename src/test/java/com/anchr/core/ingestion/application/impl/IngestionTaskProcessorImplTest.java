@@ -10,6 +10,7 @@ import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
 import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
+import com.anchr.core.integration.ai.client.DoclingClient;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.repository.SegmentRepository;
@@ -53,6 +54,8 @@ class IngestionTaskProcessorImplTest {
     private StorageConfigRepository storageConfigRepository;
     @Mock
     private DoclingChunkMapper doclingChunkMapper;
+    @Mock
+    private DoclingClient doclingClient;
 
     private IngestionTaskProcessorImpl processor;
 
@@ -70,6 +73,7 @@ class IngestionTaskProcessorImplTest {
                 objectStoragePort,
                 storageConfigRepository,
                 doclingChunkMapper,
+                doclingClient,
                 new Gson()
         );
     }

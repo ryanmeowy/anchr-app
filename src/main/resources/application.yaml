@@ -46,6 +46,10 @@ app:
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
   docling:
     base-url: ${APP_DOCLING_BASE_URL}
+    api-token: ${APP_DOCLING_API_TOKEN}
+    poll-interval: ${APP_DOCLING_POLL_INTERVAL:2s}
+    max-wait: ${APP_DOCLING_MAX_WAIT:45m}
+    max-resubmits: ${APP_DOCLING_MAX_RESUBMITS:2}
   segment:
     index-name: kb_segment
     read-alias: kb_segment_read
