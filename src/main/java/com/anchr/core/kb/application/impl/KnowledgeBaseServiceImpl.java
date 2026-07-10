@@ -8,17 +8,22 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
+import com.anchr.core.kb.domain.model.DocumentIndexDeletePayload;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealth;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealthScore;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
+import com.anchr.core.kb.domain.model.OutboxEvent;
+import com.anchr.core.kb.domain.model.OutboxEventStatus;
+import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.kb.domain.repository.OutboxEventRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -29,7 +34,6 @@ import java.util.List;
 /**
  * Default knowledge base application service.
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
@@ -40,8 +44,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final AssetRepository assetRepository;
+    private final OutboxEventRepository outboxEventRepository;
     private final IdGen idGen;
-    private final SegmentRepository kbSegmentRepository;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -188,23 +193,30 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteDocument(String kbId, String assetId) {
-        String id = requireId(kbId, "kbId");
-        String documentId = requireId(assetId, "assetId");
+        kbId = requireId(kbId, "kbId");
+        assetId = requireId(assetId, "assetId");
         RequestUserContext context = UserContextHolder.get();
-        get(id);
+        get(kbId);
+        LocalDateTime now = LocalDateTime.now();
         boolean deleted = assetRepository.markDeleted(
-                id, documentId, context.userId(), LocalDateTime.now());
+                kbId, assetId, context.userId(), now);
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
-        knowledgeBaseRepository.refreshDocumentStats(id, context.userId(), false);
-        try {
-            kbSegmentRepository.deleteByAssetId(documentId);
-        } catch (BusinessException e) {
-            log.warn("document segment cleanup failed, assetId={}", documentId, e);
-        }
+        knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), false);
+        outboxEventRepository.save(OutboxEvent.builder()
+                .eventType(OutboxEventType.DELETE_ASSET)
+                .aggregateType("ASSET")
+                .aggregateId(assetId)
+                .payload(toJson(new DocumentIndexDeletePayload(kbId, assetId)))
+                .status(OutboxEventStatus.PENDING)
+                .retryCount(0)
+                .createdBy(context.userId())
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
     }
 
     private String requireId(String id, String fieldName) {
@@ -227,6 +239,14 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Failed to serialize outbox event payload.", e);
+        }
     }
 
     private PageBounds normalizePage(Integer page, Integer size) {

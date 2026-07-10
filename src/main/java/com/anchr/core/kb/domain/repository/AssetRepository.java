@@ -17,6 +17,11 @@ public interface AssetRepository {
 
     Optional<Asset> findActiveById(String kbId, String assetId);
 
+    /**
+     * Locks the asset row even when it is soft-deleted. Must be invoked inside a transaction.
+     */
+    Optional<Asset> findByIdForUpdate(String kbId, String assetId);
+
     List<Asset> listActive(String kbId, int limit, int offset);
 
     long countActive(String kbId);

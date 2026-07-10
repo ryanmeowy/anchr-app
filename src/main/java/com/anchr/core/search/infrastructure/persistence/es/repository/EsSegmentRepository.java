@@ -3,6 +3,7 @@ package com.anchr.core.search.infrastructure.persistence.es.repository;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
+import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
 import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
@@ -160,8 +161,17 @@ public class EsSegmentRepository implements SegmentRepository {
         try {
             DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
                     .index(kbSegmentConfig.getWriteTargetName())
+                    .refresh(true)
                     .query(q -> q.term(t -> t.field("assetId").value(assetId))));
-            esClient.deleteByQuery(request);
+            DeleteByQueryResponse response = esClient.deleteByQuery(request);
+            if (response.timedOut()
+                    || response.versionConflicts() > 0
+                    || (response.failures() != null && !response.failures().isEmpty())) {
+                throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                        "Search index delete did not complete successfully.");
+            }
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("kb segment delete by asset failed, assetId={}", assetId, e);
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);

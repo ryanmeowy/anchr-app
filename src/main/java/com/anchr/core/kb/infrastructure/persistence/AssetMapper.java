@@ -18,6 +18,9 @@ public interface AssetMapper {
     Optional<AssetRecord> findActiveById(@Param("kbId") String kbId,
                                                   @Param("assetId") String assetId);
 
+    Optional<AssetRecord> findByIdForUpdate(@Param("kbId") String kbId,
+                                            @Param("assetId") String assetId);
+
     List<AssetRecord> listActive(@Param("kbId") String kbId,
                                          @Param("limit") int limit,
                                          @Param("offset") int offset);

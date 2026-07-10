@@ -44,6 +44,14 @@ app:
     ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
     ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
+  outbox:
+    poll-interval-ms: ${APP_OUTBOX_POLL_INTERVAL_MS:3000}
+    batch-size: ${APP_OUTBOX_BATCH_SIZE:20}
+    lock-lease-minutes: ${APP_OUTBOX_LOCK_LEASE_MINUTES:5}
+    max-attempts: ${APP_OUTBOX_MAX_ATTEMPTS:10}
+    retention-days: ${APP_OUTBOX_RETENTION_DAYS:90}
+    cleanup-batch-size: ${APP_OUTBOX_CLEANUP_BATCH_SIZE:1000}
+    cleanup-cron: "${APP_OUTBOX_CLEANUP_CRON:0 0 3 * * *}"
   docling:
     base-url: ${APP_DOCLING_BASE_URL}
     api-token: ${APP_DOCLING_API_TOKEN}
