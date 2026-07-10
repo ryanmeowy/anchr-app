@@ -33,6 +33,11 @@ public class ActivityEventRepositoryImpl implements ActivityEventRepository {
     }
 
     @Override
+    public void deleteBySessionId(String sessionId) {
+        mapper.deleteBySessionId(sessionId);
+    }
+
+    @Override
     public ActivityEvent fetchByIdAndType(String id, ActivityEventType eventType) {
         ActivityEventRecord record = mapper.searchById(id, eventType.name());
         return record == null ? null : toDomain(record);

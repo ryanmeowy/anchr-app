@@ -19,6 +19,8 @@ public interface ActivityEventService {
 
     void recordSearchExecuted(SearchQueryDTO query, int total);
 
+    void deleteBySessionId(String sessionId);
+
     @Builder
     record CitationContext(String segmentId, String assetId, String kbId, String fileName,
                            String title, String snippet, String citationReason, String citationIndex,

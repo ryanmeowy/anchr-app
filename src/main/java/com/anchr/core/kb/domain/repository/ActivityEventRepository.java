@@ -17,4 +17,6 @@ public interface ActivityEventRepository {
                                    LocalDateTime since);
 
     ActivityEvent fetchByIdAndType(String id, ActivityEventType eventType);
+
+    void deleteBySessionId(String sessionId);
 }

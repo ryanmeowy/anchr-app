@@ -131,6 +131,7 @@ public class ConversationServiceImpl implements ConversationService {
     public void deleteSession(String sessionId) {
         loadSessionOrThrow(sessionId);
         conversationRepository.deleteSession(sessionId);
+        activityEventService.deleteBySessionId(sessionId);
     }
 
     @Override

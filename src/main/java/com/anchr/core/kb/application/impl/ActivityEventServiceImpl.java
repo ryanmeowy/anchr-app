@@ -96,6 +96,11 @@ public class ActivityEventServiceImpl implements ActivityEventService {
         saveEvent(ActivityEventType.SEARCH_EXECUTED, "SEARCH", null, payload);
     }
 
+    @Override
+    public void deleteBySessionId(String sessionId) {
+        activityEventRepository.deleteBySessionId(sessionId);
+    }
+
     private void saveEvent(ActivityEventType eventType, String resourceType, String resourceId, Map<String, Object> payload) {
         try {
             RequestUserContext context = UserContextHolder.get();
