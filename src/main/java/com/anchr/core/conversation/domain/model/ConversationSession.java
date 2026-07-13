@@ -18,11 +18,11 @@ public class ConversationSession {
     private ConversationSessionStatus status;
     private long createdAt;
     private long updatedAt;
-    private long expiresAt;
+    private Long expiresAt;
     private List<String> kbScope;
     private List<String> assetScope;
 
-    public static ConversationSession createActive(String sessionId, String userId, String title, long now, long expiresAt) {
+    public static ConversationSession createActive(String sessionId, String userId, String title, long now) {
         ConversationSession session = new ConversationSession();
         session.setSessionId(sessionId);
         session.setUserId(userId);
@@ -30,12 +30,12 @@ public class ConversationSession {
         session.setStatus(ConversationSessionStatus.ACTIVE);
         session.setCreatedAt(now);
         session.setUpdatedAt(now);
-        session.setExpiresAt(expiresAt);
+        session.setExpiresAt(null);
         return session;
     }
 
-    public void touch(long now, long expiresAt) {
+    public void touch(long now) {
         this.updatedAt = now;
-        this.expiresAt = expiresAt;
+        this.expiresAt = null;
     }
 }

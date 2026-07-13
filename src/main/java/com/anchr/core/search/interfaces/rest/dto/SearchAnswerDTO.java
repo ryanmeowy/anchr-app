@@ -27,12 +27,22 @@ public class SearchAnswerDTO implements Serializable {
     @Builder
     public static class CitationDTO implements Serializable {
         private Integer citationIndex;
-        private String segmentId;
         private String assetId;
         private String kbId;
         private String fileName;
+        @Builder.Default
+        private List<CitationChunkDTO> chunks = new ArrayList<>();
+    }
+
+    @Data
+    @Builder
+    public static class CitationChunkDTO implements Serializable {
+        private String segmentId;
         private Integer pageNo;
+        private Integer chunkOrder;
+        private String content;
         private String snippet;
+        private SearchResultDTO.Anchor anchor;
         private CitationWhy why;
     }
 

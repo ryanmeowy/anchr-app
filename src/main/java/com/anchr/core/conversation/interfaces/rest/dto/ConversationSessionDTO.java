@@ -20,5 +20,5 @@ public class ConversationSessionDTO implements Serializable {
     private List<String> assetScope;
     private long createdAt;
     private long updatedAt;
-    private long expiresAt;
+    private Long expiresAt;
 }

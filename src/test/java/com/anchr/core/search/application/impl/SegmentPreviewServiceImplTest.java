@@ -1,109 +1,124 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.search.domain.model.SearchFilter;
+import com.anchr.core.common.application.context.RequestUserContext;
+import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.kb.application.ActivityQueryService;
+import com.anchr.core.kb.application.KnowledgeBaseService;
+import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.search.application.SearchCitationReasonService;
+import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.repository.SegmentRepository;
-import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class SegmentPreviewServiceImplTest {
 
-    @Test
-    void getSegmentNeighbors_shouldIncludeNextChunkFromFollowingPage() {
-        Segment previous = segment("previous", 4, 10, "Previous chunk");
-        Segment current = segment("current", 4, 11, "Current chunk");
-        Segment next = segment("next", 5, 12, "Next chunk");
-        StubSegmentRepository repository = new StubSegmentRepository(
-                current,
-                List.of(previous, current, next));
-        SegmentPreviewServiceImpl service = new SegmentPreviewServiceImpl(
-                repository, null, null, null, null, null, null);
+    @Mock
+    private SegmentRepository segmentRepository;
+    @Mock
+    private PreviewAccessCache previewAccessCache;
+    @Mock
+    private ActivityEventService activityEventService;
+    @Mock
+    private ActivityQueryService activityQueryService;
+    @Mock
+    private SearchCitationReasonService citationReasonService;
+    @Mock
+    private KnowledgeBaseService knowledgeBaseService;
 
-        PreviewNeighborsDTO result = service.getSegmentNeighbors("current", 1, 1);
+    private SegmentPreviewServiceImpl service;
 
-        assertThat(result.getItems())
-                .extracting("relation")
-                .containsExactly("previous", "current", "next");
-        assertThat(result.getItems())
-                .extracting("pageNo")
-                .containsExactly(4, 4, 5);
-        assertThat(repository.requestedAssetId).isEqualTo("asset-1");
-        assertThat(repository.requestedChunkOrder).isEqualTo(11);
-        assertThat(repository.requestedWindow).isEqualTo(1);
+    @BeforeEach
+    void setUp() {
+        UserContextHolder.set(new RequestUserContext("user-a", "OWNER", "token-hash-a"));
+        service = new SegmentPreviewServiceImpl(
+                segmentRepository,
+                null,
+                previewAccessCache,
+                activityEventService,
+                activityQueryService,
+                citationReasonService,
+                knowledgeBaseService);
+        when(knowledgeBaseService.get(anyString())).thenReturn(KnowledgeBase.builder().id("kb-1").name("KB").build());
     }
 
-    private Segment segment(String segmentId, int pageNo, int chunkOrder, String content) {
+    @AfterEach
+    void tearDown() {
+        UserContextHolder.clear();
+    }
+
+    @Test
+    void getSegmentPreview_shouldPreferOriginalContentAndRecordIt() {
+        Segment segment = segment("Original content", "OCR content", "Title");
+        when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(segment));
+
+        var result = service.getSegmentPreview("seg-1", request());
+
+        assertThat(result.getContent()).isEqualTo("Original content");
+        ArgumentCaptor<ActivityEventService.CitationContext> captor =
+                ArgumentCaptor.forClass(ActivityEventService.CitationContext.class);
+        verify(activityEventService).recordCitationOpened(captor.capture());
+        assertThat(captor.getValue().snippet()).isEqualTo("Original content");
+    }
+
+    @Test
+    void getSegmentPreview_shouldFallbackToOcrThenTitle() {
+        when(segmentRepository.findBySegmentId("seg-1"))
+                .thenReturn(Optional.of(segment(null, "OCR content", "Title")))
+                .thenReturn(Optional.of(segment(null, null, "Title")));
+
+        assertThat(service.getSegmentPreview("seg-1", request()).getContent()).isEqualTo("OCR content");
+        assertThat(service.getSegmentPreview("seg-1", request()).getContent()).isEqualTo("Title");
+    }
+
+    @Test
+    void getSegmentPreview_shouldAllowDirectPreviewWithoutCitationContext() {
+        when(segmentRepository.findBySegmentId("seg-1"))
+                .thenReturn(Optional.of(segment("Original content", null, "Title")));
+
+        var result = service.getSegmentPreview("seg-1", new PreviewRequestDTO());
+
+        assertThat(result.getContent()).isEqualTo("Original content");
+        verifyNoInteractions(activityEventService);
+    }
+
+    private Segment segment(String content, String ocr, String title) {
         return Segment.builder()
-                .segmentId(segmentId)
+                .segmentId("seg-1")
+                .kbId("kb-1")
                 .assetId("asset-1")
-                .pageNo(pageNo)
-                .chunkOrder(chunkOrder)
                 .contentText(content)
+                .ocrText(ocr)
+                .title(title)
                 .build();
     }
 
-    private static class StubSegmentRepository implements SegmentRepository {
-
-        private final Segment current;
-        private final List<Segment> neighbors;
-        private String requestedAssetId;
-        private Integer requestedChunkOrder;
-        private int requestedWindow;
-
-        private StubSegmentRepository(Segment current, List<Segment> neighbors) {
-            this.current = current;
-            this.neighbors = neighbors;
-        }
-
-        @Override
-        public Optional<Segment> findBySegmentId(String segmentId) {
-            return Optional.of(current);
-        }
-
-        @Override
-        public List<Segment> findNeighborChunks(String assetId, Integer chunkOrder, int window) {
-            requestedAssetId = assetId;
-            requestedChunkOrder = chunkOrder;
-            requestedWindow = window;
-            return neighbors;
-        }
-
-        @Override
-        public List<SegmentHit> textSearch(String query, int limit) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public List<SegmentHit> textSearch(String query, int limit, SearchFilter filter) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public List<SegmentHit> textSearch(
-                String query, List<String> keywords, int limit, SearchFilter filter) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public List<SegmentHit> vectorSearch(List<Float> queryVector, int topK) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public List<SegmentHit> vectorSearch(
-                List<Float> queryVector, int topK, SearchFilter filter) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void deleteByAssetId(String assetId) {
-            throw new UnsupportedOperationException();
-        }
+    private PreviewRequestDTO request() {
+        PreviewRequestDTO request = new PreviewRequestDTO();
+        request.setSourceType("ASK");
+        request.setSourceId("turn-1");
+        request.setSessionId("session-1");
+        request.setQuestion("question");
+        PreviewRequestDTO.CitationInfo citationInfo = new PreviewRequestDTO.CitationInfo();
+        citationInfo.setCitationIndex("1");
+        request.setCitationInfo(citationInfo);
+        return request;
     }
 }

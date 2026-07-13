@@ -1,7 +1,6 @@
 package com.anchr.core.search.infrastructure.persistence.es.repository;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
 import co.elastic.clients.elasticsearch.core.GetResponse;
@@ -128,22 +127,6 @@ public class EsSegmentRepository implements SegmentRepository {
             return Optional.of(toSegment(doc));
         } catch (Exception e) {
             log.error("kb segment get failed, segmentId={}", segmentId, e);
-            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
-        }
-    }
-
-    @Override
-    public List<Segment> findNeighborChunks(String assetId, Integer chunkOrder, int window) {
-        assertIndexReadable();
-        if (!StringUtils.hasText(assetId) || chunkOrder == null || window <= 0) {
-            return List.of();
-        }
-        try {
-            SearchRequest request = buildNeighborChunksRequest(assetId.trim(), chunkOrder, window);
-            SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
-            return convertSegmentHits(response);
-        } catch (Exception e) {
-            log.error("kb neighbor chunks search failed, assetId={}, chunkOrder={}", assetId, chunkOrder, e);
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }
@@ -306,26 +289,6 @@ public class EsSegmentRepository implements SegmentRepository {
                 return n;
             })));
         }
-    }
-
-    private SearchRequest buildNeighborChunksRequest(String assetId, int chunkOrder, int window) {
-        int from = Math.max(0, chunkOrder - window);
-        int to = chunkOrder + window;
-        return SearchRequest.of(s -> s
-                .index(kbSegmentConfig.getReadTargetName())
-                .size(window * 2 + 1)
-                .source(src -> src.filter(f -> f.excludes("embedding")))
-                .query(q -> q.bool(b -> {
-                    b.filter(f -> f.term(t -> t.field("assetId").value(assetId)));
-                    b.filter(f -> f.range(r -> r.number(n -> n
-                            .field("chunkOrder")
-                            .gte((double) from)
-                            .lte((double) to))));
-                    return b;
-                }))
-                .sort(sort -> sort.field(f -> f.field("chunkOrder").order(SortOrder.Asc)))
-                .sort(sort -> sort.field(f -> f.field("segmentId").order(SortOrder.Asc)))
-        );
     }
 
     private List<SegmentHit> convertHits(SearchResponse<SegmentDocument> response) {

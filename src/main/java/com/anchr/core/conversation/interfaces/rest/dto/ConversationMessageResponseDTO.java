@@ -19,6 +19,8 @@ public class ConversationMessageResponseDTO implements Serializable {
     private List<String> kbScope;
     private List<String> assetScope;
     private String answerMode;
+    private String answerStatus;
+    private String answerFallbackReason;
     private String retrievalStage;
     private List<ConversationTurnDTO.CitationDTO> citations;
     private List<ResultCardDTO> resultCards;

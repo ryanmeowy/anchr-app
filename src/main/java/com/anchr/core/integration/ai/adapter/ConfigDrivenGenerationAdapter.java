@@ -35,7 +35,7 @@ public class ConfigDrivenGenerationAdapter implements ConversationRewritePort, S
     private ClientCacheManager.ResolvedClient resolve() {
         CapabilityConfig config = configResolver.activeForSlot(CapabilityResolver.SLOT_GENERATION)
                 .orElseThrow(() -> new IllegalStateException(
-                        "Generation is not configured. Save config via PATCH /api/v1/settings/generation."));
+                        "Generation is not configured"));
         return new ClientCacheManager.ResolvedClient(clientFactory.build(config), config);
     }
 }

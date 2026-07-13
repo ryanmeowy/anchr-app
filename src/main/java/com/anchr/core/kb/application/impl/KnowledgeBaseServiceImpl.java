@@ -19,6 +19,7 @@ import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
 import com.anchr.core.kb.domain.repository.AssetRepository;
+import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -46,6 +47,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final AssetRepository assetRepository;
+    private final ActivityEventRepository activityEventRepository;
     private final OutboxEventRepository outboxEventRepository;
     private final IdGen idGen;
     private final ObjectMapper objectMapper;
@@ -213,6 +215,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
+        activityEventRepository.deleteCitationOpenedByAssetId(context.userId(), assetId);
         knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), false);
         outboxEventRepository.save(OutboxEvent.builder()
                 .eventType(OutboxEventType.DELETE_ASSET)

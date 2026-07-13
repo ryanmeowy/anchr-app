@@ -24,4 +24,7 @@ public interface ActivityEventMapper {
                                    @Param("eventType") String eventType);
 
     int deleteBySessionId(@Param("sessionId") String sessionId);
+
+    int deleteCitationOpenedByAssetId(@Param("userId") String userId,
+                                      @Param("assetId") String assetId);
 }

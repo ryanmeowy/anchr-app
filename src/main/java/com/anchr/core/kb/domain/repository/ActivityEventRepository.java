@@ -19,4 +19,6 @@ public interface ActivityEventRepository {
     ActivityEvent fetchByIdAndType(String id, ActivityEventType eventType);
 
     void deleteBySessionId(String sessionId);
+
+    void deleteCitationOpenedByAssetId(String userId, String assetId);
 }

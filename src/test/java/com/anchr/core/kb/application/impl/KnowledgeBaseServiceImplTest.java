@@ -11,6 +11,7 @@ import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.AssetRepository;
+import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +43,8 @@ class KnowledgeBaseServiceImplTest {
     @Mock
     private AssetRepository assetRepository;
     @Mock
+    private ActivityEventRepository activityEventRepository;
+    @Mock
     private OutboxEventRepository outboxEventRepository;
     @Mock
     private IdGen idGen;
@@ -54,6 +57,7 @@ class KnowledgeBaseServiceImplTest {
         service = new KnowledgeBaseServiceImpl(
                 knowledgeBaseRepository,
                 assetRepository,
+                activityEventRepository,
                 outboxEventRepository,
                 idGen,
                 new ObjectMapper());
@@ -87,6 +91,7 @@ class KnowledgeBaseServiceImplTest {
         assertThat(new ObjectMapper().readTree(event.getPayload()))
                 .isEqualTo(new ObjectMapper().readTree("{\"kbId\":\"kb-1\",\"assetId\":\"asset-1\"}"));
         verify(knowledgeBaseRepository).refreshDocumentStats("kb-1", "user-a", false);
+        verify(activityEventRepository).deleteCitationOpenedByAssetId("user-a", "asset-1");
     }
 
     @Test
@@ -98,6 +103,7 @@ class KnowledgeBaseServiceImplTest {
                 .isInstanceOf(BusinessException.class);
 
         verify(outboxEventRepository, never()).save(any());
+        verify(activityEventRepository, never()).deleteCitationOpenedByAssetId(any(), any());
         verify(knowledgeBaseRepository, never()).refreshDocumentStats(any(), any(), eq(false));
     }
 

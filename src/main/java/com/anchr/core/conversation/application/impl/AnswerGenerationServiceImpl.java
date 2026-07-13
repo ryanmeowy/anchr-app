@@ -17,7 +17,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,7 +37,6 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     private static final Pattern CITATION_REFERENCE_PATTERN = Pattern.compile("\\[(\\d+)]");
     private static final String NO_EVIDENCE_TEMPLATE = """
             未找到足够内容支持该问题。
-            建议改写检索问题：%s
             你可以重试：
             1. 补充明确的实体名、版本号或术语
             2. 增加限定词（文档名、章节、页码、场景）
@@ -60,12 +63,22 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             if (StringUtils.hasText(noEvidenceReason)) {
                 meterRegistry.counter("answer.generate.fallback.count").increment();
                 meterRegistry.counter("no_evidence.answer.rate").increment();
-                return buildNoEvidenceFallback(userQuery, rewrittenQuery, noEvidenceReason);
+                return buildNoEvidenceFallback(noEvidenceReason);
             }
 
             String prompt = buildPrompt(userQuery, rewrittenQuery, groundingSegments, resolvedMode, policy);
             String rawText = conversationRewritePort.generateText(prompt);
-            String answerText = parseAnswer(rawText);
+            ModelAnswer modelAnswer = parseModelAnswer(rawText);
+            if (modelAnswer == null) {
+                meterRegistry.counter("answer.generate.fallback.count").increment();
+                return buildModelFallback(groundingSegments, "invalid_model_response");
+            }
+            if (modelAnswer.status() == ModelAnswerStatus.NO_EVIDENCE) {
+                meterRegistry.counter("answer.generate.fallback.count").increment();
+                meterRegistry.counter("no_evidence.answer.rate").increment();
+                return buildNoEvidenceFallback("model_declared_no_evidence");
+            }
+            String answerText = modelAnswer.answer();
             if (!StringUtils.hasText(answerText)) {
                 meterRegistry.counter("answer.generate.fallback.count").increment();
                 return buildModelFallback(groundingSegments, "empty_model_answer");
@@ -74,11 +87,16 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
                 meterRegistry.counter("answer.generate.fallback.count").increment();
                 return buildModelFallback(groundingSegments, "invalid_answer_citation");
             }
+            NormalizedAnswerCitations normalized = normalizeAnswerCitations(answerText, groundingSegments);
+            if (normalized == null) {
+                meterRegistry.counter("answer.generate.fallback.count").increment();
+                return buildModelFallback(groundingSegments, "missing_answer_citation");
+            }
             AnswerGenerationResult result = new AnswerGenerationResult();
-            result.setAnswerText(answerText.trim());
+            result.setAnswerText(normalized.answerText());
             result.setFallbackUsed(false);
             result.setFallbackReason(null);
-            result.setAnswerInputSegmentIds(collectSegmentIds(groundingSegments));
+            result.setAnswerInputSegmentIds(normalized.citedSegmentIds());
             return result;
         } catch (Exception e) {
             log.warn("Answer generation failed: {}", e.getMessage());
@@ -110,11 +128,12 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
                 continue;
             }
             segments.add(new GroundingSegment(
-                    i + 1,
+                    segments.size() + 1,
                     citation.getFileName(),
                     citation.getPageNo(),
                     citation.getHitType(),
                     citation.getSegmentId(),
+                    citation.getAssetId(),
                     evidence
             ));
         }
@@ -122,17 +141,14 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     }
 
     private String resolveEvidence(ConversationRetrievalCandidate candidate, ConversationCitation citation) {
-        if (StringUtils.hasText(citation.getSnippet())) {
-            return citation.getSnippet().trim();
+        if (StringUtils.hasText(candidate.getContent())) {
+            return candidate.getContent().trim();
         }
         if (StringUtils.hasText(candidate.getSnippet())) {
             return candidate.getSnippet().trim();
         }
-        if (candidate.getTopChunks() != null && !candidate.getTopChunks().isEmpty()) {
-            ConversationRetrievalCandidate.TopChunk first = candidate.getTopChunks().getFirst();
-            if (first != null && StringUtils.hasText(first.getSnippet())) {
-                return first.getSnippet().trim();
-            }
+        if (StringUtils.hasText(citation.getSnippet())) {
+            return citation.getSnippet().trim();
         }
         return null;
     }
@@ -145,47 +161,62 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         StringBuilder builder = new StringBuilder();
         builder.append("你是知识库问答助手。");
         builder.append("只能基于给定证据回答，不得编造。");
-        builder.append("输出 JSON：{\"answer\":\"string\"}。");
+        builder.append("必须只输出 JSON，不要输出解释性文字。");
+        builder.append("JSON schema：{\"status\":\"ANSWERED|NO_EVIDENCE\",\"answer\":\"string\"}。");
         builder.append("回答模式：").append(answerMode.name()).append("。");
         builder.append(policy.styleInstruction());
-        builder.append("引用格式：必须使用 [1] [2] 这种编号，且编号只能引用给定证据。");
+        builder.append("当 status=ANSWERED 时，answer 必须遵守以下引用格式：");
+        builder.append("引用编号必须紧跟在它所支持的总结、事实或结论之后，格式示例：“参数记忆保存模型内知识[1]，非参数记忆通过外部知识库提供事实依据[2]。”；");
+        builder.append("其中前一句必须确实由证据[1]支持，后一句必须确实由证据[2]支持；");
+        builder.append("一个陈述同时由多条证据支持时使用“结论[1][2]”，编号之间不加逗号、空格或其他文字；");
+        builder.append("禁止把引用编号放在段首、要点符号之后或与对应内容分离；");
+        builder.append("每个编号最多出现一次；同一证据支持的多个信息必须合并后再标注，且只能引用实际使用的给定证据；");
+        builder.append("禁止输出“参考来源”“引用来源”“References”等独立标题、段落或结尾汇总。");
         if (policy.allowSpeculation()) {
-            builder.append("如果提供可能方向或建议，必须单独成段并明确标注为推测。");
+            builder.append("如果提供可能方向或建议，必须单独成段，推测必须明确标注。");
         }
-        builder.append("如果证据不足，请直接回答“未找到足够内容支持该问题”。");
+        builder.append("如果证据足以回答，status 必须为 ANSWERED。");
+        builder.append("如果证据不足，status 必须为 NO_EVIDENCE，answer 只能使用“未找到足够内容支持该问题”，且不得输出任何引用编号。");
         builder.append("用户问题：").append(userQuery).append("。");
         builder.append("检索改写：").append(rewrittenQuery).append("。");
         builder.append("证据列表：");
         for (GroundingSegment segment : segments) {
             builder.append("[")
                     .append(segment.index())
-                    .append("] file=")
-                    .append(segment.fileName())
+                    .append("] asset=")
+                    .append(StringUtils.hasText(segment.assetId()) ? segment.assetId() : "NA")
+                    .append(",file=")
+                    .append(StringUtils.hasText(segment.fileName()) ? segment.fileName() : "NA")
                     .append(",page=")
                     .append(segment.pageNo() == null ? "NA" : segment.pageNo())
                     .append(",type=")
-                    .append(segment.hitType())
-                    .append(",snippet=")
+                    .append(StringUtils.hasText(segment.hitType()) ? segment.hitType() : "NA")
+                    .append(",content=")
                     .append(segment.evidence())
                     .append(";");
         }
         return builder.toString();
     }
 
-    private String parseAnswer(String rawText) {
+    private ModelAnswer parseModelAnswer(String rawText) {
         if (!StringUtils.hasText(rawText)) {
             return null;
         }
         String json = extractJson(rawText.trim());
         if (!StringUtils.hasText(json)) {
-            return rawText.trim();
+            return null;
         }
         try {
             JsonNode root = objectMapper.readTree(json);
+            String statusText = root.path("status").asText(null);
+            ModelAnswerStatus status = ModelAnswerStatus.from(statusText);
+            if (status == null) {
+                return null;
+            }
             String answer = root.path("answer").asText(null);
-            return StringUtils.hasText(answer) ? answer.trim() : null;
+            return new ModelAnswer(status, StringUtils.hasText(answer) ? answer.trim() : null);
         } catch (Exception e) {
-            return rawText.trim();
+            return null;
         }
     }
 
@@ -209,6 +240,43 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             }
         }
         return false;
+    }
+
+    private NormalizedAnswerCitations normalizeAnswerCitations(String answerText,
+                                                                List<GroundingSegment> groundingSegments) {
+        Matcher matcher = CITATION_REFERENCE_PATTERN.matcher(answerText);
+        Map<Integer, Integer> normalizedIndexes = new LinkedHashMap<>();
+        Map<String, Integer> documentIndexes = new LinkedHashMap<>();
+        while (matcher.find()) {
+            int originalIndex = parseCitationNumber(matcher.group(1));
+            GroundingSegment segment = groundingSegments.get(originalIndex - 1);
+            String documentKey = StringUtils.hasText(segment.assetId())
+                    ? segment.assetId().trim() : "__segment__" + segment.segmentId();
+            int documentIndex = documentIndexes.computeIfAbsent(documentKey, ignored -> documentIndexes.size() + 1);
+            normalizedIndexes.putIfAbsent(originalIndex, documentIndex);
+        }
+        if (normalizedIndexes.isEmpty()) {
+            return null;
+        }
+
+        matcher.reset();
+        StringBuilder normalizedAnswer = new StringBuilder();
+        Set<Integer> emittedDocumentIndexes = new LinkedHashSet<>();
+        while (matcher.find()) {
+            int originalIndex = parseCitationNumber(matcher.group(1));
+            Integer documentIndex = normalizedIndexes.get(originalIndex);
+            String replacement = emittedDocumentIndexes.add(documentIndex)
+                    ? "[" + documentIndex + "]"
+                    : "";
+            matcher.appendReplacement(normalizedAnswer, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(normalizedAnswer);
+
+        List<String> citedSegmentIds = normalizedIndexes.keySet().stream()
+                .map(index -> groundingSegments.get(index - 1).segmentId())
+                .filter(StringUtils::hasText)
+                .toList();
+        return new NormalizedAnswerCitations(normalizedAnswer.toString().trim(), citedSegmentIds);
     }
 
     private int parseCitationNumber(String citationText) {
@@ -252,35 +320,38 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         return maxScore;
     }
 
-    private AnswerGenerationResult buildNoEvidenceFallback(String userQuery, String rewrittenQuery, String reason) {
-        String rewriteSuggestion = resolveRewriteSuggestion(userQuery, rewrittenQuery);
+    private AnswerGenerationResult buildNoEvidenceFallback(String reason) {
         AnswerGenerationResult result = new AnswerGenerationResult();
-        result.setAnswerText(NO_EVIDENCE_TEMPLATE.formatted(rewriteSuggestion).trim());
+        result.setAnswerText(NO_EVIDENCE_TEMPLATE.trim());
         result.setFallbackUsed(true);
         result.setFallbackReason("no_evidence_" + reason);
         result.setAnswerInputSegmentIds(List.of());
         return result;
     }
 
-    private String resolveRewriteSuggestion(String userQuery, String rewrittenQuery) {
-        if (StringUtils.hasText(rewrittenQuery)) {
-            return rewrittenQuery.trim();
-        }
-        if (StringUtils.hasText(userQuery)) {
-            return userQuery.trim();
-        }
-        return "请补充更明确的问题描述";
-    }
-
     private AnswerGenerationResult buildModelFallback(List<GroundingSegment> segments, String reason) {
         StringBuilder answer = new StringBuilder();
         answer.append("根据当前知识库，先给出可确认的信息：");
+        Map<String, List<GroundingSegment>> segmentsByDocument = new LinkedHashMap<>();
         for (GroundingSegment segment : segments) {
+            String documentKey = StringUtils.hasText(segment.assetId())
+                    ? segment.assetId().trim() : "__segment__" + segment.segmentId();
+            segmentsByDocument.computeIfAbsent(documentKey, ignored -> new ArrayList<>()).add(segment);
+        }
+        int documentIndex = 0;
+        for (List<GroundingSegment> documentSegments : segmentsByDocument.values()) {
+            documentIndex++;
             answer.append(System.lineSeparator())
-                    .append("- [")
-                    .append(segment.index())
-                    .append("] ")
-                    .append(segment.evidence());
+                    .append("- ");
+            for (int i = 0; i < documentSegments.size(); i++) {
+                if (i > 0) {
+                    answer.append("；");
+                }
+                answer.append(documentSegments.get(i).evidence());
+            }
+            answer.append("[")
+                    .append(documentIndex)
+                    .append("]");
         }
         answer.append(System.lineSeparator()).append("如需更精确答案，请继续追问。");
         AnswerGenerationResult result = new AnswerGenerationResult();
@@ -306,6 +377,29 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
                                     Integer pageNo,
                                     String hitType,
                                     String segmentId,
+                                    String assetId,
                                     String evidence) {
+    }
+
+    private record ModelAnswer(ModelAnswerStatus status, String answer) {
+    }
+
+    private record NormalizedAnswerCitations(String answerText, List<String> citedSegmentIds) {
+    }
+
+    private enum ModelAnswerStatus {
+        ANSWERED,
+        NO_EVIDENCE;
+
+        private static ModelAnswerStatus from(String value) {
+            if (!StringUtils.hasText(value)) {
+                return null;
+            }
+            try {
+                return valueOf(value.trim());
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
     }
 }

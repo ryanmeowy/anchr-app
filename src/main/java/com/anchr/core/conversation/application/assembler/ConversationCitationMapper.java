@@ -34,26 +34,36 @@ public class ConversationCitationMapper {
             }
             ConversationCitation citation = new ConversationCitation();
             citation.setFileName(resolveFileName(result.getSourceRef()));
+            citation.setKbId(result.getKbId());
             citation.setPageNo(result.getPageNo());
+            citation.setChunkOrder(result.getAnchor() == null ? null : result.getAnchor().getChunkOrder());
+            citation.setContent(result.getContent());
             citation.setSnippet(resolveSnippet(result));
             citation.setHitType(resolveHitType(result));
             citation.setAssetId(result.getAssetId());
             citation.setSegmentId(result.getSegmentId());
+            citation.setAnchor(toAnchor(result.getAnchor()));
             citation.setWhy(buildCitationWhy(result));
             citations.add(citation);
         }
         return citations;
     }
 
-    private String resolveSnippet(ConversationRetrievalCandidate result) {
-        if (StringUtils.hasText(result.getSnippet())) {
-            return result.getSnippet();
-        }
-        if (result.getTopChunks() == null || result.getTopChunks().isEmpty()) {
+    private ConversationCitation.Anchor toAnchor(ConversationRetrievalCandidate.Anchor anchor) {
+        if (anchor == null) {
             return null;
         }
-        ConversationRetrievalCandidate.TopChunk topChunk = result.getTopChunks().getFirst();
-        return topChunk == null ? null : topChunk.getSnippet();
+        return ConversationCitation.Anchor.builder()
+                .pageNo(anchor.getPageNo())
+                .chunkOrder(anchor.getChunkOrder())
+                .bbox(anchor.getBbox())
+                .imageWidth(anchor.getImageWidth())
+                .imageHeight(anchor.getImageHeight())
+                .build();
+    }
+
+    private String resolveSnippet(ConversationRetrievalCandidate result) {
+        return StringUtils.hasText(result.getSnippet()) ? result.getSnippet() : null;
     }
 
     private String resolveHitType(ConversationRetrievalCandidate result) {

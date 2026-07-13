@@ -402,6 +402,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .segmentId(segmentItem.getSegmentId())
                 .kbId(segmentItem.getKbId())
                 .segmentType(segmentItem.getSegmentType())
+                .content(segmentItem.getContent())
                 .snippet(segmentItem.getSnippet())
                 .score(segmentItem.getScore())
                 .pageNo(segmentItem.getPageNo())

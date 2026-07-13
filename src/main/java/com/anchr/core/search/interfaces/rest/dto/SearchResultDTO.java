@@ -55,6 +55,7 @@ public class SearchResultDTO implements Serializable {
         private String segmentId;
         private String kbId;
         private String segmentType;
+        private String content;
         private String snippet;
         private Double score;
         private Integer pageNo;

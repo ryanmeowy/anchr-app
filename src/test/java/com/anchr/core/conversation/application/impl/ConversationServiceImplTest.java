@@ -13,6 +13,7 @@ import com.anchr.core.conversation.application.assembler.ConversationResultCardM
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
+import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.conversation.application.model.RewriteResult;
@@ -26,6 +27,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRespon
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.search.application.KbScopeResolver;
@@ -151,6 +153,8 @@ class ConversationServiceImplTest {
         ConversationMessageResponseDTO secondResponse = service.createMessage(sessionId, buildMessageRequest("那 InnoDB 呢"));
 
         assertThat(firstResponse.getSessionId()).isEqualTo(sessionId);
+        assertThat(firstResponse.getAnswerStatus()).isEqualTo(AnswerStatus.ANSWERED.name());
+        assertThat(firstResponse.getCitations()).hasSize(1);
         assertThat(secondResponse.getSessionId()).isEqualTo(sessionId);
         assertThat(secondResponse.getRewrittenQuery()).isEqualTo("mysql 架构中的 InnoDB 作用");
         assertThat(secondResponse.getCitations()).hasSize(1);
@@ -172,6 +176,7 @@ class ConversationServiceImplTest {
         ConversationTurnListDTO messageList = service.listMessages(sessionId, 20, null);
         assertThat(messageList.getTurns()).hasSize(2);
         assertThat(messageList.getTurns().getFirst().getQuery()).isEqualTo("mysql 架构是什么");
+        assertThat(messageList.getTurns().getFirst().getAnswerStatus()).isEqualTo(AnswerStatus.ANSWERED.name());
         assertThat(messageList.getTurns().get(1).getQuery()).isEqualTo("那 InnoDB 呢");
         assertThat(messageList.getTurns().getFirst().getResultCards()).hasSize(2);
         assertThat(messageList.getTurns().getFirst().getResultCards().getFirst().getPrimaryHit().getSegmentId())
@@ -224,6 +229,8 @@ class ConversationServiceImplTest {
         ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("它和 buffer pool 有什么关系"));
 
         assertThat(response.getSessionId()).isEqualTo(sessionId);
+        assertThat(response.getAnswerStatus()).isEqualTo(AnswerStatus.NO_EVIDENCE.name());
+        assertThat(response.getAnswerFallbackReason()).isEqualTo("no_evidence");
         assertThat(response.getCitations()).isEmpty();
         assertThat(response.getResultCards()).isEmpty();
         assertThat(response.getAnswer()).contains("未找到足够内容支持该问题");
@@ -235,6 +242,8 @@ class ConversationServiceImplTest {
         List<ConversationTurn> storedTurns = repository.findRecentTurns(sessionId, 10);
         assertThat(storedTurns).hasSize(1);
         ConversationTurn storedTurn = storedTurns.getFirst();
+        assertThat(storedTurn.getAnswerStatus()).isEqualTo(AnswerStatus.NO_EVIDENCE.name());
+        assertThat(storedTurn.getAnswerFallbackReason()).isEqualTo("no_evidence");
         List<ResultCardDTO> persistedResultCards = objectMapper.readValue(storedTurn.getResultCardsJson(), new TypeReference<>() {
         });
         assertThat(persistedResultCards).isEmpty();
@@ -339,13 +348,20 @@ class ConversationServiceImplTest {
         )));
         when(answerGenerationService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("根据当前知识库，先给出可确认的信息：", true, "model_unavailable",
-                        List.of("seg_redo_1", "seg_redo_2")));
+                        List.of("seg_redo_2", "seg_redo_1")));
         when(followUpQuestionService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), anyList()))
                 .thenReturn(List.of());
 
         ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql redo log 是什么"));
 
         assertThat(response.getResultCards()).hasSize(2);
+        assertThat(response.getAnswerStatus()).isEqualTo(AnswerStatus.MODEL_FALLBACK.name());
+        assertThat(response.getAnswerFallbackReason()).isEqualTo("model_unavailable");
+        assertThat(response.getCitations()).extracting(ConversationTurnDTO.CitationDTO::getAssetId)
+                .containsExactly("asset_redo_2", "asset_redo_1");
+        assertThat(response.getCitations()).flatExtracting(ConversationTurnDTO.CitationDTO::getChunks)
+                .extracting(ConversationTurnDTO.CitationChunkDTO::getSegmentId)
+                .containsExactly("seg_redo_2", "seg_redo_1");
         assertThat(response.getResultCards()).extracting(ResultCardDTO::getAssetId)
                 .containsExactly("asset_redo_1", "asset_redo_2");
         assertThat(response.getRetrievalTrace().getAnswerFallback()).isTrue();
@@ -371,7 +387,8 @@ class ConversationServiceImplTest {
                 buildResult("seg_pool_2", "asset_pool", "TEXT_CHUNK", "oss://bucket/mysql-pool.pdf", "buffer pool 使用 LRU 链表", 4)
         )));
         when(answerGenerationService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), eq(AnswerMode.STRICT), anyList(), anyList()))
-                .thenReturn(buildAnswer("Buffer pool 用于缓存数据页和索引页。[1]", false, null, List.of("seg_pool_1")));
+                .thenReturn(buildAnswer("Buffer pool 用于缓存数据页和索引页。[1]", false, null,
+                        List.of("seg_pool_1", "seg_pool_2")));
         when(followUpQuestionService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), anyList()))
                 .thenReturn(List.of());
 
@@ -382,6 +399,12 @@ class ConversationServiceImplTest {
         assertThat(card.getPrimaryHit().getSegmentId()).isEqualTo("seg_pool_1");
         assertThat(card.getAdditionalHits()).hasSize(1);
         assertThat(card.getAdditionalHits().getFirst().getSegmentId()).isEqualTo("seg_pool_2");
+        assertThat(response.getCitations()).singleElement().satisfies(citation -> {
+            assertThat(citation.getAssetId()).isEqualTo("asset_pool");
+            assertThat(citation.getCitationIndex()).isEqualTo(1);
+            assertThat(citation.getChunks()).extracting(ConversationTurnDTO.CitationChunkDTO::getSegmentId)
+                    .containsExactly("seg_pool_1", "seg_pool_2");
+        });
     }
 
     @Test
@@ -543,6 +566,7 @@ class ConversationServiceImplTest {
         legacyTurn.setRewrittenQuery("legacy query");
         legacyTurn.setAnswer("legacy answer");
         legacyTurn.setCitationsJson("[]");
+        legacyTurn.setRetrievalTraceJson("{\"answerFallback\":true,\"answerFallbackReason\":\"no_evidence_low_retrieval_score\"}");
         legacyTurn.setCreatedAt(System.currentTimeMillis());
         repository.saveTurn(legacyTurn);
 
@@ -550,6 +574,9 @@ class ConversationServiceImplTest {
 
         assertThat(response.getTurns()).hasSize(1);
         assertThat(response.getTurns().getFirst().getResultCards()).isEmpty();
+        assertThat(response.getTurns().getFirst().getAnswerStatus()).isEqualTo(AnswerStatus.NO_EVIDENCE.name());
+        assertThat(response.getTurns().getFirst().getAnswerFallbackReason())
+                .isEqualTo("no_evidence_low_retrieval_score");
     }
 
     private RewriteResult buildRewrite(String originalQuery, String rewrittenQuery, String reason, boolean fallback) {
@@ -557,7 +584,6 @@ class ConversationServiceImplTest {
         result.setOriginalQuery(originalQuery);
         result.setRewrittenQuery(rewrittenQuery);
         result.setRewriteReason(reason);
-        result.setPreferredModalities(List.of("MIXED"));
         result.setTopicEntities(List.of("mysql", "innodb"));
         result.setConfidence(0.92d);
         result.setFallbackUsed(fallback);
@@ -567,10 +593,6 @@ class ConversationServiceImplTest {
     private ConversationRetrievalResult buildRetrievalResult(List<ConversationRetrievalCandidate> topCandidates) {
         ConversationRetrievalResult result = new ConversationRetrievalResult();
         result.setTopCandidates(topCandidates);
-        ConversationRetrievalResult.GroupedResult groupedResult = new ConversationRetrievalResult.GroupedResult();
-        groupedResult.setGroupKey("MIXED");
-        groupedResult.setItems(topCandidates);
-        result.setGroupedResults(topCandidates.isEmpty() ? List.of() : List.of(groupedResult));
         return result;
     }
 

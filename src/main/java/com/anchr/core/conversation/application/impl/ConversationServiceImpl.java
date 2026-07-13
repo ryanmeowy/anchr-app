@@ -11,6 +11,7 @@ import com.anchr.core.conversation.application.ConversationService;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
+import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.domain.model.ConversationRole;
 import com.anchr.core.conversation.domain.model.ConversationSession;
@@ -30,6 +31,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -39,10 +42,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Default conversation application service.
@@ -56,7 +59,6 @@ public class ConversationServiceImpl implements ConversationService {
     private static final int MAX_TURN_LIMIT = 100;
     private static final int DEFAULT_SESSION_LIST_LIMIT = 20;
     private static final int MAX_SESSION_LIST_LIMIT = 50;
-    private static final long SESSION_TTL_MILLIS = TimeUnit.DAYS.toMillis(30);
     private static final int AUTO_TITLE_MAX_LENGTH = 128;
     private static final int LAST_MESSAGE_PREVIEW_MAX_LENGTH = 80;
     private static final String SINGLE_USER_ID = "single_user";
@@ -70,7 +72,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final ActivityEventService activityEventService;
-    @Qualifier("ingestionTaskExecutor")
+    @Qualifier("streamEventExecutor")
     private final Executor streamExecutor;
 
     @Override
@@ -81,8 +83,7 @@ public class ConversationServiceImpl implements ConversationService {
                 newSessionId(),
                 SINGLE_USER_ID,
                 title,
-                now,
-                resolveExpiresAt(now)
+                now
         );
         session.setKbScope(kbScopeResolver.resolveVisibleKbIds(request.getKbIds()));
         conversationRepository.saveSession(session);
@@ -122,12 +123,13 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationSession session = loadSessionOrThrow(sessionId);
         long now = System.currentTimeMillis();
         session.setTitle(request.getTitle().trim());
-        session.touch(now, resolveExpiresAt(now));
+        session.touch(now);
         conversationRepository.saveSession(session);
         return toSessionDto(session);
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteSession(String sessionId) {
         loadSessionOrThrow(sessionId);
         conversationRepository.deleteSession(sessionId);
@@ -141,9 +143,11 @@ public class ConversationServiceImpl implements ConversationService {
         applyConversationScope(session, request);
         AnswerMode answerMode = resolveAnswerMode(request);
         request.setAnswerMode(answerMode.name());
+        request.setPreferredModalities(resolveRequestedModalities(request.getPreferredModalities()));
         boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
         ConversationMessagePipelineResult pipelineResult = conversationMessagePipeline.execute(session.getSessionId(), request);
+        AnswerStatus answerStatus = AnswerStatus.from(pipelineResult.answerGenerationResult());
 
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId(newTurnId());
@@ -155,6 +159,8 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setKbScopeJson(conversationTurnCodec.serializeKbScope(request.getKbIds()));
         turn.setAssetScopeJson(conversationTurnCodec.serializeAssetScope(request.getAssetIdList()));
         turn.setAnswerMode(answerMode.name());
+        turn.setAnswerStatus(answerStatus.name());
+        turn.setAnswerFallbackReason(pipelineResult.answerGenerationResult().getFallbackReason());
         turn.setCitationsJson(conversationTurnCodec.serializeCitations(pipelineResult.answerCitations()));
         turn.setResultCardsJson(conversationTurnCodec.serializeResultCards(pipelineResult.resultCards()));
         turn.setRetrievalTraceJson(conversationRetrievalTraceBuilder.buildTraceJson(
@@ -175,7 +181,7 @@ public class ConversationServiceImpl implements ConversationService {
         if (shouldAutoTitle) {
             session.setTitle(buildAutoTitle(request.getQuery(), pipelineResult.rewriteResult().getRewrittenQuery()));
         }
-        session.touch(now, resolveExpiresAt(now));
+        session.touch(now);
         conversationRepository.saveSession(session);
 
         ConversationMessageResponseDTO response = new ConversationMessageResponseDTO();
@@ -186,6 +192,8 @@ public class ConversationServiceImpl implements ConversationService {
         response.setKbScope(request.getKbIds());
         response.setAssetScope(request.getAssetIdList());
         response.setAnswerMode(turn.getAnswerMode());
+        response.setAnswerStatus(turn.getAnswerStatus());
+        response.setAnswerFallbackReason(turn.getAnswerFallbackReason());
         response.setRetrievalStage("ANSWERED");
         response.setCitations(conversationTurnCodec.toCitationDTOs(pipelineResult.answerCitations()));
         response.setResultCards(pipelineResult.resultCards());
@@ -225,12 +233,15 @@ public class ConversationServiceImpl implements ConversationService {
                 ConversationMessageResponseDTO response = createMessage(sessionId, request);
                 streamAnswer(emitter, response.getAnswer());
                 sendEvent(emitter, "citations", response.getCitations() == null ? List.of() : response.getCitations());
-                sendEvent(emitter, "done", Map.of(
-                        "turnId", response.getTurnId(),
-                        "kbScope", response.getKbScope(),
-                        "assetScope", response.getAssetScope() == null ? List.of() : response.getAssetScope(),
-                        "answerMode", response.getAnswerMode()
-                ));
+                Map<String, Object> done = new LinkedHashMap<>();
+                done.put("turnId", response.getTurnId());
+                done.put("kbScope", response.getKbScope());
+                done.put("assetScope", response.getAssetScope() == null ? List.of() : response.getAssetScope());
+                done.put("answerMode", response.getAnswerMode());
+                done.put("answerStatus", response.getAnswerStatus());
+                done.put("fallbackReason", response.getAnswerFallbackReason());
+                done.put("citationCount", response.getCitations() == null ? 0 : response.getCitations().size());
+                sendEvent(emitter, "done", done);
                 emitter.complete();
             } catch (BusinessException e) {
                 sendError(emitter, e.getError() == null ? ApiError.INTERNAL_ERROR.name() : e.getError().name(), e.getMessage());
@@ -330,10 +341,50 @@ public class ConversationServiceImpl implements ConversationService {
         dto.setKbScope(conversationTurnCodec.parseKbScope(turn.getKbScopeJson()));
         dto.setAssetScope(conversationTurnCodec.parseAssetScope(turn.getAssetScopeJson()));
         dto.setAnswerMode(turn.getAnswerMode());
+        dto.setAnswerStatus(resolveTurnAnswerStatus(turn).name());
+        dto.setAnswerFallbackReason(resolveTurnFallbackReason(turn));
         dto.setCitations(conversationTurnCodec.parseCitations(turn.getCitationsJson()));
         dto.setResultCards(conversationTurnCodec.parseResultCards(turn.getResultCardsJson()));
         dto.setCreatedAt(turn.getCreatedAt());
         return dto;
+    }
+
+    private AnswerStatus resolveTurnAnswerStatus(ConversationTurn turn) {
+        if (StringUtils.hasText(turn.getAnswerStatus())) {
+            try {
+                return AnswerStatus.valueOf(turn.getAnswerStatus().trim());
+            } catch (IllegalArgumentException ignored) {
+                // Fall through to legacy trace inference.
+            }
+        }
+        Map<?, ?> trace = parseRetrievalTrace(turn.getRetrievalTraceJson());
+        Object fallback = trace.get("answerFallback");
+        if (!Boolean.TRUE.equals(fallback)) {
+            return AnswerStatus.ANSWERED;
+        }
+        String reason = trace.get("answerFallbackReason") instanceof String value ? value : null;
+        return StringUtils.hasText(reason) && reason.startsWith("no_evidence")
+                ? AnswerStatus.NO_EVIDENCE
+                : AnswerStatus.MODEL_FALLBACK;
+    }
+
+    private String resolveTurnFallbackReason(ConversationTurn turn) {
+        if (StringUtils.hasText(turn.getAnswerFallbackReason())) {
+            return turn.getAnswerFallbackReason();
+        }
+        Object reason = parseRetrievalTrace(turn.getRetrievalTraceJson()).get("answerFallbackReason");
+        return reason instanceof String value && StringUtils.hasText(value) ? value : null;
+    }
+
+    private Map<?, ?> parseRetrievalTrace(String retrievalTraceJson) {
+        if (!StringUtils.hasText(retrievalTraceJson)) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(retrievalTraceJson, Map.class);
+        } catch (Exception ignored) {
+            return Map.of();
+        }
     }
 
     private int normalizeLimit(Integer limit) {
@@ -348,10 +399,6 @@ public class ConversationServiceImpl implements ConversationService {
             return DEFAULT_SESSION_LIST_LIMIT;
         }
         return Math.max(1, Math.min(limit, MAX_SESSION_LIST_LIMIT));
-    }
-
-    private long resolveExpiresAt(long now) {
-        return now + SESSION_TTL_MILLIS;
     }
 
     private String encodeSessionListCursor(int offset) {
@@ -386,7 +433,7 @@ public class ConversationServiceImpl implements ConversationService {
 
     private void applyConversationScope(ConversationSession session, ConversationMessageRequestDTO request) {
         List<String> requested = request.getKbIds();
-        if ((requested == null || requested.isEmpty()) && session.getKbScope() != null && !session.getKbScope().isEmpty()) {
+        if (CollectionUtils.isEmpty(requested) && !CollectionUtils.isEmpty(session.getKbScope())) {
             request.setKbIds(session.getKbScope());
         } else {
             request.setKbIds(kbScopeResolver.resolveVisibleKbIds(requested));
@@ -395,6 +442,19 @@ public class ConversationServiceImpl implements ConversationService {
 
     private AnswerMode resolveAnswerMode(ConversationMessageRequestDTO request) {
         return AnswerMode.from(request.getAnswerMode());
+    }
+
+    private List<String> resolveRequestedModalities(List<String> requestedModalities) {
+        if (requestedModalities == null || requestedModalities.isEmpty()) {
+            return List.of("MIXED");
+        }
+        List<String> normalized = requestedModalities.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .map(value -> value.toUpperCase(java.util.Locale.ROOT))
+                .distinct()
+                .toList();
+        return normalized.isEmpty() ? List.of("MIXED") : normalized;
     }
 
     private void streamAnswer(SseEmitter emitter, String answer) throws IOException {

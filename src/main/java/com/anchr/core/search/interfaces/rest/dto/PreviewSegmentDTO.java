@@ -4,8 +4,6 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.io.Serializable;
-import java.util.List;
-
 /**
  * Segment preview response.
  */
@@ -26,10 +24,9 @@ public class PreviewSegmentDTO implements Serializable {
     private String sourceRef;
     private String thumbnail;
     private String title;
-    private String snippet;
+    private String content;
     private String ocrSummary;
     private PreviewAnchorDTO anchor;
-    private List<SurroundingChunkDTO> surroundingChunks;
     private CitationContextDTO citationContext;
     private String sourceType;
     private String sourceId;

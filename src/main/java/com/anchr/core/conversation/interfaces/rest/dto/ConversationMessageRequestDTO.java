@@ -3,6 +3,7 @@ package com.anchr.core.conversation.interfaces.rest.dto;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -32,7 +33,7 @@ public class ConversationMessageRequestDTO {
     private String answerMode;
 
     @Size(max = 10, message = "preferredModalities cannot exceed 10")
-    private List<String> preferredModalities;
+    private List<@Pattern(regexp = "(?i)TEXT|IMAGE|MIXED", message = "preferredModalities only supports TEXT, IMAGE, or MIXED") String> preferredModalities;
 
     private Boolean debug;
 

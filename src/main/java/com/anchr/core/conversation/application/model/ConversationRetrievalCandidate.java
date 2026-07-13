@@ -19,17 +19,20 @@ import java.util.List;
 public class ConversationRetrievalCandidate {
 
     private String segmentId;
+    private String kbId;
     private String assetId;
     private String assetType;
     private String resultType;
     private String segmentType;
     private String sourceRef;
+    /**
+     * Original segment content used as grounding evidence for answer generation.
+     */
+    private String content;
     private String snippet;
     private Double score;
     private Integer pageNo;
     private Anchor anchor;
-    @Builder.Default
-    private List<TopChunk> topChunks = new ArrayList<>();
     private Explain explain;
 
     @Data
@@ -42,14 +45,6 @@ public class ConversationRetrievalCandidate {
         private List<BboxInfo> bbox;
         private Integer imageWidth;
         private Integer imageHeight;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class TopChunk {
-        private String snippet;
     }
 
     @Data

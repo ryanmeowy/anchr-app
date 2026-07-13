@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationMapper">
+    <resultMap id="SessionMap" type="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationSessionRecord">
+        <id property="sessionId" column="session_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="title" column="title"/>
+        <result property="status" column="status"/>
+        <result property="kbScope" column="kb_scope"/>
+        <result property="assetScope" column="asset_scope"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <resultMap id="TurnMap" type="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationTurnRecord">
+        <id property="turnId" column="turn_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="role" column="role"/>
+        <result property="query" column="query"/>
+        <result property="rewrittenQuery" column="rewritten_query"/>
+        <result property="answer" column="answer"/>
+        <result property="kbScope" column="kb_scope"/>
+        <result property="assetScope" column="asset_scope"/>
+        <result property="answerMode" column="answer_mode"/>
+        <result property="answerStatus" column="answer_status"/>
+        <result property="answerFallbackReason" column="answer_fallback_reason"/>
+        <result property="citations" column="citations"/>
+        <result property="resultCards" column="result_cards"/>
+        <result property="retrievalTrace" column="retrieval_trace"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <insert id="upsertSession" parameterType="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationSessionRecord">
+        insert into conversation_session (
+          session_id, user_id, title, status, kb_scope, asset_scope, created_at, updated_at
+        ) values (
+          #{sessionId}, #{userId}, #{title}, #{status}, #{kbScope}, #{assetScope}, #{createdAt}, #{updatedAt}
+        ) on duplicate key update
+          user_id = values(user_id), title = values(title), status = values(status),
+          kb_scope = values(kb_scope), asset_scope = values(asset_scope), updated_at = values(updated_at),
+          deleted_at = null
+    </insert>
+
+    <select id="findSession" resultMap="SessionMap">
+        select session_id, user_id, title, status, kb_scope, asset_scope, created_at, updated_at
+        from conversation_session where session_id = #{sessionId} and deleted_at is null
+    </select>
+
+    <select id="findRecentSessions" resultMap="SessionMap">
+        select session_id, user_id, title, status, kb_scope, asset_scope, created_at, updated_at
+        from conversation_session
+        where user_id = #{userId}
+          and deleted_at is null
+        order by updated_at desc, session_id desc
+        limit #{limit}
+    </select>
+
+    <update id="softDeleteTurns">
+        update conversation_turn set deleted_at = current_timestamp(3)
+        where session_id = #{sessionId} and deleted_at is null
+    </update>
+
+    <update id="softDeleteSession">
+        update conversation_session set deleted_at = current_timestamp(3)
+        where session_id = #{sessionId} and deleted_at is null
+    </update>
+
+    <insert id="upsertTurn" parameterType="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationTurnRecord">
+        insert into conversation_turn (
+          turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
+          answer_mode, answer_status, answer_fallback_reason, citations, result_cards, retrieval_trace, created_at
+        ) values (
+          #{turnId}, #{sessionId}, #{role}, #{query}, #{rewrittenQuery}, #{answer}, #{kbScope}, #{assetScope},
+          #{answerMode}, #{answerStatus}, #{answerFallbackReason}, #{citations}, #{resultCards}, #{retrievalTrace}, #{createdAt}
+        ) on duplicate key update
+          session_id = values(session_id), role = values(role), query = values(query),
+          rewritten_query = values(rewritten_query), answer = values(answer), kb_scope = values(kb_scope),
+          asset_scope = values(asset_scope), answer_mode = values(answer_mode), answer_status = values(answer_status),
+          answer_fallback_reason = values(answer_fallback_reason), citations = values(citations),
+          result_cards = values(result_cards), retrieval_trace = values(retrieval_trace),
+          created_at = values(created_at), deleted_at = null
+    </insert>
+
+    <select id="findTurn" resultMap="TurnMap">
+        select turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
+               answer_mode, answer_status, answer_fallback_reason, citations, result_cards, retrieval_trace, created_at
+        from conversation_turn
+        where session_id = #{sessionId} and turn_id = #{turnId} and deleted_at is null
+    </select>
+
+    <select id="findRecentTurns" resultMap="TurnMap">
+        select turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
+               answer_mode, answer_status, answer_fallback_reason, citations, result_cards, retrieval_trace, created_at
+        from conversation_turn
+        where session_id = #{sessionId}
+          and deleted_at is null
+        order by created_at desc, turn_id desc
+        limit #{limit}
+    </select>
+</mapper>

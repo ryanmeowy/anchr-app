@@ -6,6 +6,7 @@ import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.anchr.core.conversation.application.model.AnswerMode;
+import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
@@ -21,6 +22,8 @@ import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -40,7 +43,7 @@ public class ConversationMessagePipeline {
                 rewriteResult.getRewrittenQuery(),
                 request.getLimit(),
                 request.getKbIds(),
-                rewriteResult.getPreferredModalities(),
+                request.getPreferredModalities(),
                 request.getAssetIdList()
         );
         List<ResultCardDTO> resultCards = conversationResultCardMapper.map(retrievalResult.getTopCandidates());
@@ -50,13 +53,18 @@ public class ConversationMessagePipeline {
                 .filter(candidate -> isTraceableCandidate(candidate, resultCardSegmentIds))
                 .limit(ANSWER_CITATION_LIMIT)
                 .toList();
-        List<ConversationCitation> answerCitations = conversationCitationMapper.mapFromSearchResults(answerCandidates);
+        List<ConversationCitation> candidateCitations = conversationCitationMapper.mapFromSearchResults(answerCandidates);
         AnswerGenerationResult answerGenerationResult = answerGenerationService.generate(
                 request.getQuery().trim(),
                 rewriteResult.getRewrittenQuery(),
                 AnswerMode.from(request.getAnswerMode()),
                 answerCandidates,
-                answerCitations
+                candidateCitations
+        );
+        List<ConversationCitation> answerCitations = filterEffectiveCitations(
+                candidateCitations,
+                answerGenerationResult.getAnswerInputSegmentIds(),
+                AnswerStatus.from(answerGenerationResult)
         );
         return new ConversationMessagePipelineResult(
                 rewriteResult,
@@ -65,6 +73,32 @@ public class ConversationMessagePipeline {
                 answerCitations,
                 answerGenerationResult
         );
+    }
+
+    private List<ConversationCitation> filterEffectiveCitations(List<ConversationCitation> candidateCitations,
+                                                                 List<String> answerInputSegmentIds,
+                                                                 AnswerStatus answerStatus) {
+        if (answerStatus == AnswerStatus.NO_EVIDENCE
+                || candidateCitations == null || candidateCitations.isEmpty()
+                || answerInputSegmentIds == null || answerInputSegmentIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, ConversationCitation> citationBySegmentId = new LinkedHashMap<>();
+        for (ConversationCitation citation : candidateCitations) {
+            if (citation != null && StringUtils.hasText(citation.getSegmentId())) {
+                citationBySegmentId.putIfAbsent(citation.getSegmentId().trim(), citation);
+            }
+        }
+        if (citationBySegmentId.isEmpty()) {
+            return List.of();
+        }
+        return answerInputSegmentIds.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .map(citationBySegmentId::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
     }
 
     private LinkedHashSet<String> collectResultCardSegmentIds(List<ResultCardDTO> resultCards) {

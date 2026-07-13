@@ -38,6 +38,11 @@ public class ActivityEventRepositoryImpl implements ActivityEventRepository {
     }
 
     @Override
+    public void deleteCitationOpenedByAssetId(String userId, String assetId) {
+        mapper.deleteCitationOpenedByAssetId(userId, assetId);
+    }
+
+    @Override
     public ActivityEvent fetchByIdAndType(String id, ActivityEventType eventType) {
         ActivityEventRecord record = mapper.searchById(id, eventType.name());
         return record == null ? null : toDomain(record);

@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.domain.model;
 
 import jakarta.annotation.Nullable;
+import com.anchr.core.common.model.BboxInfo;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,12 +19,28 @@ import java.util.Locale;
 public class ConversationCitation {
 
     private String fileName;
+    private String kbId;
     private Integer pageNo;
+    private Integer chunkOrder;
+    private String content;
     private String snippet;
     private String hitType;
     private String assetId;
     private String segmentId;
+    private Anchor anchor;
     private CitationWhy why;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Anchor implements Serializable {
+        private Integer pageNo;
+        private Integer chunkOrder;
+        private List<BboxInfo> bbox;
+        private Integer imageWidth;
+        private Integer imageHeight;
+    }
 
     /**
      * Explains why a particular segment was selected as a citation — the retrieval-level rationale.

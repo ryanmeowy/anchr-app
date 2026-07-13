@@ -33,7 +33,7 @@ public class ConversationRetrievalTraceBuilder {
         trace.put("answerMode", request.getAnswerMode());
         trace.put("rewriteReason", rewriteResult.getRewriteReason());
         trace.put("topicEntities", rewriteResult.getTopicEntities());
-        trace.put("preferredModalities", rewriteResult.getPreferredModalities());
+        trace.put("preferredModalities", request.getPreferredModalities());
         trace.put("rewriteConfidence", rewriteResult.getConfidence());
         trace.put("rewriteFallback", rewriteResult.isFallbackUsed());
         trace.put("retrievedCount", retrievalResult.getTopCandidates().size());
@@ -70,14 +70,17 @@ public class ConversationRetrievalTraceBuilder {
 
     private Map<String, Integer> toGroupedCounts(ConversationRetrievalResult retrievalResult) {
         Map<String, Integer> groupedCounts = new LinkedHashMap<>();
-        if (retrievalResult.getGroupedResults() == null || retrievalResult.getGroupedResults().isEmpty()) {
+        if (retrievalResult.getTopCandidates() == null || retrievalResult.getTopCandidates().isEmpty()) {
             return groupedCounts;
         }
-        for (ConversationRetrievalResult.GroupedResult groupedResult : retrievalResult.getGroupedResults()) {
-            if (groupedResult == null || !StringUtils.hasText(groupedResult.getGroupKey())) {
+        for (ConversationRetrievalCandidate candidate : retrievalResult.getTopCandidates()) {
+            if (candidate == null || !StringUtils.hasText(candidate.getSegmentType())) {
                 continue;
             }
-            groupedCounts.put(groupedResult.getGroupKey(), groupedResult.getItems() == null ? 0 : groupedResult.getItems().size());
+            String segmentType = candidate.getSegmentType().trim().toUpperCase(java.util.Locale.ROOT);
+            String modality = segmentType.startsWith("TEXT") ? "TEXT"
+                    : segmentType.startsWith("IMAGE") ? "IMAGE" : "OTHER";
+            groupedCounts.merge(modality, 1, Integer::sum);
         }
         return groupedCounts;
     }

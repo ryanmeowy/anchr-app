@@ -4,6 +4,7 @@ import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.search.application.UnifiedSearchService;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
@@ -13,11 +14,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -27,8 +27,6 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class ConversationRetrievalOrchestratorImpl implements ConversationRetrievalOrchestrator {
 
-    private static final String MODALITY_TEXT = "TEXT";
-    private static final String MODALITY_IMAGE = "IMAGE";
     private static final String MODALITY_MIXED = "MIXED";
 
     private final UnifiedSearchService unifiedSearchService;
@@ -47,16 +45,18 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
             query.setLimit(limit);
             query.setKbIds(kbIds);
             query.setAssetIdList(assetIdList);
+            query.setHitTypes(resolveSegmentTypes(preferredModalities));
 
             List<SearchResultDTO> rawResults = unifiedSearchService.search(query);
-            List<SearchResultDTO> filtered = applyModalityFilter(rawResults, preferredModalities);
-            List<ConversationRetrievalCandidate> candidates = filtered.stream()
-                    .map(this::toCandidate)
+            List<ConversationRetrievalCandidate> candidates = rawResults.stream()
+                    .flatMap(item -> toCandidates(item).stream())
                     .filter(Objects::nonNull)
+                    .sorted(Comparator.comparing(
+                            candidate -> candidate.getScore() == null ? 0.0D : candidate.getScore(),
+                            Comparator.reverseOrder()))
                     .toList();
             ConversationRetrievalResult result = new ConversationRetrievalResult();
             result.setTopCandidates(candidates);
-            result.setGroupedResults(groupByResultType(candidates));
             meterRegistry.summary("conversation.retrieval.topk").record(candidates.size());
             if (candidates.isEmpty()) {
                 meterRegistry.counter("conversation.retrieval.empty.count").increment();
@@ -69,100 +69,54 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
         }
     }
 
-    private List<SearchResultDTO> applyModalityFilter(List<SearchResultDTO> rawResults, List<String> preferredModalities) {
-        if (rawResults == null || rawResults.isEmpty()) {
-            return List.of();
-        }
-        if (!hasStrictModality(preferredModalities)) {
-            return rawResults;
-        }
-        boolean textOnly = preferredModalities.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .map(value -> value.toUpperCase(Locale.ROOT))
-                .allMatch(MODALITY_TEXT::equals);
-        boolean imageOnly = preferredModalities.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .map(value -> value.toUpperCase(Locale.ROOT))
-                .allMatch(MODALITY_IMAGE::equals);
-
-        if (!textOnly && !imageOnly) {
-            return rawResults;
-        }
-        List<SearchResultDTO> filtered = new ArrayList<>();
-        for (SearchResultDTO item : rawResults) {
-            String segmentType = item == null ? null : item.getSegmentType();
-            if (textOnly && isTextSegment(segmentType)) {
-                filtered.add(item);
-                continue;
-            }
-            if (imageOnly && isImageSegment(segmentType)) {
-                filtered.add(item);
-            }
-        }
-        return filtered;
-    }
-
-    private boolean hasStrictModality(List<String> preferredModalities) {
+    private List<String> resolveSegmentTypes(List<String> preferredModalities) {
         if (preferredModalities == null || preferredModalities.isEmpty()) {
-            return false;
-        }
-        for (String modality : preferredModalities) {
-            if (!StringUtils.hasText(modality)) {
-                continue;
-            }
-            String value = modality.trim().toUpperCase(Locale.ROOT);
-            if (MODALITY_MIXED.equals(value)) {
-                return false;
-            }
-            if (MODALITY_TEXT.equals(value) || MODALITY_IMAGE.equals(value)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private List<ConversationRetrievalResult.GroupedResult> groupByResultType(List<ConversationRetrievalCandidate> items) {
-        if (items == null || items.isEmpty()) {
             return List.of();
         }
-        Map<String, List<ConversationRetrievalCandidate>> grouped = new LinkedHashMap<>();
-        grouped.put(MODALITY_TEXT, new ArrayList<>());
-        grouped.put(MODALITY_IMAGE, new ArrayList<>());
-        for (ConversationRetrievalCandidate item : items) {
-            String groupKey = isTextSegment(item == null ? null : item.getSegmentType()) ? MODALITY_TEXT : MODALITY_IMAGE;
-            grouped.computeIfAbsent(groupKey, ignored -> new ArrayList<>()).add(item);
+        List<String> normalized = preferredModalities.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .map(value -> value.toUpperCase(Locale.ROOT))
+                .distinct()
+                .toList();
+        if (normalized.size() != 1 || MODALITY_MIXED.equals(normalized.getFirst())) {
+            return List.of();
         }
-        List<ConversationRetrievalResult.GroupedResult> results = new ArrayList<>();
-        for (Map.Entry<String, List<ConversationRetrievalCandidate>> entry : grouped.entrySet()) {
-            if (entry.getValue().isEmpty()) {
-                continue;
-            }
-            ConversationRetrievalResult.GroupedResult groupedResult = new ConversationRetrievalResult.GroupedResult();
-            groupedResult.setGroupKey(entry.getKey());
-            groupedResult.setItems(entry.getValue());
-            results.add(groupedResult);
-        }
-        return results;
+        String prefix = normalized.getFirst();
+        return Arrays.stream(SegmentType.values())
+                .map(Enum::name)
+                .filter(segmentType -> segmentType.startsWith(prefix))
+                .toList();
     }
 
-    private ConversationRetrievalCandidate toCandidate(SearchResultDTO item) {
+    private List<ConversationRetrievalCandidate> toCandidates(SearchResultDTO item) {
         if (item == null) {
-            return null;
+            return List.of();
         }
+        if (item.getTopChunks() == null || item.getTopChunks().isEmpty()) {
+            return List.of(toCandidate(item, null));
+        }
+        return item.getTopChunks().stream()
+                .filter(Objects::nonNull)
+                .map(topChunk -> toCandidate(item, topChunk))
+                .toList();
+    }
+
+    private ConversationRetrievalCandidate toCandidate(SearchResultDTO item, SearchResultDTO.TopChunk topChunk) {
         return ConversationRetrievalCandidate.builder()
-                .segmentId(item.getSegmentId())
+                .segmentId(topChunk == null ? item.getSegmentId() : topChunk.getSegmentId())
+                .kbId(topChunk == null || !StringUtils.hasText(topChunk.getKbId()) ? item.getKbId() : topChunk.getKbId())
                 .assetId(item.getAssetId())
                 .assetType(item.getAssetType())
                 .resultType(item.getResultType())
-                .segmentType(item.getSegmentType())
-                .sourceRef(item.getSourceRef())
-                .snippet(item.getSnippet())
-                .score(item.getScore())
-                .pageNo(item.getPageNo())
-                .anchor(toCandidateAnchor(item.getAnchor()))
-                .topChunks(toCandidateTopChunks(item.getTopChunks()))
+                .segmentType(topChunk == null ? item.getSegmentType() : topChunk.getSegmentType())
+                .sourceRef(topChunk == null || !StringUtils.hasText(topChunk.getSourceRef())
+                        ? item.getSourceRef() : topChunk.getSourceRef())
+                .content(topChunk == null ? item.getContent() : topChunk.getContent())
+                .snippet(topChunk == null ? item.getSnippet() : topChunk.getSnippet())
+                .score(topChunk == null ? item.getScore() : topChunk.getScore())
+                .pageNo(topChunk == null ? item.getPageNo() : topChunk.getPageNo())
+                .anchor(toCandidateAnchor(topChunk == null ? item.getAnchor() : topChunk.getAnchor()))
                 .explain(toCandidateExplain(item.getExplain()))
                 .build();
     }
@@ -180,22 +134,6 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
                 .build();
     }
 
-    private List<ConversationRetrievalCandidate.TopChunk> toCandidateTopChunks(List<SearchResultDTO.TopChunk> topChunks) {
-        if (topChunks == null || topChunks.isEmpty()) {
-            return List.of();
-        }
-        List<ConversationRetrievalCandidate.TopChunk> candidates = new ArrayList<>();
-        for (SearchResultDTO.TopChunk topChunk : topChunks) {
-            if (topChunk == null) {
-                continue;
-            }
-            candidates.add(ConversationRetrievalCandidate.TopChunk.builder()
-                    .snippet(topChunk.getSnippet())
-                    .build());
-        }
-        return candidates;
-    }
-
     private ConversationRetrievalCandidate.Explain toCandidateExplain(SearchExplainDTO source) {
         if (source == null) {
             return null;
@@ -206,11 +144,4 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
                 .build();
     }
 
-    private boolean isTextSegment(String segmentType) {
-        return StringUtils.hasText(segmentType) && segmentType.toUpperCase(Locale.ROOT).startsWith("TEXT");
-    }
-
-    private boolean isImageSegment(String segmentType) {
-        return StringUtils.hasText(segmentType) && segmentType.toUpperCase(Locale.ROOT).startsWith("IMAGE");
-    }
 }
