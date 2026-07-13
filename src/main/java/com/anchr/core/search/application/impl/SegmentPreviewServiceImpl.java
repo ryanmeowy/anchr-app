@@ -57,10 +57,13 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     @Override
     public PreviewSegmentDTO refreshSegmentPreview(String segmentId, PreviewRequestDTO request) {
-        String accessTokenHash = currentAccessTokenHash();
-        if (StringUtils.hasText(segmentId)) {
-            previewAccessCache.evict(segmentId.trim(), accessTokenHash);
+        if (!StringUtils.hasText(segmentId)) {
+            throw new BusinessException(ApiError.INVALID_REQUEST, "segmentId cannot be blank.");
         }
+        String accessTokenHash = currentAccessTokenHash();
+        Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
+                .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
+        previewAccessCache.evict(segment.getAssetId(), accessTokenHash);
         return getSegmentPreview(segmentId, request);
     }
 
@@ -189,9 +192,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         if (isDirectUrl(normalizedSourceRef)) {
             return new PreviewAccessCache.PreviewAccess(normalizedSourceRef, null);
         }
-        String segmentId = segment.getSegmentId();
-        if (StringUtils.hasText(segmentId)) {
-            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(segmentId, accessTokenHash);
+        String assetId = segment.getAssetId();
+        if (StringUtils.hasText(assetId)) {
+            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(assetId, accessTokenHash);
             if (cached.isPresent()) {
                 return cached.get();
             }
@@ -208,8 +211,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 signedObjectUrl.url(),
                 signedObjectUrl.expiresAt()
         );
-        if (StringUtils.hasText(segmentId)) {
-            previewAccessCache.save(segmentId, accessTokenHash, previewAccess);
+        if (StringUtils.hasText(assetId)) {
+            previewAccessCache.save(assetId, accessTokenHash, previewAccess);
         }
         return previewAccess;
     }

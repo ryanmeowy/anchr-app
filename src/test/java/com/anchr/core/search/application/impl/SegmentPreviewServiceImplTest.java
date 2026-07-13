@@ -9,6 +9,7 @@ import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.search.application.SearchCitationReasonService;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
 import org.junit.jupiter.api.AfterEach;
@@ -32,8 +33,9 @@ class SegmentPreviewServiceImplTest {
 
     @Mock
     private SegmentRepository segmentRepository;
-    @Mock
     private PreviewAccessCache previewAccessCache;
+    @Mock
+    private SearchObjectStoragePort objectStoragePort;
     @Mock
     private ActivityEventService activityEventService;
     @Mock
@@ -48,9 +50,10 @@ class SegmentPreviewServiceImplTest {
     @BeforeEach
     void setUp() {
         UserContextHolder.set(new RequestUserContext("user-a", "OWNER", "token-hash-a"));
+        previewAccessCache = new PreviewAccessCache();
         service = new SegmentPreviewServiceImpl(
                 segmentRepository,
-                null,
+                objectStoragePort,
                 previewAccessCache,
                 activityEventService,
                 activityQueryService,
@@ -97,6 +100,38 @@ class SegmentPreviewServiceImplTest {
 
         assertThat(result.getContent()).isEqualTo("Original content");
         verifyNoInteractions(activityEventService);
+    }
+
+    @Test
+    void getSegmentPreview_shouldReuseSignedUrlForSegmentsOfSameAsset() {
+        Segment first = Segment.builder()
+                .segmentId("seg-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .contentText("First")
+                .title("Title")
+                .sourceRef("oss://documents/shared.pdf")
+                .build();
+        Segment second = Segment.builder()
+                .segmentId("seg-2")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .contentText("Second")
+                .title("Title")
+                .sourceRef("oss://documents/shared.pdf")
+                .build();
+        long expiresAt = System.currentTimeMillis() + 120_000L;
+        when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(first));
+        when(segmentRepository.findBySegmentId("seg-2")).thenReturn(Optional.of(second));
+        when(objectStoragePort.buildPreviewUrl("documents/shared.pdf"))
+                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl("https://preview", expiresAt));
+
+        var firstResult = service.getSegmentPreview("seg-1", new PreviewRequestDTO());
+        var secondResult = service.getSegmentPreview("seg-2", new PreviewRequestDTO());
+
+        assertThat(firstResult.getPreviewUrl()).isEqualTo("https://preview");
+        assertThat(secondResult.getPreviewUrl()).isEqualTo("https://preview");
+        verify(objectStoragePort).buildPreviewUrl("documents/shared.pdf");
     }
 
     private Segment segment(String content, String ocr, String title) {
