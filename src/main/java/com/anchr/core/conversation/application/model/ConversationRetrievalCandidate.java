@@ -24,6 +24,7 @@ public class ConversationRetrievalCandidate {
     private String assetType;
     private String resultType;
     private String segmentType;
+    private String title;
     private String sourceRef;
     /**
      * Original segment content used as grounding evidence for answer generation.

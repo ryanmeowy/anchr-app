@@ -37,6 +37,7 @@ public class ConversationCitationMapper {
             citation.setKbId(result.getKbId());
             citation.setPageNo(result.getPageNo());
             citation.setChunkOrder(result.getAnchor() == null ? null : result.getAnchor().getChunkOrder());
+            citation.setTitle(result.getTitle());
             citation.setContent(result.getContent());
             citation.setSnippet(resolveSnippet(result));
             citation.setHitType(resolveHitType(result));

@@ -18,6 +18,7 @@ public class SearchResultDTO implements Serializable {
      * Unified protocol fields (Phase 2 E1).
      */
     private String segmentType;
+    private String title;
     private String content;
     private String resultType;
     private String assetType;
@@ -55,6 +56,7 @@ public class SearchResultDTO implements Serializable {
         private String segmentId;
         private String kbId;
         private String segmentType;
+        private String title;
         private String content;
         private String snippet;
         private Double score;

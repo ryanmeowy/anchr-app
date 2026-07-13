@@ -110,6 +110,7 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
                 .assetType(item.getAssetType())
                 .resultType(item.getResultType())
                 .segmentType(topChunk == null ? item.getSegmentType() : topChunk.getSegmentType())
+                .title(topChunk == null ? item.getTitle() : topChunk.getTitle())
                 .sourceRef(topChunk == null || !StringUtils.hasText(topChunk.getSourceRef())
                         ? item.getSourceRef() : topChunk.getSourceRef())
                 .content(topChunk == null ? item.getContent() : topChunk.getContent())

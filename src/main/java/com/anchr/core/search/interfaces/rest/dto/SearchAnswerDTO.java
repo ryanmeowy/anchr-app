@@ -40,6 +40,7 @@ public class SearchAnswerDTO implements Serializable {
         private String segmentId;
         private Integer pageNo;
         private Integer chunkOrder;
+        private String title;
         private String content;
         private String snippet;
         private SearchResultDTO.Anchor anchor;

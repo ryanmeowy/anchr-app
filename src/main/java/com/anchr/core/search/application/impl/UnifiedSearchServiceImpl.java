@@ -327,6 +327,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .build();
         return SearchResultDTO.builder()
                 .segmentType(toCode(segment.getSegmentType()))
+                .title(segment.getTitle())
                 .content(content)
                 .resultType(toCode(segment.getSegmentType()))
                 .assetType(segment.getAssetType())
@@ -378,6 +379,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         topChunks.add(topChunk);
         return SearchResultDTO.builder()
                 .segmentType(primary.getSegmentType())
+                .title(primary.getTitle())
                 .content(primary.getContent())
                 .resultType(primary.getResultType())
                 .assetType(primary.getAssetType())
@@ -402,6 +404,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .segmentId(segmentItem.getSegmentId())
                 .kbId(segmentItem.getKbId())
                 .segmentType(segmentItem.getSegmentType())
+                .title(segmentItem.getTitle())
                 .content(segmentItem.getContent())
                 .snippet(segmentItem.getSnippet())
                 .score(segmentItem.getScore())

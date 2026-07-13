@@ -14,6 +14,7 @@ class UnifiedSearchTopChunkMappingTest {
                 null, null, null, null, null, null, null);
         SearchResultDTO segment = SearchResultDTO.builder()
                 .segmentId("seg-1")
+                .title("2.1 Retrieval")
                 .content("full original content")
                 .snippet("short snippet")
                 .pageNo(3)
@@ -23,6 +24,7 @@ class UnifiedSearchTopChunkMappingTest {
         SearchResultDTO.TopChunk topChunk = ReflectionTestUtils.invokeMethod(service, "toTopChunk", segment);
 
         assertThat(topChunk).isNotNull();
+        assertThat(topChunk.getTitle()).isEqualTo("2.1 Retrieval");
         assertThat(topChunk.getContent()).isEqualTo("full original content");
         assertThat(topChunk.getAnchor().getChunkOrder()).isEqualTo(12);
     }

@@ -110,6 +110,7 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
                         .segmentId(source.segmentId())
                         .pageNo(source.pageNo())
                         .chunkOrder(source.chunkOrder())
+                        .title(source.title())
                         .content(source.content())
                         .snippet(source.snippet())
                         .anchor(source.anchor())
@@ -199,6 +200,10 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
                 return topChunk.getContent();
             }
             return result.getContent();
+        }
+
+        private String title() {
+            return topChunk == null ? result.getTitle() : topChunk.getTitle();
         }
 
         private Double score() {

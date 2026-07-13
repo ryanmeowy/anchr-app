@@ -149,6 +149,7 @@ public class ConversationTurnCodec {
         chunk.setSegmentId(citation.getSegmentId());
         chunk.setPageNo(citation.getPageNo());
         chunk.setChunkOrder(citation.getChunkOrder());
+        chunk.setTitle(citation.getTitle());
         chunk.setContent(citation.getContent());
         chunk.setSnippet(citation.getSnippet());
         chunk.setHitType(citation.getHitType());

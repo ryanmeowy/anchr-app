@@ -85,6 +85,8 @@ class ConversationRetrievalOrchestratorImplTest {
         assertThat(result.getTopCandidates())
                 .extracting(candidate -> candidate.getAnchor().getChunkOrder())
                 .containsExactly(4, 20);
+        assertThat(result.getTopCandidates()).extracting("title")
+                .containsExactly("section seg-earlier", "section seg-later");
     }
 
     private SearchResultDTO result(String segmentId, String segmentType) {
@@ -100,6 +102,7 @@ class ConversationRetrievalOrchestratorImplTest {
     private SearchResultDTO.TopChunk topChunk(String segmentId, double score, int pageNo, int chunkOrder) {
         return SearchResultDTO.TopChunk.builder()
                 .segmentId(segmentId)
+                .title("section " + segmentId)
                 .segmentType("TEXT_CHUNK")
                 .content("original content " + segmentId)
                 .snippet("evidence " + segmentId)

@@ -50,6 +50,8 @@ class SearchAnswerServiceImplTest {
 
         assertThat(answer.getCitations()).singleElement().satisfies(citation -> {
             assertThat(citation.getAssetId()).isEqualTo("asset-1");
+            assertThat(citation.getChunks()).extracting("title")
+                    .containsExactly("section seg-1", "section seg-2");
             assertThat(citation.getChunks()).extracting("segmentId", "chunkOrder")
                     .containsExactly(
                             org.assertj.core.groups.Tuple.tuple("seg-1", 4),
@@ -60,6 +62,7 @@ class SearchAnswerServiceImplTest {
     private SearchResultDTO.TopChunk topChunk(String segmentId, double score, int pageNo, int chunkOrder) {
         return SearchResultDTO.TopChunk.builder()
                 .segmentId(segmentId)
+                .title("section " + segmentId)
                 .snippet("evidence " + segmentId)
                 .score(score)
                 .pageNo(pageNo)
