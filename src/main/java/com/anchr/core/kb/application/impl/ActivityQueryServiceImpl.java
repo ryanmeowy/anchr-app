@@ -20,6 +20,8 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.CitationChunkSnapshotDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -221,7 +223,8 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
                 .sessionId(readString(payload, "sessionId", null))
                 .citationIndex(readString(payload, "citationIndex", null))
                 .question(readString(payload, "question", null))
-                .why(readString(payload, "why", null))
+                .anchor(readAnchor(payload, "anchor"))
+                .chunks(readCitationChunks(payload, "chunks"))
                 .openedAt(event.getCreatedAt())
                 .build();
     }
@@ -314,6 +317,31 @@ public class ActivityQueryServiceImpl implements ActivityQueryService {
             return b;
         }
         return null;
+    }
+
+    private PreviewAnchorDTO readAnchor(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        if (!(value instanceof Map<?, ?> map) || map.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.convertValue(value, PreviewAnchorDTO.class);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private List<CitationChunkSnapshotDTO> readCitationChunks(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        if (!(value instanceof List<?> list) || list.isEmpty()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.convertValue(value, objectMapper.getTypeFactory()
+                    .constructCollectionType(List.class, CitationChunkSnapshotDTO.class));
+        } catch (IllegalArgumentException e) {
+            return List.of();
+        }
     }
 
     @SuppressWarnings("unchecked")

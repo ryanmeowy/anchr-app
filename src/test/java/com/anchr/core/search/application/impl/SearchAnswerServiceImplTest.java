@@ -1,10 +1,12 @@
 package com.anchr.core.search.application.impl;
 
+import com.anchr.core.search.application.CitationReasonGenerationService;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -22,7 +24,7 @@ class SearchAnswerServiceImplTest {
         SearchQueryDTO query = new SearchQueryDTO();
         query.setQuery("question");
 
-        var answer = new SearchAnswerServiceImpl(null).answer(query, List.of(result));
+        var answer = service().answer(query, List.of(result));
 
         assertThat(answer.getCitations()).singleElement().satisfies(citation -> {
             assertThat(citation.getAssetId()).isEqualTo("asset-1");
@@ -46,12 +48,18 @@ class SearchAnswerServiceImplTest {
         SearchQueryDTO query = new SearchQueryDTO();
         query.setQuery("question");
 
-        var answer = new SearchAnswerServiceImpl(null).answer(query, List.of(result));
+        CitationReasonGenerationService reasonService = request -> Map.of(
+                "seg-1", "第一处说明核心机制。",
+                "seg-2", "第二处补充应用场景。"
+        );
+        var answer = new SearchAnswerServiceImpl(null, reasonService).answer(query, List.of(result));
 
         assertThat(answer.getCitations()).singleElement().satisfies(citation -> {
             assertThat(citation.getAssetId()).isEqualTo("asset-1");
             assertThat(citation.getChunks()).extracting("title")
                     .containsExactly("section seg-1", "section seg-2");
+            assertThat(citation.getChunks()).extracting(chunk -> chunk.getWhy().getReason())
+                    .containsExactly("第一处说明核心机制。", "第二处补充应用场景。");
             assertThat(citation.getChunks()).extracting("segmentId", "chunkOrder")
                     .containsExactly(
                             org.assertj.core.groups.Tuple.tuple("seg-1", 4),
@@ -63,10 +71,16 @@ class SearchAnswerServiceImplTest {
         return SearchResultDTO.TopChunk.builder()
                 .segmentId(segmentId)
                 .title("section " + segmentId)
+                .content("original content " + segmentId)
                 .snippet("evidence " + segmentId)
                 .score(score)
                 .pageNo(pageNo)
                 .anchor(SearchResultDTO.Anchor.builder().pageNo(pageNo).chunkOrder(chunkOrder).build())
                 .build();
+    }
+
+    private SearchAnswerServiceImpl service() {
+        CitationReasonGenerationService reasonService = request -> Map.of();
+        return new SearchAnswerServiceImpl(null, reasonService);
     }
 }

@@ -2,15 +2,18 @@ package com.anchr.core.search.application.impl;
 
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.kb.application.ActivityQueryService;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
-import com.anchr.core.search.application.SearchCitationReasonService;
+import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.CitationChunkSnapshotDTO;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -39,8 +43,6 @@ class SegmentPreviewServiceImplTest {
     @Mock
     private ActivityQueryService activityQueryService;
     @Mock
-    private SearchCitationReasonService citationReasonService;
-    @Mock
     private KnowledgeBaseService knowledgeBaseService;
 
     private SegmentPreviewServiceImpl service;
@@ -54,7 +56,6 @@ class SegmentPreviewServiceImplTest {
                 previewAccessCache,
                 activityEventService,
                 activityQueryService,
-                citationReasonService,
                 knowledgeBaseService);
         when(knowledgeBaseService.get(anyString())).thenReturn(KnowledgeBase.builder().id("kb-1").name("KB").build());
     }
@@ -72,10 +73,17 @@ class SegmentPreviewServiceImplTest {
         var result = service.getSegmentPreview("seg-1", request());
 
         assertThat(result.getContent()).isEqualTo("Original content");
+        assertThat(result.getCitationContext().getCitationReason()).isEqualTo("预先生成的引用理由");
         ArgumentCaptor<ActivityEventService.CitationContext> captor =
                 ArgumentCaptor.forClass(ActivityEventService.CitationContext.class);
         verify(activityEventService).recordCitationOpened(captor.capture());
         assertThat(captor.getValue().snippet()).isEqualTo("Original content");
+        assertThat(captor.getValue().citationReason()).isEqualTo("预先生成的引用理由");
+        assertThat(captor.getValue().anchor().getPageNo()).isEqualTo(2);
+        assertThat(captor.getValue().anchor().getChunkOrder()).isEqualTo(7);
+        assertThat(captor.getValue().anchor().getBbox()).hasSize(1);
+        assertThat(captor.getValue().chunks()).extracting(CitationChunkSnapshotDTO::getSegmentId)
+                .containsExactly("seg-1", "seg-2");
     }
 
     @Test
@@ -99,6 +107,39 @@ class SegmentPreviewServiceImplTest {
         verifyNoInteractions(activityEventService);
     }
 
+    @Test
+    void getSegmentPreview_shouldPreferPersistedAnchorForRecentCitation() {
+        Segment currentSegment = segment("Current content", null, "Current title");
+        when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(currentSegment));
+        PreviewAnchorDTO persistedAnchor = PreviewAnchorDTO.builder()
+                .pageNo(9)
+                .chunkOrder(42)
+                .bbox(List.of(BboxInfo.builder()
+                        .pageNo(9)
+                        .bbox(BboxInfo.Bbox.builder().l(1).t(2).r(3).b(4).build())
+                        .build()))
+                .imageWidth(1200)
+                .imageHeight(1600)
+                .build();
+        when(activityQueryService.fetchCitationsById("record-1")).thenReturn(RecentCitationDTO.builder()
+                .recordId("record-1")
+                .segmentId("seg-1")
+                .citationReason("历史引用理由")
+                .citationIndex("1")
+                .anchor(persistedAnchor)
+                .build());
+        PreviewRequestDTO request = new PreviewRequestDTO();
+        request.setRecordId("record-1");
+
+        var result = service.getSegmentPreview("seg-1", request);
+
+        assertThat(result.getAnchor()).isSameAs(persistedAnchor);
+        assertThat(result.getAnchor().getPageNo()).isEqualTo(9);
+        assertThat(result.getAnchor().getChunkOrder()).isEqualTo(42);
+        assertThat(result.getCitationContext().getCitationReason()).isEqualTo("历史引用理由");
+        verifyNoInteractions(activityEventService);
+    }
+
     private Segment segment(String content, String ocr, String title) {
         return Segment.builder()
                 .segmentId("seg-1")
@@ -107,6 +148,12 @@ class SegmentPreviewServiceImplTest {
                 .contentText(content)
                 .ocrText(ocr)
                 .title(title)
+                .pageNo(2)
+                .chunkOrder(7)
+                .bbox(List.of(BboxInfo.builder()
+                        .pageNo(2)
+                        .bbox(BboxInfo.Bbox.builder().l(10).t(20).r(30).b(40).build())
+                        .build()))
                 .build();
     }
 
@@ -118,6 +165,11 @@ class SegmentPreviewServiceImplTest {
         request.setQuestion("question");
         PreviewRequestDTO.CitationInfo citationInfo = new PreviewRequestDTO.CitationInfo();
         citationInfo.setCitationIndex("1");
+        citationInfo.setReason("预先生成的引用理由");
+        citationInfo.setChunks(List.of(
+                CitationChunkSnapshotDTO.builder().segmentId("seg-1").content("Original content").build(),
+                CitationChunkSnapshotDTO.builder().segmentId("seg-2").content("Other content").build()
+        ));
         request.setCitationInfo(citationInfo);
         return request;
     }

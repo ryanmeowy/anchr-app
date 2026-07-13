@@ -60,6 +60,12 @@ public class ActivityEventServiceImpl implements ActivityEventService {
         ));
         map.put("sourceType", valueOrEmpty(cxt.sourceType()));
         map.put("question", valueOrEmpty(cxt.question()));
+        if (cxt.anchor() != null) {
+            map.put("anchor", cxt.anchor());
+        }
+        if (cxt.chunks() != null && !cxt.chunks().isEmpty()) {
+            map.put("chunks", cxt.chunks());
+        }
 
         saveEvent(ActivityEventType.CITATION_OPENED, "SEGMENT", cxt.segmentId(), map);
     }

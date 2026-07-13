@@ -5,6 +5,7 @@ import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator
 import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
+import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
@@ -16,6 +17,8 @@ import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
+import com.anchr.core.search.application.CitationReasonGenerationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -36,6 +39,8 @@ public class ConversationMessagePipeline {
     private final ConversationCitationMapper conversationCitationMapper;
     private final ConversationResultCardMapper conversationResultCardMapper;
     private final AnswerGenerationService answerGenerationService;
+    private final ConversationTurnCodec conversationTurnCodec;
+    private final CitationReasonGenerationService citationReasonGenerationService;
 
     public ConversationMessagePipelineResult execute(String sessionId, ConversationMessageRequestDTO request) {
         RewriteResult rewriteResult = queryRewriteService.rewrite(sessionId, request.getQuery().trim());
@@ -66,6 +71,12 @@ public class ConversationMessagePipeline {
                 answerGenerationResult.getAnswerInputSegmentIds(),
                 AnswerStatus.from(answerGenerationResult)
         );
+        enrichCitationReasons(
+                request.getQuery().trim(),
+                rewriteResult.getRewrittenQuery(),
+                answerGenerationResult.getAnswerText(),
+                answerCitations
+        );
         return new ConversationMessagePipelineResult(
                 rewriteResult,
                 retrievalResult,
@@ -73,6 +84,42 @@ public class ConversationMessagePipeline {
                 answerCitations,
                 answerGenerationResult
         );
+    }
+
+    private void enrichCitationReasons(String question,
+                                       String rewrittenQuery,
+                                       String answer,
+                                       List<ConversationCitation> citations) {
+        if (citations == null || citations.isEmpty()) {
+            return;
+        }
+        List<ConversationTurnDTO.CitationDTO> groups = conversationTurnCodec.toCitationDTOs(citations);
+        CitationReasonGenerationService.Request reasonRequest = new CitationReasonGenerationService.Request(
+                question,
+                rewrittenQuery,
+                answer,
+                groups.stream().map(group -> new CitationReasonGenerationService.CitationGroup(
+                        group.getCitationIndex(),
+                        group.getAssetId(),
+                        group.getChunks().stream().map(chunk -> new CitationReasonGenerationService.CitationChunk(
+                                chunk.getSegmentId(),
+                                chunk.getContent(),
+                                chunk.getWhy() == null ? null : chunk.getWhy().getScore(),
+                                chunk.getWhy() == null ? List.of() : chunk.getWhy().getHitSources(),
+                                chunk.getWhy() == null ? null : chunk.getWhy().getMatchSummary()
+                        )).toList()
+                )).toList()
+        );
+        Map<String, String> reasons = citationReasonGenerationService.generate(reasonRequest);
+        for (ConversationCitation citation : citations) {
+            if (citation == null || citation.getWhy() == null || !StringUtils.hasText(citation.getSegmentId())) {
+                continue;
+            }
+            String reason = reasons.get(citation.getSegmentId());
+            if (StringUtils.hasText(reason)) {
+                citation.getWhy().setReason(reason);
+            }
+        }
     }
 
     private List<ConversationCitation> filterEffectiveCitations(List<ConversationCitation> candidateCitations,

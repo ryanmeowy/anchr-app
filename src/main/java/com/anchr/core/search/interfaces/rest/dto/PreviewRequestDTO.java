@@ -17,14 +17,7 @@ public class PreviewRequestDTO {
     public static class CitationInfo {
         private String segmentId;
         private String citationIndex;
-        private CitationReason why;
         private String reason;
-    }
-
-    @Data
-    public static class CitationReason {
-        private String score;
-        private List<String> hitSources;
-        private String matchSummary;
+        private List<CitationChunkSnapshotDTO> chunks;
     }
 }

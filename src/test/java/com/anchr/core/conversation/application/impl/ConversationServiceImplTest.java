@@ -7,6 +7,7 @@ import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.FollowUpQuestionService;
 import com.anchr.core.conversation.application.QueryRewriteService;
+import com.anchr.core.search.application.CitationReasonGenerationService;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
@@ -70,6 +71,8 @@ class ConversationServiceImplTest {
     private KbScopeResolver kbScopeResolver;
     @Mock
     private ActivityEventService activityEventService;
+    @Mock
+    private CitationReasonGenerationService citationReasonGenerationService;
 
     private InMemoryConversationRepository repository;
     private ObjectMapper objectMapper;
@@ -81,12 +84,15 @@ class ConversationServiceImplTest {
         repository = new InMemoryConversationRepository();
         objectMapper = new ObjectMapper();
         meterRegistry = new SimpleMeterRegistry();
+        ConversationTurnCodec conversationTurnCodec = new ConversationTurnCodec(objectMapper);
         ConversationMessagePipeline conversationMessagePipeline = new ConversationMessagePipeline(
                 queryRewriteService,
                 conversationRetrievalOrchestrator,
                 new ConversationCitationMapper(),
                 new ConversationResultCardMapper(),
-                answerGenerationService
+                answerGenerationService,
+                conversationTurnCodec,
+                citationReasonGenerationService
         );
         when(kbScopeResolver.resolveVisibleKbIds(any())).thenAnswer(invocation -> {
             List<String> requested = invocation.getArgument(0);
@@ -96,7 +102,7 @@ class ConversationServiceImplTest {
                 repository,
                 conversationMessagePipeline,
                 followUpQuestionService,
-                new ConversationTurnCodec(objectMapper),
+                conversationTurnCodec,
                 new ConversationRetrievalTraceBuilder(objectMapper),
                 kbScopeResolver,
                 objectMapper,
@@ -391,6 +397,10 @@ class ConversationServiceImplTest {
                         List.of("seg_pool_1", "seg_pool_2")));
         when(followUpQuestionService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), anyList()))
                 .thenReturn(List.of());
+        when(citationReasonGenerationService.generate(any())).thenReturn(Map.of(
+                "seg_pool_1", "该段说明 Buffer Pool 用于缓存数据页。",
+                "seg_pool_2", "该段说明 Buffer Pool 使用 LRU 管理缓存。"
+        ));
 
         ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql buffer pool"));
 
@@ -404,7 +414,21 @@ class ConversationServiceImplTest {
             assertThat(citation.getCitationIndex()).isEqualTo(1);
             assertThat(citation.getChunks()).extracting(ConversationTurnDTO.CitationChunkDTO::getSegmentId)
                     .containsExactly("seg_pool_1", "seg_pool_2");
+            assertThat(citation.getChunks()).extracting(chunk -> chunk.getWhy().getReason())
+                    .containsExactly(
+                            "该段说明 Buffer Pool 用于缓存数据页。",
+                            "该段说明 Buffer Pool 使用 LRU 管理缓存。"
+                    );
         });
+        assertThat(service.listMessages(sessionId, 20, null).getTurns())
+                .singleElement()
+                .satisfies(turn -> assertThat(turn.getCitations())
+                        .flatExtracting(ConversationTurnDTO.CitationDTO::getChunks)
+                        .extracting(chunk -> chunk.getWhy().getReason())
+                        .containsExactly(
+                                "该段说明 Buffer Pool 用于缓存数据页。",
+                                "该段说明 Buffer Pool 使用 LRU 管理缓存。"
+                        ));
     }
 
     @Test

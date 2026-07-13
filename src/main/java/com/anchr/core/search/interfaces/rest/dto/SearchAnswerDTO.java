@@ -82,6 +82,9 @@ public class SearchAnswerDTO implements Serializable {
         @Nullable
         private String matchSummary;
 
+        @Nullable
+        private String reason;
+
         @Data
         @Builder
         @NoArgsConstructor

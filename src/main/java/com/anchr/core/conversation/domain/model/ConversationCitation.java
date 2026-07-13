@@ -70,6 +70,9 @@ public class ConversationCitation {
         @Nullable
         private String matchSummary;
 
+        @Nullable
+        private String reason;
+
         public static String buildSummary(@Nullable Double score,
                                           @Nullable List<String> hitSources) {
             List<String> parts = new ArrayList<>();

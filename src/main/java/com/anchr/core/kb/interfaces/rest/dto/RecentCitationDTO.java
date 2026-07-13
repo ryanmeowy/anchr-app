@@ -1,11 +1,12 @@
 package com.anchr.core.kb.interfaces.rest.dto;
 
-import lombok.AllArgsConstructor;
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.CitationChunkSnapshotDTO;
 import lombok.Builder;
-import lombok.NoArgsConstructor;
 import lombok.Value;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Recent citation item.
@@ -29,5 +30,6 @@ public class RecentCitationDTO {
     String sessionId;
     String citationIndex;
     String question;
-    String why;
+    PreviewAnchorDTO anchor;
+    List<CitationChunkSnapshotDTO> chunks;
 }

@@ -1,6 +1,7 @@
 package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.application.SearchAnswerService;
+import com.anchr.core.search.application.CitationReasonGenerationService;
 import com.anchr.core.search.application.UnifiedSearchService;
 import com.anchr.core.search.interfaces.rest.dto.SearchAnswerDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
@@ -27,6 +28,7 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
     private static final int CHUNK_LIMIT_PER_ASSET = 3;
 
     private final UnifiedSearchService unifiedSearchService;
+    private final CitationReasonGenerationService citationReasonGenerationService;
 
     @Override
     public SearchAnswerDTO answer(SearchQueryDTO query) {
@@ -49,8 +51,10 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
                             .build())
                     .build();
         }
+        String answer = buildAnswer(citations);
+        enrichCitationReasons(query, answer, citations);
         return SearchAnswerDTO.builder()
-                .answer(buildAnswer(citations))
+                .answer(answer)
                 .citations(citations)
                 .results(results)
                 .answerTrace(SearchAnswerDTO.AnswerTraceDTO.builder()
@@ -58,6 +62,39 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
                         .grounded(true)
                         .build())
                 .build();
+    }
+
+    private void enrichCitationReasons(SearchQueryDTO query,
+                                       String answer,
+                                       List<SearchAnswerDTO.CitationDTO> citations) {
+        CitationReasonGenerationService.Request request = new CitationReasonGenerationService.Request(
+                query == null ? null : query.getQuery(),
+                null,
+                answer,
+                citations.stream().map(citation -> new CitationReasonGenerationService.CitationGroup(
+                        citation.getCitationIndex(),
+                        citation.getAssetId(),
+                        citation.getChunks().stream().map(chunk -> new CitationReasonGenerationService.CitationChunk(
+                                chunk.getSegmentId(),
+                                chunk.getContent(),
+                                chunk.getWhy() == null ? null : chunk.getWhy().getScore(),
+                                chunk.getWhy() == null ? List.of() : chunk.getWhy().getHitSources(),
+                                chunk.getWhy() == null ? null : chunk.getWhy().getMatchSummary()
+                        )).toList()
+                )).toList()
+        );
+        Map<String, String> reasons = citationReasonGenerationService.generate(request);
+        for (SearchAnswerDTO.CitationDTO citation : citations) {
+            for (SearchAnswerDTO.CitationChunkDTO chunk : citation.getChunks()) {
+                if (chunk.getWhy() == null || !StringUtils.hasText(chunk.getSegmentId())) {
+                    continue;
+                }
+                String reason = reasons.get(chunk.getSegmentId());
+                if (StringUtils.hasText(reason)) {
+                    chunk.getWhy().setReason(reason);
+                }
+            }
+        }
     }
 
     private List<SearchAnswerDTO.CitationDTO> buildCitations(List<SearchResultDTO> results) {
