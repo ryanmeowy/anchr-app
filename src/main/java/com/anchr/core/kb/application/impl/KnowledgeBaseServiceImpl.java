@@ -30,6 +30,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Default knowledge base application service.
@@ -39,7 +40,8 @@ import java.util.List;
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private static final int DEFAULT_PAGE = 1;
-    private static final int DEFAULT_SIZE = 20;
+    private static final int DEFAULT_KB_SIZE = 20;
+    private static final int DEFAULT_DOCUMENT_SIZE = 50;
     private static final int MAX_SIZE = 100;
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
@@ -74,7 +76,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     public PagedResult<KnowledgeBase> listKbs(String q, String status,
                                               LocalDateTime updatedAfter, LocalDateTime updatedBefore,
                                               Integer page, Integer size) {
-        PageBounds bounds = normalizePage(page, size);
+        PageBounds bounds = normalizePage(page, size, DEFAULT_KB_SIZE);
         String trimmedQ = StringUtils.hasText(q) ? q.trim() : null;
         return new PagedResult<>(
                 knowledgeBaseRepository.searchKbs(trimmedQ, status,
@@ -172,13 +174,20 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    public PagedResult<Asset> listDocuments(String kbId, Integer page, Integer size) {
+    public DocumentPagedResult listDocuments(String kbId, String keyword, String fileType,
+                                             Integer page, Integer size) {
         String id = requireId(kbId, "kbId");
         get(id);
-        PageBounds bounds = normalizePage(page, size);
-        return new PagedResult<>(
-                assetRepository.listActive(id, bounds.size(), bounds.offset()),
-                assetRepository.countActive(id),
+        PageBounds bounds = normalizePage(page, size, DEFAULT_DOCUMENT_SIZE);
+        String normalizedKeyword = trimToNull(keyword);
+        String normalizedFileType = StringUtils.hasText(fileType)
+                ? fileType.trim().toUpperCase(Locale.ROOT)
+                : null;
+        return new DocumentPagedResult(
+                assetRepository.listActive(id, normalizedKeyword, normalizedFileType,
+                        bounds.size(), bounds.offset()),
+                assetRepository.countActive(id, normalizedKeyword, normalizedFileType),
+                assetRepository.sumActiveSegments(id, normalizedKeyword, normalizedFileType),
                 bounds.page(),
                 bounds.size());
     }
@@ -186,7 +195,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     @Override
     public Asset getDocument(String kbId, String assetId) {
         String id = requireId(kbId, "kbId");
-        RequestUserContext context = UserContextHolder.get();
         get(id);
         return assetRepository.findActiveById(id, requireId(assetId, "assetId"))
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
@@ -249,9 +257,10 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         }
     }
 
-    private PageBounds normalizePage(Integer page, Integer size) {
-        int normalizedPage = null == page ? DEFAULT_PAGE : page;
-        int normalizedSize = null == size ? DEFAULT_SIZE : Math.min(size, MAX_SIZE);
+    private PageBounds normalizePage(Integer page, Integer size, int defaultSize) {
+        int normalizedPage = null == page ? DEFAULT_PAGE : Math.max(DEFAULT_PAGE, page);
+        int requestedSize = null == size ? defaultSize : size;
+        int normalizedSize = Math.clamp(requestedSize, 1, MAX_SIZE);
         return new PageBounds(normalizedPage, normalizedSize, (normalizedPage - 1) * normalizedSize);
     }
 

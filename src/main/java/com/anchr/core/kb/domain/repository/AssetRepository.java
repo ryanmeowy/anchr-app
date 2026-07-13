@@ -22,9 +22,11 @@ public interface AssetRepository {
      */
     Optional<Asset> findByIdForUpdate(String kbId, String assetId);
 
-    List<Asset> listActive(String kbId, int limit, int offset);
+    List<Asset> listActive(String kbId, String keyword, String fileType, int limit, int offset);
 
-    long countActive(String kbId);
+    long countActive(String kbId, String keyword, String fileType);
+
+    long sumActiveSegments(String kbId, String keyword, String fileType);
 
     /**
      * Aggregated document/segment ingestion stats for a KB (counts by index_status

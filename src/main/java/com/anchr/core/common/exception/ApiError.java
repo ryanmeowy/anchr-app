@@ -23,6 +23,7 @@ public enum ApiError {
     CONVERSATION_SESSION_NOT_FOUND(404, "Conversation session not found"),
     KNOWLEDGE_BASE_NOT_FOUND(404, "Knowledge base not found"),
     DOCUMENT_NOT_FOUND(404, "Document not found"),
+    DOCUMENT_PREVIEW_NOT_AVAILABLE(422, "Document preview is not available"),
     INGESTION_TASK_NOT_FOUND(404, "Ingestion task not found"),
     SEGMENT_NOT_FOUND(404, "Segment not found"),
     PROVIDER_UNAVAILABLE(503, "Provider unavailable."),

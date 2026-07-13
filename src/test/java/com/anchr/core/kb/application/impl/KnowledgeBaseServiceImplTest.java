@@ -5,6 +5,7 @@ import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventStatus;
@@ -22,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -109,5 +111,45 @@ class KnowledgeBaseServiceImplTest {
         assertThatThrownBy(() -> service.deleteDocument("kb-1", "asset-1"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("database unavailable");
+    }
+
+    @Test
+    void listDocuments_shouldNormalizeFiltersAndSupportLibraryPageSizes() {
+        when(assetRepository.listActive("kb-1", "RAG", "PDF", 24, 24))
+                .thenReturn(List.of());
+        when(assetRepository.countActive("kb-1", "RAG", "PDF"))
+                .thenReturn(186L);
+        when(assetRepository.sumActiveSegments("kb-1", "RAG", "PDF"))
+                .thenReturn(4832L);
+
+        var result = service.listDocuments("kb-1", " RAG ", "pdf", 2, 24);
+
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.size()).isEqualTo(24);
+        assertThat(result.total()).isEqualTo(186L);
+        assertThat(result.segmentTotal()).isEqualTo(4832L);
+        verify(assetRepository).listActive("kb-1", "RAG", "PDF", 24, 24);
+    }
+
+    @Test
+    void listDocuments_shouldUseFiftyAsDefaultSizeAndClampInvalidBounds() {
+        when(assetRepository.listActive("kb-1", null, null, 50, 0))
+                .thenReturn(List.of());
+        when(assetRepository.listActive("kb-1", null, null, 1, 0))
+                .thenReturn(List.of());
+        when(assetRepository.listActive("kb-1", null, null, 100, 0))
+                .thenReturn(List.of());
+        when(assetRepository.countActive("kb-1", null, null)).thenReturn(0L);
+        when(assetRepository.sumActiveSegments("kb-1", null, null)).thenReturn(0L);
+
+        var defaultResult = service.listDocuments("kb-1", null, null, null, null);
+        var minimumResult = service.listDocuments("kb-1", null, null, 0, 0);
+        var maximumResult = service.listDocuments("kb-1", null, null, -3, 1000);
+
+        assertThat(defaultResult.size()).isEqualTo(50);
+        assertThat(minimumResult.page()).isEqualTo(1);
+        assertThat(minimumResult.size()).isEqualTo(1);
+        assertThat(maximumResult.page()).isEqualTo(1);
+        assertThat(maximumResult.size()).isEqualTo(100);
     }
 }

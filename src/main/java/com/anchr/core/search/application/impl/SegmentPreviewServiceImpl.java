@@ -39,7 +39,6 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     private static final int SURROUNDING_CHUNK_MAX_BYTES = 4096;
     private static final int SURROUNDING_CHUNK_WINDOW = 1;
-    private static final long PREVIEW_URL_TTL_MILLIS = 5 * 60 * 1_000L;
     private static final String RELATION_CURRENT = "current";
     private static final String RELATION_PREVIOUS = "previous";
     private static final String RELATION_NEXT = "next";
@@ -284,13 +283,13 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         if (!StringUtils.hasText(objectKey)) {
             return new PreviewAccessCache.PreviewAccess(null, null);
         }
-        String previewUrl = signPreviewUrl(objectKey);
-        if (!StringUtils.hasText(previewUrl)) {
+        SearchObjectStoragePort.SignedObjectUrl signedObjectUrl = signPreviewUrl(objectKey);
+        if (signedObjectUrl == null || !StringUtils.hasText(signedObjectUrl.url())) {
             throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);
         }
         PreviewAccessCache.PreviewAccess previewAccess = new PreviewAccessCache.PreviewAccess(
-                previewUrl,
-                System.currentTimeMillis() + PREVIEW_URL_TTL_MILLIS
+                signedObjectUrl.url(),
+                signedObjectUrl.expiresAt()
         );
         if (StringUtils.hasText(segmentId)) {
             previewAccessCache.save(segmentId, accessTokenHash, previewAccess);
@@ -306,7 +305,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return accessTokenHash;
     }
 
-    private String signPreviewUrl(String objectKey) {
+    private SearchObjectStoragePort.SignedObjectUrl signPreviewUrl(String objectKey) {
         try {
             return objectStoragePort.buildPreviewUrl(objectKey);
         } catch (Exception e) {

@@ -3,6 +3,7 @@ package com.anchr.core.kb.interfaces.rest.dto;
 import com.anchr.core.kb.domain.model.Asset;
 import lombok.Builder;
 import lombok.Value;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 
@@ -21,9 +22,9 @@ public class AssetDTO {
     String mimeType;
     Long sizeBytes;
     String fileHash;
-    String previewObjectKey;
-    String thumbnailKey;
     String sourceUrl;
+    Integer versionNo;
+    boolean previewAvailable;
     String parseStatus;
     String indexStatus;
     int segmentCount;
@@ -44,9 +45,9 @@ public class AssetDTO {
                 .mimeType(document.getMimeType())
                 .sizeBytes(document.getSizeBytes())
                 .fileHash(document.getFileHash())
-                .previewObjectKey(document.getPreviewObjectKey())
-                .thumbnailKey(document.getThumbnailKey())
                 .sourceUrl(document.getSourceUrl())
+                .versionNo(document.getVersionNo())
+                .previewAvailable(isPreviewAvailable(document))
                 .parseStatus(document.getParseStatus().name())
                 .indexStatus(document.getIndexStatus().name())
                 .segmentCount(document.getSegmentCount())
@@ -57,5 +58,16 @@ public class AssetDTO {
                 .createdAt(document.getCreatedAt())
                 .updatedAt(document.getUpdatedAt())
                 .build();
+    }
+
+    private static boolean isPreviewAvailable(Asset document) {
+        return StringUtils.hasText(document.getPreviewObjectKey())
+                || StringUtils.hasText(document.getObjectKey())
+                || isHttpUrl(document.getSourceUrl());
+    }
+
+    private static boolean isHttpUrl(String value) {
+        return StringUtils.hasText(value)
+                && (value.trim().startsWith("http://") || value.trim().startsWith("https://"));
     }
 }

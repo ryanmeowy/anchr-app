@@ -14,6 +14,7 @@ public class AssetListDTO {
 
     List<AssetDTO> items;
     long total;
+    long segmentTotal;
     int page;
     int size;
 }

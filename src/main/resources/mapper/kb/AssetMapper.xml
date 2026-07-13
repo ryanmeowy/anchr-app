@@ -78,6 +78,13 @@
         from asset
         where kb_id = #{kbId}
           and deleted_at is null
+        <if test="keyword != null and keyword != ''">
+          and (file_name like concat('%', #{keyword}, '%')
+               or title like concat('%', #{keyword}, '%'))
+        </if>
+        <if test="fileType != null and fileType != ''">
+          and file_type = #{fileType}
+        </if>
         order by created_at desc, id desc
         limit #{limit} offset #{offset}
     </select>
@@ -87,6 +94,27 @@
         from asset
         where kb_id = #{kbId}
           and deleted_at is null
+        <if test="keyword != null and keyword != ''">
+          and (file_name like concat('%', #{keyword}, '%')
+               or title like concat('%', #{keyword}, '%'))
+        </if>
+        <if test="fileType != null and fileType != ''">
+          and file_type = #{fileType}
+        </if>
+    </select>
+
+    <select id="sumActiveSegments" resultType="long">
+        select coalesce(sum(segment_count), 0)
+        from asset
+        where kb_id = #{kbId}
+          and deleted_at is null
+        <if test="keyword != null and keyword != ''">
+          and (file_name like concat('%', #{keyword}, '%')
+               or title like concat('%', #{keyword}, '%'))
+        </if>
+        <if test="fileType != null and fileType != ''">
+          and file_type = #{fileType}
+        </if>
     </select>
 
     <select id="healthStats" resultType="com.anchr.core.kb.infrastructure.persistence.AssetHealthStatsRecord">
