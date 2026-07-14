@@ -80,7 +80,7 @@ public class SettingsController {
         return Result.success(capabilityConfigService.update(capability.toUpperCase(), id, request));
     }
 
-    @RequireAuth(roles = {"ADMIN", "USER"})
+    @RequireAuth
     @PutMapping("/{capability}/{id}/select")
     public Result<Void> selectConfig(@PathVariable String capability, @PathVariable Long id) {
         capabilityConfigService.select(capability.toUpperCase(), id);
