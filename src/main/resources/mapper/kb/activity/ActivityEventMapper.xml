@@ -41,7 +41,7 @@
     <delete id="deleteBySessionId">
         delete from activity_event
         where event_type in ('QUESTION_ASKED', 'CITATION_OPENED')
-          and JSON_EXTRACT(payload, '$.sessionId') = #{sessionId}
+          and JSON_UNQUOTE(JSON_EXTRACT(payload, '$.sessionId')) = #{sessionId}
     </delete>
     <delete id="deleteCitationOpenedByAssetId">
         delete from activity_event

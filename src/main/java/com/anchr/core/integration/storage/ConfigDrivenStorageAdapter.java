@@ -81,11 +81,6 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
         return buildPresignedUrl(objectKey, LONG_VALIDITY_MS);
     }
 
-    @Override
-    public String buildAiImageInput(String objectKey) {
-        return buildPresignedUrl(objectKey, MEDIUM_VALIDITY_MS);
-    }
-
     // ── internal ─────────────────────────────────────────────────────────
 
     private OSS buildClient(StorageConfig config) {

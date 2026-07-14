@@ -535,7 +535,7 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void renameAndDeleteSession_shouldOperateInSingleUserSpace() {
+    void renameAndDeleteSession_shouldDeleteConversationAndRelatedActivityRecords() {
         ConversationCreateRequestDTO createRequest = new ConversationCreateRequestDTO();
         createRequest.setTitle("原标题");
         ConversationSessionDTO session = service.createSession(createRequest);
@@ -549,6 +549,7 @@ class ConversationServiceImplTest {
         service.deleteSession(session.getSessionId());
 
         assertThat(repository.findSession(session.getSessionId())).isEmpty();
+        verify(activityEventService).deleteBySessionId(session.getSessionId());
     }
 
     @Test
