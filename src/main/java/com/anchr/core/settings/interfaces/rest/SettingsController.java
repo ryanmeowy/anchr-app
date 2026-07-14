@@ -31,7 +31,7 @@ public class SettingsController {
 
     // ── capability config ──────────────────────────────────────────────────
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{capability}")
     public Result<List<CapabilityConfigDTO>> getConfig(@PathVariable String capability) {
         List<CapabilityConfigDTO> configs = capabilityConfigService.get(capability.toUpperCase());
@@ -47,7 +47,7 @@ public class SettingsController {
         return Result.success(configs);
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{capability}/all")
     public Result<List<CapabilityConfigDTO>> getAllConfigs(@PathVariable String capability) {
         List<CapabilityConfigDTO> configs = capabilityConfigService.findAll(capability.toUpperCase());
@@ -94,7 +94,7 @@ public class SettingsController {
         return Result.success(null);
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @GetMapping("/{capability}/params")
     public Result<CapabilityParamsDTO> params(@PathVariable String capability) {
         return Result.success(CapabilityParamsDTO.builder()
@@ -120,7 +120,7 @@ public class SettingsController {
 
     // ── test connection ────────────────────────────────────────────────────
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping("/test-connection")
     public Result<CapabilityConnectionTestResultDTO> testConnection(
             @Valid @RequestBody CapabilityConnectionTestRequestDTO request) {
@@ -129,7 +129,7 @@ public class SettingsController {
 
     // ── storage ────────────────────────────────────────────────────────────
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/storage")
     public Result<StorageConfigDTO> getStorageConfig() {
         StorageConfigDTO storageConfigDTO = storageConfigService.get()
@@ -153,7 +153,7 @@ public class SettingsController {
                 storageConfigService.maskSecretKey(saved)));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping("/storage/test")
     public Result<StorageConnectionTestResultDTO> testStorage(
             @Valid @RequestBody StorageConnectionTestRequestDTO request) {

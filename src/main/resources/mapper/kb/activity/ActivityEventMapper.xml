@@ -38,6 +38,18 @@
         order by created_at desc, id desc
         limit #{limit} offset #{offset}
     </select>
+    <delete id="deleteBySessionId">
+        delete from activity_event
+        where event_type in ('QUESTION_ASKED', 'CITATION_OPENED')
+          and JSON_UNQUOTE(JSON_EXTRACT(payload, '$.sessionId')) = #{sessionId}
+    </delete>
+    <delete id="deleteCitationOpenedByAssetId">
+        delete from activity_event
+        where user_id = #{userId}
+          and event_type = 'CITATION_OPENED'
+          and JSON_UNQUOTE(JSON_EXTRACT(payload, '$.assetId')) = #{assetId}
+    </delete>
+
     <select id="searchById" resultMap="ActivityEventRecordMap">
         select
             <include refid="ActivityEventColumns"/>

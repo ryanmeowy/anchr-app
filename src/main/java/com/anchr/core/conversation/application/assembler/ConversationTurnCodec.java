@@ -11,7 +11,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -108,21 +111,50 @@ public class ConversationTurnCodec {
         if (citations == null || citations.isEmpty()) {
             return List.of();
         }
-        List<ConversationTurnDTO.CitationDTO> citationList = new ArrayList<>();
+        Map<String, ConversationTurnDTO.CitationDTO> citationGroups = new LinkedHashMap<>();
         for (ConversationCitation citation : citations) {
             if (citation == null) {
                 continue;
             }
-            ConversationTurnDTO.CitationDTO dto = new ConversationTurnDTO.CitationDTO();
-            dto.setFileName(citation.getFileName());
-            dto.setPageNo(citation.getPageNo());
-            dto.setSnippet(citation.getSnippet());
-            dto.setHitType(citation.getHitType());
-            dto.setAssetId(citation.getAssetId());
-            dto.setSegmentId(citation.getSegmentId());
-            dto.setWhy(citation.getWhy());
-            citationList.add(dto);
+            String groupKey = StringUtils.hasText(citation.getAssetId())
+                    ? "asset:" + citation.getAssetId()
+                    : "segment:" + citation.getSegmentId();
+            ConversationTurnDTO.CitationDTO group = citationGroups.computeIfAbsent(groupKey, ignored -> {
+                ConversationTurnDTO.CitationDTO dto = new ConversationTurnDTO.CitationDTO();
+                dto.setCitationIndex(citationGroups.size() + 1);
+                dto.setFileName(citation.getFileName());
+                dto.setKbId(citation.getKbId());
+                dto.setAssetId(citation.getAssetId());
+                return dto;
+            });
+            boolean alreadyPresent = group.getChunks().stream()
+                    .anyMatch(chunk -> java.util.Objects.equals(chunk.getSegmentId(), citation.getSegmentId()));
+            if (!alreadyPresent) {
+                group.getChunks().add(toCitationChunkDTO(citation));
+            }
         }
-        return citationList;
+        Comparator<ConversationTurnDTO.CitationChunkDTO> documentOrder = Comparator
+                .comparing(ConversationTurnDTO.CitationChunkDTO::getPageNo,
+                        Comparator.nullsLast(Integer::compareTo))
+                .thenComparing(ConversationTurnDTO.CitationChunkDTO::getChunkOrder,
+                        Comparator.nullsLast(Integer::compareTo))
+                .thenComparing(ConversationTurnDTO.CitationChunkDTO::getSegmentId,
+                        Comparator.nullsLast(String::compareTo));
+        citationGroups.values().forEach(group -> group.getChunks().sort(documentOrder));
+        return new ArrayList<>(citationGroups.values());
+    }
+
+    private ConversationTurnDTO.CitationChunkDTO toCitationChunkDTO(ConversationCitation citation) {
+        ConversationTurnDTO.CitationChunkDTO chunk = new ConversationTurnDTO.CitationChunkDTO();
+        chunk.setSegmentId(citation.getSegmentId());
+        chunk.setPageNo(citation.getPageNo());
+        chunk.setChunkOrder(citation.getChunkOrder());
+        chunk.setTitle(citation.getTitle());
+        chunk.setContent(citation.getContent());
+        chunk.setSnippet(citation.getSnippet());
+        chunk.setHitType(citation.getHitType());
+        chunk.setAnchor(citation.getAnchor());
+        chunk.setWhy(citation.getWhy());
+        return chunk;
     }
 }

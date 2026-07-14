@@ -62,7 +62,7 @@ class IngestionApplicationServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
+        UserContextHolder.set(new RequestUserContext("user-a", "ADMIN"));
         service = new IngestionApplicationServiceImpl(
                 knowledgeBaseService,
                 assetRepository,

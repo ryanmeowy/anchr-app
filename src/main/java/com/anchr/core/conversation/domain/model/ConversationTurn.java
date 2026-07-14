@@ -19,6 +19,8 @@ public class ConversationTurn {
     private String kbScopeJson;
     private String assetScopeJson;
     private String answerMode;
+    private String answerStatus;
+    private String answerFallbackReason;
     private String citationsJson;
     private String resultCardsJson;
     private String retrievalTraceJson;

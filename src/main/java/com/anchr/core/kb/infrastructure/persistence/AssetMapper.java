@@ -18,11 +18,22 @@ public interface AssetMapper {
     Optional<AssetRecord> findActiveById(@Param("kbId") String kbId,
                                                   @Param("assetId") String assetId);
 
-    List<AssetRecord> listActive(@Param("kbId") String kbId,
-                                         @Param("limit") int limit,
-                                         @Param("offset") int offset);
+    Optional<AssetRecord> findByIdForUpdate(@Param("kbId") String kbId,
+                                            @Param("assetId") String assetId);
 
-    long countActive(@Param("kbId") String kbId);
+    List<AssetRecord> listActive(@Param("kbId") String kbId,
+                                 @Param("keyword") String keyword,
+                                 @Param("fileType") String fileType,
+                                 @Param("limit") int limit,
+                                 @Param("offset") int offset);
+
+    long countActive(@Param("kbId") String kbId,
+                     @Param("keyword") String keyword,
+                     @Param("fileType") String fileType);
+
+    long sumActiveSegments(@Param("kbId") String kbId,
+                           @Param("keyword") String keyword,
+                           @Param("fileType") String fileType);
 
     AssetHealthStatsRecord healthStats(@Param("kbId") String kbId);
 

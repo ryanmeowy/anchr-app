@@ -22,7 +22,7 @@ public class IndexController {
 
     private final SegmentIndexManager segmentIndexManager;
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/status")
     public Result<SegmentIndexStatusDTO> status() {
         return Result.success(segmentIndexManager.status());

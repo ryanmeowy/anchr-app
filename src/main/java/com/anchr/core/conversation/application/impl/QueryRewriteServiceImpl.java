@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class QueryRewriteServiceImpl implements QueryRewriteService {
 
-    private static final int CONTEXT_TURN_LIMIT = 5;
+    private static final int CONTEXT_TURN_LIMIT = 20;
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
 
     private final ConversationRepository conversationRepository;
@@ -89,7 +89,6 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 result.setRewriteReason(reason);
             }
             result.setTopicEntities(readStringArray(root.path("topicEntities")));
-            result.setPreferredModalities(readStringArray(root.path("preferredModalities")));
             double confidence = root.path("confidence").asDouble(0.0D);
             result.setConfidence(Math.max(0.0D, Math.min(1.0D, confidence)));
             return result;
@@ -138,7 +137,6 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         builder.append("\"rewrittenQuery\":\"string\",");
         builder.append("\"rewriteReason\":\"string\",");
         builder.append("\"topicEntities\":[\"string\"],");
-        builder.append("\"preferredModalities\":[\"TEXT|IMAGE|MIXED\"],");
         builder.append("\"confidence\":0.0");
         builder.append("}。");
         builder.append("约束：");
@@ -173,7 +171,6 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         fallback.setRewrittenQuery(latestQuery);
         fallback.setRewriteReason(reason);
         fallback.setTopicEntities(List.of());
-        fallback.setPreferredModalities(List.of("MIXED"));
         fallback.setConfidence(0.0D);
         fallback.setFallbackUsed(true);
         return fallback;

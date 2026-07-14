@@ -100,7 +100,7 @@
             <include refid="KnowledgeBaseColumns"/>
         from knowledge_base
         <include refid="KbSearchWhere"/>
-        order by status = 'ACTIVE' desc, updated_at desc, id desc
+        order by updated_at desc, id desc
         limit #{limit} offset #{offset}
     </select>
 

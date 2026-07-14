@@ -194,7 +194,7 @@ class SegmentIndexMigrationValidationTest {
             }
 
             @Override
-            public String buildPreviewUrl(String objectKey) {
+            public SignedObjectUrl buildPreviewUrl(String objectKey) {
                 throw new UnsupportedOperationException();
             }
         };

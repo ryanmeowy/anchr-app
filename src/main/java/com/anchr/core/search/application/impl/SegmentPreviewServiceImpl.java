@@ -1,6 +1,5 @@
 package com.anchr.core.search.application.impl;
 
-import cn.hutool.json.JSONUtil;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.application.context.UserContextHolder;
@@ -9,25 +8,19 @@ import com.anchr.core.kb.application.ActivityQueryService;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
-import com.anchr.core.search.application.SearchCitationReasonService;
 import com.anchr.core.search.application.SegmentPreviewService;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
-import com.anchr.core.search.interfaces.rest.dto.PreviewNeighborsDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
 import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
-import com.anchr.core.search.interfaces.rest.dto.SurroundingChunkDTO;
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.nio.charset.StandardCharsets;
-import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -37,19 +30,11 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
-    private static final int SURROUNDING_CHUNK_MAX_BYTES = 4096;
-    private static final int SURROUNDING_CHUNK_WINDOW = 1;
-    private static final long PREVIEW_URL_TTL_MILLIS = 5 * 60 * 1_000L;
-    private static final String RELATION_CURRENT = "current";
-    private static final String RELATION_PREVIOUS = "previous";
-    private static final String RELATION_NEXT = "next";
-
     private final SegmentRepository kbSegmentRepository;
     private final SearchObjectStoragePort objectStoragePort;
     private final PreviewAccessCache previewAccessCache;
     private final ActivityEventService activityEventService;
     private final ActivityQueryService  activityQueryService;
-    private final SearchCitationReasonService citationReasonService;
     private final KnowledgeBaseService knowledgeBaseService;
 
     @Override
@@ -61,7 +46,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
         PreviewSegmentDTO preview = toPreview(segment, accessTokenHash, request);
-        if (!StringUtils.hasText(request.getRecordId())) {
+        if (!StringUtils.hasText(request.getRecordId()) && request.getCitationInfo() != null) {
             recordCitationOpened(preview, request);
         }
         return preview;
@@ -69,25 +54,14 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     @Override
     public PreviewSegmentDTO refreshSegmentPreview(String segmentId, PreviewRequestDTO request) {
-        String accessTokenHash = currentAccessTokenHash();
-        if (StringUtils.hasText(segmentId)) {
-            previewAccessCache.evict(segmentId.trim(), accessTokenHash);
-        }
-        return getSegmentPreview(segmentId, request);
-    }
-
-    @Override
-    public PreviewNeighborsDTO getSegmentNeighbors(String segmentId, int before, int after) {
         if (!StringUtils.hasText(segmentId)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "segmentId cannot be blank.");
         }
+        String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        int window = Math.clamp(Math.max(before, after), 1, 10);
-        return PreviewNeighborsDTO.builder()
-                .segmentId(segment.getSegmentId())
-                .items(buildSurroundingChunks(segment, window))
-                .build();
+        previewAccessCache.evict(segment.getAssetId(), accessTokenHash);
+        return getSegmentPreview(segmentId, request);
     }
 
     private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash, PreviewRequestDTO request) {
@@ -108,10 +82,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .sourceRef(segment.getSourceRef())
                 .thumbnail(segment.getThumbnail())
                 .title(segment.getTitle())
-                .snippet(resolveSnippet(segment))
+                .content(resolveContent(segment))
                 .ocrSummary(segment.getOcrSummary())
-                .anchor(toAnchor(segment))
-                .surroundingChunks(buildSurroundingChunks(segment, SURROUNDING_CHUNK_WINDOW))
+                .anchor(previewInfo.anchor == null ? toAnchor(segment) : previewInfo.anchor)
                 .sourceType(previewInfo.sourceType)
                 .sourceId(previewInfo.sourceId)
                 .sessionId(previewInfo.sessionId)
@@ -128,8 +101,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                     .sourceId(recentCitationDTO.getSourceId())
                     .sessionId(recentCitationDTO.getSessionId())
                     .citationIndex(recentCitationDTO.getCitationIndex())
-                    .why(recentCitationDTO.getWhy())
+                    .reason(recentCitationDTO.getCitationReason())
                     .question(recentCitationDTO.getQuestion())
+                    .anchor(recentCitationDTO.getAnchor())
                     .build();
         }
 
@@ -140,14 +114,15 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .sourceId(request.getSourceId())
                 .sessionId(request.getSessionId())
                 .citationIndex(citationInfo.getCitationIndex())
-                .why(JSONUtil.toJsonStr(citationInfo.getWhy()))
+                .reason(citationInfo.getReason())
                 .question(request.getQuestion())
                 .build();
     }
 
 
     @Builder
-    record PreviewInfo(String sourceType, String sourceId, String sessionId, String citationIndex, String why, String question){}
+    record PreviewInfo(String sourceType, String sourceId, String sessionId, String citationIndex,
+                       String reason, String question, PreviewAnchorDTO anchor){}
 
     private void recordCitationOpened(PreviewSegmentDTO preview, PreviewRequestDTO request) {
         PreviewSegmentDTO.CitationContextDTO citationContext = preview.getCitationContext();
@@ -158,13 +133,15 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .kbId(preview.getKbId())
                 .fileName(preview.getFileName())
                 .title(preview.getTitle())
-                .snippet(preview.getSnippet())
+                .snippet(preview.getContent())
                 .citationIndex(citationInfo.getCitationIndex())
                 .citationReason(citationContext.getCitationReason())
                 .sourceId(request.getSourceId())
                 .sessionId(request.getSessionId())
                 .sourceType(request.getSourceType())
                 .question(request.getQuestion())
+                .anchor(preview.getAnchor())
+                .chunks(citationInfo.getChunks())
                 .build();
         activityEventService.recordCitationOpened(cxt);
     }
@@ -189,79 +166,14 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
-    private List<SurroundingChunkDTO> buildSurroundingChunks(Segment segment, int window) {
-        if (!StringUtils.hasText(segment.getAssetId()) || segment.getChunkOrder() == null) {
-            return buildCurrentChunk(segment);
-        }
-        List<SurroundingChunkDTO> chunks = kbSegmentRepository.findNeighborChunks(
-                        segment.getAssetId(),
-                        segment.getChunkOrder(),
-                        window)
-                .stream()
-                .map(candidate -> toSurroundingChunk(segment, candidate))
-                .filter(Objects::nonNull)
-                .toList();
-        return chunks.isEmpty() ? buildCurrentChunk(segment) : chunks;
-    }
-
     private PreviewSegmentDTO.CitationContextDTO buildCitationContext(Segment segment, PreviewInfo previewInfo, PreviewRequestDTO request) {
-        if (segment == null || !StringUtils.hasText(resolveSnippet(segment))) {
+        if (segment == null || !StringUtils.hasText(resolveContent(segment))) {
             return null;
         }
-        String reason = Optional.ofNullable(request.getCitationInfo()).map(PreviewRequestDTO.CitationInfo::getReason).orElse(null);
         return PreviewSegmentDTO.CitationContextDTO.builder()
                 .citationIndex(previewInfo.citationIndex)
-                .citationReason(null == previewInfo.why ? reason : buildCitationReason(previewInfo.why))
+                .citationReason(previewInfo.reason)
                 .build();
-    }
-
-    private String buildCitationReason(String why) {
-        if (!StringUtils.hasText(why)) {
-            return null;
-        }
-        return citationReasonService.generate(why);
-    }
-
-    private List<SurroundingChunkDTO> buildCurrentChunk(Segment segment) {
-        String content = resolveSnippet(segment);
-        if (!StringUtils.hasText(content)) {
-            return List.of();
-        }
-        return List.of(SurroundingChunkDTO.builder()
-                .segmentId(segment.getSegmentId())
-                .chunkOrder(segment.getChunkOrder())
-                .pageNo(segment.getPageNo())
-                .content(truncateUtf8(content.trim(), SURROUNDING_CHUNK_MAX_BYTES))
-                .relation(RELATION_CURRENT)
-                .bbox(segment.getBbox())
-                .build());
-    }
-
-    private SurroundingChunkDTO toSurroundingChunk(Segment current, Segment candidate) {
-        String content = resolveSnippet(candidate);
-        if (!StringUtils.hasText(content)) {
-            return null;
-        }
-        return SurroundingChunkDTO.builder()
-                .segmentId(candidate.getSegmentId())
-                .chunkOrder(candidate.getChunkOrder())
-                .pageNo(candidate.getPageNo())
-                .content(truncateUtf8(content.trim(), SURROUNDING_CHUNK_MAX_BYTES))
-                .relation(resolveRelation(current, candidate))
-                .bbox(candidate.getBbox())
-                .build();
-    }
-
-    private String resolveRelation(Segment current, Segment candidate) {
-        if (Objects.equals(current.getSegmentId(), candidate.getSegmentId())
-                || Objects.equals(current.getChunkOrder(), candidate.getChunkOrder())) {
-            return RELATION_CURRENT;
-        }
-        if (candidate.getChunkOrder() != null && current.getChunkOrder() != null
-                && candidate.getChunkOrder() < current.getChunkOrder()) {
-            return RELATION_PREVIOUS;
-        }
-        return RELATION_NEXT;
     }
 
     private PreviewAccessCache.PreviewAccess buildPreviewAccess(Segment segment, String accessTokenHash) {
@@ -273,9 +185,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         if (isDirectUrl(normalizedSourceRef)) {
             return new PreviewAccessCache.PreviewAccess(normalizedSourceRef, null);
         }
-        String segmentId = segment.getSegmentId();
-        if (StringUtils.hasText(segmentId)) {
-            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(segmentId, accessTokenHash);
+        String assetId = segment.getAssetId();
+        if (StringUtils.hasText(assetId)) {
+            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(assetId, accessTokenHash);
             if (cached.isPresent()) {
                 return cached.get();
             }
@@ -284,16 +196,16 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         if (!StringUtils.hasText(objectKey)) {
             return new PreviewAccessCache.PreviewAccess(null, null);
         }
-        String previewUrl = signPreviewUrl(objectKey);
-        if (!StringUtils.hasText(previewUrl)) {
+        SearchObjectStoragePort.SignedObjectUrl signedObjectUrl = signPreviewUrl(objectKey);
+        if (signedObjectUrl == null || !StringUtils.hasText(signedObjectUrl.url())) {
             throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);
         }
         PreviewAccessCache.PreviewAccess previewAccess = new PreviewAccessCache.PreviewAccess(
-                previewUrl,
-                System.currentTimeMillis() + PREVIEW_URL_TTL_MILLIS
+                signedObjectUrl.url(),
+                signedObjectUrl.expiresAt()
         );
-        if (StringUtils.hasText(segmentId)) {
-            previewAccessCache.save(segmentId, accessTokenHash, previewAccess);
+        if (StringUtils.hasText(assetId)) {
+            previewAccessCache.save(assetId, accessTokenHash, previewAccess);
         }
         return previewAccess;
     }
@@ -306,7 +218,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return accessTokenHash;
     }
 
-    private String signPreviewUrl(String objectKey) {
+    private SearchObjectStoragePort.SignedObjectUrl signPreviewUrl(String objectKey) {
         try {
             return objectStoragePort.buildPreviewUrl(objectKey);
         } catch (Exception e) {
@@ -328,12 +240,12 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return objectKey;
     }
 
-    private String resolveSnippet(Segment segment) {
-        if (StringUtils.hasText(segment.getOcrText())) {
-            return segment.getOcrText();
-        }
+    private String resolveContent(Segment segment) {
         if (StringUtils.hasText(segment.getContentText())) {
             return segment.getContentText();
+        }
+        if (StringUtils.hasText(segment.getOcrText())) {
+            return segment.getOcrText();
         }
         return segment.getTitle();
     }
@@ -350,26 +262,6 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
             return path.substring(slashIndex + 1);
         }
         return StringUtils.hasText(segment.getTitle()) ? segment.getTitle().trim() : null;
-    }
-
-    private String truncateUtf8(String value, int maxBytes) {
-        if (!StringUtils.hasText(value) || value.getBytes(StandardCharsets.UTF_8).length <= maxBytes) {
-            return value;
-        }
-        StringBuilder builder = new StringBuilder();
-        int usedBytes = 0;
-        for (int offset = 0; offset < value.length(); ) {
-            int codePoint = value.codePointAt(offset);
-            String current = new String(Character.toChars(codePoint));
-            int currentBytes = current.getBytes(StandardCharsets.UTF_8).length;
-            if (usedBytes + currentBytes > maxBytes) {
-                break;
-            }
-            builder.append(current);
-            usedBytes += currentBytes;
-            offset += Character.charCount(codePoint);
-        }
-        return builder.toString();
     }
 
     private String toCode(Enum<?> value) {

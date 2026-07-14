@@ -17,9 +17,16 @@ public interface AssetRepository {
 
     Optional<Asset> findActiveById(String kbId, String assetId);
 
-    List<Asset> listActive(String kbId, int limit, int offset);
+    /**
+     * Locks the asset row even when it is soft-deleted. Must be invoked inside a transaction.
+     */
+    Optional<Asset> findByIdForUpdate(String kbId, String assetId);
 
-    long countActive(String kbId);
+    List<Asset> listActive(String kbId, String keyword, String fileType, int limit, int offset);
+
+    long countActive(String kbId, String keyword, String fileType);
+
+    long sumActiveSegments(String kbId, String keyword, String fileType);
 
     /**
      * Aggregated document/segment ingestion stats for a KB (counts by index_status

@@ -7,6 +7,9 @@ import org.springframework.web.multipart.MultipartFile;
  */
 public interface SearchObjectStoragePort {
 
+    record SignedObjectUrl(String url, long expiresAt) {
+    }
+
     /**
      * Validity level for temporary AI input URLs.
      */
@@ -33,5 +36,5 @@ public interface SearchObjectStoragePort {
     /**
      * Build short-lived URL for preview loading.
      */
-    String buildPreviewUrl(String objectKey);
+    SignedObjectUrl buildPreviewUrl(String objectKey);
 }

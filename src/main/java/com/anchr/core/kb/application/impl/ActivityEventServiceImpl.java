@@ -60,6 +60,12 @@ public class ActivityEventServiceImpl implements ActivityEventService {
         ));
         map.put("sourceType", valueOrEmpty(cxt.sourceType()));
         map.put("question", valueOrEmpty(cxt.question()));
+        if (cxt.anchor() != null) {
+            map.put("anchor", cxt.anchor());
+        }
+        if (cxt.chunks() != null && !cxt.chunks().isEmpty()) {
+            map.put("chunks", cxt.chunks());
+        }
 
         saveEvent(ActivityEventType.CITATION_OPENED, "SEGMENT", cxt.segmentId(), map);
     }
@@ -94,6 +100,11 @@ public class ActivityEventServiceImpl implements ActivityEventService {
         payload.put("withAnswer", query.getWithAnswer());
         payload.put("answerMode", valueOrEmpty(query.getAnswerMode()));
         saveEvent(ActivityEventType.SEARCH_EXECUTED, "SEARCH", null, payload);
+    }
+
+    @Override
+    public void deleteBySessionId(String sessionId) {
+        activityEventRepository.deleteBySessionId(sessionId);
     }
 
     private void saveEvent(ActivityEventType eventType, String resourceType, String resourceId, Map<String, Object> payload) {

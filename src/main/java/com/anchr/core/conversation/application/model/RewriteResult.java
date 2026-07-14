@@ -15,8 +15,6 @@ public class RewriteResult {
     private String rewrittenQuery;
     private String rewriteReason;
     private List<String> topicEntities = new ArrayList<>();
-    private List<String> preferredModalities = new ArrayList<>();
     private double confidence;
     private boolean fallbackUsed;
 }
-

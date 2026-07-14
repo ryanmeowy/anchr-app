@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.kb.infrastructure.persistence.OutboxEventMapper">
+
+    <resultMap id="OutboxEventRecordMap" type="com.anchr.core.kb.infrastructure.persistence.OutboxEventRecord">
+        <id property="id" column="id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="aggregateType" column="aggregate_type"/>
+        <result property="aggregateId" column="aggregate_id"/>
+        <result property="payload" column="payload"/>
+        <result property="status" column="status"/>
+        <result property="retryCount" column="retry_count"/>
+        <result property="nextRetryAt" column="next_retry_at"/>
+        <result property="lockToken" column="lock_token"/>
+        <result property="lockedAt" column="locked_at"/>
+        <result property="processedAt" column="processed_at"/>
+        <result property="lastError" column="last_error"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="OutboxEventColumns">
+        id, event_type, aggregate_type, aggregate_id, payload, status, retry_count,
+        next_retry_at, lock_token, locked_at, processed_at, last_error,
+        created_by, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.anchr.core.kb.infrastructure.persistence.OutboxEventRecord"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into outbox_event (
+            event_type, aggregate_type, aggregate_id, payload, status, retry_count,
+            next_retry_at, lock_token, locked_at, processed_at, last_error,
+            created_by, created_at, updated_at
+        ) values (
+            #{eventType}, #{aggregateType}, #{aggregateId}, #{payload}, #{status}, #{retryCount},
+            #{nextRetryAt}, #{lockToken}, #{lockedAt}, #{processedAt}, #{lastError},
+            #{createdBy}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <select id="selectClaimableForUpdate" resultMap="OutboxEventRecordMap">
+        select
+            <include refid="OutboxEventColumns"/>
+        from outbox_event
+        where (status = 'PENDING' and (next_retry_at is null or next_retry_at &lt;= #{now}))
+           or (status = 'PROCESSING' and locked_at &lt;= #{expiredBefore})
+        order by id asc
+        limit #{limit}
+        for update skip locked
+    </select>
+
+    <update id="markProcessing">
+        update outbox_event
+        set status = 'PROCESSING',
+            lock_token = #{lockToken},
+            locked_at = #{lockedAt},
+            updated_at = #{lockedAt}
+        where id = #{id}
+    </update>
+
+    <update id="markDone">
+        update outbox_event
+        set status = 'DONE',
+            processed_at = #{processedAt},
+            next_retry_at = null,
+            lock_token = null,
+            locked_at = null,
+            last_error = null,
+            updated_at = #{processedAt}
+        where id = #{id}
+          and status = 'PROCESSING'
+          and lock_token = #{lockToken}
+    </update>
+
+    <update id="markRetry">
+        update outbox_event
+        set status = 'PENDING',
+            retry_count = #{retryCount},
+            next_retry_at = #{nextRetryAt},
+            lock_token = null,
+            locked_at = null,
+            last_error = #{lastError},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and status = 'PROCESSING'
+          and lock_token = #{lockToken}
+    </update>
+
+    <update id="markFailed">
+        update outbox_event
+        set status = 'FAILED',
+            retry_count = #{retryCount},
+            next_retry_at = null,
+            lock_token = null,
+            locked_at = null,
+            last_error = #{lastError},
+            updated_at = #{updatedAt}
+        where id = #{id}
+          and status = 'PROCESSING'
+          and lock_token = #{lockToken}
+    </update>
+
+    <delete id="deleteDoneBefore">
+        delete from outbox_event
+        where status = 'DONE'
+          and processed_at &lt; #{processedBefore}
+        order by id asc
+        limit #{limit}
+    </delete>
+</mapper>

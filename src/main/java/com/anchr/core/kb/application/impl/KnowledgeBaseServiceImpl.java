@@ -8,40 +8,49 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
+import com.anchr.core.kb.domain.model.DocumentIndexDeletePayload;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealth;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealthScore;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
+import com.anchr.core.kb.domain.model.OutboxEvent;
+import com.anchr.core.kb.domain.model.OutboxEventStatus;
+import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
 import com.anchr.core.kb.domain.repository.AssetRepository;
+import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.kb.domain.repository.OutboxEventRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Default knowledge base application service.
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private static final int DEFAULT_PAGE = 1;
-    private static final int DEFAULT_SIZE = 20;
+    private static final int DEFAULT_KB_SIZE = 20;
+    private static final int DEFAULT_DOCUMENT_SIZE = 50;
     private static final int MAX_SIZE = 100;
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final AssetRepository assetRepository;
+    private final ActivityEventRepository activityEventRepository;
+    private final OutboxEventRepository outboxEventRepository;
     private final IdGen idGen;
-    private final SegmentRepository kbSegmentRepository;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -69,7 +78,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     public PagedResult<KnowledgeBase> listKbs(String q, String status,
                                               LocalDateTime updatedAfter, LocalDateTime updatedBefore,
                                               Integer page, Integer size) {
-        PageBounds bounds = normalizePage(page, size);
+        PageBounds bounds = normalizePage(page, size, DEFAULT_KB_SIZE);
         String trimmedQ = StringUtils.hasText(q) ? q.trim() : null;
         return new PagedResult<>(
                 knowledgeBaseRepository.searchKbs(trimmedQ, status,
@@ -167,13 +176,20 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    public PagedResult<Asset> listDocuments(String kbId, Integer page, Integer size) {
+    public DocumentPagedResult listDocuments(String kbId, String keyword, String fileType,
+                                             Integer page, Integer size) {
         String id = requireId(kbId, "kbId");
         get(id);
-        PageBounds bounds = normalizePage(page, size);
-        return new PagedResult<>(
-                assetRepository.listActive(id, bounds.size(), bounds.offset()),
-                assetRepository.countActive(id),
+        PageBounds bounds = normalizePage(page, size, DEFAULT_DOCUMENT_SIZE);
+        String normalizedKeyword = trimToNull(keyword);
+        String normalizedFileType = StringUtils.hasText(fileType)
+                ? fileType.trim().toUpperCase(Locale.ROOT)
+                : null;
+        return new DocumentPagedResult(
+                assetRepository.listActive(id, normalizedKeyword, normalizedFileType,
+                        bounds.size(), bounds.offset()),
+                assetRepository.countActive(id, normalizedKeyword, normalizedFileType),
+                assetRepository.sumActiveSegments(id, normalizedKeyword, normalizedFileType),
                 bounds.page(),
                 bounds.size());
     }
@@ -181,30 +197,37 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     @Override
     public Asset getDocument(String kbId, String assetId) {
         String id = requireId(kbId, "kbId");
-        RequestUserContext context = UserContextHolder.get();
         get(id);
         return assetRepository.findActiveById(id, requireId(assetId, "assetId"))
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteDocument(String kbId, String assetId) {
-        String id = requireId(kbId, "kbId");
-        String documentId = requireId(assetId, "assetId");
+        kbId = requireId(kbId, "kbId");
+        assetId = requireId(assetId, "assetId");
         RequestUserContext context = UserContextHolder.get();
-        get(id);
+        get(kbId);
+        LocalDateTime now = LocalDateTime.now();
         boolean deleted = assetRepository.markDeleted(
-                id, documentId, context.userId(), LocalDateTime.now());
+                kbId, assetId, context.userId(), now);
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
-        knowledgeBaseRepository.refreshDocumentStats(id, context.userId(), false);
-        try {
-            kbSegmentRepository.deleteByAssetId(documentId);
-        } catch (BusinessException e) {
-            log.warn("document segment cleanup failed, assetId={}", documentId, e);
-        }
+        activityEventRepository.deleteCitationOpenedByAssetId(context.userId(), assetId);
+        knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), false);
+        outboxEventRepository.save(OutboxEvent.builder()
+                .eventType(OutboxEventType.DELETE_ASSET)
+                .aggregateType("ASSET")
+                .aggregateId(assetId)
+                .payload(toJson(new DocumentIndexDeletePayload(kbId, assetId)))
+                .status(OutboxEventStatus.PENDING)
+                .retryCount(0)
+                .createdBy(context.userId())
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
     }
 
     private String requireId(String id, String fieldName) {
@@ -229,9 +252,18 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
-    private PageBounds normalizePage(Integer page, Integer size) {
-        int normalizedPage = null == page ? DEFAULT_PAGE : page;
-        int normalizedSize = null == size ? DEFAULT_SIZE : Math.min(size, MAX_SIZE);
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ApiError.INTERNAL_ERROR, "Failed to serialize outbox event payload.", e);
+        }
+    }
+
+    private PageBounds normalizePage(Integer page, Integer size, int defaultSize) {
+        int normalizedPage = null == page ? DEFAULT_PAGE : Math.max(DEFAULT_PAGE, page);
+        int requestedSize = null == size ? defaultSize : size;
+        int normalizedSize = Math.clamp(requestedSize, 1, MAX_SIZE);
         return new PageBounds(normalizedPage, normalizedSize, (normalizedPage - 1) * normalizedSize);
     }
 

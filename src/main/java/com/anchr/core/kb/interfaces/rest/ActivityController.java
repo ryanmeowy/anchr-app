@@ -23,7 +23,7 @@ public class ActivityController {
 
     private final ActivityQueryService activityQueryService;
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/recent-questions")
     public Result<RecentQuestionListDTO> recentQuestions(
             @RequestParam(required = false) Integer limit,
@@ -31,7 +31,7 @@ public class ActivityController {
         return Result.success(activityQueryService.recentQuestions(limit, cursor));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/recent-citations")
     public Result<RecentCitationListDTO> recentCitations(
             @RequestParam(required = false) Integer limit,
@@ -39,7 +39,7 @@ public class ActivityController {
         return Result.success(activityQueryService.recentCitations(limit, cursor));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/recent-search")
     public Result<RecentSearchListDTO> recentSearch(
             @RequestParam(required = false) Integer limit,
@@ -47,7 +47,7 @@ public class ActivityController {
         return Result.success(activityQueryService.recentSearch(limit, cursor));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/recent-document")
     public Result<RecentDocumentListDTO> recentDocument(
             @RequestParam(required = false) Integer limit,

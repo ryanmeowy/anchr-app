@@ -212,7 +212,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
      */
     private void refreshSlot(String capability) {
         String slot = CapabilityResolver.slotFor(capability);
-        java.util.Optional<CapabilityConfig> active = configResolver.activeForSlot(slot);
+        Optional<CapabilityConfig> active = configResolver.activeForSlot(slot);
         if (active.isPresent()) {
             clientCacheManager.put(slot,
                     new ClientCacheManager.ResolvedClient(clientFactory.build(active.get()), active.get()));
@@ -221,7 +221,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         }
     }
 
-    private String extraConfigJson(java.util.Map<String, Object> extraConfig) {
+    private String extraConfigJson(Map<String, Object> extraConfig) {
         if (extraConfig == null || extraConfig.isEmpty()) return null;
         try {
             return objectMapper.writeValueAsString(extraConfig);

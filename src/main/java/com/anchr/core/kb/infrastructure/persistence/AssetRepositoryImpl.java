@@ -33,15 +33,25 @@ public class AssetRepositoryImpl implements AssetRepository {
     }
 
     @Override
-    public List<Asset> listActive(String kbId, int limit, int offset) {
-        return mapper.listActive(kbId, limit, offset).stream()
+    public Optional<Asset> findByIdForUpdate(String kbId, String assetId) {
+        return mapper.findByIdForUpdate(kbId, assetId).map(this::toDomain);
+    }
+
+    @Override
+    public List<Asset> listActive(String kbId, String keyword, String fileType, int limit, int offset) {
+        return mapper.listActive(kbId, keyword, fileType, limit, offset).stream()
                 .map(this::toDomain)
                 .toList();
     }
 
     @Override
-    public long countActive(String kbId) {
-        return mapper.countActive(kbId);
+    public long countActive(String kbId, String keyword, String fileType) {
+        return mapper.countActive(kbId, keyword, fileType);
+    }
+
+    @Override
+    public long sumActiveSegments(String kbId, String keyword, String fileType) {
+        return mapper.sumActiveSegments(kbId, keyword, fileType);
     }
 
     @Override

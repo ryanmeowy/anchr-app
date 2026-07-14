@@ -70,8 +70,8 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     }
 
     @Override
-    public String buildPreviewUrl(String objectKey) {
-        return buildPresignedUrl(objectKey, SHORT_VALIDITY_MS);
+    public SignedObjectUrl buildPreviewUrl(String objectKey) {
+        return buildSignedObjectUrl(objectKey, SHORT_VALIDITY_MS);
     }
 
     // ── IngestionObjectStoragePort ───────────────────────────────────────
@@ -79,11 +79,6 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     @Override
     public String buildDownloadUrl(String objectKey) {
         return buildPresignedUrl(objectKey, LONG_VALIDITY_MS);
-    }
-
-    @Override
-    public String buildAiImageInput(String objectKey) {
-        return buildPresignedUrl(objectKey, MEDIUM_VALIDITY_MS);
     }
 
     // ── internal ─────────────────────────────────────────────────────────
@@ -94,14 +89,19 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     }
 
     private String buildPresignedUrl(String objectKey, long durationMs) {
+        return buildSignedObjectUrl(objectKey, durationMs).url();
+    }
+
+    private SignedObjectUrl buildSignedObjectUrl(String objectKey, long durationMs) {
         StorageConfig config = loadConfig();
         OSS client = buildClient(config);
         try {
+            long expiresAt = System.currentTimeMillis() + durationMs;
             GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(
                     config.getBucket(), objectKey, HttpMethod.GET);
-            request.setExpiration(new Date(System.currentTimeMillis() + durationMs));
+            request.setExpiration(new Date(expiresAt));
             URL url = client.generatePresignedUrl(request);
-            return url.toString();
+            return new SignedObjectUrl(url.toString(), expiresAt);
         } catch (Exception e) {
             log.error("Failed to sign URL for {}: {}", objectKey, e.getMessage());
             throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);

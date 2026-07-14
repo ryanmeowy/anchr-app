@@ -39,13 +39,13 @@ public class ConversationController {
     private final ConversationService conversationService;
 
     @PostMapping
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     public Result<ConversationSessionDTO> createSession(@Valid @RequestBody ConversationCreateRequestDTO request) {
         return Result.success(conversationService.createSession(request));
     }
     
     @GetMapping
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     public Result<ConversationSessionListDTO> listSessions(
             @RequestParam(required = false) @Min(1) @Max(50) Integer limit,
             @RequestParam(required = false) String cursor) {
@@ -53,13 +53,13 @@ public class ConversationController {
     }
     
     @GetMapping("/{sessionId}")
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     public Result<ConversationSessionDTO> getSession(@PathVariable @NotBlank String sessionId) {
         return Result.success(conversationService.getSession(sessionId));
     }
     
     @PatchMapping("/{sessionId}")
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     public Result<ConversationSessionDTO> renameSession(
             @PathVariable @NotBlank String sessionId,
             @Valid @RequestBody ConversationRenameRequestDTO request) {
@@ -74,7 +74,7 @@ public class ConversationController {
     }
     
     @PostMapping("/{sessionId}/messages")
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     public Result<ConversationMessageResponseDTO> createMessage(
             @PathVariable @NotBlank String sessionId,
             @Valid @RequestBody ConversationMessageRequestDTO request) {
@@ -82,7 +82,7 @@ public class ConversationController {
     }
 
     @PostMapping(value = "/{sessionId}/messages/stream", produces = "text/event-stream;charset=UTF-8")
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     public SseEmitter streamMessage(
             @PathVariable @NotBlank String sessionId,
             @Valid @RequestBody ConversationMessageRequestDTO request) {
@@ -90,7 +90,7 @@ public class ConversationController {
     }
     
     @GetMapping("/{sessionId}/messages")
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     public Result<ConversationTurnListDTO> listMessages(
             @PathVariable @NotBlank String sessionId,
             @RequestParam(required = false) @Min(1) @Max(100) Integer limit,

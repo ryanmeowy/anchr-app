@@ -12,11 +12,4 @@ import java.util.List;
 public class ConversationRetrievalResult {
 
     private List<ConversationRetrievalCandidate> topCandidates = new ArrayList<>();
-    private List<GroupedResult> groupedResults = new ArrayList<>();
-
-    @Data
-    public static class GroupedResult {
-        private String groupKey;
-        private List<ConversationRetrievalCandidate> items = new ArrayList<>();
-    }
 }

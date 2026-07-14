@@ -16,7 +16,7 @@ public class SearchExplainDTO implements Serializable {
     /**
      * Effective strategy marker for diagnostics.
      */
-    private String strategyEffective;
+//    private String strategyEffective;
 
     /**
      * Coarse match sources.

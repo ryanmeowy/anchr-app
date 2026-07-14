@@ -13,11 +13,4 @@ public interface IngestionObjectStoragePort {
      */
     String buildDownloadUrl(String objectKey);
 
-    /**
-     * Build temporary image input for AI embedding/OCR/captioning.
-     *
-     * @param objectKey object storage key
-     * @return temporary accessible image input
-     */
-    String buildAiImageInput(String objectKey);
 }

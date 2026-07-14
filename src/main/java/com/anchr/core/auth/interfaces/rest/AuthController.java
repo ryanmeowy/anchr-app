@@ -1,5 +1,6 @@
 package com.anchr.core.auth.interfaces.rest;
 
+import com.anchr.core.auth.interfaces.rest.dto.TokenValidationDTO;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
@@ -53,6 +54,51 @@ public class AuthController {
 
     private final SecureRandom secureRandom = new SecureRandom();
 
+    @GetMapping("/validate-token")
+    public Result<TokenValidationDTO> validateToken(
+            @RequestHeader(value = "X-Access-Token", required = false) String token) {
+        if (!StringUtils.hasText(token)) {
+            return Result.error(ApiError.AUTH_TOKEN_INVALID);
+        }
+
+        try {
+            String tokenJson = redisTemplate.opsForValue().get(TOKEN_CACHE_PREFIX + token.trim());
+            if (!StringUtils.hasText(tokenJson)) {
+                return Result.error(ApiError.AUTH_TOKEN_INVALID);
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> tokenData = objectMapper.readValue(tokenJson, Map.class);
+            String role = toPublicRole(tokenData.get("role"));
+            if (role == null) {
+                return Result.error(ApiError.AUTH_TOKEN_INVALID);
+            }
+            return Result.success(TokenValidationDTO.builder()
+                    .valid(true)
+                    .role(role)
+                    .build());
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to parse token data", e);
+            return Result.error(ApiError.AUTH_TOKEN_INVALID);
+        } catch (Exception e) {
+            log.error("Failed to validate token", e);
+            return Result.error(ApiError.INTERNAL_ERROR);
+        }
+    }
+
+    private String toPublicRole(Object storedRole) {
+        if (!(storedRole instanceof String role)) {
+            return null;
+        }
+        role = role.trim().toUpperCase();
+        if (!"ADMIN".equals(role)
+                && !"USER".equals(role)
+                && !"GUEST".equals(role)) {
+            return null;
+        }
+        return role;
+    }
+
     private boolean constantTimeEquals(String a, String b) {
         if (a == null || b == null) return false;
         byte[] aBytes = a.getBytes(StandardCharsets.UTF_8);
@@ -71,8 +117,10 @@ public class AuthController {
         if (!constantTimeEquals(adminSecret, secret)) {
             return Result.error(ApiError.FORBIDDEN);
         }
-        String normalizedRole = role.trim().toUpperCase();
-        if (!"OWNER".equals(normalizedRole) && !"GUEST".equals(normalizedRole)) {
+        String requestedRole = role.trim().toUpperCase();
+        if (!"ADMIN".equals(requestedRole)
+                && !"USER".equals(requestedRole)
+                && !"GUEST".equals(requestedRole)) {
             return Result.error(ApiError.INVALID_REQUEST);
         }
         String newToken;
@@ -85,7 +133,7 @@ public class AuthController {
         }
         String redisKey = TOKEN_CACHE_PREFIX + newToken;
         Map<String, Object> tokenData = new LinkedHashMap<>();
-        tokenData.put("role", normalizedRole);
+        tokenData.put("role", requestedRole);
         tokenData.put("createdAt", System.currentTimeMillis());
         try {
             String json = objectMapper.writeValueAsString(tokenData);
@@ -97,7 +145,7 @@ public class AuthController {
             log.error("Failed to store token in redis", e);
             return Result.error(ApiError.INTERNAL_ERROR);
         }
-        log.info("Token refreshed: role={}", normalizedRole);
+        log.info("Token refreshed: role={}", requestedRole);
         return Result.success(newToken);
     }
 
@@ -183,7 +231,7 @@ public class AuthController {
         return token.substring(0, 4) + "..." + token.substring(token.length() - 4);
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @GetMapping("/sts")
     public Result<Map<String, Object>> getStsToken() {
         StorageConfig config = storageConfigRepository.find()

@@ -29,12 +29,16 @@ public interface KnowledgeBaseService {
 
     KnowledgeBaseHealth getHealth(String kbId);
 
-    PagedResult<Asset> listDocuments(String kbId, Integer page, Integer size);
+    DocumentPagedResult listDocuments(String kbId, String keyword, String fileType,
+                                      Integer page, Integer size);
 
     Asset getDocument(String kbId, String assetId);
 
     void deleteDocument(String kbId, String assetId);
 
     record PagedResult<T>(List<T> items, long total, int page, int size) {
+    }
+
+    record DocumentPagedResult(List<Asset> items, long total, long segmentTotal, int page, int size) {
     }
 }

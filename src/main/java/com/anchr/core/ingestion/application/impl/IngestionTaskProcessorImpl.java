@@ -9,7 +9,6 @@ import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
-import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
 import com.anchr.core.integration.ai.client.DoclingClient;
 import com.anchr.core.common.model.ParseRequest;
 import com.anchr.core.common.model.ParseResponse;
@@ -53,7 +52,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private static final int STAGE_PARSE_PROGRESS = 20;
     private static final int STAGE_EMBED_PROGRESS = 55;
     private static final int STAGE_INDEX_PROGRESS = 75;
-    private static final int STAGE_DONE_PROGRESS = 100;
     private static final int ERROR_MESSAGE_MAX_LENGTH = 1000;
 
     private final Map<String, ReentrantLock> taskLocks = new ConcurrentHashMap<>();
@@ -67,11 +65,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final IngestionEmbeddingPort embeddingPort;
     private final AesUtil aesUtil;
-    private final SegmentBulkWriter segmentBulkWriter;
+    private final IngestionIndexFinalizer ingestionIndexFinalizer;
     private final SegmentRepository segmentRepository;
     private final IngestionObjectStoragePort objectStoragePort;
     private final StorageConfigRepository storageConfigRepository;
     private final DoclingChunkMapper doclingChunkMapper;
+    private final DoclingClient doclingClient;
     private final Gson gson;
 
     @Value("${app.embedding.ingestion-min-interval-ms:1500}")
@@ -82,9 +81,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     @Value("${app.embedding.ingestion-rate-limit-backoff-ms:5000}")
     private long embeddingRateLimitBackoffMs;
-
-    @Value("${app.docling.base-url:http://127.0.0.1:8091}")
-    private String doclingBaseUrl;
 
     @Override
     public void submit(String kbId, String taskId, String userId) {
@@ -115,11 +111,13 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private void processItem( String kbId, String taskId, IngestionTaskItem item, String userId) {
-        Asset asset = findAsset(kbId, item);
+        Asset asset = null;
         try {
-            processAsset(kbId, taskId, item, asset, userId);
-            // freshIngest=true: real ingest — refresh counts and stamp last_ingested_at.
-            knowledgeBaseRepository.refreshDocumentStats(kbId, userId, true);
+            asset = findAsset(kbId, item);
+            if (processAsset(kbId, taskId, item, asset, userId)) {
+                // freshIngest=true: real ingest — refresh counts and stamp last_ingested_at.
+                knowledgeBaseRepository.refreshDocumentStats(kbId, userId, true);
+            }
         } catch (Exception e) {
             log.warn("knowledge base ingestion item failed, taskId={}, itemId={}, assetId={}: {}",
                     taskId, item.getId(), item.getAssetId(), e.getMessage());
@@ -127,15 +125,14 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
     }
 
-    private void processAsset(String kbId, String taskId, IngestionTaskItem item,
-                              Asset asset, String userId) {
+    private boolean processAsset(String kbId, String taskId, IngestionTaskItem item,
+                                 Asset asset, String userId) {
         updateRunning(kbId, taskId, item.getId(), IngestionStage.PARSE, STAGE_PARSE_PROGRESS, userId);
         assetRepository.updateStatuses(kbId, asset.getId(),
                 DocumentParseStatus.RUNNING.name(), DocumentIndexStatus.PENDING.name(), userId, LocalDateTime.now());
 
-        DoclingClient docling = new DoclingClient(doclingBaseUrl);
         String downloadUrl = objectStoragePort.buildDownloadUrl(asset.getObjectKey());
-        ParseResponse parsed = docling.parse(buildParseRequest(asset, taskId, item.getId(), downloadUrl));
+        ParseResponse parsed = doclingClient.parse(buildParseRequest(asset, taskId, item.getId(), downloadUrl));
         if (parsed.chunks() == null || parsed.chunks().isEmpty()) {
             throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "docling returned empty chunks.");
         }
@@ -148,9 +145,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         assetRepository.updateStatuses(kbId, asset.getId(),
                 DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.RUNNING.name(), userId, LocalDateTime.now());
         List<Segment> segments = buildSegments(asset, chunks);
-        segmentBulkWriter.write(segments);
-        completeItem(kbId, taskId, item.getId(), asset.getId(), chunks.size(), userId);
-        cleanupOverwrittenAsset(kbId, item, userId);
+        boolean indexed = ingestionIndexFinalizer.finalizeIndex(
+                kbId, taskId, item.getId(), asset, segments, chunks.size(), userId);
+        if (indexed) {
+            cleanupOverwrittenAsset(kbId, item, userId);
+        }
+        return indexed;
     }
 
     private ParseRequest buildParseRequest(Asset asset, String taskId, String itemId, String downloadUrl) {
@@ -235,17 +235,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         ingestionTaskRepository.refreshSummary(kbId, taskId, userId, now);
     }
 
-    private void completeItem(String kbId, String taskId, String itemId,
-                              String assetId, int segmentCount, String userId) {
-        LocalDateTime now = LocalDateTime.now();
-        assetRepository.updateIngestionResult(kbId, assetId,
-                DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.SUCCESS.name(), segmentCount, segmentCount,
-                null, null, userId, now);
-        ingestionTaskRepository.markItemSuccess(kbId, taskId, itemId,
-                IngestionStage.ASKABLE.name(), STAGE_DONE_PROGRESS, now);
-        ingestionTaskRepository.refreshSummary(kbId, taskId, userId, now);
-    }
-
     private void cleanupOverwrittenAsset(String kbId, IngestionTaskItem item, String userId) {
         if (item.getDedupeResult() != DedupeResult.OVERWRITTEN
                 || !StringUtils.hasText(item.getDuplicateAssetId())
@@ -273,9 +262,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 ? businessException.getError().name()
                 : ApiError.INTERNAL_ERROR.name();
         String errorMessage = clip(e.getMessage(), ERROR_MESSAGE_MAX_LENGTH);
-        assetRepository.updateIngestionResult(kbId, asset.getId(),
-                DocumentParseStatus.FAILED.name(), DocumentIndexStatus.FAILED.name(), asset.getSegmentCount(), asset.getIndexedSegmentCount(),
-                errorCode, errorMessage, userId, now);
+        if (asset != null) {
+            assetRepository.updateIngestionResult(kbId, asset.getId(),
+                    DocumentParseStatus.FAILED.name(), DocumentIndexStatus.FAILED.name(),
+                    asset.getSegmentCount(), asset.getIndexedSegmentCount(),
+                    errorCode, errorMessage, userId, now);
+        }
         ingestionTaskRepository.markItemFailed(kbId, taskId, item.getId(),
                 item.getStage().name(), item.getProgress(), errorCode, errorMessage, now);
         ingestionTaskRepository.refreshSummary(kbId, taskId, userId, now);

@@ -1,6 +1,8 @@
 package com.anchr.core.kb.application;
 
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.CitationChunkSnapshotDTO;
 import lombok.Builder;
 
 import java.util.List;
@@ -19,8 +21,11 @@ public interface ActivityEventService {
 
     void recordSearchExecuted(SearchQueryDTO query, int total);
 
+    void deleteBySessionId(String sessionId);
+
     @Builder
     record CitationContext(String segmentId, String assetId, String kbId, String fileName,
                            String title, String snippet, String citationReason, String citationIndex,
-                           String question, String sourceType, String sourceId, String sessionId){}
+                           String question, String sourceType, String sourceId, String sessionId,
+                           PreviewAnchorDTO anchor, List<CitationChunkSnapshotDTO> chunks){}
 }

@@ -3,13 +3,14 @@ package com.anchr.core.ingestion.application.impl;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
+import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
-import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
+import com.anchr.core.integration.ai.client.DoclingClient;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.repository.SegmentRepository;
@@ -23,6 +24,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -44,7 +47,7 @@ class IngestionTaskProcessorImplTest {
     @Mock
     private AesUtil aesUtil;
     @Mock
-    private SegmentBulkWriter segmentBulkWriter;
+    private IngestionIndexFinalizer ingestionIndexFinalizer;
     @Mock
     private SegmentRepository segmentRepository;
     @Mock
@@ -53,6 +56,8 @@ class IngestionTaskProcessorImplTest {
     private StorageConfigRepository storageConfigRepository;
     @Mock
     private DoclingChunkMapper doclingChunkMapper;
+    @Mock
+    private DoclingClient doclingClient;
 
     private IngestionTaskProcessorImpl processor;
 
@@ -65,11 +70,12 @@ class IngestionTaskProcessorImplTest {
                 knowledgeBaseRepository,
                 embeddingPort,
                 aesUtil,
-                segmentBulkWriter,
+                ingestionIndexFinalizer,
                 segmentRepository,
                 objectStoragePort,
                 storageConfigRepository,
                 doclingChunkMapper,
+                doclingClient,
                 new Gson()
         );
     }
@@ -96,6 +102,34 @@ class IngestionTaskProcessorImplTest {
 
         verify(assetRepository, never()).markDeleted(any(), any(), any(), any());
         verify(segmentRepository, never()).deleteByAssetId(any());
+    }
+
+    @Test
+    void submit_shouldFailPendingItemWhenAssetWasDeletedBeforeProcessing() {
+        IngestionTaskItem item = IngestionTaskItem.builder()
+                .id("item-1")
+                .taskId("task-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .stage(IngestionStage.PARSE)
+                .status(IngestionTaskItemStatus.PENDING)
+                .progress(10)
+                .build();
+        IngestionTask task = IngestionTask.builder()
+                .id("task-1")
+                .kbId("kb-1")
+                .items(List.of(item))
+                .build();
+        when(ingestionTaskRepository.findById("kb-1", "task-1"))
+                .thenReturn(Optional.of(task));
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.empty());
+
+        processor.submit("kb-1", "task-1", "user-a");
+
+        verify(ingestionTaskRepository).markItemFailed(
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq("PARSE"), eq(10),
+                eq("DOCUMENT_NOT_FOUND"), any(), any());
     }
 
     private void invokeCleanup(IngestionTaskItem item) throws Exception {

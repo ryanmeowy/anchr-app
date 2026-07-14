@@ -3,11 +3,13 @@ package com.anchr.core.kb.interfaces.rest;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.kb.application.KnowledgeBaseService;
+import com.anchr.core.kb.application.AssetPreviewService;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.interfaces.rest.dto.AssetDTO;
 import com.anchr.core.kb.interfaces.rest.dto.AssetListDTO;
+import com.anchr.core.kb.interfaces.rest.dto.AssetPreviewDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KbQueryRequestDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KbStatsRequestDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseCreateRequestDTO;
@@ -45,15 +47,16 @@ import java.util.List;
 public class KnowledgeBaseController {
 
     private final KnowledgeBaseService knowledgeBaseService;
+    private final AssetPreviewService assetPreviewService;
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping
     public Result<KnowledgeBaseDTO> create(@Valid @RequestBody KnowledgeBaseCreateRequestDTO request) {
         return Result.success(KnowledgeBaseDTO.from(
                 knowledgeBaseService.create(request.getName(), request.getDescription())));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @PostMapping("/search")
     public Result<KnowledgeBaseListDTO> listKbs(@RequestBody KbQueryRequestDTO request) {
         String status = parseStatus(request.getStatus());
@@ -69,13 +72,13 @@ public class KnowledgeBaseController {
                 .build());
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}")
     public Result<KnowledgeBaseDTO> get(@PathVariable @NotBlank String kbId) {
         return Result.success(KnowledgeBaseDTO.from(knowledgeBaseService.get(kbId)));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PatchMapping("/{kbId}")
     public Result<KnowledgeBaseDTO> update(@PathVariable @NotBlank String kbId,
                                            @Valid @RequestBody KnowledgeBaseUpdateRequestDTO request) {
@@ -90,7 +93,7 @@ public class KnowledgeBaseController {
         return Result.success();
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @PostMapping("/stats")
     public Result<List<KnowledgeBaseStatsDTO>> stats(@RequestBody KbStatsRequestDTO request) {
         return Result.success(knowledgeBaseService.getStats(request.getKbIds()).stream()
@@ -98,32 +101,43 @@ public class KnowledgeBaseController {
                 .toList());
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}/health")
     public Result<KnowledgeBaseHealthDTO> health(@PathVariable @NotBlank String kbId) {
         return Result.success(KnowledgeBaseHealthDTO.from(knowledgeBaseService.getHealth(kbId)));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}/documents")
     public Result<AssetListDTO> listDocuments(
             @PathVariable @NotBlank String kbId,
             @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "20") Integer size) {
-        KnowledgeBaseService.PagedResult<Asset> result = knowledgeBaseService.listDocuments(kbId, page, size);
+            @RequestParam(defaultValue = "50") Integer size,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String fileType) {
+        KnowledgeBaseService.DocumentPagedResult result =
+                knowledgeBaseService.listDocuments(kbId, keyword, fileType, page, size);
         return Result.success(AssetListDTO.builder()
                 .items(result.items().stream().map(AssetDTO::from).toList())
                 .total(result.total())
+                .segmentTotal(result.segmentTotal())
                 .page(result.page())
                 .size(result.size())
                 .build());
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}/documents/{assetId}")
     public Result<AssetDTO> getDocument(@PathVariable @NotBlank String kbId,
                                                 @PathVariable @NotBlank String assetId) {
         return Result.success(AssetDTO.from(knowledgeBaseService.getDocument(kbId, assetId)));
+    }
+
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    @GetMapping("/{kbId}/documents/{assetId}/preview")
+    public Result<AssetPreviewDTO> previewDocument(@PathVariable @NotBlank String kbId,
+                                                   @PathVariable @NotBlank String assetId) {
+        return Result.success(assetPreviewService.getPreview(kbId, assetId));
     }
 
     @RequireAuth
