@@ -19,7 +19,7 @@ public class IngestionCapabilityController {
 
     private final IngestionCapabilityService ingestionCapabilityService;
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/capabilities")
     public Result<IngestionCapabilityDTO> getCapabilities() {
         return Result.success(IngestionCapabilityDTO.from(ingestionCapabilityService.getCapabilities()));

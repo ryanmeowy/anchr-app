@@ -6,7 +6,7 @@ package com.anchr.core.common.application.context;
 public record RequestUserContext(String userId, String role, String accessTokenHash) {
 
     public static final String DEFAULT_USER_ID = "system";
-    public static final String DEFAULT_ROLE = "OWNER";
+    public static final String DEFAULT_ROLE = "ADMIN";
 
     public RequestUserContext(String userId, String role) {
         this(userId, role, null);

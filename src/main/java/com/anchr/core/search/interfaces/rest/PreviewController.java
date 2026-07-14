@@ -23,7 +23,7 @@ public class PreviewController {
 
     private final SegmentPreviewService segmentPreviewService;
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @PostMapping("/segments/{segmentId}")
     public Result<PreviewSegmentDTO> getSegmentPreview(
             @PathVariable @NotBlank String segmentId,
@@ -31,7 +31,7 @@ public class PreviewController {
         return Result.success(segmentPreviewService.getSegmentPreview(segmentId, request));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping("/segments/{segmentId}/refresh")
     public Result<PreviewSegmentDTO> refreshSegmentPreview(
             @PathVariable @NotBlank String segmentId,

@@ -53,7 +53,7 @@ class KnowledgeBaseServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        UserContextHolder.set(new RequestUserContext("user-a", "OWNER"));
+        UserContextHolder.set(new RequestUserContext("user-a", "ADMIN"));
         service = new KnowledgeBaseServiceImpl(
                 knowledgeBaseRepository,
                 assetRepository,

@@ -33,7 +33,7 @@ public class KnowledgeBaseIngestionController {
 
     private final IngestionApplicationService ingestionApplicationService;
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping("/ingestion-tasks")
     public Result<IngestionTaskDTO> createTask(@PathVariable @NotBlank String kbId,
                                                @Valid @RequestBody IngestionTaskCreateRequestDTO request) {
@@ -41,7 +41,7 @@ public class KnowledgeBaseIngestionController {
                 ingestionApplicationService.createTask(kbId, toCommand(request))));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/ingestion-tasks")
     public Result<IngestionTaskListDTO> listTasks(@PathVariable @NotBlank String kbId,
                                                   @RequestParam(required = false) IngestionTaskStatus status,
@@ -54,21 +54,21 @@ public class KnowledgeBaseIngestionController {
                 .build());
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/ingestion-tasks/{taskId}")
     public Result<IngestionTaskDTO> getTask(@PathVariable @NotBlank String kbId,
                                             @PathVariable @NotBlank String taskId) {
         return Result.success(IngestionTaskDTO.from(ingestionApplicationService.getTask(kbId, taskId)));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping("/ingestion-tasks/{taskId}/retry-failed")
     public Result<IngestionTaskDTO> retryFailed(@PathVariable @NotBlank String kbId,
                                                 @PathVariable @NotBlank String taskId) {
         return Result.success(IngestionTaskDTO.from(ingestionApplicationService.retryFailed(kbId, taskId)));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping("/ingestion-tasks/{taskId}/items/{itemId}/retry")
     public Result<IngestionTaskDTO> retryItem(@PathVariable @NotBlank String kbId,
                                               @PathVariable @NotBlank String taskId,
@@ -76,7 +76,7 @@ public class KnowledgeBaseIngestionController {
         return Result.success(IngestionTaskDTO.from(ingestionApplicationService.retryItem(kbId, taskId, itemId)));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping("/documents/{assetId}/reparse")
     public Result<DocumentMaintenanceTaskDTO> reparse(@PathVariable @NotBlank String kbId,
                                                       @PathVariable @NotBlank String assetId) {
@@ -84,7 +84,7 @@ public class KnowledgeBaseIngestionController {
                 ingestionApplicationService.createReparseTask(kbId, assetId), assetId));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping("/documents/{assetId}/reembed")
     public Result<DocumentMaintenanceTaskDTO> reembed(@PathVariable @NotBlank String kbId,
                                                       @PathVariable @NotBlank String assetId) {

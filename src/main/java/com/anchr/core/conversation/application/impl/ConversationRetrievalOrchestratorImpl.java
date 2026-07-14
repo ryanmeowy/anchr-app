@@ -140,7 +140,7 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
             return null;
         }
         return ConversationRetrievalCandidate.Explain.builder()
-                .strategyEffective(source.getStrategyEffective())
+//                .strategyEffective(source.getStrategyEffective())
                 .hitSources(source.getHitSources() == null ? List.of() : List.copyOf(source.getHitSources()))
                 .build();
     }

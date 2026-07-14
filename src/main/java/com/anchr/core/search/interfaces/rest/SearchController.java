@@ -18,11 +18,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
-
 /**
  * Unified kb search api for text + image retrieval.
  */
@@ -38,44 +33,22 @@ public class SearchController {
     private final SearchAnswerService kbSearchAnswerService;
     private final SearchQueryRewriteService searchQueryRewriteService;
     private final SearchFollowUpService searchFollowUpService;
-    private final Executor searchRewriteExecutor;
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @PostMapping("/kb")
     public Result<SearchPageDTO> searchKb(@Valid @RequestBody SearchQueryDTO query) {
         String userQuery = query.getQuery();
-
-        CompletableFuture<SearchRewriteResult> rewriteFuture = CompletableFuture
-                .supplyAsync(() -> searchQueryRewriteService.rewrite(userQuery),
-                        searchRewriteExecutor);
-
-        SearchPageDTO page = unifiedSearchService.searchPage(query, List.of());
-
-        SearchRewriteResult rewriteResult = awaitRewrite(rewriteFuture, userQuery);
-
-        if (!rewriteResult.isFallbackUsed() && !rewriteResult.getKeywords().isEmpty()) {
-            page = unifiedSearchService.searchPage(query, rewriteResult.getKeywords());
-            page.setRewrittenKeywords(rewriteResult.getKeywords());
-        }
-
-        applyQueryIntent(page, rewriteResult);
+        SearchRewriteResult rewrite = searchQueryRewriteService.rewrite(userQuery);
+        SearchPageDTO page = unifiedSearchService.searchPage(query, rewrite);
+        page.setRewrittenQuery(rewrite.getRewrittenQuery());
+        page.setRewrittenKeywords(rewrite.getKeywords());
+        applyQueryIntent(page, rewrite);
         if (Boolean.TRUE.equals(query.getWithAnswer())) {
             page.setAnswer(kbSearchAnswerService.answer(query, page.getItems()));
         }
         page.setSuggestedQuestions(
                 searchFollowUpService.generate(userQuery, page.getItems()));
         return Result.success(page);
-    }
-
-    private SearchRewriteResult awaitRewrite(CompletableFuture<SearchRewriteResult> future, String query) {
-        try {
-            return future
-                    .completeOnTimeout(buildTimeoutFallback(query), REWRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                    .get();
-        } catch (Exception e) {
-            log.warn("Rewrite future failed, query={}", query, e);
-            return buildTimeoutFallback(query);
-        }
     }
 
     private void applyQueryIntent(SearchPageDTO page, SearchRewriteResult rewriteResult) {
@@ -89,13 +62,5 @@ public class SearchController {
                 .fallback(rewriteResult.isFallbackUsed())
                 .build();
         insight.setQueryIntent(queryIntent);
-    }
-
-    private SearchRewriteResult buildTimeoutFallback(String query) {
-        SearchRewriteResult fallback = new SearchRewriteResult();
-        fallback.setOriginalQuery(query);
-        fallback.setKeywords(List.of());
-        fallback.setFallbackUsed(true);
-        return fallback;
     }
 }

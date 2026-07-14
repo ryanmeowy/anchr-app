@@ -7,8 +7,8 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.KbScopeResolver;
 import com.anchr.core.search.application.UnifiedSearchService;
+import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.config.AppSearchProperties;
-import com.anchr.core.search.domain.model.AssetType;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.Segment;
@@ -48,8 +48,6 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
-    private static final String STRATEGY_CODE = "KB_RRF";
-    private static final String STRATEGY_CODE_RERANK = "KB_RRF_RERANK";
     private static final int MAX_CURSOR_OFFSET = 10_000;
 
     private final SegmentRepository kbSegmentRepository;
@@ -72,7 +70,12 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     @Override
-    public SearchPageDTO searchPage(SearchQueryDTO query, List<String> keywords) {
+    public SearchPageDTO searchPage(SearchQueryDTO query, SearchRewriteResult rewriteResult) {
+        List<String> keywords = null == rewriteResult.getKeywords() ? List.of() :rewriteResult.getKeywords();
+        String queryStr = rewriteResult.getRewrittenQuery();
+        if (StringUtils.hasText(queryStr)) {
+            query.setQuery(queryStr);
+        }
         SearchResult result = searchInternal(query, decodeCursorOffset(query == null ? null : query.getCursor()), keywords);
         List<SearchResultDTO> pageItems = result.items();
         int offset = result.offset();
@@ -96,7 +99,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         if (query == null || !StringUtils.hasText(query.getQuery())) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
-        String keyword = query.getQuery().trim();
+        String rawQuery = query.getQuery().trim();
         int limit = resolveLimit(query.getLimit());
         int pageEnd = Math.max(0, offset) + limit;
         int recallTopK = resolveRecallTopK(pageEnd);
@@ -106,14 +109,14 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                     0, 0, 0, 0, System.currentTimeMillis() - startMs);
         }
 
-        List<Float> queryVector = kbQueryEmbeddingService.embedQuery(keyword);
+        List<Float> queryVector = kbQueryEmbeddingService.embedQuery(rawQuery);
         List<String> effectiveKeywords = keywords != null && !keywords.isEmpty() ? keywords : List.of();
-        List<SegmentHit> textHits = kbSegmentRepository.textSearch(keyword, effectiveKeywords, recallTopK, filter);
+        List<SegmentHit> textHits = kbSegmentRepository.textSearch(rawQuery, effectiveKeywords, recallTopK, filter);
         List<SegmentHit> vectorHits = kbSegmentRepository.vectorSearch(queryVector, recallTopK, filter);
         int textHitCount = textHits.size();
         int vectorHitCount = vectorHits.size();
         log.info("kb search recall completed, keyword={}, recallTopK={}, textHits={}, vectorHits={}",
-                keyword, recallTopK, textHitCount, vectorHitCount);
+                rawQuery, recallTopK, textHitCount, vectorHitCount);
 
         List<SegmentRerankCandidate> candidates = fuseCandidates(
                 textHits,
@@ -121,13 +124,12 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 appSearchProperties.getRrf().getRankConstant()
         );
         int fusedCount = candidates.size();
-        RerankOutcome rerankOutcome = applyRerank(keyword, candidates, limit);
+        RerankOutcome rerankOutcome = applyRerank(rawQuery, candidates, limit);
         List<SegmentRerankCandidate> rankedCandidates = rerankOutcome.candidates();
         int rerankCount = rankedCandidates.size();
-        String effectiveStrategyCode = rerankOutcome.applied() ? STRATEGY_CODE_RERANK : STRATEGY_CODE;
 
         List<SearchResultDTO> segmentResults = rankedCandidates.stream()
-                .map(candidate -> toResult(candidate, keyword, effectiveStrategyCode))
+                .map(candidate -> toResult(candidate, rawQuery))
                 .filter(Objects::nonNull)
                 .toList();
         List<SearchResultDTO> allAggregated = aggregateByAsset(segmentResults, pageEnd);
@@ -267,6 +269,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         }
     }
 
+    // RRF(document) = Σ 1 / (k + rank)
     private double reciprocal(int rankConstant, int rankIndex) {
         return 1d / (rankConstant + rankIndex + 1d);
     }
@@ -291,7 +294,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         );
     }
 
-    private SearchResultDTO toResult(SegmentRerankCandidate candidate, String keyword, String strategyCode) {
+    private SearchResultDTO toResult(SegmentRerankCandidate candidate, String keyword) {
         Segment segment = candidate.segment();
         Map<String, String> highlights = candidate.highlights();
         boolean titleHit = highlights.containsKey("title") || containsIgnoreCase(segment.getTitle(), keyword);
@@ -339,7 +342,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .assetId(segment.getAssetId())
                 .sourceRef(segment.getSourceRef())
                 .anchor(anchor)
-                .explain(buildExplain(segment, strategyCode, hitSources, candidate.vectorHit(), titleHit, contentHit, ocrHit, tagHit))
+                .explain(buildExplain(segment, hitSources, candidate.vectorHit(), titleHit, contentHit, ocrHit, tagHit))
                 .build();
     }
 
@@ -433,8 +436,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private SearchExplainDTO buildExplain(Segment segment,
-                                            String strategyCode,
-                                            List<String> hitSources,
+                                          List<String> hitSources,
                                             boolean vectorHit,
                                             boolean titleHit,
                                             boolean contentHit,
@@ -467,7 +469,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         }
 
         return SearchExplainDTO.builder()
-                .strategyEffective(strategyCode)
                 .hitSources(hitSources)
                 .matchedBy(matchedBy)
                 .textSignals(textSignals)
@@ -648,6 +649,13 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return Math.min(recallSize, maxCandidates);
     }
 
+    /**
+     * Reranking every recalled candidate adds model latency and payload cost without improving
+     * results that are too deep to reach the requested page. A bounded window concentrates that
+     * cost on competitive candidates, keeps enough alternatives to correct imperfect RRF ordering,
+     * and prevents very small page sizes or unusually large recalls from making the quality/cost
+     * trade-off respectively too narrow or unbounded.
+    */
     private int resolveRerankWindowSize(int limit, int candidateSize) {
         if (candidateSize <= 0) {
             return 0;
@@ -656,14 +664,20 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         if (!rerank.isWindowEnabled()) {
             return candidateSize;
         }
+        int bounded = getBounded(limit, rerank);
+        return Math.min(candidateSize, bounded);
+    }
+
+    private static int getBounded(int limit, AppSearchProperties.Rerank rerank) {
         int safeLimit = Math.max(1, limit);
+        // A fixed size gives predictable model cost; otherwise scaling with the page preserves enough
+        // competition for every result slot instead of using the same window for very different pages.
         int baseSize = rerank.getWindowSize() > 0
                 ? rerank.getWindowSize()
                 : safeLimit * Math.max(1, rerank.getWindowFactor());
         int minSize = Math.max(1, rerank.getWindowMin());
         int maxSize = Math.max(minSize, rerank.getWindowMax());
-        int bounded = Math.max(minSize, Math.min(baseSize, maxSize));
-        return Math.min(candidateSize, bounded);
+        return Math.max(minSize, Math.min(baseSize, maxSize));
     }
 
     private WeightPair resolveFusionWeights() {

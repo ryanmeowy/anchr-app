@@ -49,14 +49,14 @@ public class KnowledgeBaseController {
     private final KnowledgeBaseService knowledgeBaseService;
     private final AssetPreviewService assetPreviewService;
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PostMapping
     public Result<KnowledgeBaseDTO> create(@Valid @RequestBody KnowledgeBaseCreateRequestDTO request) {
         return Result.success(KnowledgeBaseDTO.from(
                 knowledgeBaseService.create(request.getName(), request.getDescription())));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @PostMapping("/search")
     public Result<KnowledgeBaseListDTO> listKbs(@RequestBody KbQueryRequestDTO request) {
         String status = parseStatus(request.getStatus());
@@ -72,13 +72,13 @@ public class KnowledgeBaseController {
                 .build());
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}")
     public Result<KnowledgeBaseDTO> get(@PathVariable @NotBlank String kbId) {
         return Result.success(KnowledgeBaseDTO.from(knowledgeBaseService.get(kbId)));
     }
 
-    @RequireAuth
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @PatchMapping("/{kbId}")
     public Result<KnowledgeBaseDTO> update(@PathVariable @NotBlank String kbId,
                                            @Valid @RequestBody KnowledgeBaseUpdateRequestDTO request) {
@@ -93,7 +93,7 @@ public class KnowledgeBaseController {
         return Result.success();
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @PostMapping("/stats")
     public Result<List<KnowledgeBaseStatsDTO>> stats(@RequestBody KbStatsRequestDTO request) {
         return Result.success(knowledgeBaseService.getStats(request.getKbIds()).stream()
@@ -101,13 +101,13 @@ public class KnowledgeBaseController {
                 .toList());
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}/health")
     public Result<KnowledgeBaseHealthDTO> health(@PathVariable @NotBlank String kbId) {
         return Result.success(KnowledgeBaseHealthDTO.from(knowledgeBaseService.getHealth(kbId)));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}/documents")
     public Result<AssetListDTO> listDocuments(
             @PathVariable @NotBlank String kbId,
@@ -126,14 +126,14 @@ public class KnowledgeBaseController {
                 .build());
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}/documents/{assetId}")
     public Result<AssetDTO> getDocument(@PathVariable @NotBlank String kbId,
                                                 @PathVariable @NotBlank String assetId) {
         return Result.success(AssetDTO.from(knowledgeBaseService.getDocument(kbId, assetId)));
     }
 
-    @RequireAuth(roles = {"OWNER", "GUEST"})
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     @GetMapping("/{kbId}/documents/{assetId}/preview")
     public Result<AssetPreviewDTO> previewDocument(@PathVariable @NotBlank String kbId,
                                                    @PathVariable @NotBlank String assetId) {

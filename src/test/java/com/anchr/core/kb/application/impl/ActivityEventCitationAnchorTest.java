@@ -37,7 +37,7 @@ class ActivityEventCitationAnchorTest {
         when(idGen.nextIdStr()).thenReturn("event-1");
         ObjectMapper objectMapper = new ObjectMapper();
         ActivityEventServiceImpl service = new ActivityEventServiceImpl(repository, idGen, objectMapper);
-        UserContextHolder.set(new RequestUserContext("user-1", "OWNER", "token"));
+        UserContextHolder.set(new RequestUserContext("user-1", "ADMIN", "token"));
         PreviewAnchorDTO anchor = anchor(9, 42);
 
         service.recordCitationOpened(ActivityEventService.CitationContext.builder()

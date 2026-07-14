@@ -51,7 +51,7 @@ class SegmentPreviewServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        UserContextHolder.set(new RequestUserContext("user-a", "OWNER", "token-hash-a"));
+        UserContextHolder.set(new RequestUserContext("user-a", "ADMIN", "token-hash-a"));
         previewAccessCache = new PreviewAccessCache();
         service = new SegmentPreviewServiceImpl(
                 segmentRepository,

@@ -1,5 +1,6 @@
 package com.anchr.core.search.application;
 
+import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchPageDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
@@ -15,5 +16,5 @@ public interface UnifiedSearchService {
 
     List<SearchResultDTO> search(SearchQueryDTO query, List<String> keywords);
 
-    SearchPageDTO searchPage(SearchQueryDTO query, List<String> keywords);
+    SearchPageDTO searchPage(SearchQueryDTO query, SearchRewriteResult keywords);
 }

@@ -12,6 +12,7 @@ import java.util.List;
 public class SearchRewriteResult {
 
     private String originalQuery;
+    private String rewrittenQuery;
     private List<String> keywords = new ArrayList<>();
     private String intent;
     private String intentCategory;

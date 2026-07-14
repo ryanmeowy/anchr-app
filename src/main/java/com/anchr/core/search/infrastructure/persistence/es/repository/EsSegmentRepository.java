@@ -1,6 +1,9 @@
 package com.anchr.core.search.infrastructure.persistence.es.repository;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.FieldValue;
+import co.elastic.clients.elasticsearch._types.KnnSearch;
+import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
 import co.elastic.clients.elasticsearch.core.GetResponse;
@@ -14,8 +17,8 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.SearchFilter;
-import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
@@ -161,7 +164,7 @@ public class EsSegmentRepository implements SegmentRepository {
         }
     }
 
-    private SearchRequest buildTextSearchRequest(String query, List<String> keywords, int limit, SearchFilter filter) {
+    private SearchRequest buildTextSearchRequest1(String query, List<String> keywords, int limit, SearchFilter filter) {
         boolean hasKeywords = keywords != null && keywords.stream().anyMatch(StringUtils::hasText);
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())
@@ -183,14 +186,14 @@ public class EsSegmentRepository implements SegmentRepository {
                             b.should(sh -> sh.match(m -> m.field("title").query(kw).boost(2.5f)));
                             b.should(sh -> sh.match(m -> m.field("contentText").query(kw).boost(4.0f)));
                             b.should(sh -> sh.match(m -> m.field("ocrText").query(kw).boost(3.0f)));
-                            b.should(sh -> sh.match(m -> m.field("tags").query(kw).boost(3.2f)));
+//                            b.should(sh -> sh.match(m -> m.field("tags").query(kw).boost(3.2f)));
                         }
                     } else {
                         // No keywords: original query with full weights
                         b.should(sh -> sh.match(m -> m.field("title").query(query).boost(2.5f)));
                         b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(4.0f)));
                         b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(3.0f)));
-                        b.should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)));
+//                        b.should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)));
                     }
                     b.minimumShouldMatch("1");
                     return b;
@@ -199,8 +202,54 @@ public class EsSegmentRepository implements SegmentRepository {
                         .fields("title", f -> f.numberOfFragments(0))
                         .fields("contentText", f -> f.fragmentSize(180).numberOfFragments(1))
                         .fields("ocrText", f -> f.fragmentSize(180).numberOfFragments(1))
-                        .fields("tags", f -> f.numberOfFragments(0))
+//                        .fields("tags", f -> f.numberOfFragments(0))
                 )
+        );
+    }
+
+    /**
+     * Builds one term-centric combined-fields query per rewritten keyword.
+     * Rewritten keywords are preferred when available; the original query is
+     * retained only as the rewrite fallback. Each keyword must match 70% of
+     * its analyzed terms, while the outer bool query requires all keywords
+     * when there are at most two and 70% when there are more than two.
+     */
+    private SearchRequest buildTextSearchRequest(String query,
+                                                  List<String> keywords,
+                                                  int limit,
+                                                  SearchFilter filter) {
+        List<String> effectiveKeywords = keywords == null
+                ? List.of()
+                : keywords.stream()
+                        .filter(StringUtils::hasText)
+                        .map(String::trim)
+                        .distinct()
+                        .toList();
+        List<String> textQueries = effectiveKeywords.isEmpty()
+                ? List.of(query.trim())
+                : effectiveKeywords;
+
+        return SearchRequest.of(s -> s
+                .index(kbSegmentConfig.getReadTargetName())
+                .size(limit)
+                .query(q -> q.bool(b -> {
+                    applyFilters(b, filter);
+                    for (String textQuery : textQueries) {
+                        b.should(sh -> sh.combinedFields(cf -> cf
+                                .query(textQuery)
+                                .fields("title^2.5", "contentText^4.0", "ocrText^3.0")
+                                .minimumShouldMatch("70%")
+                        ));
+                    }
+                    b.minimumShouldMatch("2<70%");
+                    return b;
+                }))
+                .highlight(h -> h
+                        .fields("title", f -> f.numberOfFragments(0))
+                        .fields("contentText", f -> f.fragmentSize(180).numberOfFragments(1))
+                        .fields("ocrText", f -> f.fragmentSize(180).numberOfFragments(1))
+                )
+                .source(src -> src.filter(f -> f.excludes("embedding")))
         );
     }
 
@@ -214,33 +263,34 @@ public class EsSegmentRepository implements SegmentRepository {
                     k.field("embedding")
                             .queryVector(queryVector)
                             .k(topK)
-                            .numCandidates(numCandidates);
+                            .numCandidates(numCandidates)
+                            .similarity(0.75f);
                     applyKnnFilters(k, filter);
                     return k;
                 })
         );
     }
 
-    private void applyFilters(co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery.Builder builder,
+    private void applyFilters(BoolQuery.Builder builder,
                               SearchFilter filter) {
         if (filter == null) {
             return;
         }
         if (!CollectionUtils.isEmpty(filter.getKbIds())) {
             builder.filter(f -> f.terms(t -> t.field("kbId").terms(v -> v.value(
-                    filter.getKbIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+                    filter.getKbIds().stream().map(FieldValue::of).toList()))));
         }
         if (!CollectionUtils.isEmpty(filter.getAssetIds())) {
             builder.filter(f -> f.terms(t -> t.field("assetId").terms(v -> v.value(
-                    filter.getAssetIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+                    filter.getAssetIds().stream().map(FieldValue::of).toList()))));
         }
         if (!CollectionUtils.isEmpty(filter.getAssetTypes())) {
             builder.filter(f -> f.terms(t -> t.field("assetType").terms(v -> v.value(
-                    filter.getAssetTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+                    filter.getAssetTypes().stream().map(FieldValue::of).toList()))));
         }
         if (!CollectionUtils.isEmpty(filter.getHitTypes())) {
             builder.filter(f -> f.terms(t -> t.field("segmentType").terms(v -> v.value(
-                    filter.getHitTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+                    filter.getHitTypes().stream().map(FieldValue::of).toList()))));
         }
         if (filter.getCreatedFrom() != null || filter.getCreatedTo() != null) {
             builder.filter(f -> f.range(r -> r.number(n -> {
@@ -256,26 +306,26 @@ public class EsSegmentRepository implements SegmentRepository {
         }
     }
 
-    private void applyKnnFilters(co.elastic.clients.elasticsearch._types.KnnSearch.Builder builder,
+    private void applyKnnFilters(KnnSearch.Builder builder,
                                  SearchFilter filter) {
         if (filter == null) {
             return;
         }
         if (!CollectionUtils.isEmpty(filter.getKbIds())) {
             builder.filter(f -> f.terms(t -> t.field("kbId").terms(v -> v.value(
-                    filter.getKbIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+                    filter.getKbIds().stream().map(FieldValue::of).toList()))));
         }
         if (!CollectionUtils.isEmpty(filter.getAssetIds())) {
             builder.filter(f -> f.terms(t -> t.field("assetId").terms(v -> v.value(
-                    filter.getAssetIds().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+                    filter.getAssetIds().stream().map(FieldValue::of).toList()))));
         }
         if (!CollectionUtils.isEmpty(filter.getAssetTypes())) {
             builder.filter(f -> f.terms(t -> t.field("assetType").terms(v -> v.value(
-                    filter.getAssetTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+                    filter.getAssetTypes().stream().map(FieldValue::of).toList()))));
         }
         if (!CollectionUtils.isEmpty(filter.getHitTypes())) {
             builder.filter(f -> f.terms(t -> t.field("segmentType").terms(v -> v.value(
-                    filter.getHitTypes().stream().map(co.elastic.clients.elasticsearch._types.FieldValue::of).toList()))));
+                    filter.getHitTypes().stream().map(FieldValue::of).toList()))));
         }
         if (filter.getCreatedFrom() != null || filter.getCreatedTo() != null) {
             builder.filter(f -> f.range(r -> r.number(n -> {
