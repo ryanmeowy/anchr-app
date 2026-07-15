@@ -8,7 +8,6 @@ import java.time.LocalDateTime;
 public class ConversationTurnRecord {
     private String turnId;
     private String sessionId;
-    private String role;
     private String query;
     private String rewrittenQuery;
     private String answer;

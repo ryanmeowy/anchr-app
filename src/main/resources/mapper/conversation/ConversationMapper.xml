@@ -15,7 +15,6 @@
     <resultMap id="TurnMap" type="com.anchr.core.conversation.infrastructure.persistence.ConversationTurnRecord">
         <id property="turnId" column="turn_id"/>
         <result property="sessionId" column="session_id"/>
-        <result property="role" column="role"/>
         <result property="query" column="query"/>
         <result property="rewrittenQuery" column="rewritten_query"/>
         <result property="answer" column="answer"/>
@@ -72,15 +71,15 @@
 
     <insert id="upsertTurn" parameterType="com.anchr.core.conversation.infrastructure.persistence.ConversationTurnRecord">
         insert into conversation_turn (
-          turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
+          turn_id, session_id, query, rewritten_query, answer, kb_scope, asset_scope,
           answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
           intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
         ) values (
-          #{turnId}, #{sessionId}, #{role}, #{query}, #{rewrittenQuery}, #{answer}, #{kbScope}, #{assetScope},
+          #{turnId}, #{sessionId}, #{query}, #{rewrittenQuery}, #{answer}, #{kbScope}, #{assetScope},
           #{answerMode}, #{answerStatus}, #{answerFallbackReason}, #{intentType}, #{intentConfidence}, #{intentReason},
           #{intentSource}, #{intentFallback}, #{citations}, #{resultCards}, #{retrievalTrace}, #{createdAt}
         ) on duplicate key update
-          session_id = values(session_id), role = values(role), query = values(query),
+          session_id = values(session_id), query = values(query),
           rewritten_query = values(rewritten_query), answer = values(answer), kb_scope = values(kb_scope),
           asset_scope = values(asset_scope), answer_mode = values(answer_mode), answer_status = values(answer_status),
           answer_fallback_reason = values(answer_fallback_reason), citations = values(citations),
@@ -92,7 +91,7 @@
     </insert>
 
     <select id="findTurn" resultMap="TurnMap">
-        select turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
+        select turn_id, session_id, query, rewritten_query, answer, kb_scope, asset_scope,
                answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
                intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
         from conversation_turn
@@ -100,7 +99,7 @@
     </select>
 
     <select id="findRecentTurns" resultMap="TurnMap">
-        select turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
+        select turn_id, session_id, query, rewritten_query, answer, kb_scope, asset_scope,
                answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
                intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
         from conversation_turn

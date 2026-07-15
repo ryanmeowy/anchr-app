@@ -12,7 +12,6 @@ public class ConversationTurn {
 
     private String turnId;
     private String sessionId;
-    private ConversationRole role;
     private String query;
     private String rewrittenQuery;
     private String answer;

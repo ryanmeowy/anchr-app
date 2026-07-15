@@ -17,7 +17,6 @@ import com.anchr.core.conversation.application.model.ConversationExecutionResult
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
 import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationIntentType;
-import com.anchr.core.conversation.domain.model.ConversationRole;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
@@ -163,7 +162,6 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId(newTurnId());
         turn.setSessionId(session.getSessionId());
-        turn.setRole(ConversationRole.USER);
         turn.setQuery(request.getQuery().trim());
         turn.setRewrittenQuery(executionResult.rewrittenQuery());
         turn.setAnswer(executionResult.answer());

@@ -3,7 +3,6 @@ package com.anchr.core.conversation.infrastructure.persistence;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.conversation.domain.model.ConversationRole;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationSessionStatus;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
@@ -125,7 +124,6 @@ public class ConversationRepositoryImpl implements ConversationRepository {
         ConversationTurnRecord record = new ConversationTurnRecord();
         record.setTurnId(turn.getTurnId());
         record.setSessionId(turn.getSessionId());
-        record.setRole(turn.getRole().name());
         record.setQuery(turn.getQuery());
         record.setRewrittenQuery(turn.getRewrittenQuery());
         record.setAnswer(turn.getAnswer());
@@ -150,7 +148,6 @@ public class ConversationRepositoryImpl implements ConversationRepository {
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId(record.getTurnId());
         turn.setSessionId(record.getSessionId());
-        turn.setRole(ConversationRole.valueOf(record.getRole()));
         turn.setQuery(record.getQuery());
         turn.setRewrittenQuery(record.getRewrittenQuery());
         turn.setAnswer(record.getAnswer());

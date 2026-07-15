@@ -1,7 +1,6 @@
 package com.anchr.core.conversation.infrastructure.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.conversation.domain.model.ConversationRole;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
@@ -132,7 +131,6 @@ class ConversationMysqlIntegrationTest {
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId(turnId);
         turn.setSessionId(sessionId);
-        turn.setRole(ConversationRole.USER);
         turn.setQuery("query " + turnId);
         turn.setRewrittenQuery("rewritten " + turnId);
         turn.setAnswer("answer " + turnId);

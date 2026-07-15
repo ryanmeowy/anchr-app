@@ -3,7 +3,6 @@ package com.anchr.core.conversation.infrastructure.persistence;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationSessionStatus;
-import com.anchr.core.conversation.domain.model.ConversationRole;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,7 +85,6 @@ class ConversationRepositoryImplTest {
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId("turn_1");
         turn.setSessionId("cvs_1");
-        turn.setRole(ConversationRole.USER);
         turn.setIntentType("CHAT");
         turn.setIntentConfidence(0.98D);
         turn.setIntentReason("explicit_chat_rule");
@@ -105,7 +103,6 @@ class ConversationRepositoryImplTest {
         ConversationTurn legacy = new ConversationTurn();
         legacy.setTurnId("turn_legacy");
         legacy.setSessionId("cvs_1");
-        legacy.setRole(ConversationRole.USER);
         legacy.setCreatedAt(1_700_000_000_124L);
         repository.saveTurn(legacy);
 
