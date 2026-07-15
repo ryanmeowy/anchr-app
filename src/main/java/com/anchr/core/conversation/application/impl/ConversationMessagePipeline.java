@@ -44,6 +44,11 @@ public class ConversationMessagePipeline {
 
     public ConversationMessagePipelineResult execute(String sessionId, ConversationMessageRequestDTO request) {
         RewriteResult rewriteResult = queryRewriteService.rewrite(sessionId, request.getQuery().trim());
+        return execute(request, rewriteResult);
+    }
+
+    public ConversationMessagePipelineResult execute(ConversationMessageRequestDTO request,
+                                                     RewriteResult rewriteResult) {
         ConversationRetrievalResult retrievalResult = conversationRetrievalOrchestrator.retrieve(
                 rewriteResult.getRewrittenQuery(),
                 request.getLimit(),

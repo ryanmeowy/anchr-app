@@ -1,5 +1,6 @@
-package com.anchr.core.conversation.infrastructure.persistence.mysql;
+package com.anchr.core.conversation.infrastructure.persistence;
 
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationRole;
@@ -20,7 +21,7 @@ import java.util.Optional;
 
 @Repository
 @RequiredArgsConstructor
-public class MysqlConversationRepository implements ConversationRepository {
+public class ConversationRepositoryImpl implements ConversationRepository {
 
     private static final int MAX_RECENT_LIMIT = 100;
     private static final int MAX_SESSION_LIST_LIMIT = 200;
@@ -133,6 +134,11 @@ public class MysqlConversationRepository implements ConversationRepository {
         record.setAnswerMode(turn.getAnswerMode());
         record.setAnswerStatus(turn.getAnswerStatus());
         record.setAnswerFallbackReason(turn.getAnswerFallbackReason());
+        record.setIntentType(StringUtils.hasText(turn.getIntentType()) ? turn.getIntentType() : "KB_QUERY");
+        record.setIntentConfidence(turn.getIntentConfidence());
+        record.setIntentReason(turn.getIntentReason());
+        record.setIntentSource(StringUtils.hasText(turn.getIntentSource()) ? turn.getIntentSource() : "LEGACY");
+        record.setIntentFallback(turn.isIntentFallback());
         record.setCitations(normalizeJson(turn.getCitationsJson(), "[]"));
         record.setResultCards(normalizeJson(turn.getResultCardsJson(), "[]"));
         record.setRetrievalTrace(normalizeJson(turn.getRetrievalTraceJson(), "{}"));
@@ -153,6 +159,11 @@ public class MysqlConversationRepository implements ConversationRepository {
         turn.setAnswerMode(record.getAnswerMode());
         turn.setAnswerStatus(record.getAnswerStatus());
         turn.setAnswerFallbackReason(record.getAnswerFallbackReason());
+        turn.setIntentType(record.getIntentType());
+        turn.setIntentConfidence(record.getIntentConfidence());
+        turn.setIntentReason(record.getIntentReason());
+        turn.setIntentSource(record.getIntentSource());
+        turn.setIntentFallback(record.isIntentFallback());
         turn.setCitationsJson(record.getCitations());
         turn.setResultCardsJson(record.getResultCards());
         turn.setRetrievalTraceJson(record.getRetrievalTrace());

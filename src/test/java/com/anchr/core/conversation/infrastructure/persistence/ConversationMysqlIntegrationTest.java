@@ -1,4 +1,4 @@
-package com.anchr.core.conversation.infrastructure.persistence.mysql;
+package com.anchr.core.conversation.infrastructure.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationRole;
@@ -41,7 +41,7 @@ class ConversationMysqlIntegrationTest {
             .withPassword("anchr");
 
     private SqlSession sqlSession;
-    private MysqlConversationRepository repository;
+    private ConversationRepositoryImpl repository;
 
     @BeforeAll
     static void migrate() {
@@ -72,7 +72,7 @@ class ConversationMysqlIntegrationTest {
         }
         SqlSessionFactory factory = new SqlSessionFactoryBuilder().build(configuration);
         sqlSession = factory.openSession(true);
-        repository = new MysqlConversationRepository(sqlSession.getMapper(ConversationMapper.class), new ObjectMapper());
+        repository = new ConversationRepositoryImpl(sqlSession.getMapper(ConversationMapper.class), new ObjectMapper());
     }
 
     @AfterEach

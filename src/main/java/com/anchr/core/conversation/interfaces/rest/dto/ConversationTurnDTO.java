@@ -23,6 +23,7 @@ public class ConversationTurnDTO implements Serializable {
     private String answerMode;
     private String answerStatus;
     private String answerFallbackReason;
+    private ConversationIntentDTO intent;
     private List<CitationDTO> citations;
     private List<ResultCardDTO> resultCards;
     private long createdAt;

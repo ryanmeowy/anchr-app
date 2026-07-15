@@ -6,13 +6,17 @@ import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.conversation.application.FollowUpQuestionService;
+import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationService;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
+import com.anchr.core.conversation.application.model.ConversationExecutionResult;
+import com.anchr.core.conversation.application.model.ConversationIntentResult;
+import com.anchr.core.conversation.application.model.ConversationIntentSource;
+import com.anchr.core.conversation.application.model.ConversationIntentType;
 import com.anchr.core.conversation.domain.model.ConversationRole;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
@@ -20,6 +24,7 @@ import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationIntentDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
@@ -64,8 +69,7 @@ public class ConversationServiceImpl implements ConversationService {
     private static final String SINGLE_USER_ID = "single_user";
 
     private final ConversationRepository conversationRepository;
-    private final ConversationMessagePipeline conversationMessagePipeline;
-    private final FollowUpQuestionService followUpQuestionService;
+    private final ConversationMessageOrchestrator conversationMessageOrchestrator;
     private final ConversationTurnCodec conversationTurnCodec;
     private final ConversationRetrievalTraceBuilder conversationRetrievalTraceBuilder;
     private final KbScopeResolver kbScopeResolver;
@@ -138,6 +142,12 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public ConversationMessageResponseDTO createMessage(String sessionId, ConversationMessageRequestDTO request) {
+        return createMessageInternal(sessionId, request, ConversationProgressListener.NOOP);
+    }
+
+    private ConversationMessageResponseDTO createMessageInternal(String sessionId,
+                                                                  ConversationMessageRequestDTO request,
+                                                                  ConversationProgressListener progressListener) {
         ConversationSession session = loadSessionOrThrow(sessionId);
         long now = System.currentTimeMillis();
         applyConversationScope(session, request);
@@ -146,40 +156,39 @@ public class ConversationServiceImpl implements ConversationService {
         request.setPreferredModalities(resolveRequestedModalities(request.getPreferredModalities()));
         boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
-        ConversationMessagePipelineResult pipelineResult = conversationMessagePipeline.execute(session.getSessionId(), request);
-        AnswerStatus answerStatus = AnswerStatus.from(pipelineResult.answerGenerationResult());
+        ConversationExecutionResult executionResult = conversationMessageOrchestrator.execute(
+                session.getSessionId(), request, progressListener);
+        AnswerStatus answerStatus = executionResult.answerStatus();
 
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId(newTurnId());
         turn.setSessionId(session.getSessionId());
         turn.setRole(ConversationRole.USER);
         turn.setQuery(request.getQuery().trim());
-        turn.setRewrittenQuery(pipelineResult.rewriteResult().getRewrittenQuery());
-        turn.setAnswer(pipelineResult.answerGenerationResult().getAnswerText());
+        turn.setRewrittenQuery(executionResult.rewrittenQuery());
+        turn.setAnswer(executionResult.answer());
         turn.setKbScopeJson(conversationTurnCodec.serializeKbScope(request.getKbIds()));
         turn.setAssetScopeJson(conversationTurnCodec.serializeAssetScope(request.getAssetIdList()));
         turn.setAnswerMode(answerMode.name());
         turn.setAnswerStatus(answerStatus.name());
-        turn.setAnswerFallbackReason(pipelineResult.answerGenerationResult().getFallbackReason());
-        turn.setCitationsJson(conversationTurnCodec.serializeCitations(pipelineResult.answerCitations()));
-        turn.setResultCardsJson(conversationTurnCodec.serializeResultCards(pipelineResult.resultCards()));
-        turn.setRetrievalTraceJson(conversationRetrievalTraceBuilder.buildTraceJson(
-                request,
-                pipelineResult.rewriteResult(),
-                pipelineResult.retrievalResult(),
-                pipelineResult.answerGenerationResult()
-        ));
+        turn.setAnswerFallbackReason(executionResult.fallbackReason());
+        applyIntent(turn, executionResult.intent());
+        turn.setCitationsJson(conversationTurnCodec.serializeCitations(executionResult.citations()));
+        turn.setResultCardsJson(conversationTurnCodec.serializeResultCards(executionResult.resultCards()));
+        turn.setRetrievalTraceJson(buildRetrievalTraceJson(request, executionResult));
         turn.setCreatedAt(now);
         conversationRepository.saveTurn(turn);
-        activityEventService.recordQuestionAsked(
-                session.getSessionId(),
-                turn.getTurnId(),
-                turn.getQuery(),
-                request.getKbIds());
+        if (executionResult.intent().type() == ConversationIntentType.KB_QUERY) {
+            activityEventService.recordQuestionAsked(
+                    session.getSessionId(),
+                    turn.getTurnId(),
+                    turn.getQuery(),
+                    request.getKbIds());
+        }
         meterRegistry.counter("conversation.turn.count").increment();
 
         if (shouldAutoTitle) {
-            session.setTitle(buildAutoTitle(request.getQuery(), pipelineResult.rewriteResult().getRewrittenQuery()));
+            session.setTitle(buildAutoTitle(request.getQuery(), executionResult.rewrittenQuery()));
         }
         session.touch(now);
         conversationRepository.saveSession(session);
@@ -187,32 +196,24 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationMessageResponseDTO response = new ConversationMessageResponseDTO();
         response.setSessionId(session.getSessionId());
         response.setTurnId(turn.getTurnId());
-        response.setRewrittenQuery(pipelineResult.rewriteResult().getRewrittenQuery());
+        response.setRewrittenQuery(executionResult.rewrittenQuery());
         response.setAnswer(turn.getAnswer());
         response.setKbScope(request.getKbIds());
         response.setAssetScope(request.getAssetIdList());
         response.setAnswerMode(turn.getAnswerMode());
         response.setAnswerStatus(turn.getAnswerStatus());
         response.setAnswerFallbackReason(turn.getAnswerFallbackReason());
-        response.setRetrievalStage("ANSWERED");
-        response.setCitations(conversationTurnCodec.toCitationDTOs(pipelineResult.answerCitations()));
-        response.setResultCards(pipelineResult.resultCards());
-        List<String> suggestedQuestions = followUpQuestionService.generate(
-                request.getQuery().trim(),
-                pipelineResult.rewriteResult().getRewrittenQuery(),
-                pipelineResult.answerCitations()
-        );
-        response.setSuggestedQuestions(suggestedQuestions);
-        response.setRetrievalTrace(conversationRetrievalTraceBuilder.buildTraceDto(
-                request,
-                pipelineResult.rewriteResult(),
-                pipelineResult.retrievalResult(),
-                pipelineResult.answerGenerationResult()
-        ));
+        response.setRetrievalStage(executionResult.retrievalExecuted() ? "ANSWERED" : "SKIPPED");
+        response.setIntent(toIntentDto(executionResult.intent()));
+        response.setCitations(conversationTurnCodec.toCitationDTOs(executionResult.citations()));
+        response.setResultCards(executionResult.resultCards());
+        response.setRetrievalTrace(buildRetrievalTraceDto(request, executionResult));
         response.setCreatedAt(now);
-        meterRegistry.summary("answer.citation.count").record(pipelineResult.answerCitations().size());
-        if (pipelineResult.answerCitations().isEmpty()) {
-            meterRegistry.counter("answer.citation.empty.count").increment();
+        if (executionResult.retrievalExecuted()) {
+            meterRegistry.summary("answer.citation.count").record(executionResult.citations().size());
+            if (executionResult.citations().isEmpty()) {
+                meterRegistry.counter("answer.citation.empty.count").increment();
+            }
         }
         return response;
     }
@@ -224,13 +225,27 @@ public class ConversationServiceImpl implements ConversationService {
         streamExecutor.execute(() -> {
             UserContextHolder.set(context);
             try {
-                String answerMode = AnswerMode.from(request.getAnswerMode()).name();
                 sendEvent(emitter, "trace", Map.of(
-                        "stage", "retrieval",
-                        "message", "started",
-                        "answerMode", answerMode
+                        "stage", "routing",
+                        "message", "started"
                 ));
-                ConversationMessageResponseDTO response = createMessage(sessionId, request);
+                ConversationMessageResponseDTO response = createMessageInternal(sessionId, request,
+                        new ConversationProgressListener() {
+                            @Override
+                            public void onRoutingCompleted(ConversationIntentResult intent) {
+                                Map<String, Object> trace = new LinkedHashMap<>();
+                                trace.put("stage", "routing");
+                                trace.put("message", "completed");
+                                trace.put("intentType", intent.type().name());
+                                trace.put("confidence", intent.confidence());
+                                sendProgressEvent(emitter, trace);
+                            }
+
+                            @Override
+                            public void onStageStarted(String stage) {
+                                sendProgressEvent(emitter, Map.of("stage", stage, "message", "started"));
+                            }
+                        });
                 streamAnswer(emitter, response.getAnswer());
                 sendEvent(emitter, "citations", response.getCitations() == null ? List.of() : response.getCitations());
                 Map<String, Object> done = new LinkedHashMap<>();
@@ -241,6 +256,10 @@ public class ConversationServiceImpl implements ConversationService {
                 done.put("answerStatus", response.getAnswerStatus());
                 done.put("fallbackReason", response.getAnswerFallbackReason());
                 done.put("citationCount", response.getCitations() == null ? 0 : response.getCitations().size());
+                if (response.getIntent() != null) {
+                    done.put("intentType", response.getIntent().getType());
+                    done.put("retrievalExecuted", response.getIntent().isRetrievalRequired());
+                }
                 sendEvent(emitter, "done", done);
                 emitter.complete();
             } catch (BusinessException e) {
@@ -343,6 +362,7 @@ public class ConversationServiceImpl implements ConversationService {
         dto.setAnswerMode(turn.getAnswerMode());
         dto.setAnswerStatus(resolveTurnAnswerStatus(turn).name());
         dto.setAnswerFallbackReason(resolveTurnFallbackReason(turn));
+        dto.setIntent(toIntentDto(turn));
         dto.setCitations(conversationTurnCodec.parseCitations(turn.getCitationsJson()));
         dto.setResultCards(conversationTurnCodec.parseResultCards(turn.getResultCardsJson()));
         dto.setCreatedAt(turn.getCreatedAt());
@@ -374,6 +394,81 @@ public class ConversationServiceImpl implements ConversationService {
         }
         Object reason = parseRetrievalTrace(turn.getRetrievalTraceJson()).get("answerFallbackReason");
         return reason instanceof String value && StringUtils.hasText(value) ? value : null;
+    }
+
+    private void applyIntent(ConversationTurn turn, ConversationIntentResult intent) {
+        turn.setIntentType(intent.type().name());
+        turn.setIntentConfidence(intent.confidence());
+        turn.setIntentReason(truncate(intent.reason(), 255));
+        turn.setIntentSource(intent.source().name());
+        turn.setIntentFallback(intent.fallbackUsed());
+    }
+
+    private ConversationIntentDTO toIntentDto(ConversationIntentResult intent) {
+        ConversationIntentDTO dto = new ConversationIntentDTO();
+        dto.setType(intent.type().name());
+        dto.setConfidence(intent.confidence());
+        dto.setReason(intent.reason());
+        dto.setSource(intent.source().name());
+        dto.setFallbackUsed(intent.fallbackUsed());
+        dto.setRetrievalRequired(intent.retrievalRequired());
+        return dto;
+    }
+
+    private ConversationIntentDTO toIntentDto(ConversationTurn turn) {
+        ConversationIntentType type;
+        ConversationIntentSource source;
+        try {
+            type = StringUtils.hasText(turn.getIntentType())
+                    ? ConversationIntentType.valueOf(turn.getIntentType()) : ConversationIntentType.KB_QUERY;
+        } catch (IllegalArgumentException e) {
+            type = ConversationIntentType.KB_QUERY;
+        }
+        try {
+            source = StringUtils.hasText(turn.getIntentSource())
+                    ? ConversationIntentSource.valueOf(turn.getIntentSource()) : ConversationIntentSource.LEGACY;
+        } catch (IllegalArgumentException e) {
+            source = ConversationIntentSource.LEGACY;
+        }
+        return toIntentDto(new ConversationIntentResult(type,
+                turn.getIntentConfidence() == null ? 0.0D : turn.getIntentConfidence(),
+                turn.getIntentReason(), source, turn.isIntentFallback()));
+    }
+
+    private String buildRetrievalTraceJson(ConversationMessageRequestDTO request,
+                                           ConversationExecutionResult result) {
+        ConversationMessagePipelineResult rag = result.ragResult();
+        if (rag == null) {
+            return "{}";
+        }
+        return conversationRetrievalTraceBuilder.buildTraceJson(request, rag.rewriteResult(),
+                rag.retrievalResult(), rag.answerGenerationResult());
+    }
+
+    private ConversationMessageResponseDTO.RetrievalTraceDTO buildRetrievalTraceDto(
+            ConversationMessageRequestDTO request, ConversationExecutionResult result) {
+        ConversationMessagePipelineResult rag = result.ragResult();
+        if (rag == null) {
+            return null;
+        }
+        return conversationRetrievalTraceBuilder.buildTraceDto(request, rag.rewriteResult(),
+                rag.retrievalResult(), rag.answerGenerationResult());
+    }
+
+    private void sendProgressEvent(SseEmitter emitter, Object data) {
+        try {
+            sendEvent(emitter, "trace", data);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to send progress event", e);
+        }
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) {
+            return value;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
     }
 
     private Map<?, ?> parseRetrievalTrace(String retrievalTraceJson) {

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationMapper">
-    <resultMap id="SessionMap" type="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationSessionRecord">
+<mapper namespace="com.anchr.core.conversation.infrastructure.persistence.ConversationMapper">
+    <resultMap id="SessionMap" type="com.anchr.core.conversation.infrastructure.persistence.ConversationSessionRecord">
         <id property="sessionId" column="session_id"/>
         <result property="userId" column="user_id"/>
         <result property="title" column="title"/>
@@ -12,7 +12,7 @@
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
-    <resultMap id="TurnMap" type="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationTurnRecord">
+    <resultMap id="TurnMap" type="com.anchr.core.conversation.infrastructure.persistence.ConversationTurnRecord">
         <id property="turnId" column="turn_id"/>
         <result property="sessionId" column="session_id"/>
         <result property="role" column="role"/>
@@ -24,13 +24,18 @@
         <result property="answerMode" column="answer_mode"/>
         <result property="answerStatus" column="answer_status"/>
         <result property="answerFallbackReason" column="answer_fallback_reason"/>
+        <result property="intentType" column="intent_type"/>
+        <result property="intentConfidence" column="intent_confidence"/>
+        <result property="intentReason" column="intent_reason"/>
+        <result property="intentSource" column="intent_source"/>
+        <result property="intentFallback" column="intent_fallback"/>
         <result property="citations" column="citations"/>
         <result property="resultCards" column="result_cards"/>
         <result property="retrievalTrace" column="retrieval_trace"/>
         <result property="createdAt" column="created_at"/>
     </resultMap>
 
-    <insert id="upsertSession" parameterType="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationSessionRecord">
+    <insert id="upsertSession" parameterType="com.anchr.core.conversation.infrastructure.persistence.ConversationSessionRecord">
         insert into conversation_session (
           session_id, user_id, title, status, kb_scope, asset_scope, created_at, updated_at
         ) values (
@@ -65,32 +70,39 @@
         where session_id = #{sessionId} and deleted_at is null
     </update>
 
-    <insert id="upsertTurn" parameterType="com.anchr.core.conversation.infrastructure.persistence.mysql.ConversationTurnRecord">
+    <insert id="upsertTurn" parameterType="com.anchr.core.conversation.infrastructure.persistence.ConversationTurnRecord">
         insert into conversation_turn (
           turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
-          answer_mode, answer_status, answer_fallback_reason, citations, result_cards, retrieval_trace, created_at
+          answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
+          intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
         ) values (
           #{turnId}, #{sessionId}, #{role}, #{query}, #{rewrittenQuery}, #{answer}, #{kbScope}, #{assetScope},
-          #{answerMode}, #{answerStatus}, #{answerFallbackReason}, #{citations}, #{resultCards}, #{retrievalTrace}, #{createdAt}
+          #{answerMode}, #{answerStatus}, #{answerFallbackReason}, #{intentType}, #{intentConfidence}, #{intentReason},
+          #{intentSource}, #{intentFallback}, #{citations}, #{resultCards}, #{retrievalTrace}, #{createdAt}
         ) on duplicate key update
           session_id = values(session_id), role = values(role), query = values(query),
           rewritten_query = values(rewritten_query), answer = values(answer), kb_scope = values(kb_scope),
           asset_scope = values(asset_scope), answer_mode = values(answer_mode), answer_status = values(answer_status),
           answer_fallback_reason = values(answer_fallback_reason), citations = values(citations),
+          intent_type = values(intent_type), intent_confidence = values(intent_confidence),
+          intent_reason = values(intent_reason), intent_source = values(intent_source),
+          intent_fallback = values(intent_fallback),
           result_cards = values(result_cards), retrieval_trace = values(retrieval_trace),
           created_at = values(created_at), deleted_at = null
     </insert>
 
     <select id="findTurn" resultMap="TurnMap">
         select turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
-               answer_mode, answer_status, answer_fallback_reason, citations, result_cards, retrieval_trace, created_at
+               answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
+               intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
         from conversation_turn
         where session_id = #{sessionId} and turn_id = #{turnId} and deleted_at is null
     </select>
 
     <select id="findRecentTurns" resultMap="TurnMap">
         select turn_id, session_id, role, query, rewritten_query, answer, kb_scope, asset_scope,
-               answer_mode, answer_status, answer_fallback_reason, citations, result_cards, retrieval_trace, created_at
+               answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
+               intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
         from conversation_turn
         where session_id = #{sessionId}
           and deleted_at is null

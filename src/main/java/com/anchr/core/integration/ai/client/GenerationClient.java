@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
 
 /**
  * Generation capability backed by {@link AiClient}.
@@ -21,7 +22,12 @@ public class GenerationClient {
      */
     public GenerationResult generate(String modelName, List<Map<String, String>> messages,
                                      Map<String, Object> extraConfig) {
-        JsonNode root = client.chatCompletions(modelName, messages, extraConfig);
+        return generate(modelName, messages, extraConfig, Duration.ofSeconds(30));
+    }
+
+    public GenerationResult generate(String modelName, List<Map<String, String>> messages,
+                                     Map<String, Object> extraConfig, Duration timeout) {
+        JsonNode root = client.chatCompletions(modelName, messages, extraConfig, timeout);
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
             throw new AiClient.OpenAiException(-1, "Empty generation response.");

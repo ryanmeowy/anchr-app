@@ -4,8 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.conversation.application.AnswerGenerationService;
+import com.anchr.core.conversation.application.ChatResponseService;
+import com.anchr.core.conversation.application.ConversationIntentRouter;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
-import com.anchr.core.conversation.application.FollowUpQuestionService;
 import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.search.application.CitationReasonGenerationService;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
@@ -15,8 +16,12 @@ import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.AnswerStatus;
+import com.anchr.core.conversation.application.model.ChatResponseResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
+import com.anchr.core.conversation.application.model.ConversationIntentResult;
+import com.anchr.core.conversation.application.model.ConversationIntentSource;
+import com.anchr.core.conversation.application.model.ConversationIntentType;
 import com.anchr.core.conversation.application.model.RewriteResult;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.ConversationSession;
@@ -55,6 +60,8 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceImplTest {
@@ -66,11 +73,13 @@ class ConversationServiceImplTest {
     @Mock
     private AnswerGenerationService answerGenerationService;
     @Mock
-    private FollowUpQuestionService followUpQuestionService;
-    @Mock
     private KbScopeResolver kbScopeResolver;
     @Mock
     private ActivityEventService activityEventService;
+    @Mock
+    private ConversationIntentRouter conversationIntentRouter;
+    @Mock
+    private ChatResponseService chatResponseService;
     @Mock
     private CitationReasonGenerationService citationReasonGenerationService;
 
@@ -94,14 +103,21 @@ class ConversationServiceImplTest {
                 conversationTurnCodec,
                 citationReasonGenerationService
         );
+        lenient().when(conversationIntentRouter.route(any(), any())).thenReturn(new ConversationIntentResult(
+                ConversationIntentType.KB_QUERY, 1.0D, "test", ConversationIntentSource.MODEL, false));
+        ConversationMessageOrchestrator orchestrator = new ConversationMessageOrchestrator(
+                conversationIntentRouter,
+                chatResponseService,
+                conversationMessagePipeline,
+                meterRegistry
+        );
         when(kbScopeResolver.resolveVisibleKbIds(any())).thenAnswer(invocation -> {
             List<String> requested = invocation.getArgument(0);
             return requested == null ? List.of() : requested;
         });
         service = new ConversationServiceImpl(
                 repository,
-                conversationMessagePipeline,
-                followUpQuestionService,
+                orchestrator,
                 conversationTurnCodec,
                 new ConversationRetrievalTraceBuilder(objectMapper),
                 kbScopeResolver,
@@ -110,6 +126,82 @@ class ConversationServiceImplTest {
                 activityEventService,
                 Runnable::run
         );
+    }
+
+    @Test
+    void createMessage_shouldSkipRetrievalAndQuestionActivityForChat() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        when(conversationIntentRouter.route(eq(session.getSessionId()), eq("你好"))).thenReturn(
+                new ConversationIntentResult(ConversationIntentType.CHAT, 1.0D,
+                        "explicit_chat_rule", ConversationIntentSource.RULE, false));
+        when(chatResponseService.generate(session.getSessionId(), "你好")).thenReturn(
+                new ChatResponseResult("你好！有什么想了解的吗？", AnswerStatus.ANSWERED, null));
+
+        ConversationMessageResponseDTO response = service.createMessage(
+                session.getSessionId(), buildMessageRequest("你好"));
+
+        assertThat(response.getIntent().getType()).isEqualTo("CHAT");
+        assertThat(response.getRetrievalStage()).isEqualTo("SKIPPED");
+        assertThat(response.getRewrittenQuery()).isNull();
+        assertThat(response.getCitations()).isEmpty();
+        assertThat(response.getResultCards()).isEmpty();
+        verify(queryRewriteService, never()).rewrite(any(), any());
+        verify(activityEventService, never()).recordQuestionAsked(any(), any(), any(), any());
+
+        ConversationTurnDTO stored = service.listMessages(session.getSessionId(), 20, null).getTurns().getFirst();
+        assertThat(stored.getIntent().getType()).isEqualTo("CHAT");
+        assertThat(stored.getIntent().getSource()).isEqualTo("RULE");
+        assertThat(service.getSession(session.getSessionId()).getTitle()).isEqualTo("你好");
+    }
+
+    @Test
+    void createMessage_shouldReturnClarificationWithoutModelOrRetrievalForOther() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        when(conversationIntentRouter.route(eq(session.getSessionId()), eq("帮我查天气"))).thenReturn(
+                new ConversationIntentResult(ConversationIntentType.OTHER, 0.95D,
+                        "需要外部天气能力", ConversationIntentSource.MODEL, false));
+
+        ConversationMessageResponseDTO response = service.createMessage(
+                session.getSessionId(), buildMessageRequest("帮我查天气"));
+
+        assertThat(response.getIntent().getType()).isEqualTo("OTHER");
+        assertThat(response.getRetrievalStage()).isEqualTo("SKIPPED");
+        assertThat(response.getAnswer()).contains("知识库");
+        assertThat(response.getCitations()).isEmpty();
+        verify(chatResponseService, never()).generate(any(), any());
+        verify(queryRewriteService, never()).rewrite(any(), any());
+        verify(activityEventService, never()).recordQuestionAsked(any(), any(), any(), any());
+    }
+
+    @Test
+    void createMessage_shouldKeepIntentResolutionSeparateFromRetrievalRewrite() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        String sessionId = session.getSessionId();
+        when(conversationIntentRouter.route(sessionId, "就按刚才的方案")).thenReturn(
+                new ConversationIntentResult(ConversationIntentType.KB_QUERY, 0.96D,
+                        "已从上下文还原完整请求", ConversationIntentSource.MODEL, false));
+        RewriteResult rewrite = buildRewrite(
+                "就按刚才的方案",
+                "Docker 部署方案的具体步骤",
+                "rewrite_by_model",
+                false
+        );
+        when(queryRewriteService.rewrite(sessionId, "就按刚才的方案")).thenReturn(rewrite);
+        when(conversationRetrievalOrchestrator.retrieve(
+                eq("Docker 部署方案的具体步骤"), eq(20), anyList(), anyList(), eq(null)
+        )).thenReturn(buildRetrievalResult(List.of()));
+        when(answerGenerationService.generate(
+                eq("就按刚才的方案"),
+                eq("Docker 部署方案的具体步骤"),
+                eq(AnswerMode.STRICT), anyList(), anyList()
+        )).thenReturn(buildAnswer("未找到相关内容。", true, "no_evidence", List.of()));
+
+        ConversationMessageResponseDTO response = service.createMessage(
+                sessionId, buildMessageRequest("就按刚才的方案"));
+
+        assertThat(response.getRewrittenQuery()).isEqualTo("Docker 部署方案的具体步骤");
+        assertThat(response.getRetrievalTrace().getRewriteReason()).isEqualTo("rewrite_by_model");
+        verify(queryRewriteService).rewrite(sessionId, "就按刚才的方案");
     }
 
     @Test
@@ -150,10 +242,6 @@ class ConversationServiceImplTest {
                 .thenReturn(buildAnswer("MySQL 架构通常由连接层、SQL 层、存储引擎层组成。[1]", false, null, List.of("seg_text_1")));
         when(answerGenerationService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("InnoDB 是默认事务引擎，支持行级锁与崩溃恢复。[1]", false, null, List.of("seg_text_2")));
-        when(followUpQuestionService.generate(eq("mysql 架构是什么"), eq("mysql 架构是什么 核心组件"), anyList()))
-                .thenReturn(List.of("《mysql-notes.pdf》里还有哪些和“mysql”直接相关的内容？", "“mysql”和“InnoDB”之间的关系是什么？"));
-        when(followUpQuestionService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), anyList()))
-                .thenReturn(List.of("在《mysql-notes.pdf》第12页，关于“InnoDB”还有哪些关键点？", "有没有“InnoDB”对应的结构图或示意图可对照理解？"));
 
         ConversationMessageResponseDTO firstResponse = service.createMessage(sessionId, buildMessageRequest("mysql 架构是什么"));
         ConversationMessageResponseDTO secondResponse = service.createMessage(sessionId, buildMessageRequest("那 InnoDB 呢"));
@@ -175,8 +263,6 @@ class ConversationServiceImplTest {
         assertThat(secondResponse.getRetrievalTrace().getRetrievedCount()).isEqualTo(1);
         assertThat(secondResponse.getRetrievalTrace().getTopSegmentIds()).containsExactly("seg_text_2");
         assertThat(secondResponse.getRetrievalTrace().getTopHitSources()).contains("VECTOR", "CONTENT");
-        assertThat(secondResponse.getSuggestedQuestions()).hasSize(2);
-        assertThat(secondResponse.getSuggestedQuestions().getFirst()).contains("mysql-notes.pdf");
         assertThat(service.getSession(sessionId).getTitle()).isEqualTo("mysql 架构是什么 核心组件");
 
         ConversationTurnListDTO messageList = service.listMessages(sessionId, 20, null);
@@ -229,8 +315,6 @@ class ConversationServiceImplTest {
                 anyList(),
                 anyList()
         )).thenReturn(buildAnswer("未找到足够内容支持该问题。请尝试缩小范围或补充关键词。", true, "no_evidence", List.of()));
-        when(followUpQuestionService.generate(eq("它和 buffer pool 有什么关系"), eq("mysql 架构中 InnoDB 与 buffer pool 的关系"), anyList()))
-                .thenReturn(List.of());
 
         ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("它和 buffer pool 有什么关系"));
 
@@ -243,7 +327,6 @@ class ConversationServiceImplTest {
         assertThat(response.getRetrievalTrace().getRetrievedCount()).isEqualTo(0);
         assertThat(response.getRetrievalTrace().getAnswerFallback()).isTrue();
         assertThat(response.getRetrievalTrace().getAnswerFallbackReason()).isEqualTo("no_evidence");
-        assertThat(response.getSuggestedQuestions()).isEmpty();
 
         List<ConversationTurn> storedTurns = repository.findRecentTurns(sessionId, 10);
         assertThat(storedTurns).hasSize(1);
@@ -277,8 +360,6 @@ class ConversationServiceImplTest {
         when(answerGenerationService.generate(
                 eq(request.getQuery()), eq(request.getQuery()), eq(AnswerMode.STRICT), anyList(), anyList()
         )).thenReturn(buildAnswer("未找到相关内容。", true, "no_evidence", List.of()));
-        when(followUpQuestionService.generate(eq(request.getQuery()), eq(request.getQuery()), anyList()))
-                .thenReturn(List.of());
 
         ConversationMessageResponseDTO response = service.createMessage(session.getSessionId(), request);
 
@@ -310,8 +391,6 @@ class ConversationServiceImplTest {
         when(answerGenerationService.generate(eq("mysql 索引有哪些"), eq("mysql 索引 类型 适用场景"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("MySQL 常见索引包括 BTree、Hash 和全文索引。[1][2][3]", false, null,
                         List.of("seg_asset_1", "seg_asset_2", "seg_asset_3")));
-        when(followUpQuestionService.generate(eq("mysql 索引有哪些"), eq("mysql 索引 类型 适用场景"), anyList()))
-                .thenReturn(List.of());
 
         ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql 索引有哪些"));
 
@@ -355,8 +434,6 @@ class ConversationServiceImplTest {
         when(answerGenerationService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("根据当前知识库，先给出可确认的信息：", true, "model_unavailable",
                         List.of("seg_redo_2", "seg_redo_1")));
-        when(followUpQuestionService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), anyList()))
-                .thenReturn(List.of());
 
         ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql redo log 是什么"));
 
@@ -395,8 +472,6 @@ class ConversationServiceImplTest {
         when(answerGenerationService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("Buffer pool 用于缓存数据页和索引页。[1]", false, null,
                         List.of("seg_pool_1", "seg_pool_2")));
-        when(followUpQuestionService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), anyList()))
-                .thenReturn(List.of());
         when(citationReasonGenerationService.generate(any())).thenReturn(Map.of(
                 "seg_pool_1", "该段说明 Buffer Pool 用于缓存数据页。",
                 "seg_pool_2", "该段说明 Buffer Pool 使用 LRU 管理缓存。"
@@ -454,8 +529,6 @@ class ConversationServiceImplTest {
                 anyList(),
                 anyList()
         )).thenReturn(buildAnswer("MySQL 可概括为 SQL 层和存储引擎层。[1]", false, null, List.of("seg_summary_1")));
-        when(followUpQuestionService.generate(eq("mysql 总结一下"), eq("mysql 总结 核心机制"), anyList()))
-                .thenReturn(List.of());
         ConversationMessageRequestDTO request = buildMessageRequest("mysql 总结一下");
         request.setAnswerMode("summary");
 
@@ -493,8 +566,6 @@ class ConversationServiceImplTest {
                 anyList(),
                 anyList()
         )).thenReturn(buildAnswer("MySQL 是关系型数据库。[1]", false, null, List.of("seg_strict_1")));
-        when(followUpQuestionService.generate(eq("mysql 自由发挥"), eq("mysql 自由发挥"), anyList()))
-                .thenReturn(List.of());
         ConversationMessageRequestDTO request = buildMessageRequest("mysql 自由发挥");
         request.setAnswerMode("creative");
 
@@ -573,8 +644,6 @@ class ConversationServiceImplTest {
         )));
         when(answerGenerationService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("InnoDB 是默认事务引擎，支持行级锁与崩溃恢复。[1]", false, null, List.of("seg_text_2")));
-        when(followUpQuestionService.generate(eq("那 InnoDB 呢"), eq("mysql 架构中的 InnoDB 作用"), anyList()))
-                .thenReturn(List.of("在《mysql-notes.pdf》第12页，关于“InnoDB”还有哪些关键点？", "有没有“InnoDB”对应的结构图或示意图可对照理解？"));
 
         service.createMessage(sessionId, buildMessageRequest("那 InnoDB 呢"));
 

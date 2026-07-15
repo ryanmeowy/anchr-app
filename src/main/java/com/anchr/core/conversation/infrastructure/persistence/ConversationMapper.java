@@ -1,4 +1,4 @@
-package com.anchr.core.conversation.infrastructure.persistence.mysql;
+package com.anchr.core.conversation.infrastructure.persistence;
 
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;

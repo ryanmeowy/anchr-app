@@ -1,8 +1,10 @@
-package com.anchr.core.conversation.infrastructure.persistence.mysql;
+package com.anchr.core.conversation.infrastructure.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationSessionStatus;
+import com.anchr.core.conversation.domain.model.ConversationRole;
+import com.anchr.core.conversation.domain.model.ConversationTurn;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,16 +24,16 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.inOrder;
 
 @ExtendWith(MockitoExtension.class)
-class MysqlConversationRepositoryTest {
+class ConversationRepositoryImplTest {
 
     @Mock
     private ConversationMapper mapper;
 
-    private MysqlConversationRepository repository;
+    private ConversationRepositoryImpl repository;
 
     @BeforeEach
     void setUp() {
-        repository = new MysqlConversationRepository(mapper, new ObjectMapper());
+        repository = new ConversationRepositoryImpl(mapper, new ObjectMapper());
     }
 
     @Test
@@ -77,6 +79,38 @@ class MysqlConversationRepositoryTest {
         var ordered = inOrder(mapper);
         ordered.verify(mapper).softDeleteTurns("cvs_1");
         ordered.verify(mapper).softDeleteSession("cvs_1");
+    }
+
+    @Test
+    void shouldPersistIntentAndDefaultLegacyTurns() {
+        ConversationTurn turn = new ConversationTurn();
+        turn.setTurnId("turn_1");
+        turn.setSessionId("cvs_1");
+        turn.setRole(ConversationRole.USER);
+        turn.setIntentType("CHAT");
+        turn.setIntentConfidence(0.98D);
+        turn.setIntentReason("explicit_chat_rule");
+        turn.setIntentSource("RULE");
+        turn.setIntentFallback(false);
+        turn.setCreatedAt(1_700_000_000_123L);
+
+        repository.saveTurn(turn);
+
+        ArgumentCaptor<ConversationTurnRecord> captor = ArgumentCaptor.forClass(ConversationTurnRecord.class);
+        verify(mapper).upsertTurn(captor.capture());
+        assertThat(captor.getValue().getIntentType()).isEqualTo("CHAT");
+        assertThat(captor.getValue().getIntentConfidence()).isEqualTo(0.98D);
+        assertThat(captor.getValue().getIntentSource()).isEqualTo("RULE");
+
+        ConversationTurn legacy = new ConversationTurn();
+        legacy.setTurnId("turn_legacy");
+        legacy.setSessionId("cvs_1");
+        legacy.setRole(ConversationRole.USER);
+        legacy.setCreatedAt(1_700_000_000_124L);
+        repository.saveTurn(legacy);
+
+        verify(mapper).upsertTurn(org.mockito.ArgumentMatchers.argThat(record ->
+                "KB_QUERY".equals(record.getIntentType()) && "LEGACY".equals(record.getIntentSource())));
     }
 
     private ConversationSessionRecord record(String sessionId, long timestamp) {

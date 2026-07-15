@@ -19,6 +19,8 @@ import java.util.Map;
 @Slf4j
 public class AiClient {
 
+    private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -35,6 +37,10 @@ public class AiClient {
     // ── low-level POST ──────────────────────────────────────────────────
 
     public JsonNode post(String path, Map<String, Object> body) {
+        return post(path, body, DEFAULT_REQUEST_TIMEOUT);
+    }
+
+    public JsonNode post(String path, Map<String, Object> body, Duration timeout) {
         try {
             String json = objectMapper.writeValueAsString(body);
             HttpRequest request = HttpRequest.newBuilder()
@@ -42,7 +48,7 @@ public class AiClient {
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json))
-                    .timeout(Duration.ofSeconds(30))
+                    .timeout(timeout == null ? DEFAULT_REQUEST_TIMEOUT : timeout)
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -79,13 +85,18 @@ public class AiClient {
     /** POST /chat/completions */
     public JsonNode chatCompletions(String model, List<Map<String, String>> messages,
                                     Map<String, Object> extraConfig) {
+        return chatCompletions(model, messages, extraConfig, DEFAULT_REQUEST_TIMEOUT);
+    }
+
+    public JsonNode chatCompletions(String model, List<Map<String, String>> messages,
+                                    Map<String, Object> extraConfig, Duration timeout) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("messages", messages);
         if (extraConfig != null) {
             body.putAll(extraConfig);
         }
-        return post("/chat/completions", body);
+        return post("/chat/completions", body, timeout);
     }
 
     /** only for aliyun */

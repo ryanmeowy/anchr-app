@@ -36,6 +36,11 @@ mybatis:
     map-underscore-to-camel-case: true
 
 app:
+  conversation:
+    intent-routing:
+      enabled: ${APP_CONVERSATION_INTENT_ROUTING_ENABLED:true}
+      context-turn-limit: ${APP_CONVERSATION_INTENT_CONTEXT_TURN_LIMIT:5}
+      timeout: ${APP_CONVERSATION_INTENT_TIMEOUT:5s}
   security:
     admin-secret: ${APP_ADMIN_SECRET}
     encrypt-key: ${APP_ENCRYPT_KEY}

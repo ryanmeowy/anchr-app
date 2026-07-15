@@ -22,10 +22,10 @@ public class ConversationMessageResponseDTO implements Serializable {
     private String answerStatus;
     private String answerFallbackReason;
     private String retrievalStage;
+    private ConversationIntentDTO intent;
     private List<ConversationTurnDTO.CitationDTO> citations;
     private List<ResultCardDTO> resultCards;
     private RetrievalTraceDTO retrievalTrace;
-    private List<String> suggestedQuestions;
     private long createdAt;
 
     @Data

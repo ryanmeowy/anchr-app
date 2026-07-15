@@ -1,4 +1,4 @@
-package com.anchr.core.conversation.infrastructure.persistence.mysql;
+package com.anchr.core.conversation.infrastructure.persistence;
 
 import lombok.Data;
 

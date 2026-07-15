@@ -1,4 +1,4 @@
-package com.anchr.core.conversation.infrastructure.persistence.mysql;
+package com.anchr.core.conversation.infrastructure.persistence;
 
 import lombok.Data;
 
@@ -17,6 +17,11 @@ public class ConversationTurnRecord {
     private String answerMode;
     private String answerStatus;
     private String answerFallbackReason;
+    private String intentType;
+    private Double intentConfidence;
+    private String intentReason;
+    private String intentSource;
+    private boolean intentFallback;
     private String citations;
     private String resultCards;
     private String retrievalTrace;

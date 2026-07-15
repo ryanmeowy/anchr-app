@@ -21,6 +21,11 @@ public class ConversationTurn {
     private String answerMode;
     private String answerStatus;
     private String answerFallbackReason;
+    private String intentType;
+    private Double intentConfidence;
+    private String intentReason;
+    private String intentSource;
+    private boolean intentFallback;
     private String citationsJson;
     private String resultCardsJson;
     private String retrievalTraceJson;
