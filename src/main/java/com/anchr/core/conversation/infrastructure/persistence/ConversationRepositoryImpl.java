@@ -47,6 +47,11 @@ public class ConversationRepositoryImpl implements ConversationRepository {
     }
 
     @Override
+    public boolean lockActiveSession(String sessionId) {
+        return StringUtils.hasText(sessionId) && mapper.lockActiveSession(sessionId) != null;
+    }
+
+    @Override
     public List<ConversationSession> findRecentSessions(String userId, int limit) {
         if (!StringUtils.hasText(userId)) {
             return List.of();
@@ -132,14 +137,21 @@ public class ConversationRepositoryImpl implements ConversationRepository {
         record.setAnswerMode(turn.getAnswerMode());
         record.setAnswerStatus(turn.getAnswerStatus());
         record.setAnswerFallbackReason(turn.getAnswerFallbackReason());
-        record.setIntentType(StringUtils.hasText(turn.getIntentType()) ? turn.getIntentType() : "KB_QUERY");
+        boolean agentMode = "AGENT".equals(turn.getExecutionMode());
+        record.setIntentType(agentMode ? turn.getIntentType()
+                : StringUtils.hasText(turn.getIntentType()) ? turn.getIntentType() : "KB_QUERY");
         record.setIntentConfidence(turn.getIntentConfidence());
         record.setIntentReason(turn.getIntentReason());
-        record.setIntentSource(StringUtils.hasText(turn.getIntentSource()) ? turn.getIntentSource() : "LEGACY");
+        record.setIntentSource(agentMode ? turn.getIntentSource()
+                : StringUtils.hasText(turn.getIntentSource()) ? turn.getIntentSource() : "LEGACY");
         record.setIntentFallback(turn.isIntentFallback());
         record.setCitations(normalizeJson(turn.getCitationsJson(), "[]"));
         record.setResultCards(normalizeJson(turn.getResultCardsJson(), "[]"));
         record.setRetrievalTrace(normalizeJson(turn.getRetrievalTraceJson(), "{}"));
+        record.setAgentRunId(turn.getAgentRunId());
+        record.setWorkflowVersion(turn.getWorkflowVersion());
+        record.setExecutionMode(StringUtils.hasText(turn.getExecutionMode()) ? turn.getExecutionMode() : "TRADITIONAL");
+        record.setAgentTaskId(turn.getAgentTaskId());
         record.setCreatedAt(toLocalDateTime(turn.getCreatedAt()));
         return record;
     }
@@ -164,6 +176,10 @@ public class ConversationRepositoryImpl implements ConversationRepository {
         turn.setCitationsJson(record.getCitations());
         turn.setResultCardsJson(record.getResultCards());
         turn.setRetrievalTraceJson(record.getRetrievalTrace());
+        turn.setAgentRunId(record.getAgentRunId());
+        turn.setWorkflowVersion(record.getWorkflowVersion());
+        turn.setExecutionMode(record.getExecutionMode());
+        turn.setAgentTaskId(record.getAgentTaskId());
         turn.setCreatedAt(toEpochMillis(record.getCreatedAt()));
         return turn;
     }

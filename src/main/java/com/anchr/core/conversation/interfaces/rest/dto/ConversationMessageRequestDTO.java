@@ -38,4 +38,7 @@ public class ConversationMessageRequestDTO {
     private Boolean debug;
 
     private Boolean stream;
+
+    /** Client preference; the server-side feature flag must also be enabled. */
+    private Boolean agentEnabled;
 }

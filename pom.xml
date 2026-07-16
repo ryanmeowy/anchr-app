@@ -40,7 +40,20 @@
         <aspectjrt.version>1.9.21</aspectjrt.version>
         <aspectjweaver.version>1.9.21</aspectjweaver.version>
         <mybatis-spring-boot.version>3.0.4</mybatis-spring-boot.version>
+        <spring-ai.version>1.1.8</spring-ai.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
     <dependencies>
         <!--↓↓ spring ↓↓-->
         <dependency>
@@ -92,6 +105,10 @@
             <groupId>org.mybatis.spring.boot</groupId>
             <artifactId>mybatis-spring-boot-starter</artifactId>
             <version>${mybatis-spring-boot.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-openai</artifactId>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>

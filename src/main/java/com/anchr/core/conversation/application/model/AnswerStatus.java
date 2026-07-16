@@ -5,6 +5,8 @@ package com.anchr.core.conversation.application.model;
  */
 public enum AnswerStatus {
     ANSWERED,
+    PROCESSING,
+    CANCELLED,
     NO_EVIDENCE,
     MODEL_FALLBACK;
 

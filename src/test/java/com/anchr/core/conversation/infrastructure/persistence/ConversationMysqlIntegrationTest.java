@@ -119,6 +119,22 @@ class ConversationMysqlIntegrationTest {
         assertThat(countDeletedRows("conversation_turn", "session_id", newer.getSessionId())).isEqualTo(2);
     }
 
+    @Test
+    void deletedSession_shouldNotBeRevivedByAStaleSave() {
+        ConversationSession session = session("cvs_deleted", 1_000L, List.of("kb_1"));
+        repository.saveSession(session);
+        assertThat(repository.lockActiveSession(session.getSessionId())).isTrue();
+
+        repository.deleteSession(session.getSessionId());
+        session.setTitle("stale worker update");
+        session.setUpdatedAt(2_000L);
+        repository.saveSession(session);
+
+        assertThat(repository.lockActiveSession(session.getSessionId())).isFalse();
+        assertThat(repository.findSession(session.getSessionId())).isEmpty();
+        assertThat(countDeletedRows("conversation_session", "session_id", session.getSessionId())).isEqualTo(1);
+    }
+
     private ConversationSession session(String sessionId, long timestamp, List<String> kbScope) {
         ConversationSession session = ConversationSession.createActive(sessionId, "single_user", null, timestamp);
         session.setUpdatedAt(timestamp);

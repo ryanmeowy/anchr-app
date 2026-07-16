@@ -15,6 +15,10 @@ public class ConversationTurnDTO implements Serializable {
 
     private String turnId;
     private String sessionId;
+    private String agentRunId;
+    private String workflowVersion;
+    private String executionMode;
+    private AgentTaskDTO agentTask;
     private String query;
     private String rewrittenQuery;
     private String answer;

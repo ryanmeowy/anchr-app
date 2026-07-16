@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.application;
 
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
+import com.anchr.core.conversation.application.model.AgentProgressEvent;
 
 public interface ConversationProgressListener {
 
@@ -11,5 +12,8 @@ public interface ConversationProgressListener {
     }
 
     default void onStageStarted(String stage) {
+    }
+
+    default void onAgentProgress(AgentProgressEvent event) {
     }
 }

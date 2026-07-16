@@ -31,6 +31,10 @@
         <result property="citations" column="citations"/>
         <result property="resultCards" column="result_cards"/>
         <result property="retrievalTrace" column="retrieval_trace"/>
+        <result property="agentRunId" column="agent_run_id"/>
+        <result property="workflowVersion" column="workflow_version"/>
+        <result property="executionMode" column="execution_mode"/>
+        <result property="agentTaskId" column="agent_task_id"/>
         <result property="createdAt" column="created_at"/>
     </resultMap>
 
@@ -41,13 +45,18 @@
           #{sessionId}, #{userId}, #{title}, #{status}, #{kbScope}, #{assetScope}, #{createdAt}, #{updatedAt}
         ) on duplicate key update
           user_id = values(user_id), title = values(title), status = values(status),
-          kb_scope = values(kb_scope), asset_scope = values(asset_scope), updated_at = values(updated_at),
-          deleted_at = null
+          kb_scope = values(kb_scope), asset_scope = values(asset_scope), updated_at = values(updated_at)
     </insert>
 
     <select id="findSession" resultMap="SessionMap">
         select session_id, user_id, title, status, kb_scope, asset_scope, created_at, updated_at
         from conversation_session where session_id = #{sessionId} and deleted_at is null
+    </select>
+
+    <select id="lockActiveSession" resultType="java.lang.Integer">
+        select 1 from conversation_session
+        where session_id = #{sessionId} and deleted_at is null
+        for update
     </select>
 
     <select id="findRecentSessions" resultMap="SessionMap">
@@ -73,11 +82,13 @@
         insert into conversation_turn (
           turn_id, session_id, query, rewritten_query, answer, kb_scope, asset_scope,
           answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
-          intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
+          intent_source, intent_fallback, citations, result_cards, retrieval_trace, agent_run_id, workflow_version,
+          execution_mode, agent_task_id, created_at
         ) values (
           #{turnId}, #{sessionId}, #{query}, #{rewrittenQuery}, #{answer}, #{kbScope}, #{assetScope},
           #{answerMode}, #{answerStatus}, #{answerFallbackReason}, #{intentType}, #{intentConfidence}, #{intentReason},
-          #{intentSource}, #{intentFallback}, #{citations}, #{resultCards}, #{retrievalTrace}, #{createdAt}
+          #{intentSource}, #{intentFallback}, #{citations}, #{resultCards}, #{retrievalTrace}, #{agentRunId}, #{workflowVersion},
+          #{executionMode}, #{agentTaskId}, #{createdAt}
         ) on duplicate key update
           session_id = values(session_id), query = values(query),
           rewritten_query = values(rewritten_query), answer = values(answer), kb_scope = values(kb_scope),
@@ -87,13 +98,16 @@
           intent_reason = values(intent_reason), intent_source = values(intent_source),
           intent_fallback = values(intent_fallback),
           result_cards = values(result_cards), retrieval_trace = values(retrieval_trace),
+          agent_run_id = values(agent_run_id), workflow_version = values(workflow_version),
+          execution_mode = values(execution_mode), agent_task_id = values(agent_task_id),
           created_at = values(created_at), deleted_at = null
     </insert>
 
     <select id="findTurn" resultMap="TurnMap">
         select turn_id, session_id, query, rewritten_query, answer, kb_scope, asset_scope,
                answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
-               intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
+               intent_source, intent_fallback, citations, result_cards, retrieval_trace, agent_run_id, workflow_version,
+               execution_mode, agent_task_id, created_at
         from conversation_turn
         where session_id = #{sessionId} and turn_id = #{turnId} and deleted_at is null
     </select>
@@ -101,7 +115,8 @@
     <select id="findRecentTurns" resultMap="TurnMap">
         select turn_id, session_id, query, rewritten_query, answer, kb_scope, asset_scope,
                answer_mode, answer_status, answer_fallback_reason, intent_type, intent_confidence, intent_reason,
-               intent_source, intent_fallback, citations, result_cards, retrieval_trace, created_at
+               intent_source, intent_fallback, citations, result_cards, retrieval_trace, agent_run_id, workflow_version,
+               execution_mode, agent_task_id, created_at
         from conversation_turn
         where session_id = #{sessionId}
           and deleted_at is null

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ChatResponseService;
+import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
 import com.anchr.core.conversation.application.ConversationIntentRouter;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.QueryRewriteService;
@@ -44,6 +45,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -82,6 +84,8 @@ class ConversationServiceImplTest {
     private ChatResponseService chatResponseService;
     @Mock
     private CitationReasonGenerationService citationReasonGenerationService;
+    @Mock
+    private AgentConversationCleanupService agentConversationCleanupService;
 
     private InMemoryConversationRepository repository;
     private ObjectMapper objectMapper;
@@ -126,6 +130,7 @@ class ConversationServiceImplTest {
                 activityEventService,
                 Runnable::run
         );
+        ReflectionTestUtils.setField(service, "agentConversationCleanupService", agentConversationCleanupService);
     }
 
     @Test
@@ -620,6 +625,8 @@ class ConversationServiceImplTest {
         service.deleteSession(session.getSessionId());
 
         assertThat(repository.findSession(session.getSessionId())).isEmpty();
+        verify(agentConversationCleanupService).cancelRunning(session.getSessionId());
+        verify(agentConversationCleanupService).deleteRecords(session.getSessionId());
         verify(activityEventService).deleteBySessionId(session.getSessionId());
     }
 

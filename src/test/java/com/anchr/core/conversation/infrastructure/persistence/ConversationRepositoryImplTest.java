@@ -81,6 +81,16 @@ class ConversationRepositoryImplTest {
     }
 
     @Test
+    void lockActiveSession_shouldReflectWhetherMapperFoundAnActiveRow() {
+        when(mapper.lockActiveSession("active")).thenReturn(1);
+        when(mapper.lockActiveSession("deleted")).thenReturn(null);
+
+        assertThat(repository.lockActiveSession("active")).isTrue();
+        assertThat(repository.lockActiveSession("deleted")).isFalse();
+        assertThat(repository.lockActiveSession(" ")).isFalse();
+    }
+
+    @Test
     void shouldPersistIntentAndDefaultLegacyTurns() {
         ConversationTurn turn = new ConversationTurn();
         turn.setTurnId("turn_1");

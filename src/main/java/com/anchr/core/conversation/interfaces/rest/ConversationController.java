@@ -10,6 +10,8 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequest
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationCapabilitiesDTO;
+import com.anchr.core.conversation.config.AgentProperties;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -37,6 +39,14 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final AgentProperties agentProperties;
+
+    @GetMapping("/capabilities")
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    public Result<ConversationCapabilitiesDTO> capabilities() {
+        return Result.success(new ConversationCapabilitiesDTO(agentProperties.isEnabled(),
+                agentProperties.getWorkflowVersion(), agentProperties.getSummaryMaxDocuments()));
+    }
 
     @PostMapping
     @RequireAuth(roles = {"ADMIN", "USER"})

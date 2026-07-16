@@ -15,6 +15,14 @@ public interface ConversationRepository {
 
     Optional<ConversationSession> findSession(String sessionId);
 
+    /**
+     * Locks and verifies an active session before a generated result is persisted.
+     * The default keeps non-database adapters and legacy tests compatible.
+     */
+    default boolean lockActiveSession(String sessionId) {
+        return findSession(sessionId).isPresent();
+    }
+
     List<ConversationSession> findRecentSessions(String userId, int limit);
 
     void deleteSession(String sessionId);

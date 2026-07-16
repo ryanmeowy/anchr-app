@@ -8,10 +8,14 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationService;
+import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
+import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
+import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerStatus;
+import com.anchr.core.conversation.application.model.AgentProgressEvent;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.application.model.ConversationExecutionResult;
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
@@ -20,6 +24,9 @@ import com.anchr.core.conversation.application.model.ConversationIntentType;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
+import com.anchr.core.conversation.domain.model.AgentTask;
+import com.anchr.core.conversation.domain.model.AgentTaskStatus;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
@@ -29,13 +36,18 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.AgentTaskDTO;
 import com.anchr.core.search.application.KbScopeResolver;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -56,7 +68,7 @@ import java.util.concurrent.Executor;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class ConversationServiceImpl implements ConversationService {
 
     private static final int DEFAULT_TURN_LIMIT = 20;
@@ -75,8 +87,31 @@ public class ConversationServiceImpl implements ConversationService {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final ActivityEventService activityEventService;
+    private final AgentTaskRepository agentTaskRepository;
+    private final TransactionTemplate transactionTemplate;
     @Qualifier("streamEventExecutor")
     private final Executor streamExecutor;
+    @Autowired(required = false)
+    private AgentRunFinalizer agentRunFinalizer;
+    @Autowired(required = false)
+    private AgentTaskProcessor agentTaskProcessor;
+    @Autowired(required = false)
+    private AgentConversationCleanupService agentConversationCleanupService;
+
+    /** Compatibility constructor for legacy unit tests that exercise only the traditional path. */
+    public ConversationServiceImpl(ConversationRepository conversationRepository,
+                                   ConversationMessageOrchestrator conversationMessageOrchestrator,
+                                   ConversationTurnCodec conversationTurnCodec,
+                                   ConversationRetrievalTraceBuilder conversationRetrievalTraceBuilder,
+                                   KbScopeResolver kbScopeResolver,
+                                   ObjectMapper objectMapper,
+                                   MeterRegistry meterRegistry,
+                                   ActivityEventService activityEventService,
+                                   Executor streamExecutor) {
+        this(conversationRepository, conversationMessageOrchestrator, conversationTurnCodec,
+                conversationRetrievalTraceBuilder, kbScopeResolver, objectMapper, meterRegistry,
+                activityEventService, null, null, streamExecutor);
+    }
 
     @Override
     public ConversationSessionDTO createSession(ConversationCreateRequestDTO request) {
@@ -135,7 +170,13 @@ public class ConversationServiceImpl implements ConversationService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteSession(String sessionId) {
         loadSessionOrThrow(sessionId);
+        if (agentConversationCleanupService != null) {
+            agentConversationCleanupService.cancelRunning(sessionId);
+        }
         conversationRepository.deleteSession(sessionId);
+        if (agentConversationCleanupService != null) {
+            agentConversationCleanupService.deleteRecords(sessionId);
+        }
         activityEventService.deleteBySessionId(sessionId);
     }
 
@@ -153,14 +194,15 @@ public class ConversationServiceImpl implements ConversationService {
         AnswerMode answerMode = resolveAnswerMode(request);
         request.setAnswerMode(answerMode.name());
         request.setPreferredModalities(resolveRequestedModalities(request.getPreferredModalities()));
-        boolean shouldAutoTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         meterRegistry.counter("conversation.active.count").increment();
+        String turnId = newTurnId();
+        String runId = newRunId();
         ConversationExecutionResult executionResult = conversationMessageOrchestrator.execute(
-                session.getSessionId(), request, progressListener);
+                session.getSessionId(), turnId, runId, request, progressListener);
         AnswerStatus answerStatus = executionResult.answerStatus();
 
         ConversationTurn turn = new ConversationTurn();
-        turn.setTurnId(newTurnId());
+        turn.setTurnId(turnId);
         turn.setSessionId(session.getSessionId());
         turn.setQuery(request.getQuery().trim());
         turn.setRewrittenQuery(executionResult.rewrittenQuery());
@@ -174,9 +216,33 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setCitationsJson(conversationTurnCodec.serializeCitations(executionResult.citations()));
         turn.setResultCardsJson(conversationTurnCodec.serializeResultCards(executionResult.resultCards()));
         turn.setRetrievalTraceJson(buildRetrievalTraceJson(request, executionResult));
+        turn.setAgentRunId(executionResult.agentRunId());
+        turn.setWorkflowVersion(executionResult.workflowVersion());
+        turn.setExecutionMode(executionResult.executionMode().name());
+        turn.setAgentTaskId(executionResult.agentTask() == null ? null : executionResult.agentTask().taskId());
         turn.setCreatedAt(now);
-        conversationRepository.saveTurn(turn);
-        if (executionResult.intent().type() == ConversationIntentType.KB_QUERY) {
+        try {
+            Runnable persistence = () -> {
+                if (!conversationRepository.lockActiveSession(session.getSessionId())) {
+                    throw new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND);
+                }
+                conversationRepository.saveTurn(turn);
+                if (executionResult.agentTask() != null) {
+                    if (agentTaskRepository == null) throw new IllegalStateException("Agent task repository is unavailable");
+                    agentTaskRepository.save(newAgentTask(executionResult, turn, now));
+                    submitTaskAfterCommit(executionResult.agentTask().taskId());
+                }
+            };
+            if (transactionTemplate == null) persistence.run();
+            else transactionTemplate.executeWithoutResult(status -> persistence.run());
+        } catch (RuntimeException e) {
+            markAgentRunTurnFailed(executionResult.agentRunId(), e);
+            throw e;
+        }
+        if (agentRunFinalizer != null) {
+            agentRunFinalizer.markTurnSaved(executionResult.agentRunId());
+        }
+        if (executionResult.intent() != null && executionResult.intent().type() == ConversationIntentType.KB_QUERY) {
             activityEventService.recordQuestionAsked(
                     session.getSessionId(),
                     turn.getTurnId(),
@@ -185,7 +251,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
         meterRegistry.counter("conversation.turn.count").increment();
 
-        if (shouldAutoTitle) {
+        if (shouldAutoGenerateTitle(session.getSessionId(), session.getTitle())) {
             session.setTitle(buildAutoTitle(request.getQuery(), executionResult.rewrittenQuery()));
         }
         session.touch(now);
@@ -194,6 +260,10 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationMessageResponseDTO response = new ConversationMessageResponseDTO();
         response.setSessionId(session.getSessionId());
         response.setTurnId(turn.getTurnId());
+        response.setAgentRunId(turn.getAgentRunId());
+        response.setWorkflowVersion(turn.getWorkflowVersion());
+        response.setExecutionMode(turn.getExecutionMode());
+        response.setAgentTask(toAgentTaskDto(turn.getAgentTaskId()));
         response.setRewrittenQuery(executionResult.rewrittenQuery());
         response.setAnswer(turn.getAnswer());
         response.setKbScope(request.getKbIds());
@@ -223,10 +293,8 @@ public class ConversationServiceImpl implements ConversationService {
         streamExecutor.execute(() -> {
             UserContextHolder.set(context);
             try {
-                sendEvent(emitter, "trace", Map.of(
-                        "stage", "routing",
-                        "message", "started"
-                ));
+                sendEvent(emitter, "trace", Map.of("stage",
+                        Boolean.TRUE.equals(request.getAgentEnabled()) ? "agent_thinking" : "routing", "message", "started"));
                 ConversationMessageResponseDTO response = createMessageInternal(sessionId, request,
                         new ConversationProgressListener() {
                             @Override
@@ -243,6 +311,19 @@ public class ConversationServiceImpl implements ConversationService {
                             public void onStageStarted(String stage) {
                                 sendProgressEvent(emitter, Map.of("stage", stage, "message", "started"));
                             }
+
+                            @Override
+                            public void onAgentProgress(AgentProgressEvent event) {
+                                Map<String, Object> trace = new LinkedHashMap<>();
+                                trace.put("stage", event.stage());
+                                trace.put("message", event.message());
+                                trace.put("attempt", event.attempt());
+                                trace.put("runId", event.runId());
+                                if (event.details() != null && !event.details().isEmpty()) {
+                                    trace.put("details", event.details());
+                                }
+                                sendProgressEvent(emitter, trace);
+                            }
                         });
                 streamAnswer(emitter, response.getAnswer());
                 sendEvent(emitter, "citations", response.getCitations() == null ? List.of() : response.getCitations());
@@ -254,9 +335,15 @@ public class ConversationServiceImpl implements ConversationService {
                 done.put("answerStatus", response.getAnswerStatus());
                 done.put("fallbackReason", response.getAnswerFallbackReason());
                 done.put("citationCount", response.getCitations() == null ? 0 : response.getCitations().size());
+                done.put("retrievalExecuted", !"SKIPPED".equals(response.getRetrievalStage()));
+                if (StringUtils.hasText(response.getAgentRunId())) {
+                    done.put("runId", response.getAgentRunId());
+                    done.put("workflowVersion", response.getWorkflowVersion());
+                }
+                done.put("executionMode", response.getExecutionMode());
+                if (response.getAgentTask() != null) done.put("agentTask", response.getAgentTask());
                 if (response.getIntent() != null) {
                     done.put("intentType", response.getIntent().getType());
-                    done.put("retrievalExecuted", response.getIntent().isRetrievalRequired());
                 }
                 sendEvent(emitter, "done", done);
                 emitter.complete();
@@ -352,6 +439,10 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationTurnDTO dto = new ConversationTurnDTO();
         dto.setTurnId(turn.getTurnId());
         dto.setSessionId(turn.getSessionId());
+        dto.setAgentRunId(turn.getAgentRunId());
+        dto.setWorkflowVersion(turn.getWorkflowVersion());
+        dto.setExecutionMode(StringUtils.hasText(turn.getExecutionMode()) ? turn.getExecutionMode() : "TRADITIONAL");
+        dto.setAgentTask(toAgentTaskDto(turn.getAgentTaskId()));
         dto.setQuery(turn.getQuery());
         dto.setRewrittenQuery(turn.getRewrittenQuery());
         dto.setAnswer(turn.getAnswer());
@@ -395,6 +486,10 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private void applyIntent(ConversationTurn turn, ConversationIntentResult intent) {
+        if (intent == null) {
+            turn.setIntentType(null); turn.setIntentConfidence(null); turn.setIntentReason(null);
+            turn.setIntentSource(null); turn.setIntentFallback(false); return;
+        }
         turn.setIntentType(intent.type().name());
         turn.setIntentConfidence(intent.confidence());
         turn.setIntentReason(truncate(intent.reason(), 255));
@@ -403,6 +498,7 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private ConversationIntentDTO toIntentDto(ConversationIntentResult intent) {
+        if (intent == null) return null;
         ConversationIntentDTO dto = new ConversationIntentDTO();
         dto.setType(intent.type().name());
         dto.setConfidence(intent.confidence());
@@ -414,6 +510,7 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private ConversationIntentDTO toIntentDto(ConversationTurn turn) {
+        if ("AGENT".equals(turn.getExecutionMode()) && !StringUtils.hasText(turn.getIntentType())) return null;
         ConversationIntentType type;
         ConversationIntentSource source;
         try {
@@ -431,6 +528,36 @@ public class ConversationServiceImpl implements ConversationService {
         return toIntentDto(new ConversationIntentResult(type,
                 turn.getIntentConfidence() == null ? 0.0D : turn.getIntentConfidence(),
                 turn.getIntentReason(), source, turn.isIntentFallback()));
+    }
+
+    private AgentTask newAgentTask(ConversationExecutionResult result, ConversationTurn turn, long now) {
+        AgentTask task = new AgentTask();
+        task.setTaskId(result.agentTask().taskId()); task.setRunId(result.agentRunId()); task.setTurnId(turn.getTurnId());
+        task.setSessionId(turn.getSessionId()); task.setUserId(SINGLE_USER_ID); task.setTaskType(result.agentTask().type());
+        task.setStatus(AgentTaskStatus.PENDING.name()); task.setProgress(0); task.setCurrentStage("QUEUED");
+        task.setRequestJson(result.agentTask().requestJson()); task.setCitationsJson("[]"); task.setCreatedAt(now); task.setUpdatedAt(now);
+        return task;
+    }
+
+    private AgentTaskDTO toAgentTaskDto(String taskId) {
+        if (!StringUtils.hasText(taskId) || agentTaskRepository == null) return null;
+        return agentTaskRepository.findById(taskId).map(task -> {
+            AgentTaskDTO dto = new AgentTaskDTO(); dto.setTaskId(task.getTaskId()); dto.setType(task.getTaskType());
+            dto.setStatus(task.getStatus()); dto.setProgress(task.getProgress()); dto.setCurrentStage(task.getCurrentStage());
+            dto.setAnswer(task.getAnswer()); dto.setCitations(conversationTurnCodec.parseCitations(task.getCitationsJson()));
+            dto.setErrorCode(task.getErrorCode()); dto.setErrorMessage(task.getErrorMessage()); return dto;
+        }).orElse(null);
+    }
+
+    private void submitTaskAfterCommit(String taskId) {
+        if (agentTaskProcessor == null) return;
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { agentTaskProcessor.trigger(taskId); }
+            });
+        } else {
+            agentTaskProcessor.trigger(taskId);
+        }
     }
 
     private String buildRetrievalTraceJson(ConversationMessageRequestDTO request,
@@ -610,5 +737,18 @@ public class ConversationServiceImpl implements ConversationService {
 
     private String newTurnId() {
         return "turn_" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String newRunId() {
+        return "run_" + UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private void markAgentRunTurnFailed(String runId, RuntimeException original) {
+        if (agentRunFinalizer == null) return;
+        try {
+            agentRunFinalizer.markTurnFailed(runId);
+        } catch (RuntimeException traceError) {
+            original.addSuppressed(traceError);
+        }
     }
 }

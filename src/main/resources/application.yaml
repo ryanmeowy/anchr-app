@@ -36,6 +36,20 @@ mybatis:
     map-underscore-to-camel-case: true
 
 app:
+  agent:
+    enabled: ${APP_AGENT_ENABLED:true}
+    workflow-version: ${APP_AGENT_WORKFLOW_VERSION:general-agent-v1}
+    tool-call-mode: ${APP_AGENT_TOOL_CALL_MODE:AUTO}
+    fallback-to-traditional: ${APP_AGENT_FALLBACK_TO_TRADITIONAL:true}
+    max-steps: ${APP_AGENT_MAX_STEPS:12}
+    max-tool-calls: ${APP_AGENT_MAX_TOOL_CALLS:8}
+    total-timeout: ${APP_AGENT_TOTAL_TIMEOUT:90s}
+    model-timeout: ${APP_AGENT_MODEL_TIMEOUT:30s}
+    task-timeout: ${APP_AGENT_TASK_TIMEOUT:10m}
+    task-model-timeout: ${APP_AGENT_TASK_MODEL_TIMEOUT:90s}
+    task-lease: ${APP_AGENT_TASK_LEASE:2m}
+    task-max-retries: ${APP_AGENT_TASK_MAX_RETRIES:2}
+    task-poll-interval: ${APP_AGENT_TASK_POLL_INTERVAL:5s}
   conversation:
     intent-routing:
       enabled: ${APP_CONVERSATION_INTENT_ROUTING_ENABLED:true}

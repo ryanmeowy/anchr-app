@@ -12,6 +12,8 @@ public interface ConversationMapper {
 
     Optional<ConversationSessionRecord> findSession(@Param("sessionId") String sessionId);
 
+    Integer lockActiveSession(@Param("sessionId") String sessionId);
+
     List<ConversationSessionRecord> findRecentSessions(@Param("userId") String userId,
                                                        @Param("limit") int limit);
 

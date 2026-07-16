@@ -24,5 +24,11 @@ public interface SegmentRepository {
 
     Optional<Segment> findBySegmentId(String segmentId);
 
+    List<Segment> listByAssetId(String kbId,
+                                String assetId,
+                                Integer afterChunkOrder,
+                                String afterSegmentId,
+                                int limit);
+
     void deleteByAssetId(String assetId);
 }

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.conversation.infrastructure.persistence.AgentTaskMapper">
+  <resultMap id="TaskMap" type="com.anchr.core.conversation.infrastructure.persistence.AgentTaskRecord">
+    <id property="taskId" column="task_id"/><result property="runId" column="run_id"/>
+    <result property="turnId" column="turn_id"/><result property="sessionId" column="session_id"/>
+    <result property="userId" column="user_id"/><result property="taskType" column="task_type"/>
+    <result property="status" column="status"/><result property="progress" column="progress"/>
+    <result property="currentStage" column="current_stage"/><result property="requestJson" column="request_json"/>
+    <result property="answer" column="answer"/><result property="citationsJson" column="citations_json"/>
+    <result property="attemptCount" column="attempt_count"/><result property="nextRetryAt" column="next_retry_at"/>
+    <result property="leaseOwner" column="lease_owner"/><result property="leaseUntil" column="lease_until"/>
+    <result property="errorCode" column="error_code"/><result property="errorMessage" column="error_message"/>
+    <result property="createdAt" column="created_at"/><result property="updatedAt" column="updated_at"/>
+    <result property="startedAt" column="started_at"/><result property="finishedAt" column="finished_at"/>
+  </resultMap>
+  <insert id="upsert">
+    insert into agent_task(task_id,run_id,turn_id,session_id,user_id,task_type,status,progress,current_stage,
+      request_json,answer,citations_json,attempt_count,next_retry_at,lease_owner,lease_until,error_code,error_message,
+      created_at,updated_at,started_at,finished_at)
+    values(#{taskId},#{runId},#{turnId},#{sessionId},#{userId},#{taskType},#{status},#{progress},#{currentStage},
+      #{requestJson},#{answer},#{citationsJson},#{attemptCount},#{nextRetryAt},#{leaseOwner},#{leaseUntil},#{errorCode},#{errorMessage},
+      #{createdAt},#{updatedAt},#{startedAt},#{finishedAt})
+    on duplicate key update status=values(status),progress=values(progress),current_stage=values(current_stage),
+      answer=values(answer),citations_json=values(citations_json),attempt_count=values(attempt_count),
+      next_retry_at=values(next_retry_at),lease_owner=values(lease_owner),lease_until=values(lease_until),
+      error_code=values(error_code),error_message=values(error_message),updated_at=values(updated_at),
+      started_at=values(started_at),finished_at=values(finished_at)
+  </insert>
+  <select id="findById" resultMap="TaskMap">select * from agent_task where task_id=#{taskId}</select>
+  <select id="findBySessionId" resultMap="TaskMap">
+    select * from agent_task where session_id=#{sessionId} order by created_at asc
+  </select>
+  <select id="findClaimable" resultMap="TaskMap">
+    select * from agent_task
+    where (status='PENDING' and (next_retry_at is null or next_retry_at &lt;= #{now}))
+       or (status='RUNNING' and lease_until &lt; #{now})
+    order by created_at asc limit #{limit}
+  </select>
+  <update id="claim">
+    update agent_task set status='RUNNING', lease_owner=#{owner}, lease_until=#{leaseUntil},
+      attempt_count=attempt_count+1, started_at=coalesce(started_at,#{now}), updated_at=#{now}
+    where task_id=#{taskId} and ((status='PENDING' and (next_retry_at is null or next_retry_at &lt;= #{now}))
+      or (status='RUNNING' and lease_until &lt; #{now}))
+  </update>
+  <update id="updateClaimed">
+    update agent_task set
+      status=#{record.status}, progress=#{record.progress}, current_stage=#{record.currentStage},
+      answer=#{record.answer}, citations_json=#{record.citationsJson},
+      next_retry_at=#{record.nextRetryAt}, lease_owner=#{record.leaseOwner}, lease_until=#{record.leaseUntil},
+      error_code=#{record.errorCode}, error_message=#{record.errorMessage},
+      updated_at=#{record.updatedAt}, finished_at=#{record.finishedAt}
+    where task_id=#{record.taskId} and status='RUNNING' and lease_owner=#{expectedLeaseOwner}
+  </update>
+  <update id="cancel">
+    update agent_task set status='CANCELLED', progress=100, current_stage='CANCELLED',
+      answer='任务已取消。', citations_json='[]', next_retry_at=null,
+      lease_owner=null, lease_until=null, error_code='TASK_CANCELLED', error_message='任务已取消。',
+      updated_at=#{now}, finished_at=#{now}
+    where task_id=#{taskId} and user_id=#{userId} and status in ('PENDING','RUNNING')
+  </update>
+  <delete id="deleteBySessionId">delete from agent_task where session_id=#{sessionId}</delete>
+</mapper>

@@ -24,5 +24,9 @@ public class ConversationTurnRecord {
     private String citations;
     private String resultCards;
     private String retrievalTrace;
+    private String agentRunId;
+    private String workflowVersion;
+    private String executionMode;
+    private String agentTaskId;
     private LocalDateTime createdAt;
 }

@@ -3,6 +3,7 @@ package com.anchr.core.search.infrastructure.persistence.es.repository;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch._types.KnnSearch;
+import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
@@ -130,6 +131,44 @@ public class EsSegmentRepository implements SegmentRepository {
             return Optional.of(toSegment(doc));
         } catch (Exception e) {
             log.error("kb segment get failed, segmentId={}", segmentId, e);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+        }
+    }
+
+    @Override
+    public List<Segment> listByAssetId(String kbId,
+                                       String assetId,
+                                       Integer afterChunkOrder,
+                                       String afterSegmentId,
+                                       int limit) {
+        assertIndexReadable();
+        if (!StringUtils.hasText(kbId) || !StringUtils.hasText(assetId) || limit <= 0) {
+            return List.of();
+        }
+        try {
+            SearchRequest.Builder builder = new SearchRequest.Builder()
+                    .index(kbSegmentConfig.getReadTargetName())
+                    .size(Math.min(limit, 100))
+                    .query(q -> q.bool(b -> b
+                            .filter(f -> f.term(t -> t.field("kbId").value(kbId.trim())))
+                            .filter(f -> f.term(t -> t.field("assetId").value(assetId.trim())))))
+                    .sort(s -> s.field(f -> f.field("chunkOrder").order(SortOrder.Asc).missing("_last")))
+                    .sort(s -> s.field(f -> f.field("segmentId").order(SortOrder.Asc)))
+                    .source(src -> src.filter(f -> f.excludes("embedding")));
+            if (afterChunkOrder != null && StringUtils.hasText(afterSegmentId)) {
+                builder.searchAfter(FieldValue.of(afterChunkOrder), FieldValue.of(afterSegmentId.trim()));
+            }
+            SearchResponse<SegmentDocument> response = esClient.search(builder.build(), SegmentDocument.class);
+            if (response == null || response.hits() == null || response.hits().hits() == null) {
+                return List.of();
+            }
+            return response.hits().hits().stream()
+                    .map(Hit::source)
+                    .filter(java.util.Objects::nonNull)
+                    .map(this::toSegment)
+                    .toList();
+        } catch (Exception e) {
+            log.error("kb asset segment listing failed, kbId={}, assetId={}", kbId, assetId, e);
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
     }

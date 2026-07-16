@@ -28,5 +28,9 @@ public class ConversationTurn {
     private String citationsJson;
     private String resultCardsJson;
     private String retrievalTraceJson;
+    private String agentRunId;
+    private String workflowVersion;
+    private String executionMode;
+    private String agentTaskId;
     private long createdAt;
 }

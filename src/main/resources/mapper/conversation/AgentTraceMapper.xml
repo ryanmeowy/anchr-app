@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.conversation.infrastructure.persistence.AgentTraceMapper">
+    <resultMap id="RunMap" type="com.anchr.core.conversation.infrastructure.persistence.AgentRunRecord">
+        <id property="runId" column="run_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="turnId" column="turn_id"/>
+        <result property="workflowVersion" column="workflow_version"/>
+        <result property="status" column="status"/>
+        <result property="currentStep" column="current_step"/>
+        <result property="stepCount" column="step_count"/>
+        <result property="toolCallCount" column="tool_call_count"/>
+        <result property="promptTokens" column="prompt_tokens"/>
+        <result property="completionTokens" column="completion_tokens"/>
+        <result property="latencyMs" column="latency_ms"/>
+        <result property="fallbackReason" column="fallback_reason"/>
+        <result property="errorCode" column="error_code"/>
+        <result property="startedAt" column="started_at"/>
+        <result property="finishedAt" column="finished_at"/>
+    </resultMap>
+
+    <resultMap id="StepMap" type="com.anchr.core.conversation.infrastructure.persistence.AgentStepRecord">
+        <id property="stepId" column="step_id"/>
+        <result property="runId" column="run_id"/>
+        <result property="stepOrder" column="step_order"/>
+        <result property="stepType" column="step_type"/>
+        <result property="attempt" column="attempt"/>
+        <result property="status" column="status"/>
+        <result property="decisionCode" column="decision_code"/>
+        <result property="inputSummary" column="input_summary"/>
+        <result property="outputSummary" column="output_summary"/>
+        <result property="promptTokens" column="prompt_tokens"/>
+        <result property="completionTokens" column="completion_tokens"/>
+        <result property="latencyMs" column="latency_ms"/>
+        <result property="errorCode" column="error_code"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <insert id="upsertRun">
+        insert into agent_run (
+          run_id, session_id, turn_id, workflow_version, status, current_step,
+          step_count, tool_call_count, prompt_tokens, completion_tokens,
+          latency_ms, fallback_reason, error_code, started_at, finished_at
+        )
+        select
+          #{runId}, #{sessionId}, #{turnId}, #{workflowVersion}, #{status}, #{currentStep},
+          #{stepCount}, #{toolCallCount}, #{promptTokens}, #{completionTokens},
+          #{latencyMs}, #{fallbackReason}, #{errorCode}, #{startedAt}, #{finishedAt}
+        from dual
+        where exists (
+          select 1 from conversation_session
+          where session_id=#{sessionId} and deleted_at is null
+        )
+        on duplicate key update
+          turn_id = values(turn_id), status = values(status), current_step = values(current_step),
+          step_count = values(step_count), tool_call_count = values(tool_call_count),
+          prompt_tokens = values(prompt_tokens), completion_tokens = values(completion_tokens),
+          latency_ms = values(latency_ms), fallback_reason = values(fallback_reason),
+          error_code = values(error_code), finished_at = values(finished_at)
+    </insert>
+
+    <insert id="insertStep">
+        insert into agent_step (
+          step_id, run_id, step_order, step_type, attempt, status, decision_code,
+          input_summary, output_summary, prompt_tokens, completion_tokens, latency_ms, error_code, created_at
+        ) values (
+          #{stepId}, #{runId}, #{stepOrder}, #{stepType}, #{attempt}, #{status}, #{decisionCode},
+          #{inputSummary}, #{outputSummary}, #{promptTokens}, #{completionTokens}, #{latencyMs}, #{errorCode}, #{createdAt}
+        )
+    </insert>
+
+    <select id="findRun" resultMap="RunMap">
+        select * from agent_run where run_id = #{runId}
+    </select>
+
+    <select id="findSteps" resultMap="StepMap">
+        select * from agent_step where run_id = #{runId} order by step_order asc
+    </select>
+
+    <delete id="deleteRunsBySessionId">
+        delete from agent_run where session_id = #{sessionId}
+    </delete>
+</mapper>
