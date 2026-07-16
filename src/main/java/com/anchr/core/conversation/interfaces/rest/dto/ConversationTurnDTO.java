@@ -44,6 +44,8 @@ public class ConversationTurnDTO implements Serializable {
     @Data
     public static class CitationChunkDTO implements Serializable {
         private String segmentId;
+        private Integer segmentIndex;
+        private String citationLabel;
         private Integer pageNo;
         private Integer chunkOrder;
         private String title;

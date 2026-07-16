@@ -52,6 +52,7 @@ class AgentTaskQueryServiceTest {
         assertThat(turn.getAnswerStatus()).isEqualTo("CANCELLED");
         assertThat(turn.getAnswer()).isEqualTo("任务已取消。");
         verify(conversations).saveTurn(turn);
+        verify(processor).recordCancellation(running);
         verify(processor).interrupt("task-1");
     }
 

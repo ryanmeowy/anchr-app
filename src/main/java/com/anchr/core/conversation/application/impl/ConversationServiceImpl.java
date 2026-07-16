@@ -9,6 +9,7 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationService;
 import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
+import com.anchr.core.conversation.application.agent.AgentRunCancellationRegistry;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
@@ -62,6 +63,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Default conversation application service.
@@ -97,6 +100,8 @@ public class ConversationServiceImpl implements ConversationService {
     private AgentTaskProcessor agentTaskProcessor;
     @Autowired(required = false)
     private AgentConversationCleanupService agentConversationCleanupService;
+    @Autowired(required = false)
+    private AgentRunCancellationRegistry agentRunCancellationRegistry;
 
     /** Compatibility constructor for legacy unit tests that exercise only the traditional path. */
     public ConversationServiceImpl(ConversationRepository conversationRepository,
@@ -189,6 +194,7 @@ public class ConversationServiceImpl implements ConversationService {
                                                                   ConversationMessageRequestDTO request,
                                                                   ConversationProgressListener progressListener) {
         ConversationSession session = loadSessionOrThrow(sessionId);
+        boolean autoGenerateTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         long now = System.currentTimeMillis();
         applyConversationScope(session, request);
         AnswerMode answerMode = resolveAnswerMode(request);
@@ -251,7 +257,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
         meterRegistry.counter("conversation.turn.count").increment();
 
-        if (shouldAutoGenerateTitle(session.getSessionId(), session.getTitle())) {
+        if (autoGenerateTitle) {
             session.setTitle(buildAutoTitle(request.getQuery(), executionResult.rewrittenQuery()));
         }
         session.touch(now);
@@ -260,6 +266,7 @@ public class ConversationServiceImpl implements ConversationService {
         ConversationMessageResponseDTO response = new ConversationMessageResponseDTO();
         response.setSessionId(session.getSessionId());
         response.setTurnId(turn.getTurnId());
+        response.setTitle(session.getTitle());
         response.setAgentRunId(turn.getAgentRunId());
         response.setWorkflowVersion(turn.getWorkflowVersion());
         response.setExecutionMode(turn.getExecutionMode());
@@ -289,6 +296,16 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public SseEmitter streamMessage(String sessionId, ConversationMessageRequestDTO request) {
         SseEmitter emitter = new SseEmitter(120_000L);
+        AtomicBoolean clientDisconnected = new AtomicBoolean(false);
+        AtomicReference<String> activeRunId = new AtomicReference<>();
+        emitter.onError(error -> {
+            clientDisconnected.set(true);
+            cancelDisconnectedRun(activeRunId.get());
+        });
+        emitter.onTimeout(() -> {
+            clientDisconnected.set(true);
+            cancelDisconnectedRun(activeRunId.get());
+        });
         RequestUserContext context = UserContextHolder.get();
         streamExecutor.execute(() -> {
             UserContextHolder.set(context);
@@ -314,6 +331,7 @@ public class ConversationServiceImpl implements ConversationService {
 
                             @Override
                             public void onAgentProgress(AgentProgressEvent event) {
+                                activeRunId.compareAndSet(null, event.runId());
                                 Map<String, Object> trace = new LinkedHashMap<>();
                                 trace.put("stage", event.stage());
                                 trace.put("message", event.message());
@@ -322,13 +340,25 @@ public class ConversationServiceImpl implements ConversationService {
                                 if (event.details() != null && !event.details().isEmpty()) {
                                     trace.put("details", event.details());
                                 }
-                                sendProgressEvent(emitter, trace);
+                                try {
+                                    sendProgressEvent(emitter, trace);
+                                } catch (SseClientDisconnectedException e) {
+                                    clientDisconnected.set(true);
+                                    cancelDisconnectedRun(event.runId());
+                                    throw e;
+                                }
                             }
                         });
+                if (clientDisconnected.get()) {
+                    log.debug("SSE client disconnected after cancelling Agent run, sessionId={}, runId={}",
+                            sessionId, activeRunId.get());
+                    return;
+                }
                 streamAnswer(emitter, response.getAnswer());
                 sendEvent(emitter, "citations", response.getCitations() == null ? List.of() : response.getCitations());
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("turnId", response.getTurnId());
+                done.put("title", response.getTitle());
                 done.put("kbScope", response.getKbScope());
                 done.put("assetScope", response.getAssetScope() == null ? List.of() : response.getAssetScope());
                 done.put("answerMode", response.getAnswerMode());
@@ -347,10 +377,18 @@ public class ConversationServiceImpl implements ConversationService {
                 }
                 sendEvent(emitter, "done", done);
                 emitter.complete();
+            } catch (SseClientDisconnectedException e) {
+                log.debug("SSE client disconnected, sessionId={}, runId={}", sessionId, activeRunId.get());
             } catch (BusinessException e) {
                 sendError(emitter, e.getError() == null ? ApiError.INTERNAL_ERROR.name() : e.getError().name(), e.getMessage());
             } catch (Exception e) {
-                sendError(emitter, ApiError.INTERNAL_ERROR.name(), ApiError.INTERNAL_ERROR.getMessage());
+                if (isClientDisconnect(e)) {
+                    clientDisconnected.set(true);
+                    cancelDisconnectedRun(activeRunId.get());
+                    log.debug("SSE client disconnected, sessionId={}, runId={}", sessionId, activeRunId.get());
+                } else {
+                    sendError(emitter, ApiError.INTERNAL_ERROR.name(), ApiError.INTERNAL_ERROR.getMessage());
+                }
             } finally {
                 UserContextHolder.clear();
             }
@@ -584,8 +622,33 @@ public class ConversationServiceImpl implements ConversationService {
         try {
             sendEvent(emitter, "trace", data);
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to send progress event", e);
+            throw new SseClientDisconnectedException(e);
         }
+    }
+
+    private void cancelDisconnectedRun(String runId) {
+        if (agentRunCancellationRegistry != null && StringUtils.hasText(runId)) {
+            agentRunCancellationRegistry.cancel(runId);
+        }
+    }
+
+    private boolean isClientDisconnect(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof SseClientDisconnectedException) return true;
+            String message = current.getMessage();
+            if (StringUtils.hasText(message)) {
+                String normalized = message.toLowerCase(java.util.Locale.ROOT);
+                if (normalized.contains("broken pipe")
+                        || normalized.contains("connection reset")
+                        || normalized.contains("responsebodyemitter has already completed")
+                        || normalized.contains("async request is not usable")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private String truncate(String value, int maxLength) {
@@ -697,18 +760,26 @@ public class ConversationServiceImpl implements ConversationService {
             sendEvent(emitter, "error", Map.of("code", code, "message", message));
             emitter.complete();
         } catch (IOException e) {
+            if (isClientDisconnect(e)) return;
             try {
                 emitter.completeWithError(e);
             } catch (Exception completeError) {
                 log.warn("failed to complete SSE emitter after error event failure, code={}", code, completeError);
             }
         } catch (Exception e) {
+            if (isClientDisconnect(e)) return;
             log.warn("failed to send SSE error event, code={}", code, e);
             try {
                 emitter.completeWithError(e);
             } catch (Exception completeError) {
                 log.warn("failed to complete SSE emitter after runtime error, code={}", code, completeError);
             }
+        }
+    }
+
+    private static class SseClientDisconnectedException extends RuntimeException {
+        private SseClientDisconnectedException(Throwable cause) {
+            super(cause);
         }
     }
 

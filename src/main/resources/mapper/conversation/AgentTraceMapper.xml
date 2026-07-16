@@ -67,6 +67,13 @@
           #{stepId}, #{runId}, #{stepOrder}, #{stepType}, #{attempt}, #{status}, #{decisionCode},
           #{inputSummary}, #{outputSummary}, #{promptTokens}, #{completionTokens}, #{latencyMs}, #{errorCode}, #{createdAt}
         )
+        on duplicate key update
+          created_at = if(values(attempt) &gt; attempt, values(created_at), created_at),
+          attempt = values(attempt),
+          status = values(status), decision_code = values(decision_code),
+          input_summary = values(input_summary), output_summary = values(output_summary),
+          prompt_tokens = values(prompt_tokens), completion_tokens = values(completion_tokens),
+          latency_ms = values(latency_ms), error_code = values(error_code)
     </insert>
 
     <select id="findRun" resultMap="RunMap">

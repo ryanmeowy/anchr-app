@@ -55,7 +55,10 @@ public class AgentTaskQueryService {
             });
             return true;
         });
-        if (Boolean.TRUE.equals(cancelled)) taskProcessor.interrupt(taskId);
+        if (Boolean.TRUE.equals(cancelled)) {
+            taskProcessor.recordCancellation(task);
+            taskProcessor.interrupt(taskId);
+        }
         return get(taskId);
     }
 

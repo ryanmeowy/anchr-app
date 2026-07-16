@@ -27,7 +27,7 @@ public class AgentTraceRecorder {
         catch (Exception e) { log.warn("Agent run trace start failed, runId={}", state.getRunRequest().runId(), e); }
     }
 
-    public void recordStep(AgentRunState state,
+    public int recordStep(AgentRunState state,
                            AgentStepType type,
                            int attempt,
                            String decision,
@@ -39,7 +39,8 @@ public class AgentTraceRecorder {
         AgentStep step = new AgentStep();
         step.setStepId(UUID.randomUUID().toString());
         step.setRunId(state.getRunRequest().runId());
-        step.setStepOrder(state.nextTraceOrder());
+        int stepOrder = state.nextTraceOrder();
+        step.setStepOrder(stepOrder);
         step.setStepType(type.name());
         step.setAttempt(Math.max(1, attempt));
         step.setStatus(StringUtils.hasText(errorCode) ? "FAILED" : "COMPLETED");
@@ -60,6 +61,7 @@ public class AgentTraceRecorder {
             meterRegistry.summary("agent.model.tokens", "step", type.name(), "type", "total")
                     .record(safeUsage.totalTokens());
         }
+        return stepOrder;
     }
 
     public void checkpoint(AgentRunState state, String workflowVersion) {

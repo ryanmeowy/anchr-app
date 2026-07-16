@@ -58,7 +58,8 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
                 .sorted((a, b) -> Double.compare(b.score, a.score)).limit(limit).toList();
         try {
             return AgentToolResult.success(objectMapper.writeValueAsString(Map.of(
-                    "success", true, "documents", ranked.stream().map(DocumentMatch::view).toList())), evidence);
+                    "success", true, "documents", ranked.stream().map(DocumentMatch::view).toList())), evidence,
+                    Map.of("documentCount", ranked.size(), "evidenceCount", evidence.size()));
         } catch (Exception e) {
             throw new IllegalStateException("Failed to encode tool result", e);
         }

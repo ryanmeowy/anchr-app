@@ -1,0 +1,163 @@
+package com.anchr.core.conversation.application;
+
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.conversation.domain.model.AgentRun;
+import com.anchr.core.conversation.domain.model.AgentStep;
+import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
+import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.conversation.interfaces.rest.dto.AgentRunActivityDTO;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+
+@Service
+@RequiredArgsConstructor
+public class AgentRunActivityService {
+    private static final int MAX_STEPS = 50;
+
+    private final AgentTraceRepository traceRepository;
+    private final ConversationRepository conversationRepository;
+    private final ObjectMapper objectMapper;
+
+    public AgentRunActivityDTO get(String runId) {
+        AgentRun run = traceRepository.findRun(runId)
+                .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND));
+        var session = conversationRepository.findSession(run.getSessionId());
+        if (session.isEmpty()) {
+            throw new BusinessException(ApiError.NOT_FOUND);
+        }
+        AgentRunActivityDTO dto = new AgentRunActivityDTO();
+        dto.setRunId(run.getRunId());
+        dto.setStatus(activityStatus(run.getStatus()));
+        dto.setWorkflowVersion(run.getWorkflowVersion());
+        dto.setToolCallCount(run.getToolCallCount());
+        dto.setPromptTokens(run.getPromptTokens());
+        dto.setCompletionTokens(run.getCompletionTokens());
+        dto.setLatencyMs(elapsedTime(run));
+        dto.setFallbackReason(run.getFallbackReason());
+        dto.setStartedAt(run.getStartedAt());
+        dto.setFinishedAt(run.getFinishedAt());
+
+        List<AgentRunActivityDTO.StepDTO> steps = new ArrayList<>(traceRepository.findSteps(runId).stream()
+                .sorted(Comparator.comparingInt(AgentStep::getStepOrder))
+                .limit(MAX_STEPS)
+                .map(this::toStep)
+                .toList());
+        if (isTerminal(dto.getStatus()) && steps.size() < MAX_STEPS) {
+            steps.add(finalStep(run, steps));
+        }
+        dto.setStepCount(steps.size());
+        dto.setSteps(steps);
+        return dto;
+    }
+
+    private AgentRunActivityDTO.StepDTO toStep(AgentStep source) {
+        Map<String, Object> input = parse(source.getInputSummaryJson());
+        Map<String, Object> output = parse(source.getOutputSummaryJson());
+        AgentRunActivityDTO.StepDTO target = new AgentRunActivityDTO.StepDTO();
+        target.setStepOrder(source.getStepOrder());
+        target.setType(stepType(source.getStepType()));
+        target.setToolName(text(output.get("tool"), text(input.get("tool"), null)));
+        target.setCallId(text(output.get("callId"), text(input.get("callId"), null)));
+        target.setTaskStage(text(output.get("taskStage"), text(input.get("taskStage"), null)));
+        target.setTaskType(text(output.get("taskType"), null));
+        target.setAnswerType(text(output.get("answerType"), null));
+        target.setDecision(decision(source.getStepType(), output));
+        target.setStatus(source.getStatus());
+        target.setAttempt(source.getAttempt());
+        Integer progress = integer(output.get("progress"));
+        target.setProgress("TASK_STAGE".equals(source.getStepType())
+                && "COMPLETED".equals(source.getStatus()) && progress != null
+                ? Integer.valueOf(100) : progress);
+        target.setMessageCount(integer(input.get("messageCount")));
+        target.setPlannedToolCallCount(integer(output.get("toolCallCount")));
+        target.setEvidenceCount(integer(output.get("evidenceCount")));
+        target.setDocumentCount(integer(output.get("documentCount")));
+        target.setSegmentCount(integer(output.get("segmentCount")));
+        target.setBatchCount(integer(output.get("batchCount")));
+        target.setCitationCount(integer(output.get("citationCount")));
+        target.setHasMore(bool(output.get("hasMore")));
+        target.setPromptTokens(source.getPromptTokens());
+        target.setCompletionTokens(source.getCompletionTokens());
+        target.setDurationMs(source.getLatencyMs());
+        target.setCreatedAt(source.getCreatedAt());
+        target.setErrorCode(source.getErrorCode());
+        return target;
+    }
+
+    private String decision(String stepType, Map<String, Object> output) {
+        if (!"MODEL_DECISION".equals(stepType)) return null;
+        Integer toolCalls = integer(output.get("toolCallCount"));
+        if (toolCalls != null && toolCalls > 0) return "TOOL_SELECTION";
+        return Boolean.TRUE.equals(bool(output.get("hasContent"))) ? "FINAL_RESPONSE" : "PROTOCOL_RETRY";
+    }
+
+    private AgentRunActivityDTO.StepDTO finalStep(AgentRun run, List<AgentRunActivityDTO.StepDTO> steps) {
+        AgentRunActivityDTO.StepDTO target = new AgentRunActivityDTO.StepDTO();
+        int maxOrder = steps.stream().mapToInt(AgentRunActivityDTO.StepDTO::getStepOrder).max().orElse(0);
+        target.setStepOrder(maxOrder + 1);
+        target.setType("FINAL");
+        target.setStatus(finalStepStatus(run.getStatus()));
+        target.setAttempt(1);
+        target.setDurationMs(run.getLatencyMs());
+        target.setCreatedAt(run.getFinishedAt() == null ? run.getStartedAt() + run.getLatencyMs() : run.getFinishedAt());
+        target.setErrorCode(run.getErrorCode());
+        return target;
+    }
+
+    private Map<String, Object> parse(String json) {
+        if (!StringUtils.hasText(json)) return Map.of();
+        try {
+            return objectMapper.readValue(json, new TypeReference<>() {});
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+    }
+
+    private String stepType(String value) {
+        if ("MODEL_DECISION".equals(value)) return "MODEL_DECISION";
+        if ("TASK_STAGE".equals(value)) return "TASK_STAGE";
+        if ("TOOL_RESULT".equals(value) || "FAILED".equals(value)) return "TOOL";
+        return "FINAL_ANSWER".equals(value) ? "FINAL" : value;
+    }
+
+    private String activityStatus(String value) {
+        return "FALLBACK".equals(value) ? "AGENT_FALLBACK" : value;
+    }
+
+    private boolean isTerminal(String value) {
+        return List.of("COMPLETED", "FAILED", "CANCELLED", "AGENT_FALLBACK").contains(value);
+    }
+
+    private String finalStepStatus(String runStatus) {
+        if ("FAILED".equals(runStatus)) return "FAILED";
+        if ("CANCELLED".equals(runStatus)) return "CANCELLED";
+        return "COMPLETED";
+    }
+
+    private String text(Object value, String fallback) {
+        return value instanceof String text && StringUtils.hasText(text) ? text : fallback;
+    }
+
+    private Integer integer(Object value) {
+        return value instanceof Number number ? number.intValue() : null;
+    }
+
+    private Boolean bool(Object value) {
+        return value instanceof Boolean bool ? bool : null;
+    }
+
+    private long elapsedTime(AgentRun run) {
+        if (run.getStartedAt() <= 0) return Math.max(0L, run.getLatencyMs());
+        long end = run.getFinishedAt() == null ? System.currentTimeMillis() : run.getFinishedAt();
+        return Math.max(0L, end - run.getStartedAt());
+    }
+}

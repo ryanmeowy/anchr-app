@@ -3,6 +3,7 @@ package com.anchr.core.integration.ai.adapter;
 import com.anchr.core.conversation.domain.port.ConversationRewritePort;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
+import com.anchr.core.conversation.application.model.ConversationGenerationResult;
 import com.anchr.core.conversation.application.model.GenerationOptions;
 import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
@@ -43,6 +44,12 @@ public class ConfigDrivenGenerationAdapter implements ConversationRewritePort, C
 
     @Override
     public String generate(List<ConversationModelMessage> messages, GenerationOptions options) {
+        return generateWithUsage(messages, options).content();
+    }
+
+    @Override
+    public ConversationGenerationResult generateWithUsage(List<ConversationModelMessage> messages,
+                                                            GenerationOptions options) {
         ClientCacheManager.ResolvedClient resolved = cacheManager.getOrBuild(
                 CapabilityResolver.SLOT_GENERATION, this::resolve);
         GenerationClient client = (GenerationClient) resolved.client();
@@ -60,7 +67,10 @@ public class ConfigDrivenGenerationAdapter implements ConversationRewritePort, C
                 .toList();
         Duration timeout = options == null || options.timeout() == null
                 ? Duration.ofSeconds(30) : options.timeout();
-        return client.generate(resolved.config().getModelName(), mappedMessages, extraConfig, timeout).content();
+        GenerationClient.GenerationResult result = client.generate(
+                resolved.config().getModelName(), mappedMessages, extraConfig, timeout);
+        return new ConversationGenerationResult(
+                result.content(), result.promptTokens(), result.completionTokens());
     }
 
     private Map<String, Object> parseExtraConfig(String raw) {

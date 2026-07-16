@@ -51,7 +51,8 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
             return AgentToolResult.success(objectMapper.writeValueAsString(Map.of(
                     "success", true,
                     "rewrittenQuery", rewrite.getRewrittenQuery(),
-                    "evidence", evidence.stream().map(this::view).toList())), evidence);
+                    "evidence", evidence.stream().map(this::view).toList())), evidence,
+                    Map.of("evidenceCount", evidence.size()));
         } catch (Exception e) {
             throw new IllegalStateException("Failed to encode tool result", e);
         }

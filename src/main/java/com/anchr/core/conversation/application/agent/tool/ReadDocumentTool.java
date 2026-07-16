@@ -67,7 +67,8 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
             return AgentToolResult.success(objectMapper.writeValueAsString(Map.of(
                     "success", true, "assetId", asset.getId(), "fileName", asset.getFileName(),
                     "segments", evidence.stream().map(this::view).toList(),
-                    "nextCursor", next == null ? "" : next, "hasMore", next != null)), evidence);
+                    "nextCursor", next == null ? "" : next, "hasMore", next != null)), evidence,
+                    Map.of("segmentCount", evidence.size(), "evidenceCount", evidence.size(), "hasMore", next != null));
         } catch (Exception e) {
             throw new IllegalStateException("Failed to encode tool result", e);
         }

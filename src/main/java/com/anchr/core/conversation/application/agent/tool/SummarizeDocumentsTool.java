@@ -52,7 +52,8 @@ public class SummarizeDocumentsTool implements AgentTool<SummarizeDocumentsTool.
             String content = objectMapper.writeValueAsString(Map.of(
                     "success", true, "deferred", true, "taskId", taskId,
                     "message", "文档总结任务已创建"));
-            return AgentToolResult.deferred(content, new AgentDeferredTask(taskId, "DOCUMENT_SUMMARY", request));
+            return AgentToolResult.deferred(content, new AgentDeferredTask(taskId, "DOCUMENT_SUMMARY", request),
+                    Map.of("documentCount", assets.size(), "taskType", "DOCUMENT_SUMMARY"));
         } catch (Exception e) {
             throw new IllegalStateException("Failed to create summary task", e);
         }
