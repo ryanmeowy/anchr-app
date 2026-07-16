@@ -25,6 +25,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
     private static final int HISTORY_LIMIT = 10;
     private static final int FIELD_LIMIT = 1_200;
     private static final int HISTORY_CHAR_LIMIT = 12_000;
+    private static final int MAX_PROTOCOL_ERRORS = 2;
     private static final String SYSTEM_PROMPT = """
             你是 Anchr 的通用知识库 Agent。你可以自然聊天，也可以根据用户目标自主选择工具。
             工具选择原则：寻找相关文档用 find_documents；检索事实证据用 search_knowledge；连续阅读指定文档用 read_document；
@@ -46,6 +47,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             或 {"action":"final","answerType":"CHAT|CLARIFICATION|KNOWLEDGE","answer":"最终回答","citedSegmentIds":[]}。
             """;
     private static final String LOCAL_CLARIFICATION = "我还缺少足够信息来完成这个请求。请补充具体问题或要处理的文档。";
+    private static final String LOCAL_PROTOCOL_FALLBACK = "模型未能按要求完成工具调用。请重试，或指定要查询的文档与问题。";
 
     private final AgentProperties properties;
     private final AgentModelPort modelPort;
@@ -106,7 +108,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         AgentModelResponse response = modelPort.respond(new AgentModelRequest(
                 List.copyOf(state.getMessages()), toolsEnabled ? toolRegistry.definitions() : List.of(),
                 new AgentModelOptions(0.2, 1_500, state.getBudget().boundedTimeout(properties.getModelTimeout()),
-                        properties.getToolCallMode().name(), toolsEnabled)));
+                        properties.getToolCallMode().name(), properties.getNativeToolChoice().name(), toolsEnabled)));
         ensureNotCancelled(state);
         state.addUsage(response.usage().promptTokens(), response.usage().completionTokens());
         List<AgentToolCall> calls = response.toolCalls();
@@ -135,6 +137,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         if (jsonFinal != null) return validateAndFinish(state, jsonFinal, progress, null, null);
         if (!calls.isEmpty()) {
             if (!toolsEnabled) return protocolError(state, progress, "TOOLS_DISABLED");
+            state.resetProtocolErrors();
             state.getMessages().add(AgentMessage.assistantToolCalls(response.content(), calls));
             for (AgentToolCall call : calls) {
                 if (state.getBudget().exhausted(state.getStepCount(), state.getToolCallCount())) break;
@@ -256,7 +259,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                                                           String fallbackReason,
                                                           String validationToolCallId,
                                                           String validationToolName) {
-        if (state.nextProtocolError() <= 1
+        if (state.nextAnswerValidationError() <= 1
                 && !state.getBudget().exhausted(state.getStepCount(), state.getToolCallCount())) {
             String validationError = errorJson(code, message);
             if (StringUtils.hasText(validationToolCallId)) {
@@ -276,7 +279,17 @@ public class AgentWorkflowImpl implements AgentWorkflow {
     private ConversationExecutionResult protocolError(AgentRunState state,
                                                        ConversationProgressListener progress,
                                                        String code) {
-        if (state.nextProtocolError() >= 2) throw new AgentWorkflowException("agent_protocol_error:" + code, null);
+        int errors = state.nextProtocolError();
+        meterRegistry.counter("agent.protocol.error", "code", code,
+                "outcome", errors >= MAX_PROTOCOL_ERRORS ? "fallback" : "retry").increment();
+        if (errors >= MAX_PROTOCOL_ERRORS) {
+            String fallbackReason = "agent_protocol_error:" + code;
+            log.warn("Agent protocol fallback, runId={}, code={}, consecutiveErrors={}",
+                    state.getRunRequest().runId(), code, errors);
+            emit(progress, state, "agent_thinking", "protocol_fallback", Map.of("errorCode", code));
+            return finish(state, LOCAL_PROTOCOL_FALLBACK, AnswerStatus.MODEL_FALLBACK,
+                    fallbackReason, List.of(), null, AgentRunStatus.FALLBACK);
+        }
         state.getMessages().add(AgentMessage.user("协议错误：" + code + "。请调用工具或提交最终回答，不要输出额外文本。"));
         emit(progress, state, "agent_thinking", "protocol_retry", Map.of("errorCode", code));
         return null;

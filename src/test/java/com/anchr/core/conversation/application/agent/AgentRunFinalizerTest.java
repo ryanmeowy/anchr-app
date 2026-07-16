@@ -46,6 +46,17 @@ class AgentRunFinalizerTest {
     }
 
     @Test
+    void markTurnSaved_shouldPreserveProtocolOutcomeAsFallback() {
+        AgentRun run = awaitingRun("agent_protocol_error:MISSING_ACTION");
+        when(repository.findRun("run-1")).thenReturn(Optional.of(run));
+        AgentRunFinalizer finalizer = new AgentRunFinalizer(repository, new SimpleMeterRegistry());
+
+        finalizer.markTurnSaved("run-1");
+
+        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.FALLBACK.name());
+    }
+
+    @Test
     void markTurnFailed_shouldKeepFailedRunWhenTurnCannotBeSaved() {
         AgentRun run = awaitingRun(null);
         when(repository.findRun("run-1")).thenReturn(Optional.of(run));

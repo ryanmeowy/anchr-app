@@ -93,7 +93,7 @@ public class SpringAiAgentModelAdapter implements AgentModelPort {
         return OpenAiChatModel.builder().openAiApi(api).defaultOptions(options).build();
     }
 
-    private OpenAiChatOptions buildOptions(CapabilityConfig config, AgentModelRequest request, boolean nativeTools) {
+    OpenAiChatOptions buildOptions(CapabilityConfig config, AgentModelRequest request, boolean nativeTools) {
         OpenAiChatOptions options = new OpenAiChatOptions();
         options.setModel(config.getModelName());
         Map<String, Object> extra = parseExtra(config.getExtraConfig());
@@ -104,9 +104,15 @@ public class SpringAiAgentModelAdapter implements AgentModelPort {
         if (nativeTools) {
             options.setTools(request.tools().stream().map(tool -> new OpenAiApi.FunctionTool(
                     new OpenAiApi.FunctionTool.Function(tool.name(), tool.description(), tool.inputSchema()))).toList());
-            options.setToolChoice("auto");
+            options.setToolChoice(nativeToolChoice(request));
         }
         return options;
+    }
+
+    private String nativeToolChoice(AgentModelRequest request) {
+        String configured = request.options() == null ? null : request.options().nativeToolChoice();
+        return "REQUIRED".equalsIgnoreCase(configured == null ? "" : configured.trim())
+                ? "required" : "auto";
     }
 
     private List<Message> toMessages(List<AgentMessage> source) {

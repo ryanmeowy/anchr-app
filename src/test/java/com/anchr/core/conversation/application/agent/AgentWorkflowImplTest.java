@@ -27,10 +27,13 @@ class AgentWorkflowImplTest {
 
     @Test
     void directChat_shouldFinishWithoutKnowledgeToolOrIntent() {
-        AgentModelPort model = request -> new AgentModelResponse(null,
-                List.of(new AgentToolCall("call-1", "deliver_answer",
-                        "{\"answerType\":\"CHAT\",\"answer\":\"你好，我能帮你查找和理解知识库内容。\",\"citedSegmentIds\":[]}")),
-                AgentTokenUsage.EMPTY, "model", "tool_calls", "req");
+        AgentModelPort model = request -> {
+            assertThat(request.options().nativeToolChoice()).isEqualTo("REQUIRED");
+            return new AgentModelResponse(null,
+                    List.of(new AgentToolCall("call-1", "deliver_answer",
+                            "{\"answerType\":\"CHAT\",\"answer\":\"你好，我能帮你查找和理解知识库内容。\",\"citedSegmentIds\":[]}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req");
+        };
         ConversationRepository conversations = mock(ConversationRepository.class);
         when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
         AgentWorkflowImpl workflow = workflow(model, List.of(new DeliverOnlyTool()), conversations);
@@ -84,6 +87,53 @@ class AgentWorkflowImplTest {
         assertThat(calls).hasValue(2);
         assertThat(result.answer()).isEqualTo("你好");
         assertThat(result.citations()).isEmpty();
+    }
+
+    @Test
+    void consecutiveRawModelText_shouldReturnSafeProtocolFallback() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelPort model = request -> new AgentModelResponse(
+                "未按协议提交的回答 " + calls.incrementAndGet(), List.of(),
+                AgentTokenUsage.EMPTY, "model", "stop", "req");
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentWorkflowImpl workflow = workflow(model, List.of(new DeliverOnlyTool()), conversations);
+
+        var result = workflow.execute(run("你好"), ConversationProgressListener.NOOP);
+
+        assertThat(calls).hasValue(2);
+        assertThat(result.answerStatus()).isEqualTo(AnswerStatus.MODEL_FALLBACK);
+        assertThat(result.fallbackReason()).isEqualTo("agent_protocol_error:MISSING_ACTION");
+        assertThat(result.executionMode()).isEqualTo(ConversationExecutionMode.AGENT);
+        assertThat(result.answer()).contains("未能按要求完成工具调用");
+    }
+
+    @Test
+    void validToolCall_shouldResetProtocolErrorCounter() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelPort model = request -> switch (calls.getAndIncrement()) {
+            case 0 -> new AgentModelResponse("第一次普通文本", List.of(),
+                    AgentTokenUsage.EMPTY, "model", "stop", "req-1");
+            case 1 -> new AgentModelResponse(null,
+                    List.of(new AgentToolCall("call-2", "test_search", "{\"query\":\"权限\"}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-2");
+            case 2 -> new AgentModelResponse("工具调用后的第一次普通文本", List.of(),
+                    AgentTokenUsage.EMPTY, "model", "stop", "req-3");
+            default -> new AgentModelResponse(null,
+                    List.of(new AgentToolCall("call-4", "deliver_answer",
+                            "{\"answerType\":\"CHAT\",\"answer\":\"已完成\",\"citedSegmentIds\":[]}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-4");
+        };
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentWorkflowImpl workflow = workflow(model,
+                List.of(new TestSearchTool(), new DeliverOnlyTool()), conversations);
+
+        var result = workflow.execute(run("权限"), ConversationProgressListener.NOOP);
+
+        assertThat(calls).hasValue(4);
+        assertThat(result.answerStatus()).isEqualTo(AnswerStatus.ANSWERED);
+        assertThat(result.answer()).isEqualTo("已完成");
     }
 
     @Test

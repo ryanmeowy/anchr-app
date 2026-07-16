@@ -22,14 +22,18 @@ public class AgentRunFinalizer {
     public void markTurnSaved(String runId) {
         AgentRun run = awaitingRun(runId);
         if (run == null) return;
-        AgentRunStatus status = StringUtils.hasText(run.getFallbackReason())
-                && FALLBACK_REASONS.contains(run.getFallbackReason())
+        AgentRunStatus status = isFallbackReason(run.getFallbackReason())
                 ? AgentRunStatus.FALLBACK : AgentRunStatus.COMPLETED;
         run.setStatus(status.name());
         run.setFinishedAt(System.currentTimeMillis());
         run.setLatencyMs(run.getFinishedAt() - run.getStartedAt());
         repository.saveRun(run);
         recordMetrics(run, status);
+    }
+
+    private boolean isFallbackReason(String reason) {
+        return StringUtils.hasText(reason)
+                && (FALLBACK_REASONS.contains(reason) || reason.startsWith("agent_protocol_error:"));
     }
 
     public void markTurnFailed(String runId) {

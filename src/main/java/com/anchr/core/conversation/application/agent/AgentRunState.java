@@ -22,7 +22,8 @@ public class AgentRunState {
     private int toolCallCount;
     private int promptTokens;
     private int completionTokens;
-    private int protocolErrors;
+    private int consecutiveProtocolErrors;
+    private int answerValidationErrors;
     private int traceOrder;
     @Setter
     private AgentStepType currentStep = AgentStepType.MODEL_DECISION;
@@ -42,7 +43,15 @@ public class AgentRunState {
     }
 
     public int nextProtocolError() {
-        return ++protocolErrors;
+        return ++consecutiveProtocolErrors;
+    }
+
+    public void resetProtocolErrors() {
+        consecutiveProtocolErrors = 0;
+    }
+
+    public int nextAnswerValidationError() {
+        return ++answerValidationErrors;
     }
 
     public int nextTraceOrder() { return ++traceOrder; }

@@ -6,5 +6,6 @@ public record AgentModelOptions(Double temperature,
                                 Integer maxTokens,
                                 Duration timeout,
                                 String toolCallMode,
+                                String nativeToolChoice,
                                 boolean toolsEnabled) {
 }

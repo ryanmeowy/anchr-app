@@ -40,6 +40,7 @@ app:
     enabled: ${APP_AGENT_ENABLED:true}
     workflow-version: ${APP_AGENT_WORKFLOW_VERSION:general-agent-v1}
     tool-call-mode: ${APP_AGENT_TOOL_CALL_MODE:AUTO}
+    native-tool-choice: ${APP_AGENT_NATIVE_TOOL_CHOICE:REQUIRED}
     fallback-to-traditional: ${APP_AGENT_FALLBACK_TO_TRADITIONAL:true}
     max-steps: ${APP_AGENT_MAX_STEPS:12}
     max-tool-calls: ${APP_AGENT_MAX_TOOL_CALLS:8}

@@ -13,6 +13,7 @@ public class AgentProperties {
     private boolean enabled = false;
     private String workflowVersion = "general-agent-v1";
     private ToolCallMode toolCallMode = ToolCallMode.AUTO;
+    private NativeToolChoice nativeToolChoice = NativeToolChoice.REQUIRED;
     private boolean fallbackToTraditional = true;
     private int maxSteps = 12;
     private int maxToolCalls = 8;
@@ -29,5 +30,9 @@ public class AgentProperties {
 
     public enum ToolCallMode {
         NATIVE, JSON, AUTO
+    }
+
+    public enum NativeToolChoice {
+        AUTO, REQUIRED
     }
 }
