@@ -35,25 +35,25 @@ class AgentRunFinalizerTest {
     }
 
     @Test
-    void markTurnSaved_shouldPreserveBudgetOutcomeAsFallback() {
+    void markTurnSaved_shouldPreserveBudgetOutcomeAsDegraded() {
         AgentRun run = awaitingRun("agent_budget_exhausted");
         when(repository.findRun("run-1")).thenReturn(Optional.of(run));
         AgentRunFinalizer finalizer = new AgentRunFinalizer(repository, new SimpleMeterRegistry());
 
         finalizer.markTurnSaved("run-1");
 
-        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.FALLBACK.name());
+        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.DEGRADED.name());
     }
 
     @Test
-    void markTurnSaved_shouldPreserveProtocolOutcomeAsFallback() {
+    void markTurnSaved_shouldPreserveProtocolOutcomeAsDegraded() {
         AgentRun run = awaitingRun("agent_protocol_error:MISSING_ACTION");
         when(repository.findRun("run-1")).thenReturn(Optional.of(run));
         AgentRunFinalizer finalizer = new AgentRunFinalizer(repository, new SimpleMeterRegistry());
 
         finalizer.markTurnSaved("run-1");
 
-        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.FALLBACK.name());
+        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.DEGRADED.name());
     }
 
     @Test
@@ -66,6 +66,20 @@ class AgentRunFinalizerTest {
 
         assertThat(run.getStatus()).isEqualTo(AgentRunStatus.FAILED.name());
         assertThat(run.getErrorCode()).isEqualTo("turn_persistence_failed");
+    }
+
+    @Test
+    void prepareTraditionalFallback_shouldBecomeFallbackAfterTurnPersistence() {
+        AgentRun run = awaitingRun(null);
+        run.setStatus(AgentRunStatus.FAILED.name());
+        when(repository.findRun("run-1")).thenReturn(Optional.of(run));
+        AgentRunFinalizer finalizer = new AgentRunFinalizer(repository, new SimpleMeterRegistry());
+
+        finalizer.prepareTraditionalFallback("run-1");
+        finalizer.markTurnSaved("run-1");
+
+        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.FALLBACK.name());
+        assertThat(run.getFallbackReason()).isEqualTo("traditional_rag_fallback");
     }
 
     private AgentRun awaitingRun(String fallbackReason) {

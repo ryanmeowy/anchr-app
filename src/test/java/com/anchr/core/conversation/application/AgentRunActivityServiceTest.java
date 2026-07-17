@@ -68,7 +68,9 @@ class AgentRunActivityServiceTest {
         AgentRunActivityService service = new AgentRunActivityService(traces, conversations, new ObjectMapper());
         AgentRun run = run("WAITING_TASK");
         AgentStep stage = step(101, "TASK_STAGE", "{}",
-                "{\"taskStage\":\"MAP_SUMMARY\",\"progress\":70}");
+                "{\"taskStage\":\"MAP_SUMMARY\",\"progress\":70,"
+                        + "\"modelCallCount\":3,\"modelLatencyMs\":61500,"
+                        + "\"firstTokenMs\":2300,\"streaming\":true}");
         when(traces.findRun("run-1")).thenReturn(Optional.of(run));
         when(conversations.findSession("session-1")).thenReturn(Optional.of(session("user-a")));
         when(traces.findSteps("run-1")).thenReturn(List.of(stage));
@@ -79,6 +81,48 @@ class AgentRunActivityServiceTest {
         assertThat(result.getSteps().getFirst().getProgress()).isEqualTo(100);
         assertThat(result.getSteps().getFirst().getPromptTokens()).isEqualTo(1_010);
         assertThat(result.getSteps().getFirst().getCompletionTokens()).isEqualTo(505);
+        assertThat(result.getSteps().getFirst().getModelCallCount()).isEqualTo(3);
+        assertThat(result.getSteps().getFirst().getModelLatencyMs()).isEqualTo(61_500L);
+        assertThat(result.getSteps().getFirst().getFirstTokenMs()).isEqualTo(2_300L);
+        assertThat(result.getSteps().getFirst().getStreaming()).isTrue();
+    }
+
+    @Test
+    void get_shouldDistinguishAgentDegradedFromTraditionalFallback() {
+        AgentTraceRepository traces = mock(AgentTraceRepository.class);
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        AgentRunActivityService service = new AgentRunActivityService(traces, conversations, new ObjectMapper());
+        AgentRun run = run("DEGRADED");
+        when(traces.findRun("run-1")).thenReturn(Optional.of(run));
+        when(conversations.findSession("session-1")).thenReturn(Optional.of(session("user-a")));
+        when(traces.findSteps("run-1")).thenReturn(List.of());
+
+        var result = service.get("run-1");
+
+        assertThat(result.getStatus()).isEqualTo("AGENT_DEGRADED");
+    }
+
+    @Test
+    void get_shouldExposeReadLimitGuardAsCompletedDecision() {
+        AgentTraceRepository traces = mock(AgentTraceRepository.class);
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        AgentRunActivityService service = new AgentRunActivityService(traces, conversations, new ObjectMapper());
+        AgentRun run = run("RUNNING");
+        AgentStep guard = step(6, "TOOL_RESULT",
+                "{\"tool\":\"read_document\",\"callId\":\"call-3\"}",
+                "{\"tool\":\"read_document\",\"callId\":\"call-3\","
+                        + "\"decision\":\"READ_LIMIT_REACHED\",\"evidenceCount\":40}");
+        when(traces.findRun("run-1")).thenReturn(Optional.of(run));
+        when(conversations.findSession("session-1")).thenReturn(Optional.of(session("user-a")));
+        when(traces.findSteps("run-1")).thenReturn(List.of(guard));
+
+        var result = service.get("run-1");
+
+        assertThat(result.getSteps()).singleElement().satisfies(step -> {
+            assertThat(step.getStatus()).isEqualTo("COMPLETED");
+            assertThat(step.getDecision()).isEqualTo("READ_LIMIT_REACHED");
+            assertThat(step.getErrorCode()).isNull();
+        });
     }
 
     private AgentRun run(String status) {

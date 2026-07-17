@@ -61,7 +61,9 @@ public class ThreadPoolConfig {
         executor.setQueueCapacity(50);
         executor.setKeepAliveSeconds(60);
         executor.setThreadNamePrefix("agent-task-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        // Never run agent work on an after-commit callback thread: transaction resources may still be bound
+        // there, which can make the claim invisible to the worker and strand the task until its lease expires.
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;
     }

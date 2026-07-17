@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.ChatResponseService;
+import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ChatResponseResult;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
@@ -20,6 +21,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Service
@@ -48,18 +50,44 @@ public class ChatResponseServiceImpl implements ChatResponseService {
 
     @Override
     public ChatResponseResult generate(String sessionId, String query) {
+        return generateInternal(sessionId, query, ConversationProgressListener.NOOP);
+    }
+
+    @Override
+    public ChatResponseResult generateStream(String sessionId,
+                                             String query,
+                                             ConversationProgressListener progress) {
+        return generateInternal(sessionId, query,
+                progress == null ? ConversationProgressListener.NOOP : progress);
+    }
+
+    private ChatResponseResult generateInternal(String sessionId,
+                                                String query,
+                                                ConversationProgressListener progress) {
         meterRegistry.counter("conversation.chat.generate.count").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
+        AtomicBoolean emitted = new AtomicBoolean(false);
         try {
-            String answer = generationPort.generate(buildMessages(sessionId, query),
-                    new GenerationOptions(0.4D, 500, Duration.ofSeconds(30)));
+            List<ConversationModelMessage> messages = buildMessages(sessionId, query);
+            GenerationOptions options = new GenerationOptions(0.4D, 500, Duration.ofSeconds(30));
+            String answer = progress.supportsAnswerStreaming()
+                    ? generationPort.generateStream(messages, options, delta -> {
+                        if (delta == null || delta.isEmpty()) return;
+                        emitted.set(true);
+                        progress.onAnswerDelta(delta);
+                    }).content()
+                    : generationPort.generate(messages, options);
             if (!StringUtils.hasText(answer)) {
-                return fallback("chat_model_unavailable");
+                ChatResponseResult fallback = fallback("chat_model_unavailable");
+                if (emitted.get()) progress.onAnswerReset(fallback.answer());
+                return fallback;
             }
             return new ChatResponseResult(answer.trim(), AnswerStatus.ANSWERED, null);
         } catch (Exception e) {
             log.warn("Chat response generation failed, sessionId={}, message={}", sessionId, e.getMessage());
-            return fallback("chat_model_unavailable");
+            ChatResponseResult fallback = fallback("chat_model_unavailable");
+            if (emitted.get()) progress.onAnswerReset(fallback.answer());
+            return fallback;
         } finally {
             sample.stop(Timer.builder("conversation.chat.generate.latency")
                     .description("Conversation chat generation latency.")

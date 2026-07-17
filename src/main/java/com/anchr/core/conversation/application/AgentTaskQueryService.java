@@ -4,6 +4,7 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.agent.AgentRunStatus;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
+import com.anchr.core.conversation.application.agent.AgentTaskStreamService;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.domain.model.AgentTask;
@@ -24,6 +25,7 @@ public class AgentTaskQueryService {
     private final ConversationRepository conversationRepository;
     private final AgentTraceRepository traceRepository;
     private final AgentTaskProcessor taskProcessor;
+    private final AgentTaskStreamService taskStreamService;
     private final ConversationTurnCodec codec;
     private final TransactionTemplate transactionTemplate;
 
@@ -59,7 +61,9 @@ public class AgentTaskQueryService {
             taskProcessor.recordCancellation(task);
             taskProcessor.interrupt(taskId);
         }
-        return get(taskId);
+        AgentTaskDTO result = get(taskId);
+        if (Boolean.TRUE.equals(cancelled)) taskStreamService.complete(result);
+        return result;
     }
 
     private AgentTask requireAccessible(String taskId) {

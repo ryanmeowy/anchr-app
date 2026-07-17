@@ -16,4 +16,14 @@ public interface ConversationProgressListener {
 
     default void onAgentProgress(AgentProgressEvent event) {
     }
+
+    default boolean supportsAnswerStreaming() {
+        return false;
+    }
+
+    default void onAnswerDelta(String delta) {
+    }
+
+    default void onAnswerReset(String answer) {
+    }
 }

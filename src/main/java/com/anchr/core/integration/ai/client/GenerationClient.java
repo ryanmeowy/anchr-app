@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 import java.util.Map;
 import java.time.Duration;
+import java.util.function.Consumer;
 
 /**
  * Generation capability backed by {@link AiClient}.
@@ -37,6 +38,17 @@ public class GenerationClient {
         int promptTokens = usage.path("prompt_tokens").asInt();
         int completionTokens = usage.path("completion_tokens").asInt();
         return new GenerationResult(content, promptTokens, completionTokens);
+    }
+
+    public GenerationResult generateStream(String modelName,
+                                           List<Map<String, String>> messages,
+                                           Map<String, Object> extraConfig,
+                                           Duration timeout,
+                                           Consumer<String> onDelta) {
+        AiClient.StreamedChatCompletion result = client.chatCompletionsStream(
+                modelName, messages, extraConfig, timeout, onDelta);
+        return new GenerationResult(
+                result.content(), result.promptTokens(), result.completionTokens());
     }
 
     /**

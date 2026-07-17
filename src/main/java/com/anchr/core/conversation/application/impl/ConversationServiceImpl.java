@@ -80,6 +80,8 @@ public class ConversationServiceImpl implements ConversationService {
     private static final int MAX_SESSION_LIST_LIMIT = 50;
     private static final int AUTO_TITLE_MAX_LENGTH = 128;
     private static final int LAST_MESSAGE_PREVIEW_MAX_LENGTH = 80;
+    // A padded trace frame prevents small SSE events from being held by common reverse proxies.
+    private static final String SSE_TRACE_PADDING = " ".repeat(2_048);
     private static final String SINGLE_USER_ID = "single_user";
 
     private final ConversationRepository conversationRepository;
@@ -297,6 +299,7 @@ public class ConversationServiceImpl implements ConversationService {
     public SseEmitter streamMessage(String sessionId, ConversationMessageRequestDTO request) {
         SseEmitter emitter = new SseEmitter(120_000L);
         AtomicBoolean clientDisconnected = new AtomicBoolean(false);
+        AtomicBoolean answerStreamed = new AtomicBoolean(false);
         AtomicReference<String> activeRunId = new AtomicReference<>();
         emitter.onError(error -> {
             clientDisconnected.set(true);
@@ -310,8 +313,15 @@ public class ConversationServiceImpl implements ConversationService {
         streamExecutor.execute(() -> {
             UserContextHolder.set(context);
             try {
-                sendEvent(emitter, "trace", Map.of("stage",
-                        Boolean.TRUE.equals(request.getAgentEnabled()) ? "agent_thinking" : "routing", "message", "started"));
+                Map<String, Object> initialTrace = new LinkedHashMap<>();
+                initialTrace.put("stage", Boolean.TRUE.equals(request.getAgentEnabled()) ? "agent_thinking" : "routing");
+                initialTrace.put("message", Boolean.TRUE.equals(request.getAgentEnabled()) ? "decision_started" : "started");
+                if (Boolean.TRUE.equals(request.getAgentEnabled())) {
+                    initialTrace.put("details", Map.of(
+                            "stepOrder", 1,
+                            "decision", "ANALYZING"));
+                }
+                sendProgressEvent(emitter, initialTrace);
                 ConversationMessageResponseDTO response = createMessageInternal(sessionId, request,
                         new ConversationProgressListener() {
                             @Override
@@ -348,13 +358,42 @@ public class ConversationServiceImpl implements ConversationService {
                                     throw e;
                                 }
                             }
+
+                            @Override
+                            public boolean supportsAnswerStreaming() {
+                                return true;
+                            }
+
+                            @Override
+                            public void onAnswerDelta(String delta) {
+                                if (delta == null || delta.isEmpty()) return;
+                                answerStreamed.set(true);
+                                try {
+                                    sendEvent(emitter, "delta", Map.of("text", delta));
+                                } catch (IOException e) {
+                                    throw new SseClientDisconnectedException(e);
+                                }
+                            }
+
+                            @Override
+                            public void onAnswerReset(String answer) {
+                                answerStreamed.set(true);
+                                try {
+                                    sendEvent(emitter, "answer_reset",
+                                            Map.of("text", answer == null ? "" : answer));
+                                } catch (IOException e) {
+                                    throw new SseClientDisconnectedException(e);
+                                }
+                            }
                         });
                 if (clientDisconnected.get()) {
                     log.debug("SSE client disconnected after cancelling Agent run, sessionId={}, runId={}",
                             sessionId, activeRunId.get());
                     return;
                 }
-                streamAnswer(emitter, response.getAnswer());
+                if (!answerStreamed.get()) {
+                    streamAnswer(emitter, response.getAnswer());
+                }
                 sendEvent(emitter, "citations", response.getCitations() == null ? List.of() : response.getCitations());
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("turnId", response.getTurnId());
@@ -620,7 +659,10 @@ public class ConversationServiceImpl implements ConversationService {
 
     private void sendProgressEvent(SseEmitter emitter, Object data) {
         try {
-            sendEvent(emitter, "trace", data);
+            emitter.send(SseEmitter.event()
+                    .name("trace")
+                    .comment(SSE_TRACE_PADDING)
+                    .data(data));
         } catch (IOException e) {
             throw new SseClientDisconnectedException(e);
         }

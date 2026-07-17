@@ -34,7 +34,8 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
 
     @Override public String name() { return "search_knowledge"; }
     @Override public String description() {
-        return "在当前授权知识库范围内检索事实、规则、定义、流程和相关内容，返回可引用证据。";
+        return "回答定义、原理、工作机制、流程、规则、配置和其他定向问题时，在当前授权知识库或指定 assetIds 内检索最相关内容并返回可引用证据；"
+                + "即使只选中一份文档，定向问题也应优先使用本工具，而不是分页通读全文。";
     }
     @Override public Class<Input> inputType() { return Input.class; }
 

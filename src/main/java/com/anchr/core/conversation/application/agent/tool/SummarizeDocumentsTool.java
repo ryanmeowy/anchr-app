@@ -30,7 +30,8 @@ public class SummarizeDocumentsTool implements AgentTool<SummarizeDocumentsTool.
 
     @Override public String name() { return "summarize_documents"; }
     @Override public String description() {
-        return "异步总结、分析或比较一至三份已明确定位的文档。优先原样复用 find_documents 返回的 documents[].assetId，不能使用 segmentId。仅在用户明确要求时调用。";
+        return "异步处理一至三份已明确定位文档的整体理解任务，包括总结、提炼核心思想或主要观点、说明文档讲了什么、内容概览、分析和比较。"
+                + "优先直接使用 ANCHR_REQUEST_CONTEXT.selectedAssets[].assetId；未提供时复用 find_documents 返回的 documents[].assetId，不能使用 segmentId。";
     }
     @Override public Class<Input> inputType() { return Input.class; }
 

@@ -12,8 +12,11 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class AgentRunFinalizer {
-    private static final Set<String> FALLBACK_REASONS = Set.of(
-            "agent_budget_exhausted"
+    private static final String TRADITIONAL_FALLBACK_REASON = "traditional_rag_fallback";
+    private static final Set<String> DEGRADED_REASONS = Set.of(
+            "agent_budget_exhausted",
+            "agent_evidence_finalization_unavailable",
+            "agent_evidence_finalization_failed"
     );
 
     private final AgentTraceRepository repository;
@@ -22,8 +25,9 @@ public class AgentRunFinalizer {
     public void markTurnSaved(String runId) {
         AgentRun run = awaitingRun(runId);
         if (run == null) return;
-        AgentRunStatus status = isFallbackReason(run.getFallbackReason())
-                ? AgentRunStatus.FALLBACK : AgentRunStatus.COMPLETED;
+        AgentRunStatus status = TRADITIONAL_FALLBACK_REASON.equals(run.getFallbackReason())
+                ? AgentRunStatus.FALLBACK
+                : isDegradedReason(run.getFallbackReason()) ? AgentRunStatus.DEGRADED : AgentRunStatus.COMPLETED;
         run.setStatus(status.name());
         run.setFinishedAt(System.currentTimeMillis());
         run.setLatencyMs(run.getFinishedAt() - run.getStartedAt());
@@ -31,9 +35,9 @@ public class AgentRunFinalizer {
         recordMetrics(run, status);
     }
 
-    private boolean isFallbackReason(String reason) {
+    private boolean isDegradedReason(String reason) {
         return StringUtils.hasText(reason)
-                && (FALLBACK_REASONS.contains(reason) || reason.startsWith("agent_protocol_error:"));
+                && (DEGRADED_REASONS.contains(reason) || reason.startsWith("agent_protocol_error:"));
     }
 
     public void markTurnFailed(String runId) {
@@ -45,6 +49,16 @@ public class AgentRunFinalizer {
         run.setLatencyMs(run.getFinishedAt() - run.getStartedAt());
         repository.saveRun(run);
         recordMetrics(run, AgentRunStatus.FAILED);
+    }
+
+    public void prepareTraditionalFallback(String runId) {
+        if (!StringUtils.hasText(runId)) return;
+        repository.findRun(runId).ifPresent(run -> {
+            run.setStatus(AgentRunStatus.AWAITING_TURN.name());
+            run.setFallbackReason(TRADITIONAL_FALLBACK_REASON);
+            run.setFinishedAt(null);
+            repository.saveRun(run);
+        });
     }
 
     private AgentRun awaitingRun(String runId) {

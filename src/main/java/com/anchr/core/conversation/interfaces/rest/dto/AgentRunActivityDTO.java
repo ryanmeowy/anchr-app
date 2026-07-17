@@ -30,6 +30,7 @@ public class AgentRunActivityDTO implements Serializable {
         private String taskStage;
         private String taskType;
         private String answerType;
+        private String model;
         private String decision;
         private String status;
         private int attempt;
@@ -44,6 +45,10 @@ public class AgentRunActivityDTO implements Serializable {
         private Boolean hasMore;
         private int promptTokens;
         private int completionTokens;
+        private Integer modelCallCount;
+        private Long modelLatencyMs;
+        private Long firstTokenMs;
+        private Boolean streaming;
         private long durationMs;
         private long createdAt;
         private String errorCode;

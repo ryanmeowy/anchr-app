@@ -70,6 +70,7 @@ public class AgentRunActivityService {
         target.setTaskStage(text(output.get("taskStage"), text(input.get("taskStage"), null)));
         target.setTaskType(text(output.get("taskType"), null));
         target.setAnswerType(text(output.get("answerType"), null));
+        target.setModel(text(output.get("model"), null));
         target.setDecision(decision(source.getStepType(), output));
         target.setStatus(source.getStatus());
         target.setAttempt(source.getAttempt());
@@ -87,17 +88,26 @@ public class AgentRunActivityService {
         target.setHasMore(bool(output.get("hasMore")));
         target.setPromptTokens(source.getPromptTokens());
         target.setCompletionTokens(source.getCompletionTokens());
-        target.setDurationMs(source.getLatencyMs());
+        target.setModelCallCount(integer(output.get("modelCallCount")));
+        target.setModelLatencyMs(longValue(output.get("modelLatencyMs")));
+        target.setFirstTokenMs(longValue(output.get("firstTokenMs")));
+        target.setStreaming(bool(output.get("streaming")));
+        target.setDurationMs("RUNNING".equals(source.getStatus()) && source.getCreatedAt() > 0
+                ? Math.max(source.getLatencyMs(), System.currentTimeMillis() - source.getCreatedAt())
+                : source.getLatencyMs());
         target.setCreatedAt(source.getCreatedAt());
         target.setErrorCode(source.getErrorCode());
         return target;
     }
 
     private String decision(String stepType, Map<String, Object> output) {
-        if (!"MODEL_DECISION".equals(stepType)) return null;
+        String explicitDecision = text(output.get("decision"), null);
+        if (!"MODEL_DECISION".equals(stepType)) return explicitDecision;
         Integer toolCalls = integer(output.get("toolCallCount"));
         if (toolCalls != null && toolCalls > 0) return "TOOL_SELECTION";
-        return Boolean.TRUE.equals(bool(output.get("hasContent"))) ? "FINAL_RESPONSE" : "PROTOCOL_RETRY";
+        return explicitDecision != null
+                ? explicitDecision
+                : Boolean.TRUE.equals(bool(output.get("hasContent"))) ? "FINAL_RESPONSE" : "PROTOCOL_RETRY";
     }
 
     private AgentRunActivityDTO.StepDTO finalStep(AgentRun run, List<AgentRunActivityDTO.StepDTO> steps) {
@@ -130,11 +140,12 @@ public class AgentRunActivityService {
     }
 
     private String activityStatus(String value) {
-        return "FALLBACK".equals(value) ? "AGENT_FALLBACK" : value;
+        if ("FALLBACK".equals(value)) return "AGENT_FALLBACK";
+        return "DEGRADED".equals(value) ? "AGENT_DEGRADED" : value;
     }
 
     private boolean isTerminal(String value) {
-        return List.of("COMPLETED", "FAILED", "CANCELLED", "AGENT_FALLBACK").contains(value);
+        return List.of("COMPLETED", "FAILED", "CANCELLED", "AGENT_DEGRADED", "AGENT_FALLBACK").contains(value);
     }
 
     private String finalStepStatus(String runStatus) {
@@ -149,6 +160,10 @@ public class AgentRunActivityService {
 
     private Integer integer(Object value) {
         return value instanceof Number number ? number.intValue() : null;
+    }
+
+    private Long longValue(Object value) {
+        return value instanceof Number number ? number.longValue() : null;
     }
 
     private Boolean bool(Object value) {

@@ -18,6 +18,7 @@ public class AgentRunState {
     private final List<AgentMessage> messages = new ArrayList<>();
     private final Map<String, ConversationRetrievalCandidate> evidence = new LinkedHashMap<>();
     private final java.util.Set<String> executedToolCalls = new java.util.HashSet<>();
+    private final Map<String, Integer> toolExecutions = new LinkedHashMap<>();
     private int stepCount;
     private int toolCallCount;
     private int promptTokens;
@@ -38,8 +39,13 @@ public class AgentRunState {
         return ++stepCount;
     }
 
-    public int nextToolCall() {
+    public int nextToolCall(String toolName) {
+        toolExecutions.merge(toolName == null ? "" : toolName, 1, Integer::sum);
         return ++toolCallCount;
+    }
+
+    public int toolExecutionCount(String toolName) {
+        return toolExecutions.getOrDefault(toolName == null ? "" : toolName, 0);
     }
 
     public int nextProtocolError() {

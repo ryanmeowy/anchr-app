@@ -12,6 +12,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDT
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCapabilitiesDTO;
 import com.anchr.core.conversation.config.AgentProperties;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -95,7 +96,11 @@ public class ConversationController {
     @RequireAuth(roles = {"ADMIN", "USER"})
     public SseEmitter streamMessage(
             @PathVariable @NotBlank String sessionId,
-            @Valid @RequestBody ConversationMessageRequestDTO request) {
+            @Valid @RequestBody ConversationMessageRequestDTO request,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-cache, no-store, no-transform");
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Connection", "keep-alive");
         return conversationService.streamMessage(sessionId, request);
     }
     

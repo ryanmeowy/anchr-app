@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 @Slf4j
 @Primary
@@ -50,6 +51,19 @@ public class ConfigDrivenGenerationAdapter implements ConversationRewritePort, C
     @Override
     public ConversationGenerationResult generateWithUsage(List<ConversationModelMessage> messages,
                                                             GenerationOptions options) {
+        return generateInternal(messages, options, null);
+    }
+
+    @Override
+    public ConversationGenerationResult generateStream(List<ConversationModelMessage> messages,
+                                                        GenerationOptions options,
+                                                        Consumer<String> onDelta) {
+        return generateInternal(messages, options, onDelta);
+    }
+
+    private ConversationGenerationResult generateInternal(List<ConversationModelMessage> messages,
+                                                           GenerationOptions options,
+                                                           Consumer<String> onDelta) {
         ClientCacheManager.ResolvedClient resolved = cacheManager.getOrBuild(
                 CapabilityResolver.SLOT_GENERATION, this::resolve);
         GenerationClient client = (GenerationClient) resolved.client();
@@ -67,8 +81,9 @@ public class ConfigDrivenGenerationAdapter implements ConversationRewritePort, C
                 .toList();
         Duration timeout = options == null || options.timeout() == null
                 ? Duration.ofSeconds(30) : options.timeout();
-        GenerationClient.GenerationResult result = client.generate(
-                resolved.config().getModelName(), mappedMessages, extraConfig, timeout);
+        GenerationClient.GenerationResult result = onDelta == null
+                ? client.generate(resolved.config().getModelName(), mappedMessages, extraConfig, timeout)
+                : client.generateStream(resolved.config().getModelName(), mappedMessages, extraConfig, timeout, onDelta);
         return new ConversationGenerationResult(
                 result.content(), result.promptTokens(), result.completionTokens());
     }

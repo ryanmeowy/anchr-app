@@ -17,4 +17,18 @@ public interface AnswerGenerationService {
                                     AnswerMode answerMode,
                                     List<ConversationRetrievalCandidate> topCandidates,
                                     List<ConversationCitation> citations);
+
+    default AnswerGenerationResult generateStream(String userQuery,
+                                                  String rewrittenQuery,
+                                                  AnswerMode answerMode,
+                                                  List<ConversationRetrievalCandidate> topCandidates,
+                                                  List<ConversationCitation> citations,
+                                                  ConversationProgressListener progress) {
+        AnswerGenerationResult result = generate(
+                userQuery, rewrittenQuery, answerMode, topCandidates, citations);
+        if (progress != null && result.getAnswerText() != null) {
+            progress.onAnswerDelta(result.getAnswerText());
+        }
+        return result;
+    }
 }

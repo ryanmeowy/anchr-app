@@ -7,5 +7,6 @@ public enum AgentRunStatus {
     COMPLETED,
     CANCELLED,
     FAILED,
+    DEGRADED,
     FALLBACK
 }

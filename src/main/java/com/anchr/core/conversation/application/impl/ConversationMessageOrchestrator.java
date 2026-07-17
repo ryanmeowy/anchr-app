@@ -4,6 +4,7 @@ import com.anchr.core.conversation.application.ChatResponseService;
 import com.anchr.core.conversation.application.ConversationIntentRouter;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.agent.AgentRunRequest;
+import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
 import com.anchr.core.conversation.application.agent.AgentWorkflow;
 import com.anchr.core.conversation.application.agent.AgentWorkflowException;
 import com.anchr.core.conversation.application.model.AnswerStatus;
@@ -30,6 +31,7 @@ public class ConversationMessageOrchestrator {
     private final MeterRegistry meterRegistry;
     private final AgentProperties agentProperties;
     private final AgentWorkflow agentWorkflow;
+    private final AgentRunFinalizer agentRunFinalizer;
 
     @Autowired
     public ConversationMessageOrchestrator(ConversationIntentRouter intentRouter,
@@ -37,13 +39,25 @@ public class ConversationMessageOrchestrator {
                                            ConversationMessagePipeline ragPipeline,
                                            MeterRegistry meterRegistry,
                                            AgentProperties agentProperties,
-                                           AgentWorkflow agentWorkflow) {
+                                           AgentWorkflow agentWorkflow,
+                                           AgentRunFinalizer agentRunFinalizer) {
         this.intentRouter = intentRouter;
         this.chatResponseService = chatResponseService;
         this.ragPipeline = ragPipeline;
         this.meterRegistry = meterRegistry;
         this.agentProperties = agentProperties;
         this.agentWorkflow = agentWorkflow;
+        this.agentRunFinalizer = agentRunFinalizer;
+    }
+
+    public ConversationMessageOrchestrator(ConversationIntentRouter intentRouter,
+                                           ChatResponseService chatResponseService,
+                                           ConversationMessagePipeline ragPipeline,
+                                           MeterRegistry meterRegistry,
+                                           AgentProperties agentProperties,
+                                           AgentWorkflow agentWorkflow) {
+        this(intentRouter, chatResponseService, ragPipeline, meterRegistry,
+                agentProperties, agentWorkflow, null);
     }
 
     /**
@@ -53,7 +67,8 @@ public class ConversationMessageOrchestrator {
                                            ChatResponseService chatResponseService,
                                            ConversationMessagePipeline ragPipeline,
                                            MeterRegistry meterRegistry) {
-        this(intentRouter, chatResponseService, ragPipeline, meterRegistry, disabledAgentProperties(), null);
+        this(intentRouter, chatResponseService, ragPipeline, meterRegistry,
+                disabledAgentProperties(), null, null);
     }
 
     public ConversationExecutionResult execute(String sessionId,
@@ -83,6 +98,9 @@ public class ConversationMessageOrchestrator {
                     case KB_QUERY -> executeLegacyRag(sessionId, request, fallbackIntent, progress, runId,
                             agentProperties.getWorkflowVersion());
                 };
+                if (agentRunFinalizer != null) {
+                    agentRunFinalizer.prepareTraditionalFallback(runId);
+                }
                 return new ConversationExecutionResult(fallback.intent(), fallback.retrievalExecuted(),
                         fallback.rewrittenQuery(), fallback.answer(), fallback.answerStatus(), fallback.fallbackReason(),
                         fallback.citations(), fallback.resultCards(), fallback.ragResult(), runId,
@@ -104,7 +122,9 @@ public class ConversationMessageOrchestrator {
                                                     ConversationProgressListener progress) {
         progress.onStageStarted("chat_generation");
         meterRegistry.counter("conversation.retrieval.skipped.count", "type", "CHAT").increment();
-        ChatResponseResult chat = chatResponseService.generate(sessionId, request.getQuery().trim());
+        ChatResponseResult chat = progress.supportsAnswerStreaming()
+                ? chatResponseService.generateStream(sessionId, request.getQuery().trim(), progress)
+                : chatResponseService.generate(sessionId, request.getQuery().trim());
         return new ConversationExecutionResult(intent, false, null, chat.answer(), chat.answerStatus(),
                 chat.fallbackReason(), List.of(), List.of(), null, null, null);
     }
@@ -123,7 +143,7 @@ public class ConversationMessageOrchestrator {
                                                           String agentRunId,
                                                           String workflowVersion) {
         progress.onStageStarted("retrieval");
-        ConversationMessagePipelineResult result = ragPipeline.execute(sessionId, request);
+        ConversationMessagePipelineResult result = ragPipeline.execute(sessionId, request, progress);
         return new ConversationExecutionResult(intent, true, result.rewriteResult().getRewrittenQuery(),
                 result.answerGenerationResult().getAnswerText(), AnswerStatus.from(result.answerGenerationResult()),
                 result.answerGenerationResult().getFallbackReason(), result.answerCitations(), result.resultCards(),

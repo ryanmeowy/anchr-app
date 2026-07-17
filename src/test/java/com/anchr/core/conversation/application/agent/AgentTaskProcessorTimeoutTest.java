@@ -27,6 +27,39 @@ class AgentTaskProcessorTimeoutTest {
     }
 
     @Test
+    void summaryStream_shouldStripOpeningFenceBeforeCompletion() {
+        String content = "# 标题\n\n" + "这是流式总结内容。".repeat(20);
+
+        String visible = AgentTaskProcessor.visibleSummaryMarkdown(
+                "```markdown\n" + content + "\n```", false);
+
+        assertThat(visible).isNotEmpty();
+        assertThat(visible).startsWith("# 标题");
+        assertThat(visible).doesNotContain("```markdown");
+        assertThat(visible.length()).isLessThan(content.length());
+    }
+
+    @Test
+    void summaryStream_shouldWaitOnlyForASplitOpeningFenceHeader() {
+        assertThat(AgentTaskProcessor.visibleSummaryMarkdown("`", false)).isEmpty();
+        assertThat(AgentTaskProcessor.visibleSummaryMarkdown("```mark", false)).isEmpty();
+        assertThat(AgentTaskProcessor.visibleSummaryMarkdown("```markdown", false)).isEmpty();
+
+        String content = "正文".repeat(80);
+        assertThat(AgentTaskProcessor.visibleSummaryMarkdown("```markdown\n" + content, false))
+                .startsWith("正文");
+    }
+
+    @Test
+    void summaryStream_shouldKeepOrdinaryMarkdownAndRemoveFenceOnCompletion() {
+        String content = "# 标题\n" + "普通内容".repeat(40);
+
+        assertThat(AgentTaskProcessor.visibleSummaryMarkdown(content, false)).startsWith("# 标题");
+        assertThat(AgentTaskProcessor.visibleSummaryMarkdown(
+                "```md\n" + content + "\n```", true)).isEqualTo(content);
+    }
+
+    @Test
     void shouldUseConfiguredTaskModelTimeoutWhenDeadlineHasEnoughTime() {
         Duration timeout = AgentTaskProcessor.boundedTaskModelTimeout(
                 Duration.ofSeconds(90), 200_000, 10_000);
@@ -71,5 +104,31 @@ class AgentTaskProcessorTimeoutTest {
                 .collect(java.util.stream.Collectors.joining("\n\n"));
 
         assertThat(AgentTaskProcessor.citationDensityWithinLimits(answer)).isFalse();
+    }
+
+    @Test
+    void citationCompaction_shouldEnforceAllLimitsWithoutRewritingTheAnswer() {
+        String answer = "第一段 {{segment:s1}} {{segment:s2}} {{segment:s3}} {{segment:s4}}\n\n"
+                + java.util.stream.IntStream.rangeClosed(5, 14)
+                .mapToObj(index -> "段落 " + index + " {{segment:s" + index + "}}")
+                .collect(java.util.stream.Collectors.joining("\n\n"));
+
+        String compacted = AgentTaskProcessor.compactCitationMarkers(answer);
+
+        assertThat(AgentTaskProcessor.citationDensityWithinLimits(compacted)).isTrue();
+        assertThat(AgentCitationRenderer.extractSegmentIds(compacted)).hasSize(10);
+        assertThat(compacted).contains("第一段", "段落 14");
+        assertThat(compacted).doesNotContain("{{segment:s4}}", "{{segment:s14}}");
+    }
+
+    @Test
+    void citationCompaction_shouldRemainPrefixStableDuringStreaming() {
+        String prefix = "第一段 {{segment:s1}} {{segment:s2}} {{segment:s3}} {{segment:s4}}\n\n第二段 ";
+        String complete = prefix + "{{segment:s5}} 后续内容 {{segment:s6}}";
+
+        String compactedPrefix = AgentTaskProcessor.compactCitationMarkers(prefix);
+        String compactedComplete = AgentTaskProcessor.compactCitationMarkers(complete);
+
+        assertThat(compactedComplete).startsWith(compactedPrefix);
     }
 }

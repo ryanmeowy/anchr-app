@@ -24,6 +24,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
     private static final int MAX_CONTENT_CHARS = 20_000;
+    private static final int MIN_PAGE_SIZE = 10;
     public record Input(
             @JsonPropertyDescription("优先填写 find_documents 返回的 documents[].assetId；也允许当前授权范围内唯一匹配的完整文件名或标题。不得填写 segmentId。")
             @NotBlank String assetId,
@@ -36,7 +37,8 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
 
     @Override public String name() { return "read_document"; }
     @Override public String description() {
-        return "按原始顺序分页读取指定文档内容。优先原样复用 find_documents 返回的 documents[].assetId，不能使用 segmentId；需要继续时使用 nextCursor。";
+        return "仅在需要连续上下文或相邻原文时，按原始顺序分页读取指定文档；定向事实问题优先使用 search_knowledge。"
+                + "优先原样复用 find_documents 返回的 documents[].assetId，不能使用 segmentId；每次建议读取 20 个片段，需要继续时使用 nextCursor。";
     }
     @Override public Class<Input> inputType() { return Input.class; }
 
@@ -44,7 +46,7 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
     public AgentToolResult execute(Input input, AgentExecutionContext context) {
         var asset = scopeGuard.requireAsset(input.assetId(), context);
         Cursor cursor = decode(input.cursor());
-        int limit = input.limit() == null ? 20 : input.limit();
+        int limit = input.limit() == null ? 20 : Math.max(MIN_PAGE_SIZE, input.limit());
         List<Segment> segments = segmentRepository.listByAssetId(asset.getKbId(), asset.getId(),
                 cursor.chunkOrder(), cursor.segmentId(), limit + 1);
         boolean hasMore = segments.size() > limit;
@@ -62,7 +64,9 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
             Segment last = bounded.getLast();
             next = encode(last.getChunkOrder(), last.getSegmentId());
         }
-        List<ConversationRetrievalCandidate> evidence = bounded.stream().map(this::candidate).toList();
+        List<ConversationRetrievalCandidate> evidence = bounded.stream()
+                .map(segment -> candidate(segment, asset.getFileName(), asset.getTitle()))
+                .toList();
         try {
             return AgentToolResult.success(objectMapper.writeValueAsString(Map.of(
                     "success", true, "assetId", asset.getId(), "fileName", asset.getFileName(),
@@ -74,11 +78,14 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
         }
     }
 
-    private ConversationRetrievalCandidate candidate(Segment segment) {
+    private ConversationRetrievalCandidate candidate(Segment segment, String assetFileName, String assetTitle) {
+        String sourceRef = StringUtils.hasText(assetFileName)
+                ? assetFileName
+                : StringUtils.hasText(segment.getSourceRef()) ? segment.getSourceRef() : assetTitle;
         return ConversationRetrievalCandidate.builder().segmentId(segment.getSegmentId()).kbId(segment.getKbId())
                 .assetId(segment.getAssetId()).assetType(segment.getAssetType())
                 .segmentType(segment.getSegmentType() == null ? null : segment.getSegmentType().name())
-                .title(segment.getTitle()).content(content(segment)).pageNo(segment.getPageNo())
+                .sourceRef(sourceRef).title(segment.getTitle()).content(content(segment)).pageNo(segment.getPageNo())
                 .anchor(ConversationRetrievalCandidate.Anchor.builder().pageNo(segment.getPageNo())
                         .chunkOrder(segment.getChunkOrder()).bbox(segment.getBbox()).build()).build();
     }
