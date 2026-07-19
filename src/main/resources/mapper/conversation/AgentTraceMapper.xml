@@ -80,6 +80,23 @@
         select * from agent_run where run_id = #{runId}
     </select>
 
+    <select id="findRecoverableRuns" resultMap="RunMap">
+        select r.*
+        from agent_run r
+        join conversation_session s on s.session_id = r.session_id
+        where s.user_id = #{userId}
+          and s.deleted_at is null
+          and (
+            r.status in ('RUNNING', 'WAITING_TASK', 'AWAITING_TURN')
+            or r.started_at &gt;= date_sub(current_timestamp(3), interval 10 minute)
+          )
+        order by
+          case when r.status in ('RUNNING', 'WAITING_TASK', 'AWAITING_TURN') then 0 else 1 end,
+          r.started_at desc,
+          r.run_id desc
+        limit #{limit}
+    </select>
+
     <select id="findSteps" resultMap="StepMap">
         select * from agent_step where run_id = #{runId} order by step_order asc
     </select>

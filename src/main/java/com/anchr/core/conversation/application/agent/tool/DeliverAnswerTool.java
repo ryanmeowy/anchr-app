@@ -17,7 +17,7 @@ import java.util.List;
 public class DeliverAnswerTool implements AgentTool<DeliverAnswerTool.Input> {
     public record Input(
             @NotNull
-            @JsonPropertyDescription("回答类型：普通聊天用 CHAT，需要用户补充信息用 CLARIFICATION，依赖知识库事实用 KNOWLEDGE。KNOWLEDGE 必须引用本轮知识工具返回的证据。")
+            @JsonPropertyDescription("回答类型：普通聊天用 CHAT，需要用户补充必要条件用 CLARIFICATION，证据直接支持核心答案时用 KNOWLEDGE，知识工具已检索但证据无法支持核心答案时用 NO_EVIDENCE。KNOWLEDGE 必须引用本轮证据；NO_EVIDENCE 禁止引用。")
             AgentAnswerType answerType,
             @NotBlank
             @Size(max = 20_000)
@@ -30,7 +30,8 @@ public class DeliverAnswerTool implements AgentTool<DeliverAnswerTool.Input> {
 
     @Override public String name() { return "deliver_answer"; }
     @Override public String description() {
-        return "提交最终回答并声明 CHAT、CLARIFICATION 或 KNOWLEDGE。KNOWLEDGE 必须使用本轮证据；Segment ID 仅用于内部验真。";
+        return "提交最终回答并声明 CHAT、CLARIFICATION、KNOWLEDGE 或 NO_EVIDENCE。"
+                + "KNOWLEDGE 必须使用本轮直接证据；NO_EVIDENCE 必须为空引用；Segment ID 仅用于内部验真。";
     }
     @Override public Class<Input> inputType() { return Input.class; }
 

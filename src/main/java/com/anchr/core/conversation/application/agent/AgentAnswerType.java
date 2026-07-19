@@ -6,5 +6,6 @@ package com.anchr.core.conversation.application.agent;
 public enum AgentAnswerType {
     CHAT,
     CLARIFICATION,
-    KNOWLEDGE
+    KNOWLEDGE,
+    NO_EVIDENCE
 }

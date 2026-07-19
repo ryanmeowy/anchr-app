@@ -426,6 +426,106 @@ class AgentWorkflowImplTest {
     }
 
     @Test
+    void declaredNoEvidence_shouldReturnEmptyCitationsForEveryAnswerMode() {
+        for (AnswerMode mode : AnswerMode.values()) {
+            AtomicInteger calls = new AtomicInteger();
+            AgentModelPort model = request -> switch (calls.getAndIncrement()) {
+                case 0 -> new AgentModelResponse(null, List.of(new AgentToolCall(
+                        "call-search", "test_search", "{\"query\":\"语义分块边界\"}")),
+                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-search");
+                default -> new AgentModelResponse(null, List.of(new AgentToolCall(
+                        "call-answer", "deliver_answer",
+                        "{\"answerType\":\"NO_EVIDENCE\",\"answer\":\"现有资料未直接回答该问题\",\"citedSegmentIds\":[]}")),
+                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-answer");
+            };
+            ConversationRepository conversations = mock(ConversationRepository.class);
+            when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+            AgentWorkflowImpl workflow = workflow(model,
+                    List.of(new TestSearchTool(), new DeliverOnlyTool()), conversations);
+
+            ConversationExecutionResult result = workflow.execute(
+                    run("语义分块的边界怎么界定", mode), ConversationProgressListener.NOOP);
+
+            assertThat(result.answerStatus()).as(mode.name()).isEqualTo(AnswerStatus.NO_EVIDENCE);
+            assertThat(result.fallbackReason()).as(mode.name()).isEqualTo("agent_declared_no_evidence");
+            assertThat(result.citations()).as(mode.name()).isEmpty();
+            assertThat(result.answer()).as(mode.name()).doesNotContain("[", "{{segment:");
+            assertThat(result.retrievalExecuted()).as(mode.name()).isTrue();
+        }
+    }
+
+    @Test
+    void declaredNoEvidence_withCitations_shouldRequireRepair() {
+        AtomicInteger calls = new AtomicInteger();
+        List<AgentProgressEvent> events = new CopyOnWriteArrayList<>();
+        AgentModelPort model = request -> switch (calls.getAndIncrement()) {
+            case 0 -> new AgentModelResponse(null, List.of(new AgentToolCall(
+                    "call-search", "test_search", "{\"query\":\"语义分块边界\"}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-search");
+            case 1 -> new AgentModelResponse(null, List.of(new AgentToolCall(
+                    "call-invalid", "deliver_answer",
+                    "{\"answerType\":\"NO_EVIDENCE\",\"answer\":\"资料未提及 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\"]}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-invalid");
+            default -> {
+                assertThat(request.messages().getLast().content())
+                        .contains("UNEXPECTED_NO_EVIDENCE_CITATION");
+                yield new AgentModelResponse(null, List.of(new AgentToolCall(
+                        "call-repaired", "deliver_answer",
+                        "{\"answerType\":\"NO_EVIDENCE\",\"answer\":\"现有资料不足\",\"citedSegmentIds\":[]}")),
+                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-repaired");
+            }
+        };
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentWorkflowImpl workflow = workflow(model,
+                List.of(new TestSearchTool(), new DeliverOnlyTool()), conversations);
+        ConversationProgressListener progress = new ConversationProgressListener() {
+            @Override public void onAgentProgress(AgentProgressEvent event) { events.add(event); }
+        };
+
+        ConversationExecutionResult result = workflow.execute(
+                run("语义分块的边界怎么界定"), progress);
+
+        assertThat(calls).hasValue(3);
+        assertThat(result.answerStatus()).isEqualTo(AnswerStatus.NO_EVIDENCE);
+        assertThat(result.citations()).isEmpty();
+        assertThat(events).anySatisfy(event -> {
+            assertThat(event.message()).isEqualTo("answer_repair_required");
+            assertThat(event.details()).containsEntry("callId", "call-invalid");
+            assertThat(event.details()).containsEntry("tool", "deliver_answer");
+            assertThat(event.details()).containsEntry("stepOrder", 4);
+            assertThat(event.details()).containsEntry("success", false);
+        });
+    }
+
+    @Test
+    void evidenceFinalizer_shouldAcceptNoEvidenceWithoutCitations() {
+        AtomicInteger toolExecutions = new AtomicInteger();
+        AgentModelPort model = request -> new AgentModelResponse(null,
+                List.of(new AgentToolCall("call-" + request.messages().size(),
+                        "read_document", "{\"assetId\":\"asset-1\"}")),
+                AgentTokenUsage.EMPTY, "model", "tool_calls", "req");
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        when(generation.generateWithUsage(any(), any())).thenReturn(new ConversationGenerationResult(
+                "{\"answerType\":\"NO_EVIDENCE\",\"answer\":\"证据仅包含相关背景\",\"citedSegmentIds\":[]}",
+                20, 8));
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentRequestContextResolver contextResolver = mock(AgentRequestContextResolver.class);
+        when(contextResolver.resolve(any())).thenReturn(AgentRequestContext.empty());
+        AgentWorkflowImpl workflow = workflow(model, generation,
+                List.of(new ReadEvidenceTool(toolExecutions), new DeliverOnlyTool()), conversations,
+                new AgentRunCancellationRegistry(), contextResolver);
+
+        ConversationExecutionResult result = workflow.execute(
+                run("语义分块的边界怎么界定"), ConversationProgressListener.NOOP);
+
+        assertThat(toolExecutions).hasValue(2);
+        assertThat(result.answerStatus()).isEqualTo(AnswerStatus.NO_EVIDENCE);
+        assertThat(result.citations()).isEmpty();
+    }
+
+    @Test
     void stripHistoricalCitationLabels_shouldPreventVisibleIndexReuse() {
         assertThat(AgentWorkflowImpl.stripHistoricalCitationLabels(
                 "结论一 [1-1]，结论二[2]，令牌 [Retrieve-Yes] 保留。"))
@@ -503,7 +603,12 @@ class AgentWorkflowImplTest {
     }
 
     private AgentRunRequest run(String query) {
+        return run(query, AnswerMode.STRICT);
+    }
+
+    private AgentRunRequest run(String query, AnswerMode answerMode) {
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO(); request.setQuery(query);
+        request.setAnswerMode(answerMode.name());
         request.setKbIds(List.of("kb-1")); request.setAssetIdList(List.of());
         return new AgentRunRequest("run-1", "turn-1", "session", "single_user", request);
     }

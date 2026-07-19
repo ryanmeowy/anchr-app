@@ -36,6 +36,8 @@ class AgentRunActivityServiceTest {
 
         var result = service.get("run-1");
 
+        assertThat(result.getSessionId()).isEqualTo("session-1");
+        assertThat(result.getTurnId()).isEqualTo("turn-1");
         assertThat(result.getStatus()).isEqualTo("COMPLETED");
         assertThat(result.getStepCount()).isEqualTo(3);
         assertThat(result.getSteps()).extracting(step -> step.getStepOrder()).containsExactly(1, 2, 3);
@@ -103,6 +105,26 @@ class AgentRunActivityServiceTest {
     }
 
     @Test
+    void get_shouldNotAppendSyntheticFinalWhenPersistedFinalExists() {
+        AgentTraceRepository traces = mock(AgentTraceRepository.class);
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        AgentRunActivityService service = new AgentRunActivityService(traces, conversations, new ObjectMapper());
+        AgentRun run = run("COMPLETED");
+        when(traces.findRun("run-1")).thenReturn(Optional.of(run));
+        when(conversations.findSession("session-1")).thenReturn(Optional.of(session("user-a")));
+        when(traces.findSteps("run-1")).thenReturn(List.of(
+                step(1, "MODEL_DECISION", "{}", "{\"hasContent\":true}"),
+                step(2, "FINAL_ANSWER", "{}", "{\"streaming\":true}")));
+
+        var result = service.get("run-1");
+
+        assertThat(result.getStepCount()).isEqualTo(2);
+        assertThat(result.getSteps()).extracting(step -> step.getStepOrder()).containsExactly(1, 2);
+        assertThat(result.getSteps()).extracting(step -> step.getType())
+                .containsExactly("MODEL_DECISION", "FINAL");
+    }
+
+    @Test
     void get_shouldExposeReadLimitGuardAsCompletedDecision() {
         AgentTraceRepository traces = mock(AgentTraceRepository.class);
         ConversationRepository conversations = mock(ConversationRepository.class);
@@ -122,6 +144,26 @@ class AgentRunActivityServiceTest {
             assertThat(step.getStatus()).isEqualTo("COMPLETED");
             assertThat(step.getDecision()).isEqualTo("READ_LIMIT_REACHED");
             assertThat(step.getErrorCode()).isNull();
+        });
+    }
+
+    @Test
+    void listRecoverable_shouldExposeStableNavigationIdentityWithoutLoadingSteps() {
+        AgentTraceRepository traces = mock(AgentTraceRepository.class);
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        AgentRunActivityService service = new AgentRunActivityService(traces, conversations, new ObjectMapper());
+        AgentRun run = run("RUNNING");
+        run.setCurrentStep("MODEL_DECISION");
+        when(traces.findRecoverableRuns("single_user", 20)).thenReturn(List.of(run));
+
+        var result = service.listRecoverable(99);
+
+        assertThat(result).singleElement().satisfies(item -> {
+            assertThat(item.getRunId()).isEqualTo("run-1");
+            assertThat(item.getSessionId()).isEqualTo("session-1");
+            assertThat(item.getTurnId()).isEqualTo("turn-1");
+            assertThat(item.getStatus()).isEqualTo("RUNNING");
+            assertThat(item.getCurrentStep()).isEqualTo("MODEL_DECISION");
         });
     }
 

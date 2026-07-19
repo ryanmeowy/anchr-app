@@ -11,6 +11,8 @@ public interface AgentTraceMapper {
     int upsertRun(AgentRunRecord record);
     int insertStep(AgentStepRecord record);
     Optional<AgentRunRecord> findRun(@Param("runId") String runId);
+    List<AgentRunRecord> findRecoverableRuns(@Param("userId") String userId,
+                                             @Param("limit") int limit);
     List<AgentStepRecord> findSteps(@Param("runId") String runId);
     int deleteRunsBySessionId(@Param("sessionId") String sessionId);
 }

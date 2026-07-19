@@ -7,6 +7,7 @@ import com.anchr.core.conversation.domain.model.AgentStep;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentRunActivityDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.AgentRunSummaryDTO;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AgentRunActivityService {
     private static final int MAX_STEPS = 50;
+    private static final String SINGLE_USER_ID = "single_user";
 
     private final AgentTraceRepository traceRepository;
     private final ConversationRepository conversationRepository;
@@ -36,7 +38,10 @@ public class AgentRunActivityService {
         }
         AgentRunActivityDTO dto = new AgentRunActivityDTO();
         dto.setRunId(run.getRunId());
+        dto.setSessionId(run.getSessionId());
+        dto.setTurnId(run.getTurnId());
         dto.setStatus(activityStatus(run.getStatus()));
+        dto.setCurrentStep(run.getCurrentStep());
         dto.setWorkflowVersion(run.getWorkflowVersion());
         dto.setToolCallCount(run.getToolCallCount());
         dto.setPromptTokens(run.getPromptTokens());
@@ -51,11 +56,31 @@ public class AgentRunActivityService {
                 .limit(MAX_STEPS)
                 .map(this::toStep)
                 .toList());
-        if (isTerminal(dto.getStatus()) && steps.size() < MAX_STEPS) {
+        boolean hasFinalStep = steps.stream().anyMatch(step -> "FINAL".equals(step.getType()));
+        if (isTerminal(dto.getStatus()) && !hasFinalStep && steps.size() < MAX_STEPS) {
             steps.add(finalStep(run, steps));
         }
         dto.setStepCount(steps.size());
         dto.setSteps(steps);
+        return dto;
+    }
+
+    public List<AgentRunSummaryDTO> listRecoverable(int limit) {
+        int boundedLimit = Math.max(1, Math.min(limit, 20));
+        return traceRepository.findRecoverableRuns(SINGLE_USER_ID, boundedLimit).stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    private AgentRunSummaryDTO toSummary(AgentRun run) {
+        AgentRunSummaryDTO dto = new AgentRunSummaryDTO();
+        dto.setRunId(run.getRunId());
+        dto.setSessionId(run.getSessionId());
+        dto.setTurnId(run.getTurnId());
+        dto.setStatus(activityStatus(run.getStatus()));
+        dto.setCurrentStep(run.getCurrentStep());
+        dto.setStartedAt(run.getStartedAt());
+        dto.setFinishedAt(run.getFinishedAt());
         return dto;
     }
 

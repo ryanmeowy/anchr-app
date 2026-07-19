@@ -9,7 +9,6 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationService;
 import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
-import com.anchr.core.conversation.application.agent.AgentRunCancellationRegistry;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
@@ -102,8 +101,6 @@ public class ConversationServiceImpl implements ConversationService {
     private AgentTaskProcessor agentTaskProcessor;
     @Autowired(required = false)
     private AgentConversationCleanupService agentConversationCleanupService;
-    @Autowired(required = false)
-    private AgentRunCancellationRegistry agentRunCancellationRegistry;
 
     /** Compatibility constructor for legacy unit tests that exercise only the traditional path. */
     public ConversationServiceImpl(ConversationRepository conversationRepository,
@@ -301,14 +298,8 @@ public class ConversationServiceImpl implements ConversationService {
         AtomicBoolean clientDisconnected = new AtomicBoolean(false);
         AtomicBoolean answerStreamed = new AtomicBoolean(false);
         AtomicReference<String> activeRunId = new AtomicReference<>();
-        emitter.onError(error -> {
-            clientDisconnected.set(true);
-            cancelDisconnectedRun(activeRunId.get());
-        });
-        emitter.onTimeout(() -> {
-            clientDisconnected.set(true);
-            cancelDisconnectedRun(activeRunId.get());
-        });
+        emitter.onError(error -> clientDisconnected.set(true));
+        emitter.onTimeout(() -> clientDisconnected.set(true));
         RequestUserContext context = UserContextHolder.get();
         streamExecutor.execute(() -> {
             UserContextHolder.set(context);
@@ -321,7 +312,7 @@ public class ConversationServiceImpl implements ConversationService {
                             "stepOrder", 1,
                             "decision", "ANALYZING"));
                 }
-                sendProgressEvent(emitter, initialTrace);
+                sendProgressEventSafely(emitter, initialTrace, clientDisconnected);
                 ConversationMessageResponseDTO response = createMessageInternal(sessionId, request,
                         new ConversationProgressListener() {
                             @Override
@@ -331,12 +322,13 @@ public class ConversationServiceImpl implements ConversationService {
                                 trace.put("message", "completed");
                                 trace.put("intentType", intent.type().name());
                                 trace.put("confidence", intent.confidence());
-                                sendProgressEvent(emitter, trace);
+                                sendProgressEventSafely(emitter, trace, clientDisconnected);
                             }
 
                             @Override
                             public void onStageStarted(String stage) {
-                                sendProgressEvent(emitter, Map.of("stage", stage, "message", "started"));
+                                sendProgressEventSafely(emitter,
+                                        Map.of("stage", stage, "message", "started"), clientDisconnected);
                             }
 
                             @Override
@@ -350,13 +342,7 @@ public class ConversationServiceImpl implements ConversationService {
                                 if (event.details() != null && !event.details().isEmpty()) {
                                     trace.put("details", event.details());
                                 }
-                                try {
-                                    sendProgressEvent(emitter, trace);
-                                } catch (SseClientDisconnectedException e) {
-                                    clientDisconnected.set(true);
-                                    cancelDisconnectedRun(event.runId());
-                                    throw e;
-                                }
+                                sendProgressEventSafely(emitter, trace, clientDisconnected);
                             }
 
                             @Override
@@ -368,26 +354,18 @@ public class ConversationServiceImpl implements ConversationService {
                             public void onAnswerDelta(String delta) {
                                 if (delta == null || delta.isEmpty()) return;
                                 answerStreamed.set(true);
-                                try {
-                                    sendEvent(emitter, "delta", Map.of("text", delta));
-                                } catch (IOException e) {
-                                    throw new SseClientDisconnectedException(e);
-                                }
+                                sendEventSafely(emitter, "delta", Map.of("text", delta), clientDisconnected);
                             }
 
                             @Override
                             public void onAnswerReset(String answer) {
                                 answerStreamed.set(true);
-                                try {
-                                    sendEvent(emitter, "answer_reset",
-                                            Map.of("text", answer == null ? "" : answer));
-                                } catch (IOException e) {
-                                    throw new SseClientDisconnectedException(e);
-                                }
+                                sendEventSafely(emitter, "answer_reset",
+                                        Map.of("text", answer == null ? "" : answer), clientDisconnected);
                             }
-                        });
+                });
                 if (clientDisconnected.get()) {
-                    log.debug("SSE client disconnected after cancelling Agent run, sessionId={}, runId={}",
+                    log.debug("SSE client disconnected after Agent run persisted, sessionId={}, runId={}",
                             sessionId, activeRunId.get());
                     return;
                 }
@@ -423,7 +401,6 @@ public class ConversationServiceImpl implements ConversationService {
             } catch (Exception e) {
                 if (isClientDisconnect(e)) {
                     clientDisconnected.set(true);
-                    cancelDisconnectedRun(activeRunId.get());
                     log.debug("SSE client disconnected, sessionId={}, runId={}", sessionId, activeRunId.get());
                 } else {
                     sendError(emitter, ApiError.INTERNAL_ERROR.name(), ApiError.INTERNAL_ERROR.getMessage());
@@ -668,9 +645,24 @@ public class ConversationServiceImpl implements ConversationService {
         }
     }
 
-    private void cancelDisconnectedRun(String runId) {
-        if (agentRunCancellationRegistry != null && StringUtils.hasText(runId)) {
-            agentRunCancellationRegistry.cancel(runId);
+    private void sendProgressEventSafely(SseEmitter emitter, Object data, AtomicBoolean clientDisconnected) {
+        if (clientDisconnected.get()) return;
+        try {
+            sendProgressEvent(emitter, data);
+        } catch (SseClientDisconnectedException e) {
+            clientDisconnected.set(true);
+        }
+    }
+
+    private void sendEventSafely(SseEmitter emitter,
+                                 String event,
+                                 Object data,
+                                 AtomicBoolean clientDisconnected) {
+        if (clientDisconnected.get()) return;
+        try {
+            sendEvent(emitter, event, data);
+        } catch (IOException e) {
+            clientDisconnected.set(true);
         }
     }
 

@@ -40,6 +40,13 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
     }
 
     @Override
+    public List<AgentRun> findRecoverableRuns(String userId, int limit) {
+        if (!StringUtils.hasText(userId)) return List.of();
+        int boundedLimit = Math.max(1, Math.min(limit, 20));
+        return mapper.findRecoverableRuns(userId, boundedLimit).stream().map(this::toDomain).toList();
+    }
+
+    @Override
     public List<AgentStep> findSteps(String runId) {
         return StringUtils.hasText(runId) ? mapper.findSteps(runId).stream().map(this::toDomain).toList() : List.of();
     }

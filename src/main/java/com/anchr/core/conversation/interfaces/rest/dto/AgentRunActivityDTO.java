@@ -9,7 +9,10 @@ import java.util.List;
 @Data
 public class AgentRunActivityDTO implements Serializable {
     private String runId;
+    private String sessionId;
+    private String turnId;
     private String status;
+    private String currentStep;
     private String workflowVersion;
     private int stepCount;
     private int toolCallCount;
