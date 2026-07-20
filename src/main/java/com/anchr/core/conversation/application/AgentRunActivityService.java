@@ -30,12 +30,7 @@ public class AgentRunActivityService {
     private final ObjectMapper objectMapper;
 
     public AgentRunActivityDTO get(String runId) {
-        AgentRun run = traceRepository.findRun(runId)
-                .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND));
-        var session = conversationRepository.findSession(run.getSessionId());
-        if (session.isEmpty()) {
-            throw new BusinessException(ApiError.NOT_FOUND);
-        }
+        AgentRun run = requireAccessibleRun(runId);
         AgentRunActivityDTO dto = new AgentRunActivityDTO();
         dto.setRunId(run.getRunId());
         dto.setSessionId(run.getSessionId());
@@ -65,6 +60,10 @@ public class AgentRunActivityService {
         return dto;
     }
 
+    public void verifyAccessible(String runId) {
+        requireAccessibleRun(runId);
+    }
+
     public List<AgentRunSummaryDTO> listRecoverable(int limit) {
         int boundedLimit = Math.max(1, Math.min(limit, 20));
         return traceRepository.findRecoverableRuns(SINGLE_USER_ID, boundedLimit).stream()
@@ -82,6 +81,15 @@ public class AgentRunActivityService {
         dto.setStartedAt(run.getStartedAt());
         dto.setFinishedAt(run.getFinishedAt());
         return dto;
+    }
+
+    private AgentRun requireAccessibleRun(String runId) {
+        AgentRun run = traceRepository.findRun(runId)
+                .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND));
+        if (conversationRepository.findSession(run.getSessionId()).isEmpty()) {
+            throw new BusinessException(ApiError.NOT_FOUND);
+        }
+        return run;
     }
 
     private AgentRunActivityDTO.StepDTO toStep(AgentStep source) {

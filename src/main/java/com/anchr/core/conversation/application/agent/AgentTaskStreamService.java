@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/** Publishes incremental background-task answers to connected Ask clients. */
+/** Publishes background-task progress and canonical terminal answers to connected Ask clients. */
 @Slf4j
 @Component
 public class AgentTaskStreamService {
@@ -53,16 +53,19 @@ public class AgentTaskStreamService {
 
     public void publishTask(AgentTask task) {
         if (task == null || !StringUtils.hasText(task.getTaskId())) return;
+        publish(task.getTaskId(), "task", taskEvent(task));
+    }
+
+    static Map<String, Object> taskEvent(AgentTask task) {
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("taskId", task.getTaskId());
         event.put("type", task.getTaskType());
         event.put("status", task.getStatus());
         event.put("progress", task.getProgress());
         event.put("currentStage", task.getCurrentStage());
-        if (StringUtils.hasText(task.getAnswer())) event.put("answer", task.getAnswer());
         if (StringUtils.hasText(task.getErrorCode())) event.put("errorCode", task.getErrorCode());
         if (StringUtils.hasText(task.getErrorMessage())) event.put("errorMessage", task.getErrorMessage());
-        publish(task.getTaskId(), "task", event);
+        return event;
     }
 
     public void publishDelta(String taskId, String delta) {
@@ -81,6 +84,9 @@ public class AgentTaskStreamService {
     public void complete(AgentTask task) {
         if (task == null || !StringUtils.hasText(task.getTaskId())) return;
         publishTask(task);
+        if (StringUtils.hasText(task.getAnswer())) {
+            publishReset(task.getTaskId(), task.getAnswer());
+        }
         complete(task.getTaskId());
     }
 

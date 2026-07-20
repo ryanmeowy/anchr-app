@@ -299,6 +299,27 @@ class ConversationServiceImplTest {
     }
 
     @Test
+    void streamMessage_shouldGenerateFinalizedAnswerBeforePublishingText() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        String sessionId = session.getSessionId();
+        when(queryRewriteService.rewrite(sessionId, "mysql 架构是什么")).thenReturn(buildRewrite(
+                "mysql 架构是什么", "mysql 架构是什么", "unchanged", false));
+        when(conversationRetrievalOrchestrator.retrieve(
+                eq("mysql 架构是什么"), eq(20), anyList(), anyList(), eq(null)
+        )).thenReturn(buildRetrievalResult(List.of()));
+        when(answerGenerationService.generate(
+                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList()
+        )).thenReturn(buildAnswer("最终规范回答", false, null, List.of()));
+
+        service.streamMessage(sessionId, buildMessageRequest("mysql 架构是什么"));
+
+        verify(answerGenerationService).generate(
+                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList());
+        verify(answerGenerationService, never()).generateStream(
+                any(), any(), any(), anyList(), anyList(), any());
+    }
+
+    @Test
     void createMessage_shouldFallbackWhenEvidenceIsEmpty() throws Exception {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         String sessionId = session.getSessionId();

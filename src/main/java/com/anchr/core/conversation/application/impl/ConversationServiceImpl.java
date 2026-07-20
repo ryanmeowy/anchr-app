@@ -8,6 +8,7 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationService;
+import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
 import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
@@ -101,6 +102,8 @@ public class ConversationServiceImpl implements ConversationService {
     private AgentTaskProcessor agentTaskProcessor;
     @Autowired(required = false)
     private AgentConversationCleanupService agentConversationCleanupService;
+    @Autowired(required = false)
+    private AgentRuntimeSnapshotService agentRuntimeSnapshotService;
 
     /** Compatibility constructor for legacy unit tests that exercise only the traditional path. */
     public ConversationServiceImpl(ConversationRepository conversationRepository,
@@ -296,7 +299,6 @@ public class ConversationServiceImpl implements ConversationService {
     public SseEmitter streamMessage(String sessionId, ConversationMessageRequestDTO request) {
         SseEmitter emitter = new SseEmitter(120_000L);
         AtomicBoolean clientDisconnected = new AtomicBoolean(false);
-        AtomicBoolean answerStreamed = new AtomicBoolean(false);
         AtomicReference<String> activeRunId = new AtomicReference<>();
         emitter.onError(error -> clientDisconnected.set(true));
         emitter.onTimeout(() -> clientDisconnected.set(true));
@@ -343,35 +345,26 @@ public class ConversationServiceImpl implements ConversationService {
                                     trace.put("details", event.details());
                                 }
                                 sendProgressEventSafely(emitter, trace, clientDisconnected);
+                                if (agentRuntimeSnapshotService != null) {
+                                    agentRuntimeSnapshotService.publishProgress(event);
+                                }
                             }
 
                             @Override
                             public boolean supportsAnswerStreaming() {
-                                return true;
-                            }
-
-                            @Override
-                            public void onAnswerDelta(String delta) {
-                                if (delta == null || delta.isEmpty()) return;
-                                answerStreamed.set(true);
-                                sendEventSafely(emitter, "delta", Map.of("text", delta), clientDisconnected);
-                            }
-
-                            @Override
-                            public void onAnswerReset(String answer) {
-                                answerStreamed.set(true);
-                                sendEventSafely(emitter, "answer_reset",
-                                        Map.of("text", answer == null ? "" : answer), clientDisconnected);
+                                // Only the finalized, citation-normalized answer is safe to expose.
+                                return false;
                             }
                 });
+                if (agentRuntimeSnapshotService != null && StringUtils.hasText(response.getAgentRunId())) {
+                    agentRuntimeSnapshotService.publishMessage(response.getAgentRunId(), response);
+                }
                 if (clientDisconnected.get()) {
                     log.debug("SSE client disconnected after Agent run persisted, sessionId={}, runId={}",
                             sessionId, activeRunId.get());
                     return;
                 }
-                if (!answerStreamed.get()) {
-                    streamAnswer(emitter, response.getAnswer());
-                }
+                streamAnswer(emitter, response.getAnswer());
                 sendEvent(emitter, "citations", response.getCitations() == null ? List.of() : response.getCitations());
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("turnId", response.getTurnId());

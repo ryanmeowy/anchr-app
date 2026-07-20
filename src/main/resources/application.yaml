@@ -51,6 +51,7 @@ app:
     task-lease: ${APP_AGENT_TASK_LEASE:2m}
     task-max-retries: ${APP_AGENT_TASK_MAX_RETRIES:2}
     task-poll-interval: ${APP_AGENT_TASK_POLL_INTERVAL:5s}
+    runtime-snapshot-ttl: ${APP_AGENT_RUNTIME_SNAPSHOT_TTL:35m}
   conversation:
     intent-routing:
       enabled: ${APP_CONVERSATION_INTENT_ROUTING_ENABLED:false}

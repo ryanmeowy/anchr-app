@@ -23,6 +23,7 @@ public class AgentProperties {
     private Duration taskModelTimeout = Duration.ofSeconds(90);
     private Duration taskLease = Duration.ofMinutes(2);
     private int taskMaxRetries = 2;
+    private Duration runtimeSnapshotTtl = Duration.ofMinutes(35);
     private int summaryMaxDocuments = 3;
     private int summaryMaxSegments = 500;
     private int summaryMaxChars = 500_000;

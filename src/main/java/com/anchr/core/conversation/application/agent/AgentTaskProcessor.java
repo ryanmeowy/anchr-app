@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.application.agent;
 
+import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.*;
@@ -15,6 +16,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -25,7 +27,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 @Component
@@ -37,7 +38,6 @@ public class AgentTaskProcessor {
     private static final int CITATION_EVIDENCE_CHARS = 500;
     private static final int CITATION_CATALOG_CHARS = 8_000;
     private static final int STREAM_TAIL_GUARD_CHARS = 96;
-    private static final long PARTIAL_ANSWER_PERSIST_INTERVAL_MILLIS = 250L;
     private static final java.util.regex.Pattern PARAGRAPH_BOUNDARY = java.util.regex.Pattern.compile(
             "(?:\\R\\s*){2,}|(?m)(?=^\\s*(?:[-*+]\\s+|\\d+[.)]\\s+))");
 
@@ -53,6 +53,8 @@ public class AgentTaskProcessor {
     private final TransactionTemplate transactionTemplate;
     private final AgentTaskStreamService taskStreamService;
     @Qualifier("agentTaskExecutor") private final Executor executor;
+    @Autowired(required = false)
+    private AgentRuntimeSnapshotService runtimeSnapshotService;
     private final String owner = UUID.randomUUID().toString();
     private final Map<String, Thread> runningThreads = new ConcurrentHashMap<>();
     private final Set<String> scheduledTaskIds = ConcurrentHashMap.newKeySet();
@@ -229,9 +231,8 @@ public class AgentTaskProcessor {
                                    SummaryRequest request,
                                    long deadline) {
         String catalog = buildCitationCatalog(draft, evidence);
-        resetPartialAnswer(task);
         String result = generateFinalAnswer(task,
-                buildCitationCompactionPrompt(draft, catalog, request), evidence, deadline);
+                buildCitationCompactionPrompt(draft, catalog, request), deadline);
         if (!citationDensityWithinLimits(result)) {
             log.warn("Agent summary citation density remains high after deterministic compaction, taskId={}",
                     task.getTaskId());
@@ -241,7 +242,6 @@ public class AgentTaskProcessor {
 
     private String generateFinalAnswer(AgentTask task,
                                        String user,
-                                       List<EvidenceText> evidence,
                                        long deadline) {
         ensureActive(task, deadline);
         List<ConversationModelMessage> messages = List.of(
@@ -249,37 +249,21 @@ public class AgentTaskProcessor {
                 new ConversationModelMessage("user", user));
         GenerationOptions options = new GenerationOptions(0.2, 2_000,
                 boundedTaskModelTimeout(properties.getTaskModelTimeout(), deadline, System.currentTimeMillis()));
-        SummaryAnswerStream answerStream = new SummaryAnswerStream(task,
-                evidence.stream().map(EvidenceText::candidate).toList());
         long started = System.currentTimeMillis();
-        AtomicLong firstTokenAt = new AtomicLong();
         ConversationGenerationResult result;
         try {
-            result = generationPort.generateStream(messages, options, delta -> {
-                if (delta != null && !delta.isEmpty()) firstTokenAt.compareAndSet(0L, System.currentTimeMillis());
-                answerStream.accept(delta);
-            });
+            result = generationPort.generateWithUsage(messages, options);
             if (result == null) {
                 result = new ConversationGenerationResult(generationPort.generate(messages, options), 0, 0);
             }
         } catch (RuntimeException e) {
-            recordGenerationUsage(task, 0, 0, System.currentTimeMillis() - started,
-                    firstTokenAt.get() == 0L ? null : firstTokenAt.get() - started, true);
+            recordGenerationUsage(task, 0, 0, System.currentTimeMillis() - started, null, false);
             throw e;
         }
-        answerStream.finish(result.content());
         recordGenerationUsage(task, result.promptTokens(), result.completionTokens(),
-                System.currentTimeMillis() - started,
-                firstTokenAt.get() == 0L ? null : firstTokenAt.get() - started, true);
+                System.currentTimeMillis() - started, null, false);
         ensureActive(task, deadline);
         return compactCitationMarkers(visibleSummaryMarkdown(result.content(), true));
-    }
-
-    private void resetPartialAnswer(AgentTask task) {
-        task.setAnswer(null);
-        renew(task);
-        taskStreamService.publishReset(task.getTaskId(), "");
-        taskStreamService.publishTask(task);
     }
 
     private String buildCitationCompactionPrompt(String draft,
@@ -447,6 +431,7 @@ public class AgentTaskProcessor {
         if (!Boolean.TRUE.equals(completed)) throw new TaskCancelledException();
         recordTaskStage(task, "COMPLETED", "COMPLETED", 100, null, finalDetails);
         updateRun(task, AgentRunStatus.COMPLETED, null);
+        publishRuntimeTask(task);
         taskStreamService.complete(task);
     }
 
@@ -471,6 +456,7 @@ public class AgentTaskProcessor {
             if (Boolean.TRUE.equals(failed)) {
                 recordTaskStage(task, "FAILED", "FAILED", 100, code);
                 updateRun(task,AgentRunStatus.FAILED,code);
+                publishRuntimeTask(task);
                 taskStreamService.complete(task);
             }
         }
@@ -523,6 +509,11 @@ public class AgentTaskProcessor {
         step.setCompletionTokens(existing==null?0:existing.getCompletionTokens());
         step.setLatencyMs("RUNNING".equals(status)?0:Math.max(0,now-createdAt));step.setErrorCode(errorCode);step.setCreatedAt(createdAt);
         try{traceRepository.saveStep(step);}catch(Exception e){log.warn("Agent task stage trace failed, taskId={}, stage={}",task.getTaskId(),stage,e);}
+        if(runtimeSnapshotService!=null)runtimeSnapshotService.publishActivity(task.getRunId());
+    }
+
+    private void publishRuntimeTask(AgentTask task){
+        if(runtimeSnapshotService!=null&&task!=null)runtimeSnapshotService.publishTask(task.getRunId(),task);
     }
 
     private void recordGenerationUsage(AgentTask task,int promptTokens,int completionTokens,
@@ -573,59 +564,6 @@ public class AgentTaskProcessor {
 
     private SummaryRequest parseRequest(String json) throws Exception {JsonNode root=objectMapper.readTree(json);List<AssetRef> assets=new ArrayList<>();for(JsonNode n:root.path("assets"))assets.add(new AssetRef(n.path("assetId").asText(),n.path("kbId").asText(),n.path("fileName").asText()));return new SummaryRequest(assets,root.path("instruction").asText(),root.path("language").asText("中文"));}
 
-    private final class SummaryAnswerStream {
-        private final AgentTask task;
-        private final List<ConversationRetrievalCandidate> evidence;
-        private final StringBuilder raw = new StringBuilder();
-        private String published = "";
-        private long lastPersistedAt;
-        private int lastPersistedLength;
-
-        private SummaryAnswerStream(AgentTask task, List<ConversationRetrievalCandidate> evidence) {
-            this.task = task;
-            this.evidence = evidence;
-        }
-
-        private void accept(String delta) {
-            if (delta == null || delta.isEmpty()) return;
-            raw.append(delta);
-            publish(false);
-        }
-
-        private void finish(String content) {
-            if (content != null && !content.contentEquals(raw)) {
-                raw.setLength(0);
-                raw.append(content);
-            }
-            publish(true);
-        }
-
-        private void publish(boolean complete) {
-            String visible = visibleAnswer(complete);
-            if (!visible.equals(published)) {
-                if (visible.startsWith(published)) {
-                    taskStreamService.publishDelta(task.getTaskId(), visible.substring(published.length()));
-                } else {
-                    taskStreamService.publishReset(task.getTaskId(), visible);
-                }
-                published = visible;
-            }
-            long now = System.currentTimeMillis();
-            boolean persist = complete || (visible.length() != lastPersistedLength
-                    && now - lastPersistedAt >= PARTIAL_ANSWER_PERSIST_INTERVAL_MILLIS);
-            if (persist) {
-                task.setAnswer(visible);
-                renew(task);
-                lastPersistedAt = now;
-                lastPersistedLength = visible.length();
-            }
-        }
-
-        private String visibleAnswer(boolean complete) {
-            String source = compactCitationMarkers(visibleSummaryMarkdown(raw.toString(), complete));
-            return AgentCitationRenderer.render(source, evidence).answer();
-        }
-    }
     private ConversationRetrievalCandidate candidate(Segment s,String file,String text){return ConversationRetrievalCandidate.builder().segmentId(s.getSegmentId()).kbId(s.getKbId()).assetId(s.getAssetId()).assetType(s.getAssetType()).segmentType(s.getSegmentType()==null?null:s.getSegmentType().name()).sourceRef(file).title(s.getTitle()).content(text).pageNo(s.getPageNo()).anchor(ConversationRetrievalCandidate.Anchor.builder().pageNo(s.getPageNo()).chunkOrder(s.getChunkOrder()).bbox(s.getBbox()).build()).build();}
     private String text(Segment s){return StringUtils.hasText(s.getContentText())?s.getContentText():StringUtils.hasText(s.getOcrText())?s.getOcrText():"";}
     private record AssetRef(String assetId,String kbId,String fileName){} private record SummaryRequest(List<AssetRef> assets,String instruction,String language){} private record EvidenceText(ConversationRetrievalCandidate candidate,String text){}
