@@ -28,6 +28,15 @@
       started_at=values(started_at),finished_at=values(finished_at)
   </insert>
   <select id="findById" resultMap="TaskMap">select * from agent_task where task_id=#{taskId}</select>
+  <select id="findByIds" resultMap="TaskMap">
+    select task_id, task_type, status, progress, current_stage,
+           answer, citations_json, error_code, error_message
+    from agent_task
+    where task_id in
+    <foreach collection="taskIds" item="taskId" open="(" separator="," close=")">
+      #{taskId}
+    </foreach>
+  </select>
   <select id="findBySessionId" resultMap="TaskMap">
     select * from agent_task where session_id=#{sessionId} order by created_at asc
   </select>

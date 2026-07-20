@@ -1,12 +1,18 @@
 package com.anchr.core.conversation.domain.repository;
 
 import com.anchr.core.conversation.domain.model.AgentTask;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public interface AgentTaskRepository {
     void save(AgentTask task);
     Optional<AgentTask> findById(String taskId);
+    default List<AgentTask> findByIds(Collection<String> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) return List.of();
+        return taskIds.stream().distinct().map(this::findById)
+                .flatMap(Optional::stream).toList();
+    }
     List<AgentTask> findBySessionId(String sessionId);
     List<AgentTask> findClaimable(long now, int limit);
     boolean claim(String taskId, String owner, long now, long leaseUntil);

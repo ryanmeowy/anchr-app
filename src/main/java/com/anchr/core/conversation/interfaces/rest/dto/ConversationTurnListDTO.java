@@ -14,5 +14,6 @@ public class ConversationTurnListDTO implements Serializable {
 
     private String sessionId;
     private List<ConversationTurnDTO> turns = new ArrayList<>();
+    private boolean hasMore;
+    private String nextBeforeTurnId;
 }
-

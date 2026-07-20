@@ -1,68 +1,71 @@
 package com.anchr.core.conversation.application.impl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationService;
-import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
-import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
+import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
+import com.anchr.core.conversation.application.model.AgentProgressEvent;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerStatus;
-import com.anchr.core.conversation.application.model.AgentProgressEvent;
-import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.application.model.ConversationExecutionResult;
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
 import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationIntentType;
-import com.anchr.core.conversation.domain.model.ConversationSession;
-import com.anchr.core.conversation.domain.model.ConversationTurn;
-import com.anchr.core.conversation.domain.repository.ConversationRepository;
-import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
+import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.AgentTaskStatus;
+import com.anchr.core.conversation.domain.model.ConversationSession;
+import com.anchr.core.conversation.domain.model.ConversationTurn;
+import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
+import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
+import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.conversation.interfaces.rest.dto.AgentTaskDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationIntentDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
-import com.anchr.core.conversation.interfaces.rest.dto.ConversationIntentDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
-import com.anchr.core.conversation.interfaces.rest.dto.AgentTaskDTO;
+import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.search.application.KbScopeResolver;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
-import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -79,8 +82,6 @@ public class ConversationServiceImpl implements ConversationService {
     private static final int DEFAULT_SESSION_LIST_LIMIT = 20;
     private static final int MAX_SESSION_LIST_LIMIT = 50;
     private static final int AUTO_TITLE_MAX_LENGTH = 128;
-    private static final int LAST_MESSAGE_PREVIEW_MAX_LENGTH = 80;
-    // A padded trace frame prevents small SSE events from being held by common reverse proxies.
     private static final String SSE_TRACE_PADDING = " ".repeat(2_048);
     private static final String SINGLE_USER_ID = "single_user";
 
@@ -156,7 +157,7 @@ public class ConversationServiceImpl implements ConversationService {
                 .toList();
 
         ConversationSessionListDTO response = new ConversationSessionListDTO();
-        response.setItems(page.stream().map(this::toSessionListItemDto).toList());
+        response.setItems(page.stream().map(this::toSessionDto).toList());
         if (sessions.size() > offset + boundedLimit) {
             response.setNextCursor(encodeSessionListCursor(offset + boundedLimit));
         }
@@ -407,37 +408,75 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public ConversationTurnListDTO listMessages(String sessionId, Integer limit, String beforeTurnId) {
+        long totalStarted = System.nanoTime();
+        long phaseStarted = System.nanoTime();
         ConversationSession session = loadSessionOrThrow(sessionId);
+        recordHistoryPhase("session", phaseStarted);
         int boundedLimit = normalizeLimit(limit);
-        List<ConversationTurn> candidates = conversationRepository.findRecentTurns(session.getSessionId(), MAX_TURN_LIMIT);
-        if (candidates.isEmpty()) {
-            ConversationTurnListDTO empty = new ConversationTurnListDTO();
-            empty.setSessionId(session.getSessionId());
-            return empty;
+
+        ConversationTurnPosition before = null;
+        if (StringUtils.hasText(beforeTurnId)) {
+            phaseStarted = System.nanoTime();
+            before = conversationRepository.findTurnPosition(session.getSessionId(), beforeTurnId)
+                    .orElseThrow(() -> new IllegalArgumentException("beforeTurnId is invalid"));
+            recordHistoryPhase("cursor", phaseStarted);
         }
 
-        List<ConversationTurn> filteredTurns = filterBeforeTurn(candidates, session.getSessionId(), beforeTurnId);
-        filteredTurns.sort(Comparator.comparingLong(ConversationTurn::getCreatedAt));
-        if (filteredTurns.size() > boundedLimit) {
-            filteredTurns = filteredTurns.subList(filteredTurns.size() - boundedLimit, filteredTurns.size());
-        }
+        phaseStarted = System.nanoTime();
+        List<ConversationTurn> candidates = conversationRepository.findTurnPage(
+                session.getSessionId(), before, boundedLimit + 1);
+        recordHistoryPhase("turns", phaseStarted);
+
+        boolean hasMore = candidates.size() > boundedLimit;
+        List<ConversationTurn> page = candidates.stream().limit(boundedLimit).toList();
+
+        phaseStarted = System.nanoTime();
+        Map<String, AgentTaskDTO> activeTasks = loadActiveTaskDtos(page);
+        recordHistoryPhase("tasks", phaseStarted);
+
+        List<ConversationTurn> chronologicalPage = page.stream()
+                .sorted(Comparator.comparingLong(ConversationTurn::getCreatedAt)
+                        .thenComparing(ConversationTurn::getTurnId))
+                .toList();
 
         ConversationTurnListDTO response = new ConversationTurnListDTO();
         response.setSessionId(session.getSessionId());
-        response.setTurns(filteredTurns.stream().map(this::toTurnDto).toList());
+        response.setHasMore(hasMore);
+        response.setNextBeforeTurnId(hasMore && !page.isEmpty()
+                ? page.getLast().getTurnId() : null);
+        phaseStarted = System.nanoTime();
+        response.setTurns(chronologicalPage.stream()
+                .map(turn -> toTurnDto(turn, StringUtils.hasText(turn.getAgentTaskId())
+                        ? activeTasks.get(turn.getAgentTaskId()) : null))
+                .toList());
+        recordHistoryPhase("mapping", phaseStarted);
+        meterRegistry.summary("conversation.history.turns").record(page.size());
+        meterRegistry.timer("conversation.history.latency", "phase", "total")
+                .record(System.nanoTime() - totalStarted, TimeUnit.NANOSECONDS);
+
         return response;
     }
 
-    private List<ConversationTurn> filterBeforeTurn(List<ConversationTurn> candidates, String sessionId, String beforeTurnId) {
-        if (!StringUtils.hasText(beforeTurnId)) {
-            return new ArrayList<>(candidates);
+    private void recordHistoryPhase(String phase, long startedAt) {
+        meterRegistry.timer("conversation.history.latency", "phase", phase)
+                .record(System.nanoTime() - startedAt, TimeUnit.NANOSECONDS);
+    }
+
+    private Map<String, AgentTaskDTO> loadActiveTaskDtos(List<ConversationTurn> turns) {
+        if (agentTaskRepository == null || turns == null || turns.isEmpty()) return Map.of();
+        Set<String> taskIds = new LinkedHashSet<>();
+        for (ConversationTurn turn : turns) {
+            if (AnswerStatus.PROCESSING.name().equals(turn.getAnswerStatus())
+                    && StringUtils.hasText(turn.getAgentTaskId())) {
+                taskIds.add(turn.getAgentTaskId());
+            }
         }
-        ConversationTurn beforeTurn = conversationRepository.findTurn(sessionId, beforeTurnId)
-                .orElseThrow(() -> new IllegalArgumentException("beforeTurnId is invalid"));
-        long boundary = beforeTurn.getCreatedAt();
-        return candidates.stream()
-                .filter(turn -> turn.getCreatedAt() < boundary)
-                .toList();
+        if (taskIds.isEmpty()) return Map.of();
+        Map<String, AgentTaskDTO> tasks = new LinkedHashMap<>();
+        for (AgentTask task : agentTaskRepository.findByIds(taskIds)) {
+            tasks.put(task.getTaskId(), toAgentTaskDto(task));
+        }
+        return tasks;
     }
 
     private ConversationSession loadSessionOrThrow(String sessionId) {
@@ -459,49 +498,22 @@ public class ConversationServiceImpl implements ConversationService {
         return dto;
     }
 
-    private ConversationSessionDTO toSessionListItemDto(ConversationSession session) {
-        ConversationSessionDTO dto = toSessionDto(session);
-        dto.setLastMessagePreview(resolveLastMessagePreview(session.getSessionId()));
-        return dto;
-    }
-
-    private String resolveLastMessagePreview(String sessionId) {
-        List<ConversationTurn> turns = conversationRepository.findRecentTurns(sessionId, 1);
-        if (turns.isEmpty()) {
-            return null;
-        }
-        ConversationTurn latest = turns.getFirst();
-        String preview = StringUtils.hasText(latest.getAnswer()) ? latest.getAnswer() : latest.getQuery();
-        if (!StringUtils.hasText(preview)) {
-            return null;
-        }
-        String normalized = preview.trim().replaceAll("\\s+", " ");
-        if (normalized.length() <= LAST_MESSAGE_PREVIEW_MAX_LENGTH) {
-            return normalized;
-        }
-        return normalized.substring(0, LAST_MESSAGE_PREVIEW_MAX_LENGTH);
-    }
-
-    private ConversationTurnDTO toTurnDto(ConversationTurn turn) {
+    private ConversationTurnDTO toTurnDto(ConversationTurn turn, AgentTaskDTO agentTask) {
         ConversationTurnDTO dto = new ConversationTurnDTO();
         dto.setTurnId(turn.getTurnId());
         dto.setSessionId(turn.getSessionId());
         dto.setAgentRunId(turn.getAgentRunId());
         dto.setWorkflowVersion(turn.getWorkflowVersion());
         dto.setExecutionMode(StringUtils.hasText(turn.getExecutionMode()) ? turn.getExecutionMode() : "TRADITIONAL");
-        dto.setAgentTask(toAgentTaskDto(turn.getAgentTaskId()));
+        dto.setAgentTask(agentTask);
         dto.setQuery(turn.getQuery());
-        dto.setRewrittenQuery(turn.getRewrittenQuery());
         dto.setAnswer(turn.getAnswer());
-        dto.setKbScope(conversationTurnCodec.parseKbScope(turn.getKbScopeJson()));
         dto.setAssetScope(conversationTurnCodec.parseAssetScope(turn.getAssetScopeJson()));
         dto.setAnswerMode(turn.getAnswerMode());
         dto.setAnswerStatus(resolveTurnAnswerStatus(turn).name());
         dto.setAnswerFallbackReason(resolveTurnFallbackReason(turn));
         dto.setIntent(toIntentDto(turn));
         dto.setCitations(conversationTurnCodec.parseCitations(turn.getCitationsJson()));
-        dto.setResultCards(conversationTurnCodec.parseResultCards(turn.getResultCardsJson()));
-        dto.setCreatedAt(turn.getCreatedAt());
         return dto;
     }
 
@@ -588,12 +600,14 @@ public class ConversationServiceImpl implements ConversationService {
 
     private AgentTaskDTO toAgentTaskDto(String taskId) {
         if (!StringUtils.hasText(taskId) || agentTaskRepository == null) return null;
-        return agentTaskRepository.findById(taskId).map(task -> {
-            AgentTaskDTO dto = new AgentTaskDTO(); dto.setTaskId(task.getTaskId()); dto.setType(task.getTaskType());
-            dto.setStatus(task.getStatus()); dto.setProgress(task.getProgress()); dto.setCurrentStage(task.getCurrentStage());
-            dto.setAnswer(task.getAnswer()); dto.setCitations(conversationTurnCodec.parseCitations(task.getCitationsJson()));
-            dto.setErrorCode(task.getErrorCode()); dto.setErrorMessage(task.getErrorMessage()); return dto;
-        }).orElse(null);
+        return agentTaskRepository.findById(taskId).map(this::toAgentTaskDto).orElse(null);
+    }
+
+    private AgentTaskDTO toAgentTaskDto(AgentTask task) {
+        AgentTaskDTO dto = new AgentTaskDTO(); dto.setTaskId(task.getTaskId()); dto.setType(task.getTaskType());
+        dto.setStatus(task.getStatus()); dto.setProgress(task.getProgress()); dto.setCurrentStage(task.getCurrentStage());
+        dto.setAnswer(task.getAnswer()); dto.setCitations(conversationTurnCodec.parseCitations(task.getCitationsJson()));
+        dto.setErrorCode(task.getErrorCode()); dto.setErrorMessage(task.getErrorMessage()); return dto;
     }
 
     private void submitTaskAfterCommit(String taskId) {

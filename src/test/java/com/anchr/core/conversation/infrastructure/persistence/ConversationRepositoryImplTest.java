@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationSessionStatus;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
+import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -118,6 +119,25 @@ class ConversationRepositoryImplTest {
 
         verify(mapper).upsertTurn(org.mockito.ArgumentMatchers.argThat(record ->
                 "KB_QUERY".equals(record.getIntentType()) && "LEGACY".equals(record.getIntentSource())));
+    }
+
+    @Test
+    void historyPage_shouldUseLightweightPositionAndBoundLimitPlusOne() {
+        long timestamp = 1_700_000_000_123L;
+        ConversationTurnRecord position = new ConversationTurnRecord();
+        position.setTurnId("turn_2");
+        position.setCreatedAt(LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(timestamp), ZoneId.systemDefault()));
+        when(mapper.findTurnPosition("cvs_1", "turn_2")).thenReturn(Optional.of(position));
+        when(mapper.findTurnPage("cvs_1", position.getCreatedAt(), "turn_2", 101))
+                .thenReturn(List.of(position));
+
+        ConversationTurnPosition before = repository.findTurnPosition("cvs_1", "turn_2").orElseThrow();
+        List<ConversationTurn> page = repository.findTurnPage("cvs_1", before, 999);
+
+        assertThat(before.createdAt()).isEqualTo(timestamp);
+        assertThat(page).extracting(ConversationTurn::getTurnId).containsExactly("turn_2");
+        verify(mapper).findTurnPage("cvs_1", position.getCreatedAt(), "turn_2", 101);
     }
 
     private ConversationSessionRecord record(String sessionId, long timestamp) {

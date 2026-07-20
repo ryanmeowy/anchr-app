@@ -123,4 +123,31 @@
         order by created_at desc, turn_id desc
         limit #{limit}
     </select>
+
+    <select id="findTurnPosition" resultMap="TurnMap">
+        select turn_id, created_at
+        from conversation_turn
+        where session_id = #{sessionId}
+          and turn_id = #{turnId}
+          and deleted_at is null
+    </select>
+
+    <select id="findTurnPage" resultMap="TurnMap">
+        select turn_id, session_id, query, answer, asset_scope,
+               answer_mode, answer_status, answer_fallback_reason,
+               intent_type, intent_confidence, intent_reason, intent_source, intent_fallback,
+               citations, retrieval_trace, agent_run_id, workflow_version,
+               execution_mode, agent_task_id, created_at
+        from conversation_turn
+        where session_id = #{sessionId}
+          and deleted_at is null
+        <if test="beforeCreatedAt != null and beforeTurnId != null">
+          and (
+            created_at &lt; #{beforeCreatedAt}
+            or (created_at = #{beforeCreatedAt} and turn_id &lt; #{beforeTurnId})
+          )
+        </if>
+        order by created_at desc, turn_id desc
+        limit #{limit}
+    </select>
 </mapper>

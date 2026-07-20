@@ -5,6 +5,7 @@ import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import java.time.*;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,6 +15,13 @@ public class AgentTaskRepositoryImpl implements AgentTaskRepository {
     private final AgentTaskMapper mapper;
     @Override public void save(AgentTask task) { mapper.upsert(toRecord(task)); }
     @Override public Optional<AgentTask> findById(String id) { return mapper.findById(id).map(this::toDomain); }
+    @Override public List<AgentTask> findByIds(Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) return List.of();
+        List<String> normalized = ids.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (normalized.isEmpty()) return List.of();
+        return mapper.findByIds(normalized).stream()
+                .map(this::toDomain).toList();
+    }
     @Override public List<AgentTask> findBySessionId(String sessionId) {
         return mapper.findBySessionId(sessionId).stream().map(this::toDomain).toList();
     }

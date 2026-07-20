@@ -3,6 +3,7 @@ package com.anchr.core.conversation.infrastructure.persistence;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,4 +29,12 @@ public interface ConversationMapper {
 
     List<ConversationTurnRecord> findRecentTurns(@Param("sessionId") String sessionId,
                                                  @Param("limit") int limit);
+
+    Optional<ConversationTurnRecord> findTurnPosition(@Param("sessionId") String sessionId,
+                                                      @Param("turnId") String turnId);
+
+    List<ConversationTurnRecord> findTurnPage(@Param("sessionId") String sessionId,
+                                              @Param("beforeCreatedAt") LocalDateTime beforeCreatedAt,
+                                              @Param("beforeTurnId") String beforeTurnId,
+                                              @Param("limit") int limit);
 }

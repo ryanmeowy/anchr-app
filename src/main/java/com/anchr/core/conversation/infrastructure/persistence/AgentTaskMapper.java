@@ -3,6 +3,7 @@ package com.anchr.core.conversation.infrastructure.persistence;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -10,6 +11,7 @@ import java.util.Optional;
 public interface AgentTaskMapper {
     int upsert(AgentTaskRecord record);
     Optional<AgentTaskRecord> findById(@Param("taskId") String taskId);
+    List<AgentTaskRecord> findByIds(@Param("taskIds") Collection<String> taskIds);
     List<AgentTaskRecord> findBySessionId(@Param("sessionId") String sessionId);
     List<AgentTaskRecord> findClaimable(@Param("now") LocalDateTime now, @Param("limit") int limit);
     int claim(@Param("taskId") String taskId, @Param("owner") String owner,

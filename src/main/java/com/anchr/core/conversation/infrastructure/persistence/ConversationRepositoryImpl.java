@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationSessionStatus;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
+import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
@@ -23,6 +24,7 @@ import java.util.Optional;
 public class ConversationRepositoryImpl implements ConversationRepository {
 
     private static final int MAX_RECENT_LIMIT = 100;
+    private static final int MAX_HISTORY_PAGE_QUERY_LIMIT = 101;
     private static final int MAX_SESSION_LIST_LIMIT = 200;
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {
     };
@@ -94,6 +96,31 @@ public class ConversationRepositoryImpl implements ConversationRepository {
         }
         int boundedLimit = Math.max(1, Math.min(limit, MAX_RECENT_LIMIT));
         return mapper.findRecentTurns(sessionId, boundedLimit).stream()
+                .map(this::toTurnDomain)
+                .toList();
+    }
+
+    @Override
+    public Optional<ConversationTurnPosition> findTurnPosition(String sessionId, String turnId) {
+        if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(turnId)) {
+            return Optional.empty();
+        }
+        return mapper.findTurnPosition(sessionId, turnId)
+                .map(record -> new ConversationTurnPosition(
+                        record.getTurnId(), toEpochMillis(record.getCreatedAt())));
+    }
+
+    @Override
+    public List<ConversationTurn> findTurnPage(String sessionId,
+                                               ConversationTurnPosition before,
+                                               int limit) {
+        if (!StringUtils.hasText(sessionId)) {
+            return List.of();
+        }
+        int boundedLimit = Math.max(1, Math.min(limit, MAX_HISTORY_PAGE_QUERY_LIMIT));
+        LocalDateTime beforeCreatedAt = before == null ? null : toLocalDateTime(before.createdAt());
+        String beforeTurnId = before == null ? null : before.turnId();
+        return mapper.findTurnPage(sessionId, beforeCreatedAt, beforeTurnId, boundedLimit).stream()
                 .map(this::toTurnDomain)
                 .toList();
     }

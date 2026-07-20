@@ -135,6 +135,26 @@ class ConversationMysqlIntegrationTest {
         assertThat(countDeletedRows("conversation_session", "session_id", session.getSessionId())).isEqualTo(1);
     }
 
+    @Test
+    void historyPage_shouldUseStableCreatedAtAndTurnIdBoundary() {
+        ConversationSession session = session("cvs_history", 1_000L, List.of("kb_1"));
+        repository.saveSession(session);
+        repository.saveTurn(turn("turn_1", session.getSessionId(), 2_000L, "[]"));
+        repository.saveTurn(turn("turn_2", session.getSessionId(), 3_000L, "[]"));
+        repository.saveTurn(turn("turn_3", session.getSessionId(), 3_000L, "[]"));
+        repository.saveTurn(turn("turn_4", session.getSessionId(), 4_000L, "[]"));
+
+        List<ConversationTurn> firstPage = repository.findTurnPage(session.getSessionId(), null, 2);
+        var before = repository.findTurnPosition(
+                session.getSessionId(), firstPage.getLast().getTurnId()).orElseThrow();
+        List<ConversationTurn> secondPage = repository.findTurnPage(session.getSessionId(), before, 2);
+
+        assertThat(firstPage).extracting(ConversationTurn::getTurnId)
+                .containsExactly("turn_4", "turn_3");
+        assertThat(secondPage).extracting(ConversationTurn::getTurnId)
+                .containsExactly("turn_2", "turn_1");
+    }
+
     private ConversationSession session(String sessionId, long timestamp, List<String> kbScope) {
         ConversationSession session = ConversationSession.createActive(sessionId, "single_user", null, timestamp);
         session.setUpdatedAt(timestamp);

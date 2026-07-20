@@ -25,8 +25,11 @@ import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationIntentType;
 import com.anchr.core.conversation.application.model.RewriteResult;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
+import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
+import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
+import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
@@ -86,6 +89,8 @@ class ConversationServiceImplTest {
     private CitationReasonGenerationService citationReasonGenerationService;
     @Mock
     private AgentConversationCleanupService agentConversationCleanupService;
+    @Mock
+    private AgentTaskRepository agentTaskRepository;
 
     private InMemoryConversationRepository repository;
     private ObjectMapper objectMapper;
@@ -128,6 +133,8 @@ class ConversationServiceImplTest {
                 objectMapper,
                 meterRegistry,
                 activityEventService,
+                agentTaskRepository,
+                null,
                 Runnable::run
         );
         ReflectionTestUtils.setField(service, "agentConversationCleanupService", agentConversationCleanupService);
@@ -275,12 +282,8 @@ class ConversationServiceImplTest {
         assertThat(messageList.getTurns().getFirst().getQuery()).isEqualTo("mysql 架构是什么");
         assertThat(messageList.getTurns().getFirst().getAnswerStatus()).isEqualTo(AnswerStatus.ANSWERED.name());
         assertThat(messageList.getTurns().get(1).getQuery()).isEqualTo("那 InnoDB 呢");
-        assertThat(messageList.getTurns().getFirst().getResultCards()).hasSize(2);
-        assertThat(messageList.getTurns().getFirst().getResultCards().getFirst().getPrimaryHit().getSegmentId())
-                .isEqualTo("seg_text_1");
-        assertThat(messageList.getTurns().get(1).getResultCards()).hasSize(1);
-        assertThat(messageList.getTurns().get(1).getResultCards().getFirst().getPrimaryHit().getSegmentId())
-                .isEqualTo("seg_text_2");
+        assertThat(messageList.isHasMore()).isFalse();
+        assertThat(messageList.getNextBeforeTurnId()).isNull();
 
         List<ConversationTurn> storedTurns = repository.findRecentTurns(sessionId, 10);
         assertThat(storedTurns).hasSize(2);
@@ -602,19 +605,11 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void listSessions_shouldReturnSingleUserSessionsWithCursorAndPreview() {
+    void listSessions_shouldReturnSingleUserSessionsWithCursorWithoutPerSessionMessageQueries() {
         ConversationSessionDTO first = service.createSession(new ConversationCreateRequestDTO());
         ConversationSessionDTO second = service.createSession(new ConversationCreateRequestDTO());
         repository.findSession(first.getSessionId()).orElseThrow().setUpdatedAt(1000L);
         repository.findSession(second.getSessionId()).orElseThrow().setUpdatedAt(2000L);
-
-        ConversationTurn firstTurn = new ConversationTurn();
-        firstTurn.setTurnId("turn_preview");
-        firstTurn.setSessionId(first.getSessionId());
-        firstTurn.setQuery("preview query");
-        firstTurn.setAnswer("preview answer ".repeat(10));
-        firstTurn.setCreatedAt(System.currentTimeMillis());
-        repository.saveTurn(firstTurn);
 
         ConversationSessionListDTO firstPage = service.listSessions(1, null);
 
@@ -627,7 +622,7 @@ class ConversationServiceImplTest {
 
         assertThat(secondPage.getItems()).hasSize(1);
         assertThat(secondPage.getItems().getFirst().getSessionId()).isEqualTo(first.getSessionId());
-        assertThat(secondPage.getItems().getFirst().getLastMessagePreview()).startsWith("preview answer");
+        assertThat(secondPage.getItems().getFirst().getLastMessagePreview()).isNull();
         assertThat(secondPage.getNextCursor()).isNull();
     }
 
@@ -679,7 +674,7 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void listMessages_shouldReturnEmptyResultCardsForLegacyTurn() {
+    void listMessages_shouldInferLegacyAnswerStatusWithoutReturningUnusedResultCards() {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         ConversationTurn legacyTurn = new ConversationTurn();
         legacyTurn.setTurnId("turn_legacy");
@@ -695,10 +690,75 @@ class ConversationServiceImplTest {
         ConversationTurnListDTO response = service.listMessages(session.getSessionId(), 20, null);
 
         assertThat(response.getTurns()).hasSize(1);
-        assertThat(response.getTurns().getFirst().getResultCards()).isEmpty();
         assertThat(response.getTurns().getFirst().getAnswerStatus()).isEqualTo(AnswerStatus.NO_EVIDENCE.name());
         assertThat(response.getTurns().getFirst().getAnswerFallbackReason())
                 .isEqualTo("no_evidence_low_retrieval_score");
+    }
+
+    @Test
+    void listMessages_shouldPageByCreatedAtAndTurnIdWithoutGaps() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        saveHistoryTurn(session.getSessionId(), "turn_1", 1_000L, AnswerStatus.ANSWERED, null);
+        saveHistoryTurn(session.getSessionId(), "turn_2", 2_000L, AnswerStatus.ANSWERED, null);
+        saveHistoryTurn(session.getSessionId(), "turn_3", 2_000L, AnswerStatus.ANSWERED, null);
+        saveHistoryTurn(session.getSessionId(), "turn_4", 3_000L, AnswerStatus.ANSWERED, null);
+
+        ConversationTurnListDTO first = service.listMessages(session.getSessionId(), 2, null);
+        ConversationTurnListDTO second = service.listMessages(
+                session.getSessionId(), 2, first.getNextBeforeTurnId());
+
+        assertThat(first.getTurns()).extracting(ConversationTurnDTO::getTurnId)
+                .containsExactly("turn_3", "turn_4");
+        assertThat(first.isHasMore()).isTrue();
+        assertThat(first.getNextBeforeTurnId()).isEqualTo("turn_3");
+        assertThat(second.getTurns()).extracting(ConversationTurnDTO::getTurnId)
+                .containsExactly("turn_1", "turn_2");
+        assertThat(second.isHasMore()).isFalse();
+        assertThat(second.getNextBeforeTurnId()).isNull();
+    }
+
+    @Test
+    void listMessages_shouldBatchOnlyProcessingTasks() {
+        ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
+        saveHistoryTurn(session.getSessionId(), "turn_done", 1_000L, AnswerStatus.ANSWERED, "task_done");
+        saveHistoryTurn(session.getSessionId(), "turn_running", 2_000L, AnswerStatus.PROCESSING, "task_running");
+        AgentTask running = new AgentTask();
+        running.setTaskId("task_running");
+        running.setStatus("RUNNING");
+        running.setProgress(40);
+        running.setCurrentStage("MAP_SUMMARY");
+        running.setCitationsJson("[]");
+        when(agentTaskRepository.findByIds(any())).thenReturn(List.of(running));
+
+        ConversationTurnListDTO response = service.listMessages(session.getSessionId(), 20, null);
+
+        assertThat(response.getTurns().getFirst().getAgentTask()).isNull();
+        assertThat(response.getTurns().get(1).getAgentTask()).isNotNull();
+        ConversationTurnDTO runningTurn = response.getTurns().get(1);
+        assertThat(runningTurn.getAgentTask().getTaskId()).isEqualTo("task_running");
+        assertThat(runningTurn.getAgentTask().getProgress()).isEqualTo(40);
+        verify(agentTaskRepository).findByIds(org.mockito.ArgumentMatchers.argThat(ids ->
+                ids.size() == 1 && ids.contains("task_running") && !ids.contains("task_done")));
+        verify(agentTaskRepository, never()).findById("task_done");
+    }
+
+    private void saveHistoryTurn(String sessionId,
+                                 String turnId,
+                                 long createdAt,
+                                 AnswerStatus status,
+                                 String taskId) {
+        ConversationTurn turn = new ConversationTurn();
+        turn.setTurnId(turnId);
+        turn.setSessionId(sessionId);
+        turn.setQuery("query " + turnId);
+        turn.setAnswer(status == AnswerStatus.PROCESSING ? "" : "answer " + turnId);
+        turn.setAnswerStatus(status.name());
+        turn.setCitationsJson("[]");
+        turn.setRetrievalTraceJson("{}");
+        turn.setExecutionMode(taskId == null ? "TRADITIONAL" : "AGENT");
+        turn.setAgentTaskId(taskId);
+        turn.setCreatedAt(createdAt);
+        repository.saveTurn(turn);
     }
 
     private RewriteResult buildRewrite(String originalQuery, String rewrittenQuery, String reason, boolean fallback) {
@@ -807,6 +867,24 @@ class ConversationServiceImplTest {
             }
             return turns.values().stream()
                     .sorted(Comparator.comparingLong(ConversationTurn::getCreatedAt).reversed())
+                    .limit(Math.max(1, limit))
+                    .collect(Collectors.toCollection(ArrayList::new));
+        }
+
+        @Override
+        public List<ConversationTurn> findTurnPage(String sessionId,
+                                                   ConversationTurnPosition before,
+                                                   int limit) {
+            LinkedHashMap<String, ConversationTurn> turns = turnsBySession.get(sessionId);
+            if (turns == null || turns.isEmpty()) return List.of();
+            return turns.values().stream()
+                    .filter(turn -> before == null
+                            || turn.getCreatedAt() < before.createdAt()
+                            || (turn.getCreatedAt() == before.createdAt()
+                            && turn.getTurnId().compareTo(before.turnId()) < 0))
+                    .sorted(Comparator.comparingLong(ConversationTurn::getCreatedAt)
+                            .thenComparing(ConversationTurn::getTurnId)
+                            .reversed())
                     .limit(Math.max(1, limit))
                     .collect(Collectors.toCollection(ArrayList::new));
         }
