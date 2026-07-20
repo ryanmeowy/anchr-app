@@ -153,10 +153,34 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 "messageCount", state.getMessages().size(),
                 "toolsEnabled", toolsEnabled,
                 "decision", "ANALYZING"));
-        AgentModelResponse response = modelPort.respond(new AgentModelRequest(
+        AgentModelRequest modelRequest = new AgentModelRequest(
                 List.copyOf(state.getMessages()), toolsEnabled ? toolRegistry.definitions() : List.of(),
                 new AgentModelOptions(0.2, 1_500, state.getBudget().boundedTimeout(properties.getModelTimeout()),
-                        properties.getToolCallMode().name(), properties.getNativeToolChoice().name(), toolsEnabled)));
+                        properties.getToolCallMode().name(), properties.getNativeToolChoice().name(), toolsEnabled));
+        AgentModelResponse response;
+        try {
+            response = modelPort.respond(modelRequest);
+        } catch (RuntimeException e) {
+            if (cancellationRegistry.isCancellationRequested(state.getRunRequest().runId())) throw e;
+            long durationMs = System.currentTimeMillis() - started;
+            String errorCode = "MODEL_DECISION_FAILED";
+            int failedStepOrder = traceRecorder.recordStep(state, AgentStepType.MODEL_DECISION, step,
+                    "MODEL_CALL_FAILED",
+                    Map.of("messageCount", state.getMessages().size(), "toolsEnabled", toolsEnabled),
+                    Map.of("toolCallCount", 0, "hasContent", false, "decision", "MODEL_ERROR"),
+                    AgentTokenUsage.EMPTY, durationMs, errorCode);
+            emit(progress, state, "agent_thinking", "decision_failed", Map.of(
+                    "stepOrder", failedStepOrder,
+                    "durationMs", durationMs,
+                    "messageCount", state.getMessages().size(),
+                    "toolCallCount", 0,
+                    "promptTokens", 0,
+                    "completionTokens", 0,
+                    "decision", "MODEL_ERROR",
+                    "success", false,
+                    "errorCode", errorCode));
+            throw e;
+        }
         ensureNotCancelled(state);
         state.addUsage(response.usage().promptTokens(), response.usage().completionTokens());
         List<AgentToolCall> calls = response.toolCalls();
@@ -515,6 +539,13 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         if (!progress.supportsAnswerStreaming()
                 || !StringUtils.hasText(validatedDraft)
                 || state.getBudget().remainingMillis() < 1_000L) {
+            return validatedDraft;
+        }
+        // Citation-bearing drafts have already been grounded, validated, and assigned stable labels.
+        // A second generative presentation pass can split one multi-source claim into duplicate
+        // sentences merely to place each citation separately. Preserve the verified text verbatim;
+        // ConversationService will still stream it after the workflow completes.
+        if (citations != null && !citations.isEmpty()) {
             return validatedDraft;
         }
         Set<String> allowedLabels = new LinkedHashSet<>();

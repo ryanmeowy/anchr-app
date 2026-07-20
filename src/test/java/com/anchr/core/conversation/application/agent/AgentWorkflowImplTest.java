@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 class AgentWorkflowImplTest {
@@ -87,6 +88,35 @@ class AgentWorkflowImplTest {
 
         releaseModel.countDown();
         assertThat(future.get(2, TimeUnit.SECONDS).answer()).isEqualTo("你好");
+    }
+
+    @Test
+    void modelDecisionFailure_shouldEmitTerminalStepBeforeWorkflowFails() {
+        List<AgentProgressEvent> events = new CopyOnWriteArrayList<>();
+        AgentModelPort model = request -> {
+            throw new IllegalStateException("model unavailable");
+        };
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentWorkflowImpl workflow = workflow(model, List.of(new DeliverOnlyTool()), conversations);
+        ConversationProgressListener progress = new ConversationProgressListener() {
+            @Override public void onAgentProgress(AgentProgressEvent event) { events.add(event); }
+        };
+
+        assertThatThrownBy(() -> workflow.execute(run("分析文档"), progress))
+                .isInstanceOf(AgentWorkflowException.class);
+
+        AgentProgressEvent started = events.stream()
+                .filter(event -> "decision_started".equals(event.message()))
+                .findFirst().orElseThrow();
+        AgentProgressEvent failed = events.stream()
+                .filter(event -> "decision_failed".equals(event.message()))
+                .findFirst().orElseThrow();
+        assertThat(failed.details())
+                .containsEntry("success", false)
+                .containsEntry("decision", "MODEL_ERROR")
+                .containsEntry("errorCode", "MODEL_DECISION_FAILED")
+                .containsEntry("stepOrder", started.details().get("stepOrder"));
     }
 
     @Test
@@ -204,6 +234,41 @@ class AgentWorkflowImplTest {
         assertThat(streamed.toString()).isEqualTo("流式回答");
         assertThat(result.answer()).isEqualTo("流式回答");
         verify(generation).generateStream(any(), any(), any());
+    }
+
+    @Test
+    void citedAnswer_shouldSkipGenerativePresentationAndPreserveVerifiedDraft() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelPort model = request -> calls.getAndIncrement() == 0
+                ? new AgentModelResponse(null,
+                        List.of(new AgentToolCall("call-1", "test_search", "{\"query\":\"RAG 原则\"}")),
+                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1")
+                : new AgentModelResponse(null,
+                        List.of(new AgentToolCall("call-2", "deliver_answer",
+                                "{\"answerType\":\"KNOWLEDGE\","
+                                        + "\"answer\":\"文中未提及相关原则的明确定义 {{segment:seg-1}}{{segment:seg-2}}\","
+                                        + "\"citedSegmentIds\":[\"seg-1\",\"seg-2\"]}")),
+                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-2");
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentRequestContextResolver contextResolver = mock(AgentRequestContextResolver.class);
+        when(contextResolver.resolve(any())).thenReturn(AgentRequestContext.empty());
+        StringBuilder streamed = new StringBuilder();
+        ConversationProgressListener progress = new ConversationProgressListener() {
+            @Override public boolean supportsAnswerStreaming() { return true; }
+            @Override public void onAnswerDelta(String delta) { streamed.append(delta); }
+        };
+        AgentWorkflowImpl workflow = workflow(model, generation,
+                List.of(new TestSearchTool(), new DeliverOnlyTool()), conversations,
+                new AgentRunCancellationRegistry(), contextResolver);
+
+        ConversationExecutionResult result = workflow.execute(run("预处理协同和目标导向是什么"), progress);
+
+        assertThat(result.answer()).isEqualTo("文中未提及相关原则的明确定义 [1-1][1-2]");
+        assertThat(result.citations()).hasSize(2);
+        assertThat(streamed).isEmpty();
+        verify(generation, never()).generateStream(any(), any(), any());
     }
 
     @Test
