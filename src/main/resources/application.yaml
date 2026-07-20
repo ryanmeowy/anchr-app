@@ -53,6 +53,7 @@ app:
     task-poll-interval: ${APP_AGENT_TASK_POLL_INTERVAL:5s}
     runtime-snapshot-ttl: ${APP_AGENT_RUNTIME_SNAPSHOT_TTL:35m}
   conversation:
+    legacy-evidence-fallback-enabled: ${APP_CONVERSATION_LEGACY_EVIDENCE_FALLBACK_ENABLED:false}
     intent-routing:
       enabled: ${APP_CONVERSATION_INTENT_ROUTING_ENABLED:false}
       context-turn-limit: ${APP_CONVERSATION_INTENT_CONTEXT_TURN_LIMIT:5}

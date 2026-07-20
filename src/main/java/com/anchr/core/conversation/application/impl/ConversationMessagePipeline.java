@@ -151,6 +151,7 @@ public class ConversationMessagePipeline {
                                                                  List<String> answerInputSegmentIds,
                                                                  AnswerStatus answerStatus) {
         if (answerStatus == AnswerStatus.NO_EVIDENCE
+                || answerStatus == AnswerStatus.GENERATION_FAILED
                 || candidateCitations == null || candidateCitations.isEmpty()
                 || answerInputSegmentIds == null || answerInputSegmentIds.isEmpty()) {
             return List.of();

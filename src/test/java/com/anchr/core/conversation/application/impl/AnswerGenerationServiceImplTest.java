@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -32,13 +33,15 @@ class AnswerGenerationServiceImplTest {
     private ConversationGenerationPort generationPort;
 
     private AnswerGenerationServiceImpl service;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
         service = new AnswerGenerationServiceImpl(
                 generationPort,
                 new ObjectMapper(),
-                new SimpleMeterRegistry()
+                meterRegistry
         );
     }
 
@@ -140,7 +143,7 @@ class AnswerGenerationServiceImplTest {
     }
 
     @Test
-    void generate_shouldFallbackWhenModelReturnsInvalidCitation() {
+    void generate_shouldFailWhenModelReturnsInvalidCitation() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_003")
@@ -161,10 +164,11 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
-        assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.isGenerationFailed()).isTrue();
         assertThat(result.getFallbackReason()).isEqualTo("invalid_answer_citation");
-        assertThat(result.getAnswerText()).contains("- " + longEvidence + "[1]");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_003");
+        assertThat(result.getAnswerText()).isEqualTo("回答模型未能生成可靠结果，请稍后重试。");
+        assertThat(result.getAnswerInputSegmentIds()).isEmpty();
     }
 
     @Test
@@ -190,7 +194,7 @@ class AnswerGenerationServiceImplTest {
     }
 
     @Test
-    void generate_shouldFallbackWhenStructuredStatusIsMissing() {
+    void generate_shouldFailWhenStructuredStatusIsMissing() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = buildCandidate("seg_missing_status", longEvidence);
         ConversationCitation citation = buildCitation("seg_missing_status", longEvidence);
@@ -205,13 +209,14 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
-        assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.isGenerationFailed()).isTrue();
         assertThat(result.getFallbackReason()).isEqualTo("invalid_model_response");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_missing_status");
+        assertThat(result.getAnswerInputSegmentIds()).isEmpty();
     }
 
     @Test
-    void generate_shouldFallbackWhenModelFails() {
+    void generate_shouldFailWhenModelFails() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_004")
@@ -232,10 +237,40 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.isGenerationFailed()).isTrue();
+        assertThat(result.getFallbackReason()).isEqualTo("model_unavailable");
+        assertThat(result.getAnswerText()).isEqualTo("回答模型未能生成可靠结果，请稍后重试。");
+        assertThat(result.getAnswerInputSegmentIds()).isEmpty();
+        assertThat(meterRegistry.get("answer.generate.failure.count")
+                .tag("reason", "model_unavailable").counter().count()).isEqualTo(1D);
+        assertThat(meterRegistry.find("answer.generate.fallback.count").counter()).isNull();
+    }
+
+    @Test
+    void generate_shouldAllowLegacyEvidenceFallbackForRollback() {
+        String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
+        ConversationRetrievalCandidate candidate = buildCandidate("seg_legacy", longEvidence);
+        ConversationCitation citation = buildCitation("seg_legacy", longEvidence);
+        when(generationPort.generate(any(), any())).thenThrow(new RuntimeException("timeout"));
+        ReflectionTestUtils.setField(service, "legacyEvidenceFallbackEnabled", true);
+
+        var result = service.generate(
+                "那 InnoDB 呢",
+                "mysql 架构中的 InnoDB 作用",
+                AnswerMode.STRICT,
+                List.of(candidate),
+                List.of(citation)
+        );
+
         assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(result.isGenerationFailed()).isFalse();
         assertThat(result.getFallbackReason()).isEqualTo("model_unavailable");
         assertThat(result.getAnswerText()).contains("根据当前知识库，先给出可确认的信息：");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_004");
+        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_legacy");
+        assertThat(meterRegistry.get("answer.generate.failure.count")
+                .tag("reason", "model_unavailable").counter().count()).isEqualTo(1D);
+        assertThat(meterRegistry.get("answer.generate.fallback.count").counter().count()).isEqualTo(1D);
     }
 
     @Test
@@ -343,9 +378,10 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
-        assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.isGenerationFailed()).isTrue();
         assertThat(result.getFallbackReason()).isEqualTo("missing_answer_citation");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_missing_citation");
+        assertThat(result.getAnswerInputSegmentIds()).isEmpty();
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ChatResponseService;
+import com.anchr.core.conversation.application.agent.AgentDeferredTask;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
 import com.anchr.core.conversation.application.ConversationIntentRouter;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
@@ -18,6 +19,8 @@ import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ChatResponseResult;
+import com.anchr.core.conversation.application.model.ConversationExecutionMode;
+import com.anchr.core.conversation.application.model.ConversationExecutionResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
@@ -49,6 +52,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -57,6 +62,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,6 +72,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
@@ -183,6 +190,48 @@ class ConversationServiceImplTest {
         verify(chatResponseService, never()).generate(any(), any());
         verify(queryRewriteService, never()).rewrite(any(), any());
         verify(activityEventService, never()).recordQuestionAsked(any(), any(), any(), any());
+    }
+
+    @Test
+    void createMessage_shouldRecordOriginalQuestionForAgentExecution() {
+        ConversationMessageOrchestrator agentOrchestrator = mock(ConversationMessageOrchestrator.class);
+        when(agentOrchestrator.execute(any(), any(), any(), any(), any()))
+                .thenReturn(buildAgentExecutionResult(AnswerStatus.ANSWERED, null));
+        ConversationServiceImpl agentService = buildService(agentOrchestrator);
+        ConversationSessionDTO session = agentService.createSession(new ConversationCreateRequestDTO());
+        ConversationMessageRequestDTO request = buildMessageRequest("  对话框里的原始问题  ");
+        request.setAgentEnabled(true);
+
+        ConversationMessageResponseDTO response = agentService.createMessage(session.getSessionId(), request);
+
+        verify(activityEventService).recordQuestionAsked(
+                session.getSessionId(),
+                response.getTurnId(),
+                "对话框里的原始问题",
+                List.of());
+        assertThat(repository.findRecentTurns(session.getSessionId(), 1).getFirst().getQuery())
+                .isEqualTo("对话框里的原始问题");
+    }
+
+    @Test
+    void createMessage_shouldRecordDeferredAgentQuestionOnlyOnce() {
+        ConversationMessageOrchestrator agentOrchestrator = mock(ConversationMessageOrchestrator.class);
+        AgentDeferredTask deferredTask = new AgentDeferredTask("task-1", "DOCUMENT_SUMMARY", "{}");
+        when(agentOrchestrator.execute(any(), any(), any(), any(), any()))
+                .thenReturn(buildAgentExecutionResult(AnswerStatus.PROCESSING, deferredTask));
+        ConversationServiceImpl agentService = buildService(agentOrchestrator);
+        ConversationSessionDTO session = agentService.createSession(new ConversationCreateRequestDTO());
+        ConversationMessageRequestDTO request = buildMessageRequest("总结这些文档");
+        request.setAgentEnabled(true);
+
+        ConversationMessageResponseDTO response = agentService.createMessage(session.getSessionId(), request);
+
+        verify(activityEventService).recordQuestionAsked(
+                session.getSessionId(),
+                response.getTurnId(),
+                "总结这些文档",
+                List.of());
+        verify(agentTaskRepository).save(any(AgentTask.class));
     }
 
     @Test
@@ -314,12 +363,31 @@ class ConversationServiceImplTest {
                 eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList()
         )).thenReturn(buildAnswer("最终规范回答", false, null, List.of()));
 
-        service.streamMessage(sessionId, buildMessageRequest("mysql 架构是什么"));
+        SseEmitter emitter = service.streamMessage(sessionId, buildMessageRequest("mysql 架构是什么"));
 
         verify(answerGenerationService).generate(
                 eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList());
         verify(answerGenerationService, never()).generateStream(
                 any(), any(), any(), anyList(), anyList(), any());
+
+        @SuppressWarnings("unchecked")
+        Set<ResponseBodyEmitter.DataWithMediaType> earlyEvents =
+                (Set<ResponseBodyEmitter.DataWithMediaType>) ReflectionTestUtils.getField(
+                        emitter, "earlySendAttempts");
+        assertThat(earlyEvents).isNotNull();
+        Map<?, ?> initialTrace = earlyEvents.stream()
+                .map(ResponseBodyEmitter.DataWithMediaType::getData)
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .findFirst()
+                .orElseThrow();
+        ConversationTurn storedTurn = repository.findRecentTurns(sessionId, 1).getFirst();
+        assertThat(initialTrace.get("turnId")).isEqualTo(storedTurn.getTurnId());
+
+        ConversationTurnDTO recovered = service.getMessage(sessionId, storedTurn.getTurnId());
+        assertThat(recovered.getTurnId()).isEqualTo(storedTurn.getTurnId());
+        assertThat(recovered.getAnswer()).isEqualTo("最终规范回答");
+        assertThat(recovered.getExecutionMode()).isEqualTo(ConversationExecutionMode.TRADITIONAL.name());
     }
 
     @Test
@@ -443,7 +511,7 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void createMessage_shouldReturnResultCardsWhenAnswerGenerationFallback() {
+    void createMessage_shouldKeepResultCardsAndSkipCitationsWhenAnswerGenerationFails() {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         String sessionId = session.getSessionId();
 
@@ -461,23 +529,21 @@ class ConversationServiceImplTest {
                 buildResult("seg_redo_2", "asset_redo_2", "TEXT_CHUNK", "oss://bucket/mysql-log.pdf", "redo log 先写日志再刷盘", 9)
         )));
         when(answerGenerationService.generate(eq("mysql redo log 是什么"), eq("mysql redo log 作用"), eq(AnswerMode.STRICT), anyList(), anyList()))
-                .thenReturn(buildAnswer("根据当前知识库，先给出可确认的信息：", true, "model_unavailable",
-                        List.of("seg_redo_2", "seg_redo_1")));
+                .thenReturn(buildGenerationFailure("model_unavailable"));
 
         ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql redo log 是什么"));
 
         assertThat(response.getResultCards()).hasSize(2);
-        assertThat(response.getAnswerStatus()).isEqualTo(AnswerStatus.MODEL_FALLBACK.name());
+        assertThat(response.getAnswer()).isEqualTo("回答模型未能生成可靠结果，请稍后重试。");
+        assertThat(response.getAnswerStatus()).isEqualTo(AnswerStatus.GENERATION_FAILED.name());
         assertThat(response.getAnswerFallbackReason()).isEqualTo("model_unavailable");
-        assertThat(response.getCitations()).extracting(ConversationTurnDTO.CitationDTO::getAssetId)
-                .containsExactly("asset_redo_2", "asset_redo_1");
-        assertThat(response.getCitations()).flatExtracting(ConversationTurnDTO.CitationDTO::getChunks)
-                .extracting(ConversationTurnDTO.CitationChunkDTO::getSegmentId)
-                .containsExactly("seg_redo_2", "seg_redo_1");
+        assertThat(response.getExecutionMode()).isEqualTo(ConversationExecutionMode.TRADITIONAL.name());
+        assertThat(response.getCitations()).isEmpty();
         assertThat(response.getResultCards()).extracting(ResultCardDTO::getAssetId)
                 .containsExactly("asset_redo_1", "asset_redo_2");
-        assertThat(response.getRetrievalTrace().getAnswerFallback()).isTrue();
+        assertThat(response.getRetrievalTrace().getAnswerFallback()).isFalse();
         assertThat(response.getRetrievalTrace().getAnswerFallbackReason()).isEqualTo("model_unavailable");
+        verify(citationReasonGenerationService, never()).generate(any());
     }
 
     @Test
@@ -805,6 +871,51 @@ class ConversationServiceImplTest {
         result.setFallbackReason(fallbackReason);
         result.setAnswerInputSegmentIds(segmentIds);
         return result;
+    }
+
+    private AnswerGenerationResult buildGenerationFailure(String reason) {
+        AnswerGenerationResult result = new AnswerGenerationResult();
+        result.setAnswerText("回答模型未能生成可靠结果，请稍后重试。");
+        result.setGenerationFailed(true);
+        result.setFallbackReason(reason);
+        result.setAnswerInputSegmentIds(List.of());
+        return result;
+    }
+
+    private ConversationExecutionResult buildAgentExecutionResult(AnswerStatus status,
+                                                                  AgentDeferredTask deferredTask) {
+        return new ConversationExecutionResult(
+                null,
+                false,
+                null,
+                status == AnswerStatus.PROCESSING ? "任务已进入后台处理" : "Agent 回答",
+                status,
+                null,
+                List.of(),
+                List.of(),
+                null,
+                "run-1",
+                "general-agent-v1",
+                ConversationExecutionMode.AGENT,
+                deferredTask);
+    }
+
+    private ConversationServiceImpl buildService(ConversationMessageOrchestrator orchestrator) {
+        ConversationTurnCodec codec = new ConversationTurnCodec(objectMapper);
+        ConversationServiceImpl builtService = new ConversationServiceImpl(
+                repository,
+                orchestrator,
+                codec,
+                new ConversationRetrievalTraceBuilder(objectMapper),
+                kbScopeResolver,
+                objectMapper,
+                meterRegistry,
+                activityEventService,
+                agentTaskRepository,
+                null,
+                Runnable::run);
+        ReflectionTestUtils.setField(builtService, "agentConversationCleanupService", agentConversationCleanupService);
+        return builtService;
     }
 
     private ConversationMessageRequestDTO buildMessageRequest(String query) {

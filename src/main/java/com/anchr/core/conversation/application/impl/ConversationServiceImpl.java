@@ -15,6 +15,7 @@ import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AgentProgressEvent;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerStatus;
+import com.anchr.core.conversation.application.model.ConversationExecutionMode;
 import com.anchr.core.conversation.application.model.ConversationExecutionResult;
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
 import com.anchr.core.conversation.application.model.ConversationIntentSource;
@@ -196,6 +197,19 @@ public class ConversationServiceImpl implements ConversationService {
     private ConversationMessageResponseDTO createMessageInternal(String sessionId,
                                                                   ConversationMessageRequestDTO request,
                                                                   ConversationProgressListener progressListener) {
+        return createMessageInternal(
+                sessionId,
+                request,
+                progressListener,
+                newTurnId(),
+                newRunId());
+    }
+
+    private ConversationMessageResponseDTO createMessageInternal(String sessionId,
+                                                                  ConversationMessageRequestDTO request,
+                                                                  ConversationProgressListener progressListener,
+                                                                  String turnId,
+                                                                  String runId) {
         ConversationSession session = loadSessionOrThrow(sessionId);
         boolean autoGenerateTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
         long now = System.currentTimeMillis();
@@ -204,8 +218,6 @@ public class ConversationServiceImpl implements ConversationService {
         request.setAnswerMode(answerMode.name());
         request.setPreferredModalities(resolveRequestedModalities(request.getPreferredModalities()));
         meterRegistry.counter("conversation.active.count").increment();
-        String turnId = newTurnId();
-        String runId = newRunId();
         ConversationExecutionResult executionResult = conversationMessageOrchestrator.execute(
                 session.getSessionId(), turnId, runId, request, progressListener);
         AnswerStatus answerStatus = executionResult.answerStatus();
@@ -251,7 +263,10 @@ public class ConversationServiceImpl implements ConversationService {
         if (agentRunFinalizer != null) {
             agentRunFinalizer.markTurnSaved(executionResult.agentRunId());
         }
-        if (executionResult.intent() != null && executionResult.intent().type() == ConversationIntentType.KB_QUERY) {
+        boolean agentQuestion = executionResult.executionMode() == ConversationExecutionMode.AGENT;
+        boolean traditionalKnowledgeBaseQuestion = executionResult.intent() != null
+                && executionResult.intent().type() == ConversationIntentType.KB_QUERY;
+        if (agentQuestion || traditionalKnowledgeBaseQuestion) {
             activityEventService.recordQuestionAsked(
                     session.getSessionId(),
                     turn.getTurnId(),
@@ -301,6 +316,8 @@ public class ConversationServiceImpl implements ConversationService {
         SseEmitter emitter = new SseEmitter(120_000L);
         AtomicBoolean clientDisconnected = new AtomicBoolean(false);
         AtomicReference<String> activeRunId = new AtomicReference<>();
+        String turnId = newTurnId();
+        String runId = newRunId();
         emitter.onError(error -> clientDisconnected.set(true));
         emitter.onTimeout(() -> clientDisconnected.set(true));
         RequestUserContext context = UserContextHolder.get();
@@ -310,9 +327,12 @@ public class ConversationServiceImpl implements ConversationService {
                 Map<String, Object> initialTrace = new LinkedHashMap<>();
                 initialTrace.put("stage", Boolean.TRUE.equals(request.getAgentEnabled()) ? "agent_thinking" : "routing");
                 initialTrace.put("message", Boolean.TRUE.equals(request.getAgentEnabled()) ? "decision_started" : "started");
+                initialTrace.put("turnId", turnId);
                 if (Boolean.TRUE.equals(request.getAgentEnabled())) {
+                    initialTrace.put("runId", runId);
                     initialTrace.put("details", Map.of(
                             "stepOrder", 1,
+                            "turnId", turnId,
                             "decision", "ANALYZING"));
                 }
                 sendProgressEventSafely(emitter, initialTrace, clientDisconnected);
@@ -356,7 +376,7 @@ public class ConversationServiceImpl implements ConversationService {
                                 // Only the finalized, citation-normalized answer is safe to expose.
                                 return false;
                             }
-                });
+                }, turnId, runId);
                 if (agentRuntimeSnapshotService != null && StringUtils.hasText(response.getAgentRunId())) {
                     agentRuntimeSnapshotService.publishMessage(response.getAgentRunId(), response);
                 }
@@ -404,6 +424,14 @@ public class ConversationServiceImpl implements ConversationService {
             }
         });
         return emitter;
+    }
+
+    @Override
+    public ConversationTurnDTO getMessage(String sessionId, String turnId) {
+        ConversationSession session = loadSessionOrThrow(sessionId);
+        ConversationTurn turn = conversationRepository.findTurn(session.getSessionId(), turnId)
+                .orElseThrow(() -> new BusinessException(ApiError.NOT_FOUND));
+        return toTurnDto(turn, toAgentTaskDto(turn.getAgentTaskId()));
     }
 
     @Override

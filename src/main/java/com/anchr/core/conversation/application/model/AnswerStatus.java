@@ -8,9 +8,13 @@ public enum AnswerStatus {
     PROCESSING,
     CANCELLED,
     NO_EVIDENCE,
+    GENERATION_FAILED,
     MODEL_FALLBACK;
 
     public static AnswerStatus from(AnswerGenerationResult result) {
+        if (result != null && result.isGenerationFailed()) {
+            return GENERATION_FAILED;
+        }
         if (result == null || !result.isFallbackUsed()) {
             return ANSWERED;
         }

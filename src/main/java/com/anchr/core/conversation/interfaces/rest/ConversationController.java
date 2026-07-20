@@ -9,6 +9,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRespon
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCapabilitiesDTO;
 import com.anchr.core.conversation.config.AgentProperties;
@@ -102,6 +103,14 @@ public class ConversationController {
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("Connection", "keep-alive");
         return conversationService.streamMessage(sessionId, request);
+    }
+
+    @GetMapping("/{sessionId}/messages/{turnId}")
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    public Result<ConversationTurnDTO> getMessage(
+            @PathVariable @NotBlank String sessionId,
+            @PathVariable @NotBlank String turnId) {
+        return Result.success(conversationService.getMessage(sessionId, turnId));
     }
     
     @GetMapping("/{sessionId}/messages")
