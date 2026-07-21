@@ -3,6 +3,7 @@ package com.anchr.core.conversation.application.impl;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.QueryRewriteService;
+import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
@@ -43,7 +44,24 @@ public class ConversationMessagePipeline {
     private final CitationReasonGenerationService citationReasonGenerationService;
 
     public ConversationMessagePipelineResult execute(String sessionId, ConversationMessageRequestDTO request) {
+        return execute(sessionId, request, ConversationProgressListener.NOOP);
+    }
+
+    public ConversationMessagePipelineResult execute(String sessionId,
+                                                     ConversationMessageRequestDTO request,
+                                                     ConversationProgressListener progress) {
         RewriteResult rewriteResult = queryRewriteService.rewrite(sessionId, request.getQuery().trim());
+        return execute(request, rewriteResult, progress);
+    }
+
+    public ConversationMessagePipelineResult execute(ConversationMessageRequestDTO request,
+                                                     RewriteResult rewriteResult) {
+        return execute(request, rewriteResult, ConversationProgressListener.NOOP);
+    }
+
+    public ConversationMessagePipelineResult execute(ConversationMessageRequestDTO request,
+                                                     RewriteResult rewriteResult,
+                                                     ConversationProgressListener progress) {
         ConversationRetrievalResult retrievalResult = conversationRetrievalOrchestrator.retrieve(
                 rewriteResult.getRewrittenQuery(),
                 request.getLimit(),
@@ -59,13 +77,20 @@ public class ConversationMessagePipeline {
                 .limit(ANSWER_CITATION_LIMIT)
                 .toList();
         List<ConversationCitation> candidateCitations = conversationCitationMapper.mapFromSearchResults(answerCandidates);
-        AnswerGenerationResult answerGenerationResult = answerGenerationService.generate(
-                request.getQuery().trim(),
-                rewriteResult.getRewrittenQuery(),
-                AnswerMode.from(request.getAnswerMode()),
-                answerCandidates,
-                candidateCitations
-        );
+        AnswerGenerationResult answerGenerationResult = progress != null && progress.supportsAnswerStreaming()
+                ? answerGenerationService.generateStream(
+                        request.getQuery().trim(),
+                        rewriteResult.getRewrittenQuery(),
+                        AnswerMode.from(request.getAnswerMode()),
+                        answerCandidates,
+                        candidateCitations,
+                        progress)
+                : answerGenerationService.generate(
+                        request.getQuery().trim(),
+                        rewriteResult.getRewrittenQuery(),
+                        AnswerMode.from(request.getAnswerMode()),
+                        answerCandidates,
+                        candidateCitations);
         List<ConversationCitation> answerCitations = filterEffectiveCitations(
                 candidateCitations,
                 answerGenerationResult.getAnswerInputSegmentIds(),
@@ -126,6 +151,7 @@ public class ConversationMessagePipeline {
                                                                  List<String> answerInputSegmentIds,
                                                                  AnswerStatus answerStatus) {
         if (answerStatus == AnswerStatus.NO_EVIDENCE
+                || answerStatus == AnswerStatus.GENERATION_FAILED
                 || candidateCitations == null || candidateCitations.isEmpty()
                 || answerInputSegmentIds == null || answerInputSegmentIds.isEmpty()) {
             return List.of();

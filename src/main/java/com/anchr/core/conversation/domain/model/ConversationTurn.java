@@ -12,7 +12,6 @@ public class ConversationTurn {
 
     private String turnId;
     private String sessionId;
-    private ConversationRole role;
     private String query;
     private String rewrittenQuery;
     private String answer;
@@ -21,8 +20,17 @@ public class ConversationTurn {
     private String answerMode;
     private String answerStatus;
     private String answerFallbackReason;
+    private String intentType;
+    private Double intentConfidence;
+    private String intentReason;
+    private String intentSource;
+    private boolean intentFallback;
     private String citationsJson;
     private String resultCardsJson;
     private String retrievalTraceJson;
+    private String agentRunId;
+    private String workflowVersion;
+    private String executionMode;
+    private String agentTaskId;
     private long createdAt;
 }

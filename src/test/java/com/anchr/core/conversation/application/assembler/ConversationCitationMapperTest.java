@@ -2,6 +2,7 @@ package com.anchr.core.conversation.application.assembler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
+import com.anchr.core.conversation.domain.model.ConversationCitation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -62,5 +63,31 @@ class ConversationCitationMapperTest {
         assertThat(citations.get(0).getChunks()).extracting("segmentId")
                 .containsExactly("seg-1", "seg-2");
         assertThat(citations.get(1).getCitationIndex()).isEqualTo(2);
+    }
+
+    @Test
+    void codec_shouldPersistAgentSegmentIndexesAndExposeStableLabels() {
+        ConversationTurnCodec codec = new ConversationTurnCodec(new ObjectMapper());
+        ConversationCitation first = citation("seg-2", "asset-1", 1, 1);
+        ConversationCitation second = citation("seg-1", "asset-1", 1, 2);
+
+        var restored = codec.parseCitations(codec.serializeCitations(List.of(first, second)));
+
+        assertThat(restored).singleElement().satisfies(group -> {
+            assertThat(group.getCitationIndex()).isEqualTo(1);
+            assertThat(group.getChunks()).extracting("segmentId", "segmentIndex", "citationLabel")
+                    .containsExactly(
+                            org.assertj.core.groups.Tuple.tuple("seg-2", 1, "1-1"),
+                            org.assertj.core.groups.Tuple.tuple("seg-1", 2, "1-2"));
+        });
+    }
+
+    private ConversationCitation citation(String segmentId, String assetId, int assetIndex, int segmentIndex) {
+        ConversationCitation citation = new ConversationCitation();
+        citation.setSegmentId(segmentId);
+        citation.setAssetId(assetId);
+        citation.setAssetCitationIndex(assetIndex);
+        citation.setSegmentCitationIndex(segmentIndex);
+        return citation;
     }
 }

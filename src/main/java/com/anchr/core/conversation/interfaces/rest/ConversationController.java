@@ -9,7 +9,11 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRespon
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationCapabilitiesDTO;
+import com.anchr.core.conversation.config.AgentProperties;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -32,11 +36,19 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  */
 @RestController
 @Validated
-@RequestMapping("/api/conversations")
+@RequestMapping("/api/v1/conversations")
 @RequiredArgsConstructor
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final AgentProperties agentProperties;
+
+    @GetMapping("/capabilities")
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    public Result<ConversationCapabilitiesDTO> capabilities() {
+        return Result.success(new ConversationCapabilitiesDTO(agentProperties.isEnabled(),
+                agentProperties.getWorkflowVersion(), agentProperties.getSummaryMaxDocuments()));
+    }
 
     @PostMapping
     @RequireAuth(roles = {"ADMIN", "USER"})
@@ -85,8 +97,20 @@ public class ConversationController {
     @RequireAuth(roles = {"ADMIN", "USER"})
     public SseEmitter streamMessage(
             @PathVariable @NotBlank String sessionId,
-            @Valid @RequestBody ConversationMessageRequestDTO request) {
+            @Valid @RequestBody ConversationMessageRequestDTO request,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-cache, no-store, no-transform");
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Connection", "keep-alive");
         return conversationService.streamMessage(sessionId, request);
+    }
+
+    @GetMapping("/{sessionId}/messages/{turnId}")
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    public Result<ConversationTurnDTO> getMessage(
+            @PathVariable @NotBlank String sessionId,
+            @PathVariable @NotBlank String turnId) {
+        return Result.success(conversationService.getMessage(sessionId, turnId));
     }
     
     @GetMapping("/{sessionId}/messages")

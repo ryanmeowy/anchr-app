@@ -121,7 +121,8 @@ public class ConversationTurnCodec {
                     : "segment:" + citation.getSegmentId();
             ConversationTurnDTO.CitationDTO group = citationGroups.computeIfAbsent(groupKey, ignored -> {
                 ConversationTurnDTO.CitationDTO dto = new ConversationTurnDTO.CitationDTO();
-                dto.setCitationIndex(citationGroups.size() + 1);
+                dto.setCitationIndex(citation.getAssetCitationIndex() == null
+                        ? citationGroups.size() + 1 : citation.getAssetCitationIndex());
                 dto.setFileName(citation.getFileName());
                 dto.setKbId(citation.getKbId());
                 dto.setAssetId(citation.getAssetId());
@@ -140,13 +141,23 @@ public class ConversationTurnCodec {
                         Comparator.nullsLast(Integer::compareTo))
                 .thenComparing(ConversationTurnDTO.CitationChunkDTO::getSegmentId,
                         Comparator.nullsLast(String::compareTo));
-        citationGroups.values().forEach(group -> group.getChunks().sort(documentOrder));
+        citationGroups.values().forEach(group -> {
+            boolean indexed = group.getChunks().stream().anyMatch(chunk -> chunk.getSegmentIndex() != null);
+            group.getChunks().sort(indexed
+                    ? Comparator.comparing(ConversationTurnDTO.CitationChunkDTO::getSegmentIndex,
+                            Comparator.nullsLast(Integer::compareTo)).thenComparing(documentOrder)
+                    : documentOrder);
+        });
         return new ArrayList<>(citationGroups.values());
     }
 
     private ConversationTurnDTO.CitationChunkDTO toCitationChunkDTO(ConversationCitation citation) {
         ConversationTurnDTO.CitationChunkDTO chunk = new ConversationTurnDTO.CitationChunkDTO();
         chunk.setSegmentId(citation.getSegmentId());
+        chunk.setSegmentIndex(citation.getSegmentCitationIndex());
+        if (citation.getAssetCitationIndex() != null && citation.getSegmentCitationIndex() != null) {
+            chunk.setCitationLabel(citation.getAssetCitationIndex() + "-" + citation.getSegmentCitationIndex());
+        }
         chunk.setPageNo(citation.getPageNo());
         chunk.setChunkOrder(citation.getChunkOrder());
         chunk.setTitle(citation.getTitle());

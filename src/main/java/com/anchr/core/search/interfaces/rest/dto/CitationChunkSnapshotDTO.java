@@ -19,6 +19,8 @@ import java.util.List;
 public class CitationChunkSnapshotDTO implements Serializable {
 
     private String segmentId;
+    private Integer segmentIndex;
+    private String citationLabel;
     private String title;
     private Integer pageNo;
     private Integer chunkOrder;

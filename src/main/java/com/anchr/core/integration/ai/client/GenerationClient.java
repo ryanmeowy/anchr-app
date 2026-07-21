@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
+import java.util.function.Consumer;
 
 /**
  * Generation capability backed by {@link AiClient}.
@@ -21,7 +23,12 @@ public class GenerationClient {
      */
     public GenerationResult generate(String modelName, List<Map<String, String>> messages,
                                      Map<String, Object> extraConfig) {
-        JsonNode root = client.chatCompletions(modelName, messages, extraConfig);
+        return generate(modelName, messages, extraConfig, Duration.ofSeconds(30));
+    }
+
+    public GenerationResult generate(String modelName, List<Map<String, String>> messages,
+                                     Map<String, Object> extraConfig, Duration timeout) {
+        JsonNode root = client.chatCompletions(modelName, messages, extraConfig, timeout);
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
             throw new AiClient.OpenAiException(-1, "Empty generation response.");
@@ -31,6 +38,17 @@ public class GenerationClient {
         int promptTokens = usage.path("prompt_tokens").asInt();
         int completionTokens = usage.path("completion_tokens").asInt();
         return new GenerationResult(content, promptTokens, completionTokens);
+    }
+
+    public GenerationResult generateStream(String modelName,
+                                           List<Map<String, String>> messages,
+                                           Map<String, Object> extraConfig,
+                                           Duration timeout,
+                                           Consumer<String> onDelta) {
+        AiClient.StreamedChatCompletion result = client.chatCompletionsStream(
+                modelName, messages, extraConfig, timeout, onDelta);
+        return new GenerationResult(
+                result.content(), result.promptTokens(), result.completionTokens());
     }
 
     /**

@@ -2,21 +2,26 @@ package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.application.model.AnswerMode;
+import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.model.ConversationGenerationResult;
+import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
-import com.anchr.core.conversation.domain.port.ConversationRewritePort;
+import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentCaptor.forClass;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,16 +30,18 @@ import static org.mockito.Mockito.when;
 class AnswerGenerationServiceImplTest {
 
     @Mock
-    private ConversationRewritePort conversationRewritePort;
+    private ConversationGenerationPort generationPort;
 
     private AnswerGenerationServiceImpl service;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
         service = new AnswerGenerationServiceImpl(
-                conversationRewritePort,
+                generationPort,
                 new ObjectMapper(),
-                new SimpleMeterRegistry()
+                meterRegistry
         );
     }
 
@@ -52,7 +59,7 @@ class AnswerGenerationServiceImplTest {
         assertThat(result.getFallbackReason()).isEqualTo("no_evidence_no_grounding_segment");
         assertThat(result.getAnswerText()).doesNotContain("建议改写检索问题");
         assertThat(result.getAnswerText()).contains("你可以重试：");
-        verifyNoInteractions(conversationRewritePort);
+        verifyNoInteractions(generationPort);
     }
 
     @Test
@@ -77,7 +84,7 @@ class AnswerGenerationServiceImplTest {
         assertThat(result.isFallbackUsed()).isTrue();
         assertThat(result.getFallbackReason()).isEqualTo("no_evidence_evidence_too_short");
         assertThat(result.getAnswerText()).doesNotContain("建议改写检索问题");
-        verifyNoInteractions(conversationRewritePort);
+        verifyNoInteractions(generationPort);
     }
 
     @Test
@@ -90,7 +97,7 @@ class AnswerGenerationServiceImplTest {
                 .snippet("InnoDB 摘要")
                 .build();
         ConversationCitation citation = buildCitation("seg_original_content", "InnoDB 摘要");
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"InnoDB 支持事务和崩溃恢复。[1]\"}");
 
         var result = service.generate(
@@ -101,10 +108,10 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
-        var promptCaptor = forClass(String.class);
-        verify(conversationRewritePort).generateText(promptCaptor.capture());
+        var promptCaptor = modelMessagesCaptor();
+        verify(generationPort).generate(promptCaptor.capture(), any());
         assertThat(result.isFallbackUsed()).isFalse();
-        assertThat(promptCaptor.getValue())
+        assertThat(promptCaptor.getValue().getFirst().content())
                 .contains("content=" + originalContent)
                 .doesNotContain("content=InnoDB 摘要");
     }
@@ -132,11 +139,11 @@ class AnswerGenerationServiceImplTest {
         assertThat(result.isFallbackUsed()).isTrue();
         assertThat(result.getFallbackReason()).isEqualTo("no_evidence_low_retrieval_score");
         assertThat(result.getAnswerText()).doesNotContain("建议改写检索问题");
-        verifyNoInteractions(conversationRewritePort);
+        verifyNoInteractions(generationPort);
     }
 
     @Test
-    void generate_shouldFallbackWhenModelReturnsInvalidCitation() {
+    void generate_shouldFailWhenModelReturnsInvalidCitation() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_003")
@@ -146,7 +153,7 @@ class AnswerGenerationServiceImplTest {
         ConversationCitation citation = new ConversationCitation();
         citation.setSegmentId("seg_003");
         citation.setSnippet(longEvidence);
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"InnoDB 支持事务和行级锁。[2]\"}");
 
         var result = service.generate(
@@ -157,10 +164,11 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
-        assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.isGenerationFailed()).isTrue();
         assertThat(result.getFallbackReason()).isEqualTo("invalid_answer_citation");
-        assertThat(result.getAnswerText()).contains("- " + longEvidence + "[1]");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_003");
+        assertThat(result.getAnswerText()).isEqualTo("回答模型未能生成可靠结果，请稍后重试。");
+        assertThat(result.getAnswerInputSegmentIds()).isEmpty();
     }
 
     @Test
@@ -168,7 +176,7 @@ class AnswerGenerationServiceImplTest {
         String longEvidence = "检索内容与问题主题接近，但没有提供开放式回答定义。".repeat(5);
         ConversationRetrievalCandidate candidate = buildCandidate("seg_no_evidence", longEvidence);
         ConversationCitation citation = buildCitation("seg_no_evidence", longEvidence);
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"status\":\"NO_EVIDENCE\",\"answer\":\"模型可以使用任意拒答文案。\"}");
 
         var result = service.generate(
@@ -186,11 +194,11 @@ class AnswerGenerationServiceImplTest {
     }
 
     @Test
-    void generate_shouldFallbackWhenStructuredStatusIsMissing() {
+    void generate_shouldFailWhenStructuredStatusIsMissing() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = buildCandidate("seg_missing_status", longEvidence);
         ConversationCitation citation = buildCitation("seg_missing_status", longEvidence);
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"answer\":\"未找到足够内容支持该问题\"}");
 
         var result = service.generate(
@@ -201,13 +209,14 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
-        assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.isGenerationFailed()).isTrue();
         assertThat(result.getFallbackReason()).isEqualTo("invalid_model_response");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_missing_status");
+        assertThat(result.getAnswerInputSegmentIds()).isEmpty();
     }
 
     @Test
-    void generate_shouldFallbackWhenModelFails() {
+    void generate_shouldFailWhenModelFails() {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_004")
@@ -217,7 +226,7 @@ class AnswerGenerationServiceImplTest {
         ConversationCitation citation = new ConversationCitation();
         citation.setSegmentId("seg_004");
         citation.setSnippet(longEvidence);
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenThrow(new RuntimeException("timeout"));
 
         var result = service.generate(
@@ -228,10 +237,40 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.isGenerationFailed()).isTrue();
+        assertThat(result.getFallbackReason()).isEqualTo("model_unavailable");
+        assertThat(result.getAnswerText()).isEqualTo("回答模型未能生成可靠结果，请稍后重试。");
+        assertThat(result.getAnswerInputSegmentIds()).isEmpty();
+        assertThat(meterRegistry.get("answer.generate.failure.count")
+                .tag("reason", "model_unavailable").counter().count()).isEqualTo(1D);
+        assertThat(meterRegistry.find("answer.generate.fallback.count").counter()).isNull();
+    }
+
+    @Test
+    void generate_shouldAllowLegacyEvidenceFallbackForRollback() {
+        String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
+        ConversationRetrievalCandidate candidate = buildCandidate("seg_legacy", longEvidence);
+        ConversationCitation citation = buildCitation("seg_legacy", longEvidence);
+        when(generationPort.generate(any(), any())).thenThrow(new RuntimeException("timeout"));
+        ReflectionTestUtils.setField(service, "legacyEvidenceFallbackEnabled", true);
+
+        var result = service.generate(
+                "那 InnoDB 呢",
+                "mysql 架构中的 InnoDB 作用",
+                AnswerMode.STRICT,
+                List.of(candidate),
+                List.of(citation)
+        );
+
         assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(result.isGenerationFailed()).isFalse();
         assertThat(result.getFallbackReason()).isEqualTo("model_unavailable");
         assertThat(result.getAnswerText()).contains("根据当前知识库，先给出可确认的信息：");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_004");
+        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_legacy");
+        assertThat(meterRegistry.get("answer.generate.failure.count")
+                .tag("reason", "model_unavailable").counter().count()).isEqualTo(1D);
+        assertThat(meterRegistry.get("answer.generate.fallback.count").counter().count()).isEqualTo(1D);
     }
 
     @Test
@@ -245,7 +284,7 @@ class AnswerGenerationServiceImplTest {
         List<ConversationCitation> citations = candidates.stream()
                 .map(candidate -> buildCitation(candidate.getSegmentId(), candidate.getSnippet()))
                 .toList();
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"简短总结。[1][2]\"}");
 
         var result = service.generate(
@@ -256,15 +295,16 @@ class AnswerGenerationServiceImplTest {
                 citations
         );
 
-        var promptCaptor = forClass(String.class);
-        verify(conversationRewritePort).generateText(promptCaptor.capture());
+        var promptCaptor = modelMessagesCaptor();
+        verify(generationPort).generate(promptCaptor.capture(), any());
         assertThat(result.isFallbackUsed()).isFalse();
-        assertThat(promptCaptor.getValue()).contains("回答模式：SUMMARY");
-        assertThat(promptCaptor.getValue()).contains("最多3条要点");
-        assertThat(promptCaptor.getValue()).contains("引用编号必须紧跟在它所支持的总结、事实或结论之后");
-        assertThat(promptCaptor.getValue()).contains("禁止输出“参考来源”“引用来源”“References”");
-        assertThat(promptCaptor.getValue()).contains("[3]");
-        assertThat(promptCaptor.getValue()).doesNotContain("[4]");
+        String prompt = promptCaptor.getValue().getFirst().content();
+        assertThat(prompt).contains("回答模式：SUMMARY");
+        assertThat(prompt).contains("最多3条要点");
+        assertThat(prompt).contains("引用编号必须紧跟在它所支持的总结、事实或结论之后");
+        assertThat(prompt).contains("禁止输出“参考来源”“引用来源”“References”");
+        assertThat(prompt).contains("[3]");
+        assertThat(prompt).doesNotContain("[4]");
         assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_1", "seg_2");
     }
 
@@ -278,7 +318,7 @@ class AnswerGenerationServiceImplTest {
         List<ConversationCitation> citations = candidates.stream()
                 .map(candidate -> buildCitation(candidate.getSegmentId(), candidate.getSnippet()))
                 .toList();
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"先引用第三条[3]，再引用第一条[1]，重复第三条[3]。\"}");
 
         var result = service.generate(
@@ -306,7 +346,7 @@ class AnswerGenerationServiceImplTest {
         firstCitation.setAssetId("asset-1");
         ConversationCitation secondCitation = buildCitation("seg_2", second.getSnippet());
         secondCitation.setAssetId("asset-1");
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"两处证据共同支持结论[1][2]。\"}");
 
         var result = service.generate(
@@ -327,7 +367,7 @@ class AnswerGenerationServiceImplTest {
         String evidence = "InnoDB 支持事务、行级锁和崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = buildCandidate("seg_missing_citation", evidence);
         ConversationCitation citation = buildCitation("seg_missing_citation", evidence);
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"InnoDB 是事务型存储引擎。\"}");
 
         var result = service.generate(
@@ -338,9 +378,10 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
-        assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.isGenerationFailed()).isTrue();
         assertThat(result.getFallbackReason()).isEqualTo("missing_answer_citation");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_missing_citation");
+        assertThat(result.getAnswerInputSegmentIds()).isEmpty();
     }
 
     @Test
@@ -349,7 +390,7 @@ class AnswerGenerationServiceImplTest {
         ConversationRetrievalCandidate candidate = buildCandidate("seg_explore", evidence);
         candidate.setScore(0.09D);
         ConversationCitation citation = buildCitation("seg_explore", evidence);
-        when(conversationRewritePort.generateText(anyString()))
+        when(generationPort.generate(any(), any()))
                 .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"证据显示 redo log 与崩溃恢复相关。[1]\\n可能方向：继续查看 checkpoint 机制。\"}");
 
         var result = service.generate(
@@ -360,12 +401,49 @@ class AnswerGenerationServiceImplTest {
                 List.of(citation)
         );
 
-        var promptCaptor = forClass(String.class);
-        verify(conversationRewritePort).generateText(promptCaptor.capture());
+        var promptCaptor = modelMessagesCaptor();
+        verify(generationPort).generate(promptCaptor.capture(), any());
         assertThat(result.isFallbackUsed()).isFalse();
-        assertThat(promptCaptor.getValue()).contains("回答模式：EXPLORE");
-        assertThat(promptCaptor.getValue()).contains("可能方向/建议");
-        assertThat(promptCaptor.getValue()).contains("推测必须明确标注");
+        String prompt = promptCaptor.getValue().getFirst().content();
+        assertThat(prompt).contains("回答模式：EXPLORE");
+        assertThat(prompt).contains("可能方向/建议");
+        assertThat(prompt).contains("推测必须明确标注");
+    }
+
+    @Test
+    void generateStream_shouldEmitOnlyDecodedAnswerBody() {
+        String evidence = "InnoDB 支持事务、行级锁和崩溃恢复能力。".repeat(5);
+        ConversationRetrievalCandidate candidate = buildCandidate("seg_stream", evidence);
+        ConversationCitation citation = buildCitation("seg_stream", evidence);
+        String response = "{\"status\":\"ANSWERED\",\"answer\":\"InnoDB 支持\\n事务[1]\"}";
+        when(generationPort.generateStream(any(), any(), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Consumer<String> onDelta = invocation.getArgument(2);
+            onDelta.accept("{\"status\":\"ANSWERED\",\"ans");
+            onDelta.accept("wer\":\"InnoDB 支持\\n");
+            onDelta.accept("事务[1]\"}");
+            return new ConversationGenerationResult(response, 20, 8);
+        });
+        StringBuilder streamed = new StringBuilder();
+        AtomicReference<String> reset = new AtomicReference<>();
+        ConversationProgressListener progress = new ConversationProgressListener() {
+            @Override public boolean supportsAnswerStreaming() { return true; }
+            @Override public void onAnswerDelta(String delta) { streamed.append(delta); }
+            @Override public void onAnswerReset(String answer) { reset.set(answer); }
+        };
+
+        var result = service.generateStream(
+                "InnoDB 是什么", "InnoDB 定义", AnswerMode.STRICT,
+                List.of(candidate), List.of(citation), progress);
+
+        assertThat(streamed.toString()).isEqualTo("InnoDB 支持\n事务[1]");
+        assertThat(reset.get()).isNull();
+        assertThat(result.getAnswerText()).isEqualTo(streamed.toString());
+    }
+
+    @SuppressWarnings("unchecked")
+    private org.mockito.ArgumentCaptor<List<ConversationModelMessage>> modelMessagesCaptor() {
+        return org.mockito.ArgumentCaptor.forClass(List.class);
     }
 
     private ConversationRetrievalCandidate buildCandidate(String segmentId, String snippet) {

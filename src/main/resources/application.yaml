@@ -36,6 +36,28 @@ mybatis:
     map-underscore-to-camel-case: true
 
 app:
+  agent:
+    enabled: ${APP_AGENT_ENABLED:true}
+    workflow-version: ${APP_AGENT_WORKFLOW_VERSION:general-agent-v1}
+    tool-call-mode: ${APP_AGENT_TOOL_CALL_MODE:AUTO}
+    native-tool-choice: ${APP_AGENT_NATIVE_TOOL_CHOICE:REQUIRED}
+    fallback-to-traditional: ${APP_AGENT_FALLBACK_TO_TRADITIONAL:true}
+    max-steps: ${APP_AGENT_MAX_STEPS:12}
+    max-tool-calls: ${APP_AGENT_MAX_TOOL_CALLS:8}
+    total-timeout: ${APP_AGENT_TOTAL_TIMEOUT:90s}
+    model-timeout: ${APP_AGENT_MODEL_TIMEOUT:30s}
+    task-timeout: ${APP_AGENT_TASK_TIMEOUT:10m}
+    task-model-timeout: ${APP_AGENT_TASK_MODEL_TIMEOUT:90s}
+    task-lease: ${APP_AGENT_TASK_LEASE:2m}
+    task-max-retries: ${APP_AGENT_TASK_MAX_RETRIES:2}
+    task-poll-interval: ${APP_AGENT_TASK_POLL_INTERVAL:5s}
+    runtime-snapshot-ttl: ${APP_AGENT_RUNTIME_SNAPSHOT_TTL:35m}
+  conversation:
+    legacy-evidence-fallback-enabled: ${APP_CONVERSATION_LEGACY_EVIDENCE_FALLBACK_ENABLED:false}
+    intent-routing:
+      enabled: ${APP_CONVERSATION_INTENT_ROUTING_ENABLED:false}
+      context-turn-limit: ${APP_CONVERSATION_INTENT_CONTEXT_TURN_LIMIT:5}
+      timeout: ${APP_CONVERSATION_INTENT_TIMEOUT:5s}
   security:
     admin-secret: ${APP_ADMIN_SECRET}
     encrypt-key: ${APP_ENCRYPT_KEY}

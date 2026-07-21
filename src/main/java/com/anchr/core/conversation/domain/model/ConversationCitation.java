@@ -28,6 +28,8 @@ public class ConversationCitation {
     private String hitType;
     private String assetId;
     private String segmentId;
+    private Integer assetCitationIndex;
+    private Integer segmentCitationIndex;
     private Anchor anchor;
     private CitationWhy why;
 

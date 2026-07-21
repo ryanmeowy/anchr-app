@@ -15,17 +15,18 @@ public class ConversationTurnDTO implements Serializable {
 
     private String turnId;
     private String sessionId;
+    private String agentRunId;
+    private String workflowVersion;
+    private String executionMode;
+    private AgentTaskDTO agentTask;
     private String query;
-    private String rewrittenQuery;
     private String answer;
-    private List<String> kbScope;
     private List<String> assetScope;
     private String answerMode;
     private String answerStatus;
     private String answerFallbackReason;
+    private ConversationIntentDTO intent;
     private List<CitationDTO> citations;
-    private List<ResultCardDTO> resultCards;
-    private long createdAt;
 
     @Data
     public static class CitationDTO implements Serializable {
@@ -39,6 +40,8 @@ public class ConversationTurnDTO implements Serializable {
     @Data
     public static class CitationChunkDTO implements Serializable {
         private String segmentId;
+        private Integer segmentIndex;
+        private String citationLabel;
         private Integer pageNo;
         private Integer chunkOrder;
         private String title;

@@ -6,6 +6,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRespon
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationRenameRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -27,6 +28,8 @@ public interface ConversationService {
     ConversationMessageResponseDTO createMessage(String sessionId, ConversationMessageRequestDTO request);
 
     SseEmitter streamMessage(String sessionId, ConversationMessageRequestDTO request);
+
+    ConversationTurnDTO getMessage(String sessionId, String turnId);
 
     ConversationTurnListDTO listMessages(String sessionId, Integer limit, String beforeTurnId);
 }

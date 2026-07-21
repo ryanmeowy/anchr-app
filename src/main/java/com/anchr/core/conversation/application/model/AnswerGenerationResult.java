@@ -13,6 +13,7 @@ public class AnswerGenerationResult {
 
     private String answerText;
     private boolean fallbackUsed;
+    private boolean generationFailed;
     private String fallbackReason;
     private List<String> answerInputSegmentIds = new ArrayList<>();
 }

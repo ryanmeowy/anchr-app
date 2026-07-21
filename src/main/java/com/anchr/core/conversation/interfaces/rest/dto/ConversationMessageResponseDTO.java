@@ -14,6 +14,11 @@ public class ConversationMessageResponseDTO implements Serializable {
 
     private String sessionId;
     private String turnId;
+    private String title;
+    private String agentRunId;
+    private String workflowVersion;
+    private String executionMode;
+    private AgentTaskDTO agentTask;
     private String rewrittenQuery;
     private String answer;
     private List<String> kbScope;
@@ -22,10 +27,10 @@ public class ConversationMessageResponseDTO implements Serializable {
     private String answerStatus;
     private String answerFallbackReason;
     private String retrievalStage;
+    private ConversationIntentDTO intent;
     private List<ConversationTurnDTO.CitationDTO> citations;
     private List<ResultCardDTO> resultCards;
     private RetrievalTraceDTO retrievalTrace;
-    private List<String> suggestedQuestions;
     private long createdAt;
 
     @Data

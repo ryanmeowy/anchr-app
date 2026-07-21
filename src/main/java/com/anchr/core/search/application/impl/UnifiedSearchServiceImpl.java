@@ -568,10 +568,19 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
         meterRegistry.counter("kb.search.rerank.calls").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
-        List<RerankItem> rerankResults = searchRerankPort.rerank(keyword, docs, rerankWindow.size());
-        sample.stop(Timer.builder("kb.search.rerank.latency")
-                .description("KB unified rerank latency")
-                .register(meterRegistry));
+        List<RerankItem> rerankResults;
+        try {
+            rerankResults = searchRerankPort.rerank(keyword, docs, rerankWindow.size());
+        } catch (RuntimeException e) {
+            meterRegistry.counter("kb.search.rerank.fallback", "reason", "model_error").increment();
+            log.warn("kb search rerank failed, retaining RRF order, candidates={}, windowSize={}, message={}",
+                    candidates.size(), windowSize, e.getMessage());
+            return new RerankOutcome(candidates, false);
+        } finally {
+            sample.stop(Timer.builder("kb.search.rerank.latency")
+                    .description("KB unified rerank latency")
+                    .register(meterRegistry));
+        }
         if (rerankResults == null || rerankResults.isEmpty()) {
             meterRegistry.counter("kb.search.rerank.fallback", "reason", "empty_result").increment();
             return new RerankOutcome(candidates, false);

@@ -3,16 +3,20 @@ package com.anchr.core.conversation.application.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.application.AnswerGenerationService;
+import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerModePolicy;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
+import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
+import com.anchr.core.conversation.application.model.GenerationOptions;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
-import com.anchr.core.conversation.domain.port.ConversationRewritePort;
+import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -24,6 +28,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.time.Duration;
 
 /**
  * Default grounded answer generation service.
@@ -35,6 +40,8 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
     private static final Pattern CITATION_REFERENCE_PATTERN = Pattern.compile("\\[(\\d+)]");
+    private static final Pattern ANSWERED_STATUS_PATTERN =
+            Pattern.compile("\"status\"\\s*:\\s*\"ANSWERED\"");
     private static final String NO_EVIDENCE_TEMPLATE = """
             未找到足够内容支持该问题。
             你可以重试：
@@ -42,10 +49,14 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             2. 增加限定词（文档名、章节、页码、场景）
             3. 将问题拆成更小的单点问题后再提问
             """;
+    private static final String GENERATION_FAILED_TEMPLATE =
+            "回答模型未能生成可靠结果，请稍后重试。";
 
-    private final ConversationRewritePort conversationRewritePort;
+    private final ConversationGenerationPort generationPort;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    @Value("${app.conversation.legacy-evidence-fallback-enabled:false}")
+    private boolean legacyEvidenceFallbackEnabled;
 
     @Override
     public AnswerGenerationResult generate(String userQuery,
@@ -53,6 +64,27 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
                                            AnswerMode answerMode,
                                            List<ConversationRetrievalCandidate> topCandidates,
                                            List<ConversationCitation> citations) {
+        return generateInternal(userQuery, rewrittenQuery, answerMode,
+                topCandidates, citations, ConversationProgressListener.NOOP);
+    }
+
+    @Override
+    public AnswerGenerationResult generateStream(String userQuery,
+                                                 String rewrittenQuery,
+                                                 AnswerMode answerMode,
+                                                 List<ConversationRetrievalCandidate> topCandidates,
+                                                 List<ConversationCitation> citations,
+                                                 ConversationProgressListener progress) {
+        return generateInternal(userQuery, rewrittenQuery, answerMode, topCandidates, citations,
+                progress == null ? ConversationProgressListener.NOOP : progress);
+    }
+
+    private AnswerGenerationResult generateInternal(String userQuery,
+                                                    String rewrittenQuery,
+                                                    AnswerMode answerMode,
+                                                    List<ConversationRetrievalCandidate> topCandidates,
+                                                    List<ConversationCitation> citations,
+                                                    ConversationProgressListener progress) {
         meterRegistry.counter("answer.generate.count").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
         AnswerMode resolvedMode = answerMode == null ? AnswerMode.STRICT : answerMode;
@@ -67,46 +99,71 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             }
 
             String prompt = buildPrompt(userQuery, rewrittenQuery, groundingSegments, resolvedMode, policy);
-            String rawText = conversationRewritePort.generateText(prompt);
+            StreamingJsonAnswerDecoder decoder = new StreamingJsonAnswerDecoder(progress);
+            GenerationOptions options = new GenerationOptions(null, null, Duration.ofSeconds(30));
+            String rawText = progress.supportsAnswerStreaming()
+                    ? generationPort.generateStream(
+                            List.of(new ConversationModelMessage("user", prompt)),
+                            options,
+                            decoder::accept).content()
+                    : generationPort.generate(
+                            List.of(new ConversationModelMessage("user", prompt)), options);
             ModelAnswer modelAnswer = parseModelAnswer(rawText);
             if (modelAnswer == null) {
-                meterRegistry.counter("answer.generate.fallback.count").increment();
-                return buildModelFallback(groundingSegments, "invalid_model_response");
+                return finalizeStream(buildGenerationFailureOrLegacyFallback(
+                                groundingSegments, "invalid_model_response"),
+                        decoder, progress);
             }
             if (modelAnswer.status() == ModelAnswerStatus.NO_EVIDENCE) {
                 meterRegistry.counter("answer.generate.fallback.count").increment();
                 meterRegistry.counter("no_evidence.answer.rate").increment();
-                return buildNoEvidenceFallback("model_declared_no_evidence");
+                return finalizeStream(buildNoEvidenceFallback("model_declared_no_evidence"),
+                        decoder, progress);
             }
             String answerText = modelAnswer.answer();
             if (!StringUtils.hasText(answerText)) {
-                meterRegistry.counter("answer.generate.fallback.count").increment();
-                return buildModelFallback(groundingSegments, "empty_model_answer");
+                return finalizeStream(buildGenerationFailureOrLegacyFallback(
+                                groundingSegments, "empty_model_answer"),
+                        decoder, progress);
             }
             if (hasInvalidCitationReference(answerText, groundingSegments.size())) {
-                meterRegistry.counter("answer.generate.fallback.count").increment();
-                return buildModelFallback(groundingSegments, "invalid_answer_citation");
+                return finalizeStream(buildGenerationFailureOrLegacyFallback(
+                                groundingSegments, "invalid_answer_citation"),
+                        decoder, progress);
             }
             NormalizedAnswerCitations normalized = normalizeAnswerCitations(answerText, groundingSegments);
             if (normalized == null) {
-                meterRegistry.counter("answer.generate.fallback.count").increment();
-                return buildModelFallback(groundingSegments, "missing_answer_citation");
+                return finalizeStream(buildGenerationFailureOrLegacyFallback(
+                                groundingSegments, "missing_answer_citation"),
+                        decoder, progress);
             }
             AnswerGenerationResult result = new AnswerGenerationResult();
             result.setAnswerText(normalized.answerText());
             result.setFallbackUsed(false);
             result.setFallbackReason(null);
             result.setAnswerInputSegmentIds(normalized.citedSegmentIds());
-            return result;
+            return finalizeStream(result, decoder, progress);
         } catch (Exception e) {
             log.warn("Answer generation failed: {}", e.getMessage());
-            meterRegistry.counter("answer.generate.fallback.count").increment();
-            return buildModelFallback(groundingSegments, "model_unavailable");
+            AnswerGenerationResult failure = buildGenerationFailureOrLegacyFallback(
+                    groundingSegments, "model_unavailable");
+            if (progress.supportsAnswerStreaming()) progress.onAnswerReset(failure.getAnswerText());
+            return failure;
         } finally {
             sample.stop(Timer.builder("answer.generate.latency")
                     .description("Conversation answer generation latency.")
                     .register(meterRegistry));
         }
+    }
+
+    private AnswerGenerationResult finalizeStream(AnswerGenerationResult result,
+                                                  StreamingJsonAnswerDecoder decoder,
+                                                  ConversationProgressListener progress) {
+        if (progress.supportsAnswerStreaming() && decoder.emitted()
+                && !decoder.emittedText().equals(result.getAnswerText())) {
+            progress.onAnswerReset(result.getAnswerText());
+        }
+        return result;
     }
 
     private List<GroundingSegment> pickGroundingSegments(List<ConversationRetrievalCandidate> topCandidates,
@@ -329,6 +386,27 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         return result;
     }
 
+    private AnswerGenerationResult buildGenerationFailureOrLegacyFallback(
+            List<GroundingSegment> segments,
+            String reason) {
+        meterRegistry.counter("answer.generate.failure.count", "reason", reason).increment();
+        if (!legacyEvidenceFallbackEnabled) {
+            return buildGenerationFailure(reason);
+        }
+        meterRegistry.counter("answer.generate.fallback.count").increment();
+        return buildModelFallback(segments, reason);
+    }
+
+    private AnswerGenerationResult buildGenerationFailure(String reason) {
+        AnswerGenerationResult result = new AnswerGenerationResult();
+        result.setAnswerText(GENERATION_FAILED_TEMPLATE);
+        result.setFallbackUsed(false);
+        result.setGenerationFailed(true);
+        result.setFallbackReason(reason);
+        result.setAnswerInputSegmentIds(List.of());
+        return result;
+    }
+
     private AnswerGenerationResult buildModelFallback(List<GroundingSegment> segments, String reason) {
         StringBuilder answer = new StringBuilder();
         answer.append("根据当前知识库，先给出可确认的信息：");
@@ -400,6 +478,85 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             } catch (IllegalArgumentException ignored) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * Incrementally extracts and decodes the JSON string stored in the answer
+     * field. JSON protocol bytes and status metadata never reach the browser.
+     */
+    private static final class StreamingJsonAnswerDecoder {
+        private final ConversationProgressListener progress;
+        private final StringBuilder raw = new StringBuilder();
+        private String emittedText = "";
+
+        private StreamingJsonAnswerDecoder(ConversationProgressListener progress) {
+            this.progress = progress;
+        }
+
+        private void accept(String delta) {
+            if (delta == null || delta.isEmpty()) return;
+            raw.append(delta);
+            if (!ANSWERED_STATUS_PATTERN.matcher(raw).find()) return;
+            String decoded = extractPartialStringField(raw.toString(), "answer");
+            if (decoded == null || !decoded.startsWith(emittedText)) return;
+            String next = decoded.substring(emittedText.length());
+            if (!next.isEmpty()) {
+                emittedText = decoded;
+                progress.onAnswerDelta(next);
+            }
+        }
+
+        private boolean emitted() {
+            return !emittedText.isEmpty();
+        }
+
+        private String emittedText() {
+            return emittedText;
+        }
+
+        private static String extractPartialStringField(String json, String field) {
+            int key = json.indexOf("\"" + field + "\"");
+            if (key < 0) return null;
+            int colon = json.indexOf(':', key + field.length() + 2);
+            if (colon < 0) return null;
+            int quote = colon + 1;
+            while (quote < json.length() && Character.isWhitespace(json.charAt(quote))) quote++;
+            if (quote >= json.length() || json.charAt(quote) != '"') return null;
+
+            StringBuilder decoded = new StringBuilder();
+            for (int i = quote + 1; i < json.length(); i++) {
+                char value = json.charAt(i);
+                if (value == '"') return decoded.toString();
+                if (value != '\\') {
+                    decoded.append(value);
+                    continue;
+                }
+                if (++i >= json.length()) return decoded.toString();
+                char escaped = json.charAt(i);
+                switch (escaped) {
+                    case '"' -> decoded.append('"');
+                    case '\\' -> decoded.append('\\');
+                    case '/' -> decoded.append('/');
+                    case 'b' -> decoded.append('\b');
+                    case 'f' -> decoded.append('\f');
+                    case 'n' -> decoded.append('\n');
+                    case 'r' -> decoded.append('\r');
+                    case 't' -> decoded.append('\t');
+                    case 'u' -> {
+                        if (i + 4 >= json.length()) return decoded.toString();
+                        String hex = json.substring(i + 1, i + 5);
+                        try {
+                            decoded.append((char) Integer.parseInt(hex, 16));
+                        } catch (NumberFormatException ignored) {
+                            return decoded.toString();
+                        }
+                        i += 4;
+                    }
+                    default -> decoded.append(escaped);
+                }
+            }
+            return decoded.toString();
         }
     }
 }
