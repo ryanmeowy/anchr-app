@@ -88,6 +88,20 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void idempotencyConflict_shouldNeverAuthorizeUploadCleanup() throws Exception {
+        MockHttpServletRequest request = ingestionCreateRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        handler.handleBusinessException(
+                new BusinessException(ApiError.IDEMPOTENCY_KEY_REUSED), request, response);
+
+        JsonNode body = readBody(response);
+        assertThat(response.getStatus()).isEqualTo(409);
+        assertThat(body.path("errorCode").asText()).isEqualTo(ApiError.IDEMPOTENCY_KEY_REUSED.name());
+        assertThat(body.path("uploadCleanupAllowed").asBoolean()).isFalse();
+    }
+
+    @Test
     void shouldAllowCleanupWhenBindingRejectsTheUploadCreateRequest() throws Exception {
         MockHttpServletRequest request = ingestionCreateRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -178,6 +192,7 @@ class GlobalExceptionHandlerTest {
                 Arguments.of(ApiError.UNAUTHORIZED, 401),
                 Arguments.of(ApiError.FORBIDDEN, 403),
                 Arguments.of(ApiError.KNOWLEDGE_BASE_NOT_FOUND, 404),
+                Arguments.of(ApiError.IDEMPOTENCY_KEY_REUSED, 409),
                 Arguments.of(ApiError.INGEST_RETRY_ONLY_FAILED, 409),
                 Arguments.of(ApiError.DOCUMENT_PREVIEW_NOT_AVAILABLE, 422),
                 Arguments.of(ApiError.INTERNAL_ERROR, 500),

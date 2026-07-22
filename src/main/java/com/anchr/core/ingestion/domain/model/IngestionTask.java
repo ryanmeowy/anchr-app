@@ -16,6 +16,8 @@ public class IngestionTask {
     String id;
     String kbId;
     IngestionSourceType sourceType;
+    String clientRequestId;
+    String requestHash;
     IngestionTaskStatus status;
     int totalCount;
     int successCount;

@@ -43,6 +43,12 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     @Override
+    public Optional<IngestionTask> findByClientRequestId(String createdBy, String clientRequestId) {
+        Optional<IngestionTaskRecord> task = mapper.findTaskByClientRequestId(createdBy, clientRequestId);
+        return task.map(record -> toDomain(record, mapper.listItems(record.getId())));
+    }
+
+    @Override
     public List<IngestionTask> list(String kbId, IngestionTaskStatus status, int limit) {
         String statusValue = status == null ? null : status.name();
         return mapper.listTasks( kbId, statusValue, limit).stream()
@@ -113,6 +119,8 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         record.setId(task.getId());
         record.setKbId(task.getKbId());
         record.setSourceType(task.getSourceType().name());
+        record.setClientRequestId(task.getClientRequestId());
+        record.setRequestHash(task.getRequestHash());
         record.setStatus(task.getStatus().name());
         record.setTotalCount(task.getTotalCount());
         record.setSuccessCount(task.getSuccessCount());
@@ -154,6 +162,8 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .id(record.getId())
                 .kbId(record.getKbId())
                 .sourceType(IngestionSourceType.valueOf(record.getSourceType()))
+                .clientRequestId(record.getClientRequestId())
+                .requestHash(record.getRequestHash())
                 .status(IngestionTaskStatus.valueOf(record.getStatus()))
                 .totalCount(defaultInt(record.getTotalCount()))
                 .successCount(defaultInt(record.getSuccessCount()))

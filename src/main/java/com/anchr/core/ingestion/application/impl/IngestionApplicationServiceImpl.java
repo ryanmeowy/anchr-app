@@ -25,6 +25,7 @@ import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -36,6 +37,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 /**
  * Default unified knowledge base ingestion application service.
@@ -47,6 +49,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
     private static final int MAX_BATCH_ITEMS = 50;
+    private static final String CLIENT_REQUEST_ID_PATTERN = "[A-Za-z0-9._:-]+";
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final AssetRepository assetRepository;
@@ -56,18 +59,51 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
     private final IdGen idGen;
     private final ActivityEventService activityEventService;
     private final IngestionTaskProcessor ingestionTaskProcessor;
+    private final IngestionCreateTransactionRunner transactionRunner;
 
     @Override
-    @Transactional
-    public IngestionTask createTask(String kbId, IngestionCreateCommand command) {
-
-        knowledgeBaseService.get(kbId);
+    public IngestionTaskCreateResult createTask(String kbId, IngestionCreateCommand command) {
+        String normalizedKbId = requireText(kbId, "kbId");
         RequestUserContext context = UserContextHolder.get();
+        NormalizedCreateRequest normalized = normalizeCreateRequest(command);
+        String requestHash = normalized.clientRequestId() == null ? null : IngestionRequestHasher.hash(
+                normalizedKbId, normalized.sourceType(), normalized.dedupeStrategy(), normalized.items());
+
+        // Acceptance is durable even if the KB is archived later. Resolve a prior request before
+        // validating that the KB is still active so a replay can never be misreported as a safe-to-clean 404.
+        if (normalized.clientRequestId() != null) {
+            Optional<IngestionTask> existing = ingestionTaskRepository.findByClientRequestId(
+                    context.userId(), normalized.clientRequestId());
+            if (existing.isPresent()) {
+                return replayOrReject(existing.get(), normalizedKbId, requestHash);
+            }
+        }
+
+        knowledgeBaseService.get(normalizedKbId);
+        try {
+            IngestionTask created = transactionRunner.write(() -> createNewTask(
+                    context, normalizedKbId, normalized, requestHash));
+            return new IngestionTaskCreateResult(created, true);
+        } catch (DuplicateKeyException duplicate) {
+            if (normalized.clientRequestId() == null || !isClientRequestUniqueConflict(duplicate)) {
+                throw duplicate;
+            }
+            Optional<IngestionTask> winner = transactionRunner.read(() ->
+                    ingestionTaskRepository.findByClientRequestId(context.userId(), normalized.clientRequestId()));
+            if (winner.isEmpty()) {
+                throw duplicate;
+            }
+            return replayOrReject(winner.get(), normalizedKbId, requestHash);
+        }
+    }
+
+    private IngestionTask createNewTask(RequestUserContext context, String kbId,
+                                        NormalizedCreateRequest request, String requestHash) {
         LocalDateTime now = LocalDateTime.now();
-        IngestionSourceType sourceType = command.sourceType() == null ? IngestionSourceType.UPLOAD : command.sourceType();
-        DedupeStrategy dedupeStrategy = command.dedupeStrategy() == null ? DedupeStrategy.SKIP : command.dedupeStrategy();
-        List<IngestionTaskItem> items = createItems(context, kbId, sourceType, dedupeStrategy, command.items(), now);
-        IngestionTask task = buildTask(context, kbId, sourceType, items, now);
+        List<IngestionTaskItem> items = createItems(context, kbId, request.sourceType(),
+                request.dedupeStrategy(), request.items(), now);
+        IngestionTask task = buildTask(context, kbId, request.sourceType(), items, now,
+                request.clientRequestId(), requestHash);
         ingestionTaskRepository.save(task);
         activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
                 task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
@@ -86,6 +122,18 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
     public IngestionTask getTask(String kbId, String taskId) {
         knowledgeBaseService.get(kbId);
         return ingestionTaskRepository.findById(kbId, requireText(taskId, "taskId"))
+                .orElseThrow(() -> new BusinessException(ApiError.INGESTION_TASK_NOT_FOUND));
+    }
+
+    @Override
+    public IngestionTask getTaskByClientRequestId(String kbId, String clientRequestId) {
+        String normalizedKbId = requireText(kbId, "kbId");
+        String normalizedClientRequestId = requireClientRequestId(clientRequestId);
+        RequestUserContext context = UserContextHolder.get();
+        // This endpoint recovers acceptance, not active KB content. The creator scope plus exact KB
+        // match authorizes the lookup even after the KB has been archived.
+        return ingestionTaskRepository.findByClientRequestId(context.userId(), normalizedClientRequestId)
+                .filter(task -> normalizedKbId.equals(task.getKbId()))
                 .orElseThrow(() -> new BusinessException(ApiError.INGESTION_TASK_NOT_FOUND));
     }
 
@@ -289,6 +337,12 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private IngestionTask buildTask(RequestUserContext context, String kbId, IngestionSourceType sourceType,
                                     List<IngestionTaskItem> items, LocalDateTime now) {
+        return buildTask(context, kbId, sourceType, items, now, null, null);
+    }
+
+    private IngestionTask buildTask(RequestUserContext context, String kbId, IngestionSourceType sourceType,
+                                    List<IngestionTaskItem> items, LocalDateTime now,
+                                    String clientRequestId, String requestHash) {
         int successCount = (int) items.stream()
                 .filter(item -> item.getStatus() == IngestionTaskItemStatus.SUCCESS
                         || item.getStatus() == IngestionTaskItemStatus.SKIPPED)
@@ -299,6 +353,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .id(items.get(0).getTaskId())
                 .kbId(kbId)
                 .sourceType(sourceType)
+                .clientRequestId(clientRequestId)
+                .requestHash(requestHash)
                 .status(resolveTaskStatus(items, successCount, failureCount, runningCount))
                 .totalCount(items.size())
                 .successCount(successCount)
@@ -429,6 +485,80 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         return Math.min(limit, MAX_LIMIT);
     }
 
+    private NormalizedCreateRequest normalizeCreateRequest(IngestionCreateCommand command) {
+        if (command == null) {
+            throw new BusinessException(ApiError.INVALID_REQUEST, "request cannot be null.");
+        }
+        if (CollectionUtils.isEmpty(command.items())) {
+            throw new BusinessException(ApiError.INVALID_REQUEST, "items cannot be empty.");
+        }
+        if (command.items().size() > MAX_BATCH_ITEMS) {
+            throw new BusinessException(ApiError.INVALID_REQUEST, "items size must be <= 50.");
+        }
+        IngestionSourceType sourceType = command.sourceType() == null
+                ? IngestionSourceType.UPLOAD : command.sourceType();
+        DedupeStrategy dedupeStrategy = command.dedupeStrategy() == null
+                ? DedupeStrategy.SKIP : command.dedupeStrategy();
+        List<IngestionCreateItemCommand> items = new ArrayList<>(command.items().size());
+        for (IngestionCreateItemCommand item : command.items()) {
+            if (item == null) {
+                throw new BusinessException(ApiError.INVALID_REQUEST, "items cannot contain null.");
+            }
+            String sourceUrl = trimToNull(item.sourceUrl());
+            if (sourceType == IngestionSourceType.URL) {
+                sourceUrl = requireText(sourceUrl, "sourceUrl");
+            }
+            items.add(new IngestionCreateItemCommand(
+                    normalizeFileName(item.fileName(), sourceUrl),
+                    trimToNull(item.title()),
+                    normalizeFileType(item.fileType()),
+                    trimToNull(item.mimeType()),
+                    item.sizeBytes(),
+                    trimToNull(item.objectKey()),
+                    trimToNull(item.fileHash()),
+                    sourceUrl));
+        }
+        return new NormalizedCreateRequest(
+                normalizeOptionalClientRequestId(command.clientRequestId()), sourceType, dedupeStrategy, List.copyOf(items));
+    }
+
+    private IngestionTaskCreateResult replayOrReject(IngestionTask existing, String kbId, String requestHash) {
+        if (!kbId.equals(existing.getKbId()) || requestHash == null || !requestHash.equals(existing.getRequestHash())) {
+            throw new BusinessException(ApiError.IDEMPOTENCY_KEY_REUSED);
+        }
+        return new IngestionTaskCreateResult(existing, false);
+    }
+
+    private boolean isClientRequestUniqueConflict(DuplicateKeyException exception) {
+        Throwable cause = exception;
+        while (cause != null) {
+            String message = cause.getMessage();
+            if (message != null && message.contains("uk_ingestion_task_creator_request")) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    private String normalizeOptionalClientRequestId(String clientRequestId) {
+        if (clientRequestId == null) {
+            return null;
+        }
+        return requireClientRequestId(clientRequestId);
+    }
+
+    private String requireClientRequestId(String clientRequestId) {
+        String normalized = requireText(clientRequestId, "clientRequestId");
+        if (normalized.length() > 128) {
+            throw new BusinessException(ApiError.INVALID_REQUEST, "clientRequestId length must be <= 128.");
+        }
+        if (!normalized.matches(CLIENT_REQUEST_ID_PATTERN)) {
+            throw new BusinessException(ApiError.INVALID_REQUEST, "clientRequestId contains unsupported characters.");
+        }
+        return normalized;
+    }
+
     private String requireText(String value, String fieldName) {
         if (!StringUtils.hasText(value)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, fieldName + " cannot be blank.");
@@ -452,6 +582,12 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private record NormalizedCreateRequest(String clientRequestId,
+                                           IngestionSourceType sourceType,
+                                           DedupeStrategy dedupeStrategy,
+                                           List<IngestionCreateItemCommand> items) {
     }
 
     private record DedupeDecision(DedupeResult result,

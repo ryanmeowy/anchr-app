@@ -17,6 +17,7 @@ public class IngestionTaskSummaryDTO {
     String taskId;
     String kbId;
     String sourceType;
+    String clientRequestId;
     String status;
     int totalCount;
     int successCount;
@@ -31,6 +32,7 @@ public class IngestionTaskSummaryDTO {
                 .taskId(task.getId())
                 .kbId(task.getKbId())
                 .sourceType(task.getSourceType().name())
+                .clientRequestId(task.getClientRequestId())
                 .status(task.getStatus().name())
                 .totalCount(task.getTotalCount())
                 .successCount(task.getSuccessCount())

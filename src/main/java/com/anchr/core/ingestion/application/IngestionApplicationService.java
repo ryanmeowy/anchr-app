@@ -12,7 +12,9 @@ import java.util.List;
  */
 public interface IngestionApplicationService {
 
-    IngestionTask createTask(String kbId, IngestionCreateCommand command);
+    IngestionTaskCreateResult createTask(String kbId, IngestionCreateCommand command);
+
+    IngestionTask getTaskByClientRequestId(String kbId, String clientRequestId);
 
     List<IngestionTask> listTasks(String kbId, IngestionTaskStatus status, int limit);
 
@@ -26,9 +28,13 @@ public interface IngestionApplicationService {
 
     IngestionTask createReembedTask(String kbId, String assetId);
 
-    record IngestionCreateCommand(IngestionSourceType sourceType,
+    record IngestionCreateCommand(String clientRequestId,
+                                  IngestionSourceType sourceType,
                                   DedupeStrategy dedupeStrategy,
                                   List<IngestionCreateItemCommand> items) {
+    }
+
+    record IngestionTaskCreateResult(IngestionTask task, boolean created) {
     }
 
     record IngestionCreateItemCommand(String fileName,

@@ -53,8 +53,12 @@ public class Result<T> implements Serializable {
     }
 
     public static <T> Result<T> success(T data) {
+        return success(200, data);
+    }
+
+    public static <T> Result<T> success(int code, T data) {
         Result<T> result = new Result<>();
-        result.setCode(200);
+        result.setCode(code);
         result.setMessage("Success");
         result.setData(data);
         return result;

@@ -8,6 +8,8 @@
         <id property="id" column="id"/>
         <result property="kbId" column="kb_id"/>
         <result property="sourceType" column="source_type"/>
+        <result property="clientRequestId" column="client_request_id"/>
+        <result property="requestHash" column="request_hash"/>
         <result property="status" column="status"/>
         <result property="totalCount" column="total_count"/>
         <result property="successCount" column="success_count"/>
@@ -42,7 +44,7 @@
     </resultMap>
 
     <sql id="IngestionTaskColumns">
-        id, kb_id, source_type, status, total_count, success_count,
+        id, kb_id, source_type, client_request_id, request_hash, status, total_count, success_count,
         failure_count, running_count, created_by, updated_by, created_at, updated_at, finished_at
     </sql>
 
@@ -56,7 +58,7 @@
         insert into ingestion_task (
             <include refid="IngestionTaskColumns"/>
         ) values (
-            #{id}, #{kbId}, #{sourceType}, #{status}, #{totalCount}, #{successCount},
+            #{id}, #{kbId}, #{sourceType}, #{clientRequestId}, #{requestHash}, #{status}, #{totalCount}, #{successCount},
             #{failureCount}, #{runningCount}, #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
     </insert>
@@ -77,6 +79,15 @@
         from ingestion_task
         where id = #{taskId}
           and kb_id = #{kbId}
+    </select>
+
+    <select id="findTaskByClientRequestId" resultMap="IngestionTaskRecordMap">
+        select
+            <include refid="IngestionTaskColumns"/>
+        from ingestion_task
+        where created_by = #{createdBy}
+          and client_request_id = #{clientRequestId}
+        limit 1
     </select>
 
     <select id="listTasks" resultMap="IngestionTaskRecordMap">

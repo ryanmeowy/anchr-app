@@ -17,6 +17,8 @@ public interface IngestionTaskRepository {
 
     Optional<IngestionTask> findById(String kbId, String taskId);
 
+    Optional<IngestionTask> findByClientRequestId(String createdBy, String clientRequestId);
+
     List<IngestionTask> list(String kbId, IngestionTaskStatus status, int limit);
 
     List<IngestionTask> listRecent(int limit);

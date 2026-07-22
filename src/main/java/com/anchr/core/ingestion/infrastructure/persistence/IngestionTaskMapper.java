@@ -20,6 +20,9 @@ public interface IngestionTaskMapper {
     Optional<IngestionTaskRecord> findTask(@Param("kbId") String kbId,
                                            @Param("taskId") String taskId);
 
+    Optional<IngestionTaskRecord> findTaskByClientRequestId(@Param("createdBy") String createdBy,
+                                                            @Param("clientRequestId") String clientRequestId);
+
     List<IngestionTaskRecord> listTasks(@Param("kbId") String kbId,
                                         @Param("status") String status,
                                         @Param("limit") int limit);

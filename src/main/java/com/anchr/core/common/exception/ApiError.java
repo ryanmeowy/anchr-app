@@ -30,6 +30,7 @@ public enum ApiError {
     INGEST_TASK_ITEM_NOT_FOUND(404, "Task item not found"),
     INGEST_RETRY_ONLY_FAILED(409, "Only FAILED item can be retried"),
     INGEST_NO_FAILED_ITEMS(409, "No FAILED items to retry"),
+    IDEMPOTENCY_KEY_REUSED(409, "The idempotency key was already used for a different request."),
     SEARCH_BACKEND_UNAVAILABLE(500, "Search backend unavailable"),
     PREVIEW_URL_SIGN_FAILED(500, "Failed to sign preview URL"),
     INTERNAL_ERROR(500, "Internal error, please try again later."),
