@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.domain.repository;
 
 import com.anchr.core.conversation.domain.model.ConversationSession;
+import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
 
@@ -13,7 +14,7 @@ import java.util.Optional;
  */
 public interface ConversationRepository {
 
-    void saveSession(ConversationSession session);
+    void createSession(ConversationSession session);
 
     Optional<ConversationSession> findSession(String sessionId);
 
@@ -25,7 +26,18 @@ public interface ConversationRepository {
         return findSession(sessionId).isPresent();
     }
 
-    List<ConversationSession> findRecentSessions(String userId, int limit);
+    List<ConversationSession> findSessionPage(String userId,
+                                              ConversationSessionPosition before,
+                                              int limit);
+
+    void renameSession(String sessionId, String title, long renamedAt);
+
+    void touchSessionIfNewer(String sessionId, long requestStartedAt);
+
+    boolean updateAutoTitleIfUnchanged(String sessionId,
+                                       String expectedTitle,
+                                       String generatedTitle,
+                                       long requestStartedAt);
 
     void deleteSession(String sessionId);
 

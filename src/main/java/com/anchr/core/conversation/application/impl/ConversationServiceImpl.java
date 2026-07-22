@@ -24,6 +24,7 @@ import com.anchr.core.conversation.application.model.ConversationMessagePipeline
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.AgentTaskStatus;
 import com.anchr.core.conversation.domain.model.ConversationSession;
+import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
@@ -40,6 +41,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.search.application.KbScopeResolver;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
@@ -56,7 +58,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -82,6 +85,13 @@ public class ConversationServiceImpl implements ConversationService {
     private static final int MAX_TURN_LIMIT = 100;
     private static final int DEFAULT_SESSION_LIST_LIMIT = 20;
     private static final int MAX_SESSION_LIST_LIMIT = 50;
+    private static final int SESSION_LIST_CURSOR_VERSION = 1;
+    private static final int MAX_SESSION_LIST_CURSOR_LENGTH = 1_024;
+    private static final long MAX_SESSION_CURSOR_UPDATED_AT = LocalDateTime.of(
+                    9999, 12, 31, 23, 59, 59, 999_000_000)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli();
     private static final int AUTO_TITLE_MAX_LENGTH = 128;
     private static final String SSE_TRACE_PADDING = " ".repeat(2_048);
     private static final String SINGLE_USER_ID = "single_user";
@@ -133,7 +143,7 @@ public class ConversationServiceImpl implements ConversationService {
                 now
         );
         session.setKbScope(kbScopeResolver.resolveVisibleKbIds(request.getKbIds()));
-        conversationRepository.saveSession(session);
+        conversationRepository.createSession(session);
         meterRegistry.counter("conversation.created.count").increment();
         return toSessionDto(session);
     }
@@ -147,32 +157,32 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public ConversationSessionListDTO listSessions(Integer limit, String cursor) {
         int boundedLimit = normalizeSessionListLimit(limit);
-        int offset = decodeSessionListCursor(cursor);
-        List<ConversationSession> sessions = conversationRepository.findRecentSessions(
+        ConversationSessionPosition before = decodeSessionListCursor(cursor);
+        List<ConversationSession> candidates = conversationRepository.findSessionPage(
                 SINGLE_USER_ID,
-                offset + boundedLimit + 1
+                before,
+                boundedLimit + 1
         );
-        List<ConversationSession> page = sessions.stream()
-                .skip(offset)
+        boolean hasMore = candidates.size() > boundedLimit;
+        List<ConversationSession> page = candidates.stream()
                 .limit(boundedLimit)
                 .toList();
 
         ConversationSessionListDTO response = new ConversationSessionListDTO();
         response.setItems(page.stream().map(this::toSessionDto).toList());
-        if (sessions.size() > offset + boundedLimit) {
-            response.setNextCursor(encodeSessionListCursor(offset + boundedLimit));
+        if (hasMore && !page.isEmpty()) {
+            ConversationSession last = page.getLast();
+            response.setNextCursor(encodeSessionListCursor(
+                    new ConversationSessionPosition(last.getSessionId(), last.getUpdatedAt())));
         }
         return response;
     }
 
     @Override
     public ConversationSessionDTO renameSession(String sessionId, ConversationRenameRequestDTO request) {
-        ConversationSession session = loadSessionOrThrow(sessionId);
         long now = System.currentTimeMillis();
-        session.setTitle(request.getTitle().trim());
-        session.touch(now);
-        conversationRepository.saveSession(session);
-        return toSessionDto(session);
+        conversationRepository.renameSession(sessionId, request.getTitle().trim(), now);
+        return toSessionDto(loadSessionOrThrow(sessionId));
     }
 
     @Override
@@ -211,8 +221,9 @@ public class ConversationServiceImpl implements ConversationService {
                                                                   String turnId,
                                                                   String runId) {
         ConversationSession session = loadSessionOrThrow(sessionId);
-        boolean autoGenerateTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
-        long now = System.currentTimeMillis();
+        String titleAtRequestStart = session.getTitle();
+        boolean autoGenerateTitle = shouldAutoGenerateTitle(session.getSessionId(), titleAtRequestStart);
+        long requestStartedAt = System.currentTimeMillis();
         applyConversationScope(session, request);
         AnswerMode answerMode = resolveAnswerMode(request);
         request.setAnswerMode(answerMode.name());
@@ -241,16 +252,25 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setWorkflowVersion(executionResult.workflowVersion());
         turn.setExecutionMode(executionResult.executionMode().name());
         turn.setAgentTaskId(executionResult.agentTask() == null ? null : executionResult.agentTask().taskId());
-        turn.setCreatedAt(now);
+        turn.setCreatedAt(requestStartedAt);
+        String generatedTitle = autoGenerateTitle
+                ? buildAutoTitle(request.getQuery(), executionResult.rewrittenQuery())
+                : null;
         try {
             Runnable persistence = () -> {
                 if (!conversationRepository.lockActiveSession(session.getSessionId())) {
                     throw new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND);
                 }
                 conversationRepository.saveTurn(turn);
+                boolean autoTitleUpdated = generatedTitle != null
+                        && conversationRepository.updateAutoTitleIfUnchanged(
+                        session.getSessionId(), titleAtRequestStart, generatedTitle, requestStartedAt);
+                if (!autoTitleUpdated) {
+                    conversationRepository.touchSessionIfNewer(session.getSessionId(), requestStartedAt);
+                }
                 if (executionResult.agentTask() != null) {
                     if (agentTaskRepository == null) throw new IllegalStateException("Agent task repository is unavailable");
-                    agentTaskRepository.save(newAgentTask(executionResult, turn, now));
+                    agentTaskRepository.save(newAgentTask(executionResult, turn, requestStartedAt));
                     submitTaskAfterCommit(executionResult.agentTask().taskId());
                 }
             };
@@ -275,16 +295,13 @@ public class ConversationServiceImpl implements ConversationService {
         }
         meterRegistry.counter("conversation.turn.count").increment();
 
-        if (autoGenerateTitle) {
-            session.setTitle(buildAutoTitle(request.getQuery(), executionResult.rewrittenQuery()));
-        }
-        session.touch(now);
-        conversationRepository.saveSession(session);
+        ConversationSession persistedSession = loadSessionOrThrow(session.getSessionId());
 
         ConversationMessageResponseDTO response = new ConversationMessageResponseDTO();
         response.setSessionId(session.getSessionId());
         response.setTurnId(turn.getTurnId());
-        response.setTitle(session.getTitle());
+        response.setTitle(persistedSession.getTitle());
+        response.setSessionUpdatedAt(persistedSession.getUpdatedAt());
         response.setAgentRunId(turn.getAgentRunId());
         response.setWorkflowVersion(turn.getWorkflowVersion());
         response.setExecutionMode(turn.getExecutionMode());
@@ -301,7 +318,7 @@ public class ConversationServiceImpl implements ConversationService {
         response.setCitations(conversationTurnCodec.toCitationDTOs(executionResult.citations()));
         response.setResultCards(executionResult.resultCards());
         response.setRetrievalTrace(buildRetrievalTraceDto(request, executionResult));
-        response.setCreatedAt(now);
+        response.setCreatedAt(requestStartedAt);
         if (executionResult.retrievalExecuted()) {
             meterRegistry.summary("answer.citation.count").record(executionResult.citations().size());
             if (executionResult.citations().isEmpty()) {
@@ -390,6 +407,7 @@ public class ConversationServiceImpl implements ConversationService {
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("turnId", response.getTurnId());
                 done.put("title", response.getTitle());
+                done.put("sessionUpdatedAt", response.getSessionUpdatedAt());
                 done.put("kbScope", response.getKbScope());
                 done.put("assetScope", response.getAssetScope() == null ? List.of() : response.getAssetScope());
                 done.put("answerMode", response.getAnswerMode());
@@ -753,27 +771,55 @@ public class ConversationServiceImpl implements ConversationService {
         return Math.max(1, Math.min(limit, MAX_SESSION_LIST_LIMIT));
     }
 
-    private String encodeSessionListCursor(int offset) {
-        String payload = "{\"offset\":" + Math.max(0, offset) + "}";
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+    private String encodeSessionListCursor(ConversationSessionPosition position) {
+        try {
+            var payload = objectMapper.createObjectNode();
+            payload.put("version", SESSION_LIST_CURSOR_VERSION);
+            payload.put("updatedAt", position.updatedAt());
+            payload.put("sessionId", position.sessionId());
+            return Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(objectMapper.writeValueAsBytes(payload));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to encode session list cursor", e);
+        }
     }
 
-    private int decodeSessionListCursor(String cursor) {
+    private ConversationSessionPosition decodeSessionListCursor(String cursor) {
         if (!StringUtils.hasText(cursor)) {
-            return 0;
+            return null;
         }
         try {
-            byte[] decoded = Base64.getUrlDecoder().decode(cursor.trim());
-            Map<?, ?> payload = objectMapper.readValue(decoded, Map.class);
-            Object offset = payload.get("offset");
-            if (offset instanceof Number number) {
-                return Math.max(0, number.intValue());
+            String normalized = cursor.trim();
+            if (normalized.length() > MAX_SESSION_LIST_CURSOR_LENGTH) {
+                throw invalidSessionListCursor();
             }
-            return 0;
+            JsonNode payload = objectMapper.readTree(Base64.getUrlDecoder().decode(normalized));
+            JsonNode version = payload == null ? null : payload.get("version");
+            JsonNode updatedAt = payload == null ? null : payload.get("updatedAt");
+            JsonNode sessionId = payload == null ? null : payload.get("sessionId");
+            if (version == null || !version.isIntegralNumber()
+                    || !version.canConvertToInt()
+                    || version.intValue() != SESSION_LIST_CURSOR_VERSION
+                    || updatedAt == null || !updatedAt.isIntegralNumber()
+                    || !updatedAt.canConvertToLong()
+                    || updatedAt.longValue() < 0
+                    || updatedAt.longValue() > MAX_SESSION_CURSOR_UPDATED_AT
+                    || sessionId == null || !sessionId.isTextual()
+                    || !StringUtils.hasText(sessionId.textValue())
+                    || !sessionId.textValue().equals(sessionId.textValue().trim())
+                    || sessionId.textValue().length() > 64) {
+                throw invalidSessionListCursor();
+            }
+            return new ConversationSessionPosition(sessionId.textValue(), updatedAt.longValue());
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalArgumentException("cursor is invalid");
+            throw invalidSessionListCursor();
         }
+    }
+
+    private BusinessException invalidSessionListCursor() {
+        return new BusinessException(ApiError.INVALID_REQUEST, "cursor is invalid");
     }
 
     private String safeTrim(String text) {

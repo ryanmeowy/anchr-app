@@ -2,6 +2,7 @@ package com.anchr.core.conversation.infrastructure.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationSession;
+import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.datasource.pooled.PooledDataSource;
@@ -40,6 +41,7 @@ class ConversationMysqlIntegrationTest {
             .withPassword("anchr");
 
     private SqlSession sqlSession;
+    private SqlSessionFactory sqlSessionFactory;
     private ConversationRepositoryImpl repository;
 
     @BeforeAll
@@ -69,8 +71,8 @@ class ConversationMysqlIntegrationTest {
         try (InputStream input = Resources.getResourceAsStream(resource)) {
             new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
         }
-        SqlSessionFactory factory = new SqlSessionFactoryBuilder().build(configuration);
-        sqlSession = factory.openSession(true);
+        sqlSessionFactory = new SqlSessionFactoryBuilder().build(configuration);
+        sqlSession = sqlSessionFactory.openSession(true);
         repository = new ConversationRepositoryImpl(sqlSession.getMapper(ConversationMapper.class), new ObjectMapper());
     }
 
@@ -82,15 +84,13 @@ class ConversationMysqlIntegrationTest {
     }
 
     @Test
-    void shouldPersistUpsertOrderLimitAndCascadeDelete() {
+    void shouldPersistAtomicSessionMetadataOrderLimitAndCascadeDelete() {
         ConversationSession older = session("cvs_older", 1_000L, List.of("kb_1"));
         ConversationSession newer = session("cvs_newer", 2_000L, List.of("kb_2"));
-        repository.saveSession(older);
-        repository.saveSession(newer);
+        repository.createSession(older);
+        repository.createSession(newer);
 
-        newer.setTitle("updated title");
-        newer.setUpdatedAt(3_000L);
-        repository.saveSession(newer);
+        repository.renameSession(newer.getSessionId(), "updated title", 3_000L);
 
         ConversationTurn first = turn("turn_1", newer.getSessionId(), 4_000L, "[]");
         ConversationTurn second = turn("turn_2", newer.getSessionId(), 5_000L, "[{\"segmentId\":\"seg_2\"}]");
@@ -100,7 +100,7 @@ class ConversationMysqlIntegrationTest {
         assertThat(repository.findSession(newer.getSessionId())).get()
                 .extracting(ConversationSession::getTitle).isEqualTo("updated title");
         assertThat(repository.findSession(newer.getSessionId()).orElseThrow().getExpiresAt()).isNull();
-        assertThat(repository.findRecentSessions("single_user", 1))
+        assertThat(repository.findSessionPage("single_user", null, 1))
                 .extracting(ConversationSession::getSessionId).containsExactly("cvs_newer");
         assertThat(repository.findRecentTurns(newer.getSessionId(), 1))
                 .extracting(ConversationTurn::getTurnId).containsExactly("turn_2");
@@ -120,15 +120,16 @@ class ConversationMysqlIntegrationTest {
     }
 
     @Test
-    void deletedSession_shouldNotBeRevivedByAStaleSave() {
+    void deletedSession_shouldNotBeRevivedByAtomicMetadataUpdates() {
         ConversationSession session = session("cvs_deleted", 1_000L, List.of("kb_1"));
-        repository.saveSession(session);
+        repository.createSession(session);
         assertThat(repository.lockActiveSession(session.getSessionId())).isTrue();
 
         repository.deleteSession(session.getSessionId());
-        session.setTitle("stale worker update");
-        session.setUpdatedAt(2_000L);
-        repository.saveSession(session);
+        repository.renameSession(session.getSessionId(), "stale worker update", 2_000L);
+        repository.touchSessionIfNewer(session.getSessionId(), 3_000L);
+        assertThat(repository.updateAutoTitleIfUnchanged(
+                session.getSessionId(), null, "stale auto title", 4_000L)).isFalse();
 
         assertThat(repository.lockActiveSession(session.getSessionId())).isFalse();
         assertThat(repository.findSession(session.getSessionId())).isEmpty();
@@ -138,7 +139,7 @@ class ConversationMysqlIntegrationTest {
     @Test
     void historyPage_shouldUseStableCreatedAtAndTurnIdBoundary() {
         ConversationSession session = session("cvs_history", 1_000L, List.of("kb_1"));
-        repository.saveSession(session);
+        repository.createSession(session);
         repository.saveTurn(turn("turn_1", session.getSessionId(), 2_000L, "[]"));
         repository.saveTurn(turn("turn_2", session.getSessionId(), 3_000L, "[]"));
         repository.saveTurn(turn("turn_3", session.getSessionId(), 3_000L, "[]"));
@@ -153,6 +154,83 @@ class ConversationMysqlIntegrationTest {
                 .containsExactly("turn_4", "turn_3");
         assertThat(secondPage).extracting(ConversationTurn::getTurnId)
                 .containsExactly("turn_2", "turn_1");
+    }
+
+    @Test
+    void sessionPage_shouldUseUpdatedAtAndSessionIdBoundary() {
+        repository.createSession(session("cvs_1", 2_000L, List.of()));
+        repository.createSession(session("cvs_2", 2_000L, List.of()));
+        repository.createSession(session("cvs_3", 2_000L, List.of()));
+        repository.createSession(session("cvs_4", 3_000L, List.of()));
+
+        List<ConversationSession> firstPage = repository.findSessionPage("single_user", null, 2);
+        ConversationSession last = firstPage.getLast();
+        List<ConversationSession> secondPage = repository.findSessionPage(
+                "single_user",
+                new ConversationSessionPosition(last.getSessionId(), last.getUpdatedAt()),
+                2);
+
+        assertThat(firstPage).extracting(ConversationSession::getSessionId)
+                .containsExactly("cvs_4", "cvs_3");
+        assertThat(secondPage).extracting(ConversationSession::getSessionId)
+                .containsExactly("cvs_2", "cvs_1");
+    }
+
+    @Test
+    void sessionMetadata_shouldKeepTimeMonotonicAndProtectManualTitle() {
+        ConversationSession session = session("cvs_atomic", 1_000L, List.of());
+        repository.createSession(session);
+
+        assertThat(repository.updateAutoTitleIfUnchanged(
+                session.getSessionId(), null, "auto title", 2_000L)).isTrue();
+        repository.touchSessionIfNewer(session.getSessionId(), 1_500L);
+        repository.renameSession(session.getSessionId(), "manual title", 3_000L);
+        assertThat(repository.updateAutoTitleIfUnchanged(
+                session.getSessionId(), null, "stale auto title", 4_000L)).isFalse();
+        repository.touchSessionIfNewer(session.getSessionId(), 4_000L);
+
+        ConversationSession stored = repository.findSession(session.getSessionId()).orElseThrow();
+        assertThat(stored.getTitle()).isEqualTo("manual title");
+        assertThat(stored.getUpdatedAt()).isEqualTo(4_000L);
+    }
+
+    @Test
+    void sessionMetadata_shouldAdvanceStrictlyForWritesInTheSameMillisecond() {
+        ConversationSession session = session("cvs_strict_clock", 1_000L, List.of());
+        repository.createSession(session);
+
+        repository.renameSession(session.getSessionId(), "manual title", 1_000L);
+        long afterRename = repository.findSession(session.getSessionId()).orElseThrow().getUpdatedAt();
+        repository.touchSessionIfNewer(session.getSessionId(), 1_000L);
+        long afterTouch = repository.findSession(session.getSessionId()).orElseThrow().getUpdatedAt();
+        assertThat(repository.updateAutoTitleIfUnchanged(
+                session.getSessionId(), "manual title", "new title", 1_000L)).isTrue();
+        long afterCas = repository.findSession(session.getSessionId()).orElseThrow().getUpdatedAt();
+
+        assertThat(afterRename).isEqualTo(1_001L);
+        assertThat(afterTouch).isEqualTo(1_002L);
+        assertThat(afterCas).isEqualTo(1_003L);
+    }
+
+    @Test
+    void turnAndSessionMetadata_shouldRollbackTogetherInOneSqlSession() {
+        ConversationSession session = session("cvs_rollback", 1_000L, List.of());
+        repository.createSession(session);
+
+        try (SqlSession transactionSession = sqlSessionFactory.openSession(false)) {
+            ConversationRepositoryImpl transactionalRepository = new ConversationRepositoryImpl(
+                    transactionSession.getMapper(ConversationMapper.class), new ObjectMapper());
+            assertThat(transactionalRepository.lockActiveSession(session.getSessionId())).isTrue();
+            transactionalRepository.saveTurn(turn("turn_rollback", session.getSessionId(), 2_000L, "[]"));
+            assertThat(transactionalRepository.updateAutoTitleIfUnchanged(
+                    session.getSessionId(), null, "temporary title", 2_000L)).isTrue();
+            transactionSession.rollback();
+        }
+
+        assertThat(repository.findRecentTurns(session.getSessionId(), 10)).isEmpty();
+        ConversationSession stored = repository.findSession(session.getSessionId()).orElseThrow();
+        assertThat(stored.getTitle()).isNull();
+        assertThat(stored.getUpdatedAt()).isEqualTo(1_000L);
     }
 
     private ConversationSession session(String sessionId, long timestamp, List<String> kbScope) {

@@ -1,7 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ChatResponseService;
@@ -30,6 +30,7 @@ import com.anchr.core.conversation.application.model.RewriteResult;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.ConversationSession;
+import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
@@ -44,6 +45,8 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.search.application.KbScopeResolver;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,25 +55,33 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -127,7 +138,7 @@ class ConversationServiceImplTest {
                 conversationMessagePipeline,
                 meterRegistry
         );
-        when(kbScopeResolver.resolveVisibleKbIds(any())).thenAnswer(invocation -> {
+        lenient().when(kbScopeResolver.resolveVisibleKbIds(any())).thenAnswer(invocation -> {
             List<String> requested = invocation.getArgument(0);
             return requested == null ? List.of() : requested;
         });
@@ -381,8 +392,17 @@ class ConversationServiceImplTest {
                 .map(Map.class::cast)
                 .findFirst()
                 .orElseThrow();
+        Map<?, ?> done = earlyEvents.stream()
+                .map(ResponseBodyEmitter.DataWithMediaType::getData)
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .filter(event -> event.containsKey("sessionUpdatedAt"))
+                .findFirst()
+                .orElseThrow();
         ConversationTurn storedTurn = repository.findRecentTurns(sessionId, 1).getFirst();
         assertThat(initialTrace.get("turnId")).isEqualTo(storedTurn.getTurnId());
+        assertThat(done.get("sessionUpdatedAt")).isEqualTo(
+                repository.findSession(sessionId).orElseThrow().getUpdatedAt());
 
         ConversationTurnDTO recovered = service.getMessage(sessionId, storedTurn.getTurnId());
         assertThat(recovered.getTurnId()).isEqualTo(storedTurn.getTurnId());
@@ -446,7 +466,7 @@ class ConversationServiceImplTest {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         ConversationSession storedSession = repository.findSession(session.getSessionId()).orElseThrow();
         storedSession.setAssetScope(List.of("legacy_asset"));
-        repository.saveSession(storedSession);
+        repository.replaceSessionForTest(storedSession);
 
         ConversationMessageRequestDTO request = buildMessageRequest("只查询当前消息范围");
         when(queryRewriteService.rewrite(eq(session.getSessionId()), eq(request.getQuery())))
@@ -671,25 +691,60 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void listSessions_shouldReturnSingleUserSessionsWithCursorWithoutPerSessionMessageQueries() {
-        ConversationSessionDTO first = service.createSession(new ConversationCreateRequestDTO());
-        ConversationSessionDTO second = service.createSession(new ConversationCreateRequestDTO());
-        repository.findSession(first.getSessionId()).orElseThrow().setUpdatedAt(1000L);
-        repository.findSession(second.getSessionId()).orElseThrow().setUpdatedAt(2000L);
+    void listSessions_shouldPageFiveHundredSessionsWithoutDuplicatesOrTruncation() {
+        for (int index = 0; index < 500; index++) {
+            repository.createSession(ConversationSession.createActive(
+                    "cvs_%03d".formatted(index), "single_user", null, 1_000L + index));
+        }
 
-        ConversationSessionListDTO firstPage = service.listSessions(1, null);
+        List<String> sessionIds = new ArrayList<>();
+        String cursor = null;
+        int pageCount = 0;
+        do {
+            ConversationSessionListDTO page = service.listSessions(50, cursor);
+            sessionIds.addAll(page.getItems().stream().map(ConversationSessionDTO::getSessionId).toList());
+            cursor = page.getNextCursor();
+            pageCount++;
+        } while (cursor != null);
 
-        assertThat(firstPage.getItems()).hasSize(1);
-        assertThat(firstPage.getItems().getFirst().getUserId()).isEqualTo("single_user");
-        assertThat(firstPage.getItems().getFirst().getSessionId()).isEqualTo(second.getSessionId());
-        assertThat(firstPage.getNextCursor()).isNotBlank();
+        assertThat(pageCount).isEqualTo(10);
+        assertThat(sessionIds).hasSize(500).doesNotHaveDuplicates();
+        assertThat(sessionIds.getFirst()).isEqualTo("cvs_499");
+        assertThat(sessionIds.getLast()).isEqualTo("cvs_000");
+    }
 
-        ConversationSessionListDTO secondPage = service.listSessions(1, firstPage.getNextCursor());
+    @Test
+    void listSessions_shouldUseSessionIdAsStableTieBreaker() {
+        repository.createSession(ConversationSession.createActive("cvs_a", "single_user", null, 2_000L));
+        repository.createSession(ConversationSession.createActive("cvs_c", "single_user", null, 2_000L));
+        repository.createSession(ConversationSession.createActive("cvs_b", "single_user", null, 2_000L));
 
-        assertThat(secondPage.getItems()).hasSize(1);
-        assertThat(secondPage.getItems().getFirst().getSessionId()).isEqualTo(first.getSessionId());
-        assertThat(secondPage.getItems().getFirst().getLastMessagePreview()).isNull();
+        ConversationSessionListDTO firstPage = service.listSessions(2, null);
+        ConversationSessionListDTO secondPage = service.listSessions(2, firstPage.getNextCursor());
+
+        assertThat(firstPage.getItems()).extracting(ConversationSessionDTO::getSessionId)
+                .containsExactly("cvs_c", "cvs_b");
+        assertThat(secondPage.getItems()).extracting(ConversationSessionDTO::getSessionId)
+                .containsExactly("cvs_a");
         assertThat(secondPage.getNextCursor()).isNull();
+    }
+
+    @Test
+    void listSessions_shouldRejectLegacyMalformedAndUnknownVersionCursors() {
+        List<String> invalidCursors = List.of(
+                encodeCursorPayload("{\"offset\":20}"),
+                encodeCursorPayload("{\"version\":2,\"updatedAt\":1000,\"sessionId\":\"cvs_1\"}"),
+                encodeCursorPayload("{\"version\":1,\"updatedAt\":1.5,\"sessionId\":\"cvs_1\"}"),
+                encodeCursorPayload("{\"version\":1,\"updatedAt\":9223372036854775807,\"sessionId\":\"cvs_1\"}"),
+                encodeCursorPayload("{\"version\":1,\"updatedAt\":1000,\"sessionId\":\" \"}"),
+                "not-base64"
+        );
+
+        for (String invalidCursor : invalidCursors) {
+            assertThatThrownBy(() -> service.listSessions(20, invalidCursor))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            error -> assertThat(error.getError()).isEqualTo(ApiError.INVALID_REQUEST));
+        }
     }
 
     @Test
@@ -737,6 +792,52 @@ class ConversationServiceImplTest {
         service.createMessage(sessionId, buildMessageRequest("那 InnoDB 呢"));
 
         assertThat(service.getSession(sessionId).getTitle()).isEqualTo("手动命名会话");
+    }
+
+    @Test
+    void createMessage_shouldKeepConcurrentManualRenameInStorageAndResponse() {
+        ConversationMessageOrchestrator concurrentOrchestrator = mock(ConversationMessageOrchestrator.class);
+        ConversationServiceImpl concurrentService = buildService(concurrentOrchestrator);
+        ConversationSessionDTO session = concurrentService.createSession(new ConversationCreateRequestDTO());
+        ConversationRenameRequestDTO renameRequest = new ConversationRenameRequestDTO();
+        renameRequest.setTitle("用户手动标题");
+        when(concurrentOrchestrator.execute(eq(session.getSessionId()), any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    concurrentService.renameSession(session.getSessionId(), renameRequest);
+                    return buildAgentExecutionResult(AnswerStatus.ANSWERED, null);
+                });
+
+        ConversationMessageResponseDTO response = concurrentService.createMessage(
+                session.getSessionId(), buildMessageRequest("自动标题候选"));
+
+        ConversationSession stored = repository.findSession(session.getSessionId()).orElseThrow();
+        assertThat(stored.getTitle()).isEqualTo("用户手动标题");
+        assertThat(response.getTitle()).isEqualTo("用户手动标题");
+        assertThat(response.getSessionUpdatedAt()).isEqualTo(stored.getUpdatedAt());
+        assertThat(repository.autoTitleCasAttempts).isEqualTo(1);
+        assertThat(repository.touchCount).isEqualTo(1);
+    }
+
+    @Test
+    void createMessage_shouldPersistTurnAndSessionMetadataThroughTransactionTemplate() {
+        ConversationMessageOrchestrator orchestrator = mock(ConversationMessageOrchestrator.class);
+        TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
+        doAnswer(invocation -> {
+            Consumer<TransactionStatus> callback = invocation.getArgument(0);
+            callback.accept(mock(TransactionStatus.class));
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+        ConversationServiceImpl transactionalService = buildService(orchestrator, transactionTemplate);
+        ConversationSessionDTO session = transactionalService.createSession(new ConversationCreateRequestDTO());
+        when(orchestrator.execute(eq(session.getSessionId()), any(), any(), any(), any()))
+                .thenReturn(buildAgentExecutionResult(AnswerStatus.ANSWERED, null));
+
+        transactionalService.createMessage(session.getSessionId(), buildMessageRequest("事务内写入"));
+
+        verify(transactionTemplate).executeWithoutResult(any());
+        assertThat(repository.findRecentTurns(session.getSessionId(), 10)).hasSize(1);
+        assertThat(repository.findSession(session.getSessionId()).orElseThrow().getTitle())
+                .isEqualTo("事务内写入");
     }
 
     @Test
@@ -901,6 +1002,11 @@ class ConversationServiceImplTest {
     }
 
     private ConversationServiceImpl buildService(ConversationMessageOrchestrator orchestrator) {
+        return buildService(orchestrator, null);
+    }
+
+    private ConversationServiceImpl buildService(ConversationMessageOrchestrator orchestrator,
+                                                  TransactionTemplate transactionTemplate) {
         ConversationTurnCodec codec = new ConversationTurnCodec(objectMapper);
         ConversationServiceImpl builtService = new ConversationServiceImpl(
                 repository,
@@ -912,7 +1018,7 @@ class ConversationServiceImplTest {
                 meterRegistry,
                 activityEventService,
                 agentTaskRepository,
-                null,
+                transactionTemplate,
                 Runnable::run);
         ReflectionTestUtils.setField(builtService, "agentConversationCleanupService", agentConversationCleanupService);
         return builtService;
@@ -925,28 +1031,85 @@ class ConversationServiceImplTest {
         return request;
     }
 
+    private String encodeCursorPayload(String payload) {
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+    }
+
     private static class InMemoryConversationRepository implements ConversationRepository {
 
         private final Map<String, ConversationSession> sessions = new HashMap<>();
         private final Map<String, LinkedHashMap<String, ConversationTurn>> turnsBySession = new HashMap<>();
+        private int autoTitleCasAttempts;
+        private int touchCount;
 
         @Override
-        public void saveSession(ConversationSession session) {
-            sessions.put(session.getSessionId(), session);
+        public synchronized void createSession(ConversationSession session) {
+            if (sessions.putIfAbsent(session.getSessionId(), copySession(session)) != null) {
+                throw new IllegalStateException("session already exists");
+            }
         }
 
         @Override
-        public Optional<ConversationSession> findSession(String sessionId) {
-            return Optional.ofNullable(sessions.get(sessionId));
+        public synchronized Optional<ConversationSession> findSession(String sessionId) {
+            return Optional.ofNullable(sessions.get(sessionId)).map(InMemoryConversationRepository::copySession);
         }
 
         @Override
-        public List<ConversationSession> findRecentSessions(String userId, int limit) {
+        public synchronized List<ConversationSession> findSessionPage(String userId,
+                                                                      ConversationSessionPosition before,
+                                                                      int limit) {
             return sessions.values().stream()
                     .filter(session -> userId.equals(session.getUserId()))
-                    .sorted(Comparator.comparingLong(ConversationSession::getUpdatedAt).reversed())
+                    .filter(session -> before == null
+                            || session.getUpdatedAt() < before.updatedAt()
+                            || (session.getUpdatedAt() == before.updatedAt()
+                            && session.getSessionId().compareTo(before.sessionId()) < 0))
+                    .sorted(Comparator.comparingLong(ConversationSession::getUpdatedAt)
+                            .thenComparing(ConversationSession::getSessionId)
+                            .reversed())
                     .limit(Math.max(1, limit))
+                    .map(InMemoryConversationRepository::copySession)
                     .collect(Collectors.toCollection(ArrayList::new));
+        }
+
+        @Override
+        public synchronized void renameSession(String sessionId, String title, long renamedAt) {
+            ConversationSession current = sessions.get(sessionId);
+            if (current == null) return;
+            ConversationSession updated = copySession(current);
+            updated.setTitle(title);
+            updated.setUpdatedAt(Math.max(current.getUpdatedAt() + 1, renamedAt));
+            sessions.put(sessionId, updated);
+        }
+
+        @Override
+        public synchronized void touchSessionIfNewer(String sessionId, long requestStartedAt) {
+            touchCount++;
+            ConversationSession current = sessions.get(sessionId);
+            if (current == null) return;
+            ConversationSession updated = copySession(current);
+            updated.setUpdatedAt(Math.max(current.getUpdatedAt() + 1, requestStartedAt));
+            sessions.put(sessionId, updated);
+        }
+
+        @Override
+        public synchronized boolean updateAutoTitleIfUnchanged(String sessionId,
+                                                               String expectedTitle,
+                                                               String generatedTitle,
+                                                               long requestStartedAt) {
+            autoTitleCasAttempts++;
+            ConversationSession current = sessions.get(sessionId);
+            if (current == null || !Objects.equals(current.getTitle(), expectedTitle)) return false;
+            ConversationSession updated = copySession(current);
+            updated.setTitle(generatedTitle);
+            updated.setUpdatedAt(Math.max(current.getUpdatedAt() + 1, requestStartedAt));
+            sessions.put(sessionId, updated);
+            return true;
+        }
+
+        private synchronized void replaceSessionForTest(ConversationSession session) {
+            sessions.put(session.getSessionId(), copySession(session));
         }
 
         @Override
@@ -998,6 +1161,20 @@ class ConversationServiceImplTest {
                             .reversed())
                     .limit(Math.max(1, limit))
                     .collect(Collectors.toCollection(ArrayList::new));
+        }
+
+        private static ConversationSession copySession(ConversationSession source) {
+            ConversationSession copy = new ConversationSession();
+            copy.setSessionId(source.getSessionId());
+            copy.setUserId(source.getUserId());
+            copy.setTitle(source.getTitle());
+            copy.setStatus(source.getStatus());
+            copy.setCreatedAt(source.getCreatedAt());
+            copy.setUpdatedAt(source.getUpdatedAt());
+            copy.setExpiresAt(source.getExpiresAt());
+            copy.setKbScope(source.getKbScope() == null ? null : List.copyOf(source.getKbScope()));
+            copy.setAssetScope(source.getAssetScope() == null ? null : List.copyOf(source.getAssetScope()));
+            return copy;
         }
     }
 }
