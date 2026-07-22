@@ -2,6 +2,7 @@
 package com.anchr.core.common.model;
 
 import com.anchr.core.common.exception.ApiError;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -28,6 +29,15 @@ public class Result<T> implements Serializable {
     private String traceId;
 
     private Map<String, Object> details;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean retryable;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean requestAccepted;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean uploadCleanupAllowed;
 
     /**
      * Correlation id for troubleshooting error responses.
@@ -56,12 +66,14 @@ public class Result<T> implements Serializable {
         result.setMessage(message);
         result.setErrorCode(String.valueOf(code));
         result.setDetails(Map.of());
+        result.setUploadCleanupAllowed(false);
         return result;
     }
 
     public static <T> Result<T> error(ApiError error) {
         Result<T> result = error(error.getCode(), error.getMessage());
         result.setErrorCode(error.name());
+        result.setRetryable(error.isRetryable());
         return result;
     }
 
@@ -82,8 +94,19 @@ public class Result<T> implements Serializable {
     public static <T> Result<T> error(ApiError error, String message, String traceId) {
         Result<T> result = error(error.getCode(), message);
         result.setErrorCode(error.name());
+        result.setRetryable(error.isRetryable());
         result.setErrorId(traceId);
         result.setTraceId(traceId);
+        return result;
+    }
+
+    public static <T> Result<T> error(ApiError error, String message, String traceId,
+                                      ErrorResponseMetadata metadata) {
+        Result<T> result = error(error, message, traceId);
+        if (metadata != null) {
+            result.setRequestAccepted(metadata.requestAccepted());
+            result.setUploadCleanupAllowed(metadata.uploadCleanupAllowed());
+        }
         return result;
     }
 

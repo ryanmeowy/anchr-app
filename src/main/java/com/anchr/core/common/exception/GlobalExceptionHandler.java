@@ -1,7 +1,6 @@
 package com.anchr.core.common.exception;
 
-import com.anchr.core.common.model.Result;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.anchr.core.common.model.ErrorResponseMetadata;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
@@ -31,7 +30,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class GlobalExceptionHandler {
 
-    private final ObjectMapper objectMapper;
+    private final ApiErrorResponseWriter errorResponseWriter;
+    private final UploadCleanupPolicy uploadCleanupPolicy;
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<Void> handleNoResourceFound(NoResourceFoundException exception) {
@@ -39,22 +39,30 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(BusinessException.class)
-    public void handleBusinessException(BusinessException e, HttpServletResponse response) {
+    public void handleBusinessException(BusinessException e, HttpServletRequest request,
+                                        HttpServletResponse response) {
         String traceId = UUID.randomUUID().toString();
         String fallback = e.getError() == null ? ApiError.INTERNAL_ERROR.getMessage() : e.getError().getMessage();
         ApiError error = e.getError() == null ? ApiError.INTERNAL_ERROR : e.getError();
-        log.error("Business exception, traceId={}, errorCode={}, message={}",
-                traceId, error.name(), e.getMessage(), e);
-        writeJsonError(response, HttpStatus.BAD_REQUEST, error,
-                safeMessage(e.getMessage(), fallback), traceId);
+        HttpStatus status = resolveStatus(error);
+        if (status.is5xxServerError()) {
+            log.error("Business exception, traceId={}, errorCode={}, status={}, message={}",
+                    traceId, error.name(), status.value(), e.getMessage(), e);
+        } else {
+            log.warn("Business exception, traceId={}, errorCode={}, status={}, message={}",
+                    traceId, error.name(), status.value(), e.getMessage());
+        }
+        errorResponseWriter.write(response, status, error, safeMessage(e.getMessage(), fallback), traceId,
+                uploadCleanupPolicy.forBusinessError(request, error));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public void handleIllegalArgument(IllegalArgumentException e, HttpServletResponse response) {
         String traceId = UUID.randomUUID().toString();
         log.warn("Illegal argument, traceId={}, message={}", traceId, e.getMessage(), e);
-        writeJsonError(response, HttpStatus.BAD_REQUEST, ApiError.INVALID_REQUEST,
-                safeMessage(e.getMessage(), ApiError.INVALID_REQUEST.getMessage()), traceId);
+        errorResponseWriter.write(response, HttpStatus.BAD_REQUEST, ApiError.INVALID_REQUEST,
+                safeMessage(e.getMessage(), ApiError.INVALID_REQUEST.getMessage()), traceId,
+                ErrorResponseMetadata.conservative());
     }
 
     @ExceptionHandler({
@@ -62,21 +70,33 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException.class,
             HttpMessageNotReadableException.class,
             MethodArgumentNotValidException.class,
-            BindException.class,
-            ConstraintViolationException.class
+            BindException.class
     })
-    public void handleBadRequest(Exception e, HttpServletResponse response) {
+    public void handleBadRequest(Exception e, HttpServletRequest request, HttpServletResponse response) {
         String traceId = UUID.randomUUID().toString();
         log.warn("Bad request, traceId={}, exceptionType={}, message={}",
                 traceId, e.getClass().getSimpleName(), e.getMessage(), e);
-        writeJsonError(response, HttpStatus.BAD_REQUEST, ApiError.INVALID_REQUEST, traceId);
+        errorResponseWriter.write(response, HttpStatus.BAD_REQUEST, ApiError.INVALID_REQUEST,
+                ApiError.INVALID_REQUEST.getMessage(), traceId,
+                uploadCleanupPolicy.forPreControllerRejection(request));
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public void handleConstraintViolation(ConstraintViolationException e, HttpServletResponse response) {
+        String traceId = UUID.randomUUID().toString();
+        log.warn("Constraint violation, traceId={}, message={}", traceId, e.getMessage(), e);
+        errorResponseWriter.write(response, HttpStatus.BAD_REQUEST, ApiError.INVALID_REQUEST,
+                ApiError.INVALID_REQUEST.getMessage(), traceId, ErrorResponseMetadata.conservative());
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public void handleUploadTooLarge(MaxUploadSizeExceededException e, HttpServletResponse response) {
+    public void handleUploadTooLarge(MaxUploadSizeExceededException e, HttpServletRequest request,
+                                     HttpServletResponse response) {
         String traceId = UUID.randomUUID().toString();
         log.warn("Upload too large, traceId={}, message={}", traceId, e.getMessage(), e);
-        writeJsonError(response, HttpStatus.BAD_REQUEST, ApiError.UPLOAD_TOO_LARGE, traceId);
+        errorResponseWriter.write(response, HttpStatus.BAD_REQUEST, ApiError.UPLOAD_TOO_LARGE,
+                ApiError.UPLOAD_TOO_LARGE.getMessage(), traceId,
+                uploadCleanupPolicy.forPreControllerRejection(request));
     }
 
     @ExceptionHandler(AsyncRequestNotUsableException.class)
@@ -90,42 +110,16 @@ public class GlobalExceptionHandler {
         String path = request == null ? "unknown" : request.getRequestURI();
         String errorId = UUID.randomUUID().toString();
         log.error("Unhandled exception, errorId={}, path={}, message={}", errorId, path, e.getMessage(), e);
-        writeJsonError(response, HttpStatus.INTERNAL_SERVER_ERROR, ApiError.INTERNAL_ERROR, errorId);
+        errorResponseWriter.write(response, HttpStatus.INTERNAL_SERVER_ERROR, ApiError.INTERNAL_ERROR,
+                ApiError.INTERNAL_ERROR.getMessage(), errorId, ErrorResponseMetadata.conservative());
     }
 
     private String safeMessage(String message, String fallback) {
         return StringUtils.hasText(message) ? message : fallback;
     }
 
-    private void writeJsonError(HttpServletResponse response, HttpStatus status, ApiError error, String traceId) {
-        writeJsonErrorInternal(response, status.value(), Result.error(error, traceId));
-    }
-
-    private void writeJsonError(HttpServletResponse response, HttpStatus status, ApiError error,
-                                String message, String traceId) {
-        writeJsonErrorInternal(response, status.value(), Result.error(error, message, traceId));
-    }
-
-    /**
-     * Write error response directly to {@link HttpServletResponse} to bypass Spring's content
-     * negotiation. This is necessary for endpoints that declare a constrained
-     * {@code produces} type (e.g. {@code text/event-stream} for SSE) where the client's
-     * {@code Accept} header would otherwise prevent JSON serialization of the error body,
-     * causing an {@code HttpMediaTypeNotAcceptableException}.
-     */
-    private void writeJsonErrorInternal(HttpServletResponse response, int httpStatus, Result<Void> result) {
-        response.setStatus(httpStatus);
-        response.setContentType("application/json;charset=UTF-8");
-        try {
-            response.getWriter().write(objectMapper.writeValueAsString(result));
-        } catch (Exception ex) {
-            log.warn("Failed to serialize error response, fallback to minimal json", ex);
-            try {
-                response.getWriter().write(
-                        "{\"code\":" + result.getCode() + ",\"message\":\"" + result.getMessage() + "\"}");
-            } catch (Exception ignored) {
-                // response already committed or stream closed
-            }
-        }
+    private HttpStatus resolveStatus(ApiError error) {
+        HttpStatus status = HttpStatus.resolve(error.getCode());
+        return status == null ? HttpStatus.INTERNAL_SERVER_ERROR : status;
     }
 }

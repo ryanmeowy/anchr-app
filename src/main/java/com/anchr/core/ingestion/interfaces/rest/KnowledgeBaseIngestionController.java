@@ -1,5 +1,7 @@
 package com.anchr.core.ingestion.interfaces.rest;
 
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.UploadCleanupContract;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.ingestion.application.IngestionApplicationService;
@@ -34,6 +36,10 @@ public class KnowledgeBaseIngestionController {
     private final IngestionApplicationService ingestionApplicationService;
 
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @UploadCleanupContract(safeBusinessErrors = {
+            ApiError.INVALID_REQUEST,
+            ApiError.KNOWLEDGE_BASE_NOT_FOUND
+    })
     @PostMapping("/ingestion-tasks")
     public Result<IngestionTaskDTO> createTask(@PathVariable @NotBlank String kbId,
                                                @Valid @RequestBody IngestionTaskCreateRequestDTO request) {
