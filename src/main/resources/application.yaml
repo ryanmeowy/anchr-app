@@ -80,6 +80,7 @@ app:
     poll-interval: ${APP_DOCLING_POLL_INTERVAL:2s}
     max-wait: ${APP_DOCLING_MAX_WAIT:45m}
     max-resubmits: ${APP_DOCLING_MAX_RESUBMITS:2}
+    embedded-image-upload-enabled: ${APP_DOCLING_EMBEDDED_IMAGE_UPLOAD_ENABLED:false}
   segment:
     index-name: kb_segment
     read-alias: kb_segment_read

@@ -11,11 +11,11 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,10 +36,12 @@ class DoclingClientTest {
         AtomicInteger polls = new AtomicInteger();
         AtomicInteger deletes = new AtomicInteger();
         AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> submittedBody = new AtomicReference<>();
         server = startServer(exchange -> {
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             String path = exchange.getRequestURI().getPath();
             if ("POST".equals(exchange.getRequestMethod()) && "/v1/jobs".equals(path)) {
+                submittedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
                 respond(exchange, 202, jobJson("queued", "null", "null"));
             } else if ("GET".equals(exchange.getRequestMethod())) {
                 if (polls.getAndIncrement() == 0) {
@@ -58,6 +60,8 @@ class DoclingClientTest {
         ParseResponse response = client(Duration.ofSeconds(2)).parse(request());
 
         assertEquals("Bearer " + TOKEN, authorization.get());
+        assertTrue(submittedBody.get().contains("\"includeEmbeddedImages\":false"));
+        assertFalse(submittedBody.get().contains("\"oss\""));
         assertEquals("parsed", response.text());
         assertEquals(1, deletes.get());
     }

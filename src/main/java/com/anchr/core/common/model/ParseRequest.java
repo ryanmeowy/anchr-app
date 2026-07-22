@@ -23,10 +23,16 @@ public record ParseRequest(
             Boolean validateTextQuality,
             Integer chunkMinTokens,
             Integer chunkMaxTokens,
-            Boolean useNativeChunker
+            Boolean useNativeChunker,
+            Boolean includeEmbeddedImages
     ) {
         public static Options chunkModel() {
-            return new Options("chunks", true, true, true, true, 200, 500, true);
+            return chunkModel(false);
+        }
+
+        public static Options chunkModel(boolean includeEmbeddedImages) {
+            return new Options("chunks", true, true, true, true, 200, 500, true,
+                    includeEmbeddedImages);
         }
     }
 

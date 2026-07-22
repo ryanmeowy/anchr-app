@@ -2,6 +2,7 @@ package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.common.model.ParseRequest;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.ingestion.domain.model.Chunk;
@@ -24,6 +25,7 @@ import com.google.gson.Gson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -34,6 +36,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -166,12 +169,17 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1")).thenReturn(Optional.of(asset));
         when(objectStoragePort.buildDownloadUrl("images/image.png"))
                 .thenReturn("https://example.test/image.png");
-        when(storageConfigRepository.find()).thenReturn(Optional.empty());
         when(doclingClient.parse(any())).thenReturn(parsed);
         when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of());
 
         processor.submit("kb-1", "task-1", "user-a");
 
+        ArgumentCaptor<ParseRequest> requestCaptor = ArgumentCaptor.forClass(ParseRequest.class);
+        verify(doclingClient).parse(requestCaptor.capture());
+        ParseRequest request = requestCaptor.getValue();
+        assertFalse(request.options().includeEmbeddedImages());
+        assertNull(request.oss());
+        verifyNoInteractions(storageConfigRepository, aesUtil);
         verify(ingestionTaskRepository).markItemFailed(
                 eq("kb-1"), eq("task-1"), eq("item-1"), eq("PARSE"), eq(10),
                 eq("TEXT_PARSE_FAILED"), any(), any());

@@ -82,6 +82,9 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     @Value("${app.embedding.ingestion-rate-limit-backoff-ms:5000}")
     private long embeddingRateLimitBackoffMs;
 
+    @Value("${app.docling.embedded-image-upload-enabled:false}")
+    private boolean embeddedImageUploadEnabled;
+
     @Override
     public void submit(String kbId, String taskId, String userId) {
         ingestionTaskExecutor.execute(() -> processTask(kbId, taskId, userId));
@@ -161,8 +164,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 .requestId(buildRequestId(taskId, itemId))
                 .fileName(asset.getFileName())
                 .sourceUrl(downloadUrl)
-                .options(ParseRequest.Options.chunkModel())
-                .oss(buildOssConfig())
+                .options(ParseRequest.Options.chunkModel(embeddedImageUploadEnabled))
+                .oss(embeddedImageUploadEnabled ? buildOssConfig() : null)
                 .build();
     }
 
