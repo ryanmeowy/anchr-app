@@ -28,7 +28,7 @@ public class DoclingChunkMapper {
 
     public List<Chunk> toTextChunks(Asset asset, ParseResponse response) {
         List<ParseResponse.Chunk> chunks = response.chunks();
-        boolean isImg = isImage(response.fileType());
+        boolean isImg = isImage(asset.getFileType());
 
         if (CollectionUtils.isEmpty(chunks)) return Lists.newArrayList();
         return chunks.stream()

@@ -138,6 +138,9 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
 
         List<Chunk> chunks = doclingChunkMapper.toTextChunks(asset, parsed);
+        if (chunks == null || chunks.isEmpty()) {
+            throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "docling returned no usable chunks.");
+        }
 
         updateRunning(kbId, taskId, item.getId(), IngestionStage.EMBED, STAGE_EMBED_PROGRESS, userId);
         enrichTextEmbeddings(asset, chunks, downloadUrl);
@@ -282,36 +285,50 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private void enrichTextEmbeddings(Asset asset, List<Chunk> chunks, String downloadUrl) {
-        if (chunks == null || chunks.isEmpty()) {
-            return;
+        Chunk firstUsableChunk = findFirstUsableChunk(chunks);
+        if (firstUsableChunk == null) {
+            throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "docling returned no usable chunks.");
         }
         boolean multi = embeddingPort.isMulti();
         boolean isImg = isImage(asset);
-        List<Float> imageEmbedding = List.of();
+
         if (isImg && multi) {
-            imageEmbedding = embedImageWithRetry(downloadUrl);
+            List<Float> imageEmbedding = embedImageWithRetry(downloadUrl);
+            if (imageEmbedding == null || imageEmbedding.isEmpty()) {
+                throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
+            }
+            firstUsableChunk.setEmbedding(imageEmbedding);
+            return;
         }
 
         for (Chunk chunk : chunks) {
-            if (chunk == null || !StringUtils.hasText(chunk.getChunkText())) {
+            if (chunk == null) {
                 continue;
             }
-            List<Float> embedding;
-            if (!isImg) {
-                embedding = embedTextWithRetry(chunk.getChunkText());
-            } else {
-                if (multi) {
-                    embedding = imageEmbedding;
-                }else {
-                    embedding = embedTextWithRetry(chunk.getOcrText());
-                }
+
+            String text = isImg ? chunk.getOcrText() : chunk.getChunkText();
+            if (!StringUtils.hasText(text)) {
+                continue;
             }
 
+            List<Float> embedding = embedTextWithRetry(text);
             if (embedding == null || embedding.isEmpty()) {
                 throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
             }
             chunk.setEmbedding(embedding);
         }
+    }
+
+    private Chunk findFirstUsableChunk(List<Chunk> chunks) {
+        if (chunks == null) {
+            return null;
+        }
+        for (Chunk chunk : chunks) {
+            if (chunk != null) {
+                return chunk;
+            }
+        }
+        return null;
     }
 
     private List<Float> embedTextWithRetry(String text) {
