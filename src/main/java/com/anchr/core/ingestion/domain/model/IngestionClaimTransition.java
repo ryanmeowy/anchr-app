@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
  * stage start forward so a retry cannot reset the stage timeout.</p>
  */
 @Value
-@Builder
+@Builder(toBuilder = true)
 public class IngestionClaimTransition {
 
     String itemId;
@@ -24,11 +24,10 @@ public class IngestionClaimTransition {
     String kbId;
     long executionEpoch;
     IngestionExecutionStage expectedExecutionStage;
-    int expectedStageAttempt;
+    long expectedClaimVersion;
     String leaseToken;
 
     IngestionExecutionStage nextExecutionStage;
-    int nextStageAttempt;
     int nextStageRetryCount;
     LocalDateTime nextStageStartedAt;
     LocalDateTime nextActionAt;
@@ -43,7 +42,9 @@ public class IngestionClaimTransition {
     String sourceRevision;
     String parseRequestSnapshot;
     String parseResultObjectKey;
+    String parseResultSha256;
     String embeddingResultObjectKey;
+    String embeddingResultSha256;
 
     String errorCode;
     String errorMessage;

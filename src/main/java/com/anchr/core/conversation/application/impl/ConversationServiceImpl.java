@@ -44,7 +44,6 @@ import com.anchr.core.search.application.KbScopeResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -66,6 +65,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -78,7 +78,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class ConversationServiceImpl implements ConversationService {
 
     private static final int DEFAULT_TURN_LIMIT = 20;
@@ -106,18 +105,14 @@ public class ConversationServiceImpl implements ConversationService {
     private final ActivityEventService activityEventService;
     private final AgentTaskRepository agentTaskRepository;
     private final TransactionTemplate transactionTemplate;
-    @Qualifier("streamEventExecutor")
     private final Executor streamExecutor;
-    @Autowired(required = false)
-    private AgentRunFinalizer agentRunFinalizer;
-    @Autowired(required = false)
-    private AgentTaskProcessor agentTaskProcessor;
-    @Autowired(required = false)
-    private AgentConversationCleanupService agentConversationCleanupService;
-    @Autowired(required = false)
-    private AgentRuntimeSnapshotService agentRuntimeSnapshotService;
 
-    /** Compatibility constructor for legacy unit tests that exercise only the traditional path. */
+    private final AgentRunFinalizer agentRunFinalizer;
+    private final AgentTaskProcessor agentTaskProcessor;
+    private final AgentConversationCleanupService agentConversationCleanupService;
+    private final AgentRuntimeSnapshotService agentRuntimeSnapshotService;
+
+    @Autowired
     public ConversationServiceImpl(ConversationRepository conversationRepository,
                                    ConversationMessageOrchestrator conversationMessageOrchestrator,
                                    ConversationTurnCodec conversationTurnCodec,
@@ -126,10 +121,32 @@ public class ConversationServiceImpl implements ConversationService {
                                    ObjectMapper objectMapper,
                                    MeterRegistry meterRegistry,
                                    ActivityEventService activityEventService,
-                                   Executor streamExecutor) {
-        this(conversationRepository, conversationMessageOrchestrator, conversationTurnCodec,
-                conversationRetrievalTraceBuilder, kbScopeResolver, objectMapper, meterRegistry,
-                activityEventService, null, null, streamExecutor);
+                                   AgentTaskRepository agentTaskRepository,
+                                   TransactionTemplate transactionTemplate,
+                                   @Qualifier("streamEventExecutor") Executor streamExecutor,
+                                   AgentRunFinalizer agentRunFinalizer,
+                                   AgentTaskProcessor agentTaskProcessor,
+                                   AgentConversationCleanupService agentConversationCleanupService,
+                                   AgentRuntimeSnapshotService agentRuntimeSnapshotService) {
+        this.conversationRepository = Objects.requireNonNull(conversationRepository);
+        this.conversationMessageOrchestrator =
+                Objects.requireNonNull(conversationMessageOrchestrator);
+        this.conversationTurnCodec = Objects.requireNonNull(conversationTurnCodec);
+        this.conversationRetrievalTraceBuilder =
+                Objects.requireNonNull(conversationRetrievalTraceBuilder);
+        this.kbScopeResolver = Objects.requireNonNull(kbScopeResolver);
+        this.objectMapper = Objects.requireNonNull(objectMapper);
+        this.meterRegistry = Objects.requireNonNull(meterRegistry);
+        this.activityEventService = Objects.requireNonNull(activityEventService);
+        this.agentTaskRepository = Objects.requireNonNull(agentTaskRepository);
+        this.transactionTemplate = Objects.requireNonNull(transactionTemplate);
+        this.streamExecutor = Objects.requireNonNull(streamExecutor);
+        this.agentRunFinalizer = Objects.requireNonNull(agentRunFinalizer);
+        this.agentTaskProcessor = Objects.requireNonNull(agentTaskProcessor);
+        this.agentConversationCleanupService =
+                Objects.requireNonNull(agentConversationCleanupService);
+        this.agentRuntimeSnapshotService =
+                Objects.requireNonNull(agentRuntimeSnapshotService);
     }
 
     @Override
@@ -189,13 +206,9 @@ public class ConversationServiceImpl implements ConversationService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteSession(String sessionId) {
         loadSessionOrThrow(sessionId);
-        if (agentConversationCleanupService != null) {
-            agentConversationCleanupService.cancelRunning(sessionId);
-        }
+        agentConversationCleanupService.cancelRunning(sessionId);
         conversationRepository.deleteSession(sessionId);
-        if (agentConversationCleanupService != null) {
-            agentConversationCleanupService.deleteRecords(sessionId);
-        }
+        agentConversationCleanupService.deleteRecords(sessionId);
         activityEventService.deleteBySessionId(sessionId);
     }
 
@@ -269,20 +282,16 @@ public class ConversationServiceImpl implements ConversationService {
                     conversationRepository.touchSessionIfNewer(session.getSessionId(), requestStartedAt);
                 }
                 if (executionResult.agentTask() != null) {
-                    if (agentTaskRepository == null) throw new IllegalStateException("Agent task repository is unavailable");
                     agentTaskRepository.save(newAgentTask(executionResult, turn, requestStartedAt));
                     submitTaskAfterCommit(executionResult.agentTask().taskId());
                 }
             };
-            if (transactionTemplate == null) persistence.run();
-            else transactionTemplate.executeWithoutResult(status -> persistence.run());
+            transactionTemplate.executeWithoutResult(status -> persistence.run());
         } catch (RuntimeException e) {
             markAgentRunTurnFailed(executionResult.agentRunId(), e);
             throw e;
         }
-        if (agentRunFinalizer != null) {
-            agentRunFinalizer.markTurnSaved(executionResult.agentRunId());
-        }
+        agentRunFinalizer.markTurnSaved(executionResult.agentRunId());
         boolean agentQuestion = executionResult.executionMode() == ConversationExecutionMode.AGENT;
         boolean traditionalKnowledgeBaseQuestion = executionResult.intent() != null
                 && executionResult.intent().type() == ConversationIntentType.KB_QUERY;
@@ -383,9 +392,7 @@ public class ConversationServiceImpl implements ConversationService {
                                     trace.put("details", event.details());
                                 }
                                 sendProgressEventSafely(emitter, trace, clientDisconnected);
-                                if (agentRuntimeSnapshotService != null) {
-                                    agentRuntimeSnapshotService.publishProgress(event);
-                                }
+                                agentRuntimeSnapshotService.publishProgress(event);
                             }
 
                             @Override
@@ -394,7 +401,7 @@ public class ConversationServiceImpl implements ConversationService {
                                 return false;
                             }
                 }, turnId, runId);
-                if (agentRuntimeSnapshotService != null && StringUtils.hasText(response.getAgentRunId())) {
+                if (StringUtils.hasText(response.getAgentRunId())) {
                     agentRuntimeSnapshotService.publishMessage(response.getAgentRunId(), response);
                 }
                 if (clientDisconnected.get()) {
@@ -509,7 +516,7 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private Map<String, AgentTaskDTO> loadActiveTaskDtos(List<ConversationTurn> turns) {
-        if (agentTaskRepository == null || turns == null || turns.isEmpty()) return Map.of();
+        if (turns == null || turns.isEmpty()) return Map.of();
         Set<String> taskIds = new LinkedHashSet<>();
         for (ConversationTurn turn : turns) {
             if (AnswerStatus.PROCESSING.name().equals(turn.getAnswerStatus())
@@ -645,7 +652,7 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private AgentTaskDTO toAgentTaskDto(String taskId) {
-        if (!StringUtils.hasText(taskId) || agentTaskRepository == null) return null;
+        if (!StringUtils.hasText(taskId)) return null;
         return agentTaskRepository.findById(taskId).map(this::toAgentTaskDto).orElse(null);
     }
 
@@ -657,7 +664,6 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private void submitTaskAfterCommit(String taskId) {
-        if (agentTaskProcessor == null) return;
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() { agentTaskProcessor.trigger(taskId); }
@@ -930,7 +936,6 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private void markAgentRunTurnFailed(String runId, RuntimeException original) {
-        if (agentRunFinalizer == null) return;
         try {
             agentRunFinalizer.markTurnFailed(runId);
         } catch (RuntimeException traceError) {

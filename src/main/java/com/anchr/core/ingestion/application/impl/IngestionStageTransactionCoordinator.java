@@ -30,7 +30,7 @@ public class IngestionStageTransactionCoordinator {
                 item.getId(),
                 item.getExecutionEpoch(),
                 item.getExecutionStage(),
-                item.getStageAttempt(),
+                item.getClaimVersion(),
                 item.getLeaseToken())) {
             return false;
         }

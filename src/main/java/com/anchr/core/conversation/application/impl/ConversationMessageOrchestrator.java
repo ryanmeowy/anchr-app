@@ -16,7 +16,6 @@ import com.anchr.core.conversation.application.model.ConversationExecutionMode;
 import com.anchr.core.conversation.config.AgentProperties;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import io.micrometer.core.instrument.MeterRegistry;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -33,7 +32,6 @@ public class ConversationMessageOrchestrator {
     private final AgentWorkflow agentWorkflow;
     private final AgentRunFinalizer agentRunFinalizer;
 
-    @Autowired
     public ConversationMessageOrchestrator(ConversationIntentRouter intentRouter,
                                            ChatResponseService chatResponseService,
                                            ConversationMessagePipeline ragPipeline,
@@ -50,27 +48,6 @@ public class ConversationMessageOrchestrator {
         this.agentRunFinalizer = agentRunFinalizer;
     }
 
-    public ConversationMessageOrchestrator(ConversationIntentRouter intentRouter,
-                                           ChatResponseService chatResponseService,
-                                           ConversationMessagePipeline ragPipeline,
-                                           MeterRegistry meterRegistry,
-                                           AgentProperties agentProperties,
-                                           AgentWorkflow agentWorkflow) {
-        this(intentRouter, chatResponseService, ragPipeline, meterRegistry,
-                agentProperties, agentWorkflow, null);
-    }
-
-    /**
-     * Compatibility constructor for legacy unit tests and embedded callers.
-     */
-    public ConversationMessageOrchestrator(ConversationIntentRouter intentRouter,
-                                           ChatResponseService chatResponseService,
-                                           ConversationMessagePipeline ragPipeline,
-                                           MeterRegistry meterRegistry) {
-        this(intentRouter, chatResponseService, ragPipeline, meterRegistry,
-                disabledAgentProperties(), null, null);
-    }
-
     public ConversationExecutionResult execute(String sessionId,
                                                ConversationMessageRequestDTO request,
                                                ConversationProgressListener listener) {
@@ -83,7 +60,7 @@ public class ConversationMessageOrchestrator {
                                                ConversationMessageRequestDTO request,
                                                ConversationProgressListener listener) {
         ConversationProgressListener progress = listener == null ? ConversationProgressListener.NOOP : listener;
-        if (Boolean.TRUE.equals(request.getAgentEnabled()) && agentProperties.isEnabled() && agentWorkflow != null) {
+        if (Boolean.TRUE.equals(request.getAgentEnabled()) && agentProperties.isEnabled()) {
             try {
                 return agentWorkflow.execute(new AgentRunRequest(runId, turnId, sessionId,
                         "single_user", request), progress);
@@ -98,9 +75,7 @@ public class ConversationMessageOrchestrator {
                     case KB_QUERY -> executeLegacyRag(sessionId, request, fallbackIntent, progress, runId,
                             agentProperties.getWorkflowVersion());
                 };
-                if (agentRunFinalizer != null) {
-                    agentRunFinalizer.prepareTraditionalFallback(runId);
-                }
+                agentRunFinalizer.prepareTraditionalFallback(runId);
                 return new ConversationExecutionResult(fallback.intent(), fallback.retrievalExecuted(),
                         fallback.rewrittenQuery(), fallback.answer(), fallback.answerStatus(), fallback.fallbackReason(),
                         fallback.citations(), fallback.resultCards(), fallback.ragResult(), runId,
@@ -148,12 +123,6 @@ public class ConversationMessageOrchestrator {
                 result.answerGenerationResult().getAnswerText(), AnswerStatus.from(result.answerGenerationResult()),
                 result.answerGenerationResult().getFallbackReason(), result.answerCitations(), result.resultCards(),
                 result, agentRunId, workflowVersion);
-    }
-
-    private static AgentProperties disabledAgentProperties() {
-        AgentProperties properties = new AgentProperties();
-        properties.setEnabled(false);
-        return properties;
     }
 
     private static String newTurnId() {

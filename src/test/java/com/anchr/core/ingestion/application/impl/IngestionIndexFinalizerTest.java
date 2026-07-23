@@ -128,7 +128,7 @@ class IngestionIndexFinalizerTest {
                 .assetId("asset-1")
                 .executionStage(IngestionExecutionStage.INDEX)
                 .executionEpoch(3L)
-                .stageAttempt(4)
+                .claimVersion(4)
                 .stageRetryCount(1)
                 .stageStartedAt(LocalDateTime.now().minusMinutes(1))
                 .leaseToken("lease-1")

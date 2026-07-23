@@ -32,6 +32,8 @@ public interface IngestionTaskRepository {
 
     Optional<IngestionTaskItem> findItem(String kbId, String taskId, String itemId);
 
+    Optional<IngestionTaskItem> findRetryItem(String kbId, String taskId, String itemId);
+
     List<String> listClaimableItemIds(int limit);
 
     List<String> listClaimableItemIds(String taskId, int limit);
@@ -40,7 +42,7 @@ public interface IngestionTaskRepository {
 
     boolean renewClaim(String itemId, long executionEpoch,
                        IngestionExecutionStage expectedExecutionStage,
-                       int stageAttempt, String leaseToken, long leaseSeconds);
+                       long claimVersion, String leaseToken, long leaseSeconds);
 
     boolean updateClaimContext(IngestionClaimContext context);
 
@@ -55,7 +57,7 @@ public interface IngestionTaskRepository {
      */
     boolean isClaimCurrentForUpdate(String itemId, long executionEpoch,
                                     IngestionExecutionStage expectedExecutionStage,
-                                    int stageAttempt, String leaseToken);
+                                    long claimVersion, String leaseToken);
 
     boolean resetFailedItem(String kbId, String taskId, String itemId,
                             int expectedParseAttempt, int nextParseAttempt,

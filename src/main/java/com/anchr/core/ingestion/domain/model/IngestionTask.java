@@ -16,6 +16,7 @@ public class IngestionTask {
     String id;
     String kbId;
     IngestionSourceType sourceType;
+    IngestionExecutionKind initialExecutionKind;
     String clientRequestId;
     String requestHash;
     IngestionTaskStatus status;

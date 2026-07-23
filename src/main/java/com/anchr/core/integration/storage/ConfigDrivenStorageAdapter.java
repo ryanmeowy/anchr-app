@@ -49,19 +49,10 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
 
     private final StorageConfigRepository configRepository;
     private final AesUtil aesUtil;
-    private final OssClientFactory clientFactory;
 
     public ConfigDrivenStorageAdapter(StorageConfigRepository configRepository, AesUtil aesUtil) {
-        this(configRepository, aesUtil,
-                (endpoint, accessKey, secretKey) -> new OSSClientBuilder()
-                        .build(endpoint, accessKey, secretKey));
-    }
-
-    ConfigDrivenStorageAdapter(StorageConfigRepository configRepository, AesUtil aesUtil,
-                               OssClientFactory clientFactory) {
         this.configRepository = configRepository;
         this.aesUtil = aesUtil;
-        this.clientFactory = clientFactory;
     }
 
     // ── SearchObjectStoragePort ──────────────────────────────────────────
@@ -186,8 +177,10 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     // ── internal ─────────────────────────────────────────────────────────
 
     private OSS buildClient(StorageConfig config) {
-        return clientFactory.create(config.getEndpoint(),
-                decrypt(config.getAccessKeyEnc()), decrypt(config.getSecretKeyEnc()));
+        return new OSSClientBuilder().build(
+                config.getEndpoint(),
+                decrypt(config.getAccessKeyEnc()),
+                decrypt(config.getSecretKeyEnc()));
     }
 
     private String buildPresignedUrl(String objectKey, long durationMs) {
@@ -271,8 +264,4 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
         }
     }
 
-    @FunctionalInterface
-    interface OssClientFactory {
-        OSS create(String endpoint, String accessKey, String secretKey);
-    }
 }

@@ -16,7 +16,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -53,8 +52,7 @@ public class AgentTaskProcessor {
     private final TransactionTemplate transactionTemplate;
     private final AgentTaskStreamService taskStreamService;
     @Qualifier("agentTaskExecutor") private final Executor executor;
-    @Autowired(required = false)
-    private AgentRuntimeSnapshotService runtimeSnapshotService;
+    private final AgentRuntimeSnapshotService runtimeSnapshotService;
     private final String owner = UUID.randomUUID().toString();
     private final Map<String, Thread> runningThreads = new ConcurrentHashMap<>();
     private final Set<String> scheduledTaskIds = ConcurrentHashMap.newKeySet();
@@ -252,10 +250,9 @@ public class AgentTaskProcessor {
         long started = System.currentTimeMillis();
         ConversationGenerationResult result;
         try {
-            result = generationPort.generateWithUsage(messages, options);
-            if (result == null) {
-                result = new ConversationGenerationResult(generationPort.generate(messages, options), 0, 0);
-            }
+            result = Objects.requireNonNull(
+                    generationPort.generateWithUsage(messages, options),
+                    "Conversation generation returned no result.");
         } catch (RuntimeException e) {
             recordGenerationUsage(task, 0, 0, System.currentTimeMillis() - started, null, false);
             throw e;
@@ -395,11 +392,9 @@ public class AgentTaskProcessor {
         long started = System.currentTimeMillis();
         ConversationGenerationResult result;
         try {
-            result = generationPort.generateWithUsage(messages, options);
-            // Keep test/custom ports that have not implemented usage reporting compatible.
-            if (result == null) {
-                result = new ConversationGenerationResult(generationPort.generate(messages, options), 0, 0);
-            }
+            result = Objects.requireNonNull(
+                    generationPort.generateWithUsage(messages, options),
+                    "Conversation generation returned no result.");
         } catch (RuntimeException e) {
             recordGenerationUsage(task, 0, 0, System.currentTimeMillis() - started, null, false);
             throw e;
@@ -509,11 +504,11 @@ public class AgentTaskProcessor {
         step.setCompletionTokens(existing==null?0:existing.getCompletionTokens());
         step.setLatencyMs("RUNNING".equals(status)?0:Math.max(0,now-createdAt));step.setErrorCode(errorCode);step.setCreatedAt(createdAt);
         try{traceRepository.saveStep(step);}catch(Exception e){log.warn("Agent task stage trace failed, taskId={}, stage={}",task.getTaskId(),stage,e);}
-        if(runtimeSnapshotService!=null)runtimeSnapshotService.publishActivity(task.getRunId());
+        runtimeSnapshotService.publishActivity(task.getRunId());
     }
 
     private void publishRuntimeTask(AgentTask task){
-        if(runtimeSnapshotService!=null&&task!=null)runtimeSnapshotService.publishTask(task.getRunId(),task);
+        if(task!=null)runtimeSnapshotService.publishTask(task.getRunId(),task);
     }
 
     private void recordGenerationUsage(AgentTask task,int promptTokens,int completionTokens,

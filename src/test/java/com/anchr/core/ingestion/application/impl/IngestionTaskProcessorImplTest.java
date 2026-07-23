@@ -4,11 +4,14 @@ import com.anchr.core.common.model.ParseRequest;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
+import com.anchr.core.ingestion.application.artifact.IngestionStoredArtifact;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
@@ -33,6 +36,8 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.time.Duration;
@@ -59,6 +64,9 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class IngestionTaskProcessorImplTest {
+
+    private static final String PARSE_ARTIFACT_SHA256 = "a".repeat(64);
+    private static final String EMBEDDING_ARTIFACT_SHA256 = "b".repeat(64);
 
     @Mock
     private IngestionTaskRepository ingestionTaskRepository;
@@ -123,12 +131,12 @@ class IngestionTaskProcessorImplTest {
             IngestionTaskProcessorImpl asyncProcessor = processor(workers);
             IngestionTaskItem priorClaim = claimed(IngestionExecutionStage.PARSE_WAIT)
                     .toBuilder()
-                    .stageAttempt(1)
+                    .claimVersion(1)
                     .leaseToken("lease-old")
                     .doclingJobId("job-old")
                     .build();
             IngestionTaskItem replacementClaim = priorClaim.toBuilder()
-                    .stageAttempt(2)
+                    .claimVersion(2)
                     .stageRetryCount(1)
                     .leaseToken("lease-new")
                     .doclingJobId("job-new")
@@ -408,21 +416,62 @@ class IngestionTaskProcessorImplTest {
         when(doclingClient.getJob("job-1", "task-1:item-1:1"))
                 .thenReturn(new DoclingClient.DoclingJob(
                         "job-1", "task-1:item-1:1", "succeeded", response, null));
-        when(artifactStore.writeParseResult(item, "job-1", response))
-                .thenReturn("ingestion/task-1/item-1/parse-result.gz");
+        IngestionStoredArtifact storedArtifact = new IngestionStoredArtifact(
+                "ingestion/task-1/item-1/parse-result.gz",
+                1,
+                PARSE_ARTIFACT_SHA256);
+        when(artifactStore.writeParseArtifact(item, "job-1", response))
+                .thenReturn(storedArtifact);
         when(ingestionTaskRepository.transitionClaim(any())).thenReturn(true);
 
         processor.processClaim(item);
 
         InOrder order = inOrder(artifactStore, ingestionTaskRepository, doclingClient);
-        order.verify(artifactStore).writeParseResult(item, "job-1", response);
+        order.verify(artifactStore).writeParseArtifact(item, "job-1", response);
         order.verify(ingestionTaskRepository).transitionClaim(any());
         order.verify(doclingClient).ackJob("job-1");
         IngestionClaimTransition transition = captureRepositoryTransition();
         assertThat(transition.getNextExecutionStage())
                 .isEqualTo(IngestionExecutionStage.EMBED);
         assertThat(transition.getParseResultObjectKey())
-                .isEqualTo("ingestion/task-1/item-1/parse-result.gz");
+                .isEqualTo(storedArtifact.objectKey());
+        assertThat(transition.getParseResultSha256())
+                .isEqualTo(storedArtifact.sha256());
+    }
+
+    @Test
+    void parsePersist_shouldDeferAckUntilAnOuterTransactionCommits() {
+        IngestionTaskItem item = claimed(IngestionExecutionStage.PARSE_PERSIST).toBuilder()
+                .doclingJobId("job-1")
+                .sourceRevision("v1:revision")
+                .build();
+        ParseResponse response = parsedResponse("task-1:item-1:1");
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(pdfAsset("objects/document.pdf", null)));
+        when(doclingClient.getJob("job-1", "task-1:item-1:1"))
+                .thenReturn(new DoclingClient.DoclingJob(
+                        "job-1", "task-1:item-1:1", "succeeded", response, null));
+        when(artifactStore.writeParseArtifact(item, "job-1", response))
+                .thenReturn(new IngestionStoredArtifact(
+                        "parse-result.gz", 1, PARSE_ARTIFACT_SHA256));
+        when(ingestionTaskRepository.transitionClaim(any())).thenReturn(true);
+
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            processor.processClaim(item);
+            verify(doclingClient, never()).ackJob(any());
+
+            List<TransactionSynchronization> synchronizations =
+                    TransactionSynchronizationManager.getSynchronizations();
+            assertThat(synchronizations).hasSize(1);
+            synchronizations.forEach(TransactionSynchronization::afterCommit);
+
+            verify(doclingClient).ackJob("job-1");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
     }
 
     @Test
@@ -437,8 +486,9 @@ class IngestionTaskProcessorImplTest {
         when(doclingClient.getJob("job-1", "task-1:item-1:1"))
                 .thenReturn(new DoclingClient.DoclingJob(
                         "job-1", "task-1:item-1:1", "succeeded", response, null));
-        when(artifactStore.writeParseResult(item, "job-1", response))
-                .thenReturn("parse-result.gz");
+        when(artifactStore.writeParseArtifact(item, "job-1", response))
+                .thenReturn(new IngestionStoredArtifact(
+                        "parse-result.gz", 1, PARSE_ARTIFACT_SHA256));
         when(ingestionTaskRepository.transitionClaim(any())).thenReturn(false);
 
         processor.processClaim(item);
@@ -469,9 +519,11 @@ class IngestionTaskProcessorImplTest {
                 .thenReturn(List.of(0.1f, 0.2f));
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
-                eq(2), eq("lease-1"), anyLong())).thenReturn(true);
-        when(artifactStore.writeEmbeddingResult(eq(item), any()))
-                .thenReturn("embedding-result.gz");
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        IngestionStoredArtifact storedArtifact = new IngestionStoredArtifact(
+                "embedding-result.gz", 1, EMBEDDING_ARTIFACT_SHA256);
+        when(artifactStore.writeEmbeddingArtifact(eq(item), any()))
+                .thenReturn(storedArtifact);
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
 
@@ -480,7 +532,7 @@ class IngestionTaskProcessorImplTest {
         assertThat(chunk.getEmbedding()).containsExactly(0.1f, 0.2f);
         verify(ingestionTaskRepository, times(3)).renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
-                eq(2), eq("lease-1"), anyLong());
+                eq(2L), eq("lease-1"), anyLong());
         ArgumentCaptor<IngestionClaimTransition> transition =
                 ArgumentCaptor.forClass(IngestionClaimTransition.class);
         verify(transactionCoordinator).transitionAndUpdateAssetStatus(
@@ -488,7 +540,9 @@ class IngestionTaskProcessorImplTest {
         assertThat(transition.getValue().getNextExecutionStage())
                 .isEqualTo(IngestionExecutionStage.INDEX);
         assertThat(transition.getValue().getEmbeddingResultObjectKey())
-                .isEqualTo("embedding-result.gz");
+                .isEqualTo(storedArtifact.objectKey());
+        assertThat(transition.getValue().getEmbeddingResultSha256())
+                .isEqualTo(storedArtifact.sha256());
     }
 
     @Test
@@ -513,9 +567,10 @@ class IngestionTaskProcessorImplTest {
                 .thenReturn(List.of(0.3f, 0.4f));
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
-                eq(2), eq("lease-1"), anyLong())).thenReturn(true);
-        when(artifactStore.writeEmbeddingResult(eq(item), any()))
-                .thenReturn("embedding-result.gz");
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        when(artifactStore.writeEmbeddingArtifact(eq(item), any()))
+                .thenReturn(new IngestionStoredArtifact(
+                        "embedding-result.gz", 1, EMBEDDING_ARTIFACT_SHA256));
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
 
@@ -546,9 +601,10 @@ class IngestionTaskProcessorImplTest {
         when(embeddingPort.isMulti()).thenReturn(false);
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
-                eq(2), eq("lease-1"), anyLong())).thenReturn(true);
-        when(artifactStore.writeEmbeddingResult(eq(item), any()))
-                .thenReturn("embedding-result.gz");
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        when(artifactStore.writeEmbeddingArtifact(eq(item), any()))
+                .thenReturn(new IngestionStoredArtifact(
+                        "embedding-result.gz", 1, EMBEDDING_ARTIFACT_SHA256));
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
 
@@ -582,9 +638,10 @@ class IngestionTaskProcessorImplTest {
                 .thenReturn(List.of(0.8f, 0.9f));
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
-                eq(2), eq("lease-1"), anyLong())).thenReturn(true);
-        when(artifactStore.writeEmbeddingResult(eq(item), any()))
-                .thenReturn("embedding-result.gz");
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        when(artifactStore.writeEmbeddingArtifact(eq(item), any()))
+                .thenReturn(new IngestionStoredArtifact(
+                        "embedding-result.gz", 1, EMBEDDING_ARTIFACT_SHA256));
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
 
@@ -622,7 +679,7 @@ class IngestionTaskProcessorImplTest {
                 .thenThrow(new AiClient.OpenAiException(429, "quota exhausted"));
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
-                eq(2), eq("lease-1"), anyLong())).thenReturn(true);
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
         when(transactionCoordinator.transitionFailed(
                 any(), eq(asset), any(), any(), anyInt(), anyInt())).thenReturn(true);
 
@@ -660,7 +717,7 @@ class IngestionTaskProcessorImplTest {
         when(embeddingPort.isMulti()).thenReturn(false);
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
-                eq(2), eq("lease-1"), anyLong())).thenReturn(true);
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
         ReflectionTestUtils.setField(
                 processor, "nextEmbeddingCallAt", System.currentTimeMillis() + 10_000L);
 
@@ -673,7 +730,7 @@ class IngestionTaskProcessorImplTest {
         }
 
         verifyNoInteractions(transactionCoordinator);
-        verify(artifactStore, never()).writeEmbeddingResult(any(), any());
+        verify(artifactStore, never()).writeEmbeddingArtifact(any(), any());
         verify(embeddingPort, never()).embed(any(), any());
     }
 
@@ -779,6 +836,8 @@ class IngestionTaskProcessorImplTest {
     }
 
     private IngestionTaskItem claimed(IngestionExecutionStage stage) {
+        IngestionPublicProjection projection =
+                IngestionPublicProjectionPolicy.running(stage, 0);
         return IngestionTaskItem.builder()
                 .id("item-1")
                 .taskId("task-1")
@@ -791,34 +850,16 @@ class IngestionTaskProcessorImplTest {
                 .sourceRevision("v1:revision")
                 .executionStage(stage)
                 .executionEpoch(1L)
-                .stageAttempt(2)
+                .claimVersion(2)
                 .stageRetryCount(0)
                 .stageStartedAt(LocalDateTime.now().minusSeconds(10))
                 .leaseToken("lease-1")
                 .leaseUntil(LocalDateTime.now().plusMinutes(5))
-                .stage(publicStage(stage))
-                .status(IngestionTaskItemStatus.RUNNING)
-                .progress(publicProgress(stage))
+                .stage(projection.stage())
+                .status(projection.status())
+                .progress(projection.progress())
                 .dedupeResult(DedupeResult.NEW)
                 .build();
-    }
-
-    private IngestionStage publicStage(IngestionExecutionStage stage) {
-        return switch (stage) {
-            case PARSE_SUBMIT, PARSE_WAIT, PARSE_PERSIST, FAILED -> IngestionStage.PARSE;
-            case EMBED -> IngestionStage.EMBED;
-            case INDEX -> IngestionStage.INDEX;
-            case COMPLETE -> IngestionStage.ASKABLE;
-        };
-    }
-
-    private int publicProgress(IngestionExecutionStage stage) {
-        return switch (stage) {
-            case PARSE_SUBMIT, PARSE_WAIT, PARSE_PERSIST, FAILED -> 20;
-            case EMBED -> 55;
-            case INDEX -> 75;
-            case COMPLETE -> 100;
-        };
     }
 
     private Asset pdfAsset(String objectKey, String sourceUrl) {

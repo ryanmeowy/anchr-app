@@ -1,7 +1,9 @@
 package com.anchr.core.ingestion.infrastructure.persistence;
 
+import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
@@ -17,139 +19,158 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class IngestionTaskMapperXmlTest {
 
+    private static final String NAMESPACE = IngestionTaskMapper.class.getName() + ".";
+
     @Test
-    void mapperXml_shouldExposeOnlyFencedExecutionStatements() throws Exception {
+    void mapperXml_shouldExposeSplitExecutionStatementsOnly() throws Exception {
         Configuration configuration = loadConfiguration();
 
-        String namespace = IngestionTaskMapper.class.getName() + ".";
-        assertThat(configuration.hasStatement(namespace + "resetFailedItem")).isTrue();
-        assertThat(configuration.hasStatement(namespace + "listClaimableItemIds")).isTrue();
-        assertThat(configuration.hasStatement(namespace + "selectClaimableItemForUpdate")).isTrue();
-        assertThat(configuration.hasStatement(namespace + "claimItem")).isTrue();
-        assertThat(configuration.hasStatement(namespace + "renewClaim")).isTrue();
-        assertThat(configuration.hasStatement(namespace + "transitionClaim")).isTrue();
-        assertThat(configuration.hasStatement(namespace + "findCurrentClaimForUpdate")).isTrue();
-        assertThat(configuration.hasStatement(namespace + "prepareParseAttempt")).isFalse();
-        assertThat(configuration.hasStatement(namespace + "recordDoclingJob")).isFalse();
-        assertThat(configuration.hasStatement(namespace + "markItemRunning")).isFalse();
-        assertThat(configuration.hasStatement(namespace + "markItemSuccess")).isFalse();
-        assertThat(configuration.hasStatement(namespace + "markItemFailed")).isFalse();
-        assertThat(configuration.hasStatement(namespace + "resetFailedItems")).isFalse();
+        assertThat(configuration.hasStatement(NAMESPACE + "insertParseAttempt")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "insertExecution")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "insertArtifact")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "pointItemToExecution")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "selectClaimableItemForUpdate")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "claimExecution")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "transitionExecution")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "projectTransitionToItem")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "selectFailedItemForRetryForUpdate"))
+                .isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "resetFailedItemPointer")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "findRetryItem")).isTrue();
+
+        assertThat(configuration.hasStatement(NAMESPACE + "claimItem")).isFalse();
+        assertThat(configuration.hasStatement(NAMESPACE + "transitionClaim")).isFalse();
+        assertThat(configuration.hasStatement(NAMESPACE + "resetFailedItem")).isFalse();
+        assertThat(configuration.hasStatement(NAMESPACE + "markItemRunning")).isFalse();
+        assertThat(configuration.hasStatement(NAMESPACE + "markItemSuccess")).isFalse();
+        assertThat(configuration.hasStatement(NAMESPACE + "markItemFailed")).isFalse();
+    }
+
+    @Test
+    void publicItemReads_shouldNotLoadLeaseSnapshotOrArtifactPayloads() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String listSql = sql(configuration, "listItems", Map.of("taskId", "task-1"));
+        String findSql = sql(configuration, "findItem", Map.of(
+                "kbId", "kb-1",
+                "taskId", "task-1",
+                "itemId", "item-1"));
+
+        assertPublicItemProjectionIsNarrow(listSql);
+        assertPublicItemProjectionIsNarrow(findSql);
+    }
+
+    @Test
+    void claimCandidate_shouldExcludeSourceErrorAndParseSnapshotPayloads() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String sql = sql(configuration, "selectClaimableItemForUpdate",
+                Map.of("itemId", "item-1"));
+
+        assertThat(sql)
+                .contains("ie.id as execution_id")
+                .contains("ie.phase")
+                .contains("ie.claim_version")
+                .contains("for update skip locked")
+                .doesNotContain("source_url")
+                .doesNotContain("error_message")
+                .doesNotContain("request_snapshot")
+                .doesNotContain("object_key");
+    }
+
+    @Test
+    void nonParseClaimedExecution_shouldNotSelectParseSnapshotPayload() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String sql = sql(configuration, "findClaimedExecution", Map.of(
+                "itemId", "item-1",
+                "leaseToken", "lease-1",
+                "includeParseSnapshot", false));
+
+        assertThat(sql)
+                .contains("null as request_snapshot")
+                .doesNotContain("ipa.request_snapshot as request_snapshot");
+    }
+
+    @Test
+    void parseClaimedExecution_shouldSelectParseSnapshotPayload() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String sql = sql(configuration, "findClaimedExecution", Map.of(
+                "itemId", "item-1",
+                "leaseToken", "lease-1",
+                "includeParseSnapshot", true));
+
+        assertThat(sql).contains("ipa.request_snapshot as request_snapshot");
+    }
+
+    @Test
+    void claimedExecution_shouldExcludePublicDisplayAndUnusedExecutionFields() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String sql = sql(configuration, "findClaimedExecution", Map.of(
+                "itemId", "item-1",
+                "leaseToken", "lease-1",
+                "includeParseSnapshot", false));
+
+        assertThat(sql)
+                .contains("iti.progress as item_progress")
+                .contains("ie.phase")
+                .contains("ie.claim_version")
+                .doesNotContain("iti.file_name")
+                .doesNotContain("iti.file_hash")
+                .doesNotContain("iti.stage as item_stage")
+                .doesNotContain("iti.status as item_status")
+                .doesNotContain("iti.error_code")
+                .doesNotContain("iti.error_message")
+                .doesNotContain("ie.execution_kind")
+                .doesNotContain("ie.execution_status,")
+                .doesNotContain("ipa.status as parse_attempt_status");
     }
 
     @Test
     void updateClaimContext_shouldFenceStableParseIdentityAndSnapshot() throws Exception {
         Configuration configuration = loadConfiguration();
-        String statement = IngestionTaskMapper.class.getName() + ".updateClaimContext";
-        BoundSql boundSql = configuration.getMappedStatement(statement).getBoundSql(Map.of(
-                "itemId", "item-1",
-                "executionEpoch", 2L,
-                "expectedExecutionStage", IngestionExecutionStage.PARSE_SUBMIT,
-                "stageAttempt", 1,
-                "leaseToken", "lease-1",
-                "parseAttempt", 3,
-                "doclingRequestId", "task-1:item-1:3",
-                "doclingJobId", "job-1",
-                "sourceRevision", "v1:revision",
-                "parseRequestSnapshot", "{\"fileName\":\"sample.pdf\"}"));
+        IngestionClaimContext context = IngestionClaimContext.builder()
+                .itemId("item-1")
+                .executionEpoch(2L)
+                .expectedExecutionStage(IngestionExecutionStage.PARSE_SUBMIT)
+                .claimVersion(1)
+                .leaseToken("lease-1")
+                .parseAttempt(3)
+                .doclingRequestId("task-1:item-1:3")
+                .doclingJobId("job-1")
+                .sourceRevision("v1:revision")
+                .parseRequestSnapshot("{\"fileName\":\"sample.pdf\"}")
+                .build();
 
-        assertThat(boundSql.getSql())
-                .contains("parse_attempt = ?")
-                .contains("docling_request_id is null or docling_request_id = ?")
-                .contains("source_revision is null or source_revision = ?")
-                .contains("parse_request_snapshot is null")
-                .contains("parse_request_snapshot = cast(? as json)");
+        String sql = sql(configuration, "updateClaimContext", context);
+
+        assertThat(sql)
+                .contains("update ingestion_item_parse_attempt ipa")
+                .contains("iti.current_execution_id = ie.id")
+                .contains("ie.phase = ?")
+                .contains("ie.claim_version = ?")
+                .contains("ie.execution_status = 'ACTIVE'")
+                .contains("ipa.attempt_no = ?")
+                .contains("ipa.request_id is null or ipa.request_id = ?")
+                .contains("ipa.source_revision is null or ipa.source_revision = ?")
+                .contains("ipa.request_snapshot is null")
+                .contains("ipa.request_snapshot = cast(? as json)");
     }
 
     @Test
-    void resetFailedItem_shouldBindExplicitNextIdentityAndExpectedAttempt() throws Exception {
+    void transition_shouldFenceCurrentExecutionPhaseStatusAndClaimVersion() throws Exception {
         Configuration configuration = loadConfiguration();
-        String statement = IngestionTaskMapper.class.getName() + ".resetFailedItem";
-        BoundSql boundSql = configuration.getMappedStatement(statement).getBoundSql(Map.of(
-                "kbId", "kb-1",
-                "taskId", "task-1",
-                "itemId", "item-1",
-                "expectedParseAttempt", 7,
-                "nextParseAttempt", 8,
-                "nextDoclingRequestId", "task-1:item-1:8",
-                "updatedAt", LocalDateTime.now()));
-
-        assertThat(boundSql.getSql())
-                .contains("iti.docling_request_id = ?")
-                .contains("iti.parse_attempt = ?")
-                .contains("and iti.parse_attempt = ?")
-                .doesNotContain("concat(")
-                .doesNotContain("parse_attempt + 1");
-        assertThat(boundSql.getSql())
-                .contains("iti.execution_epoch = iti.execution_epoch + 1")
-                .contains("iti.execution_stage = 'PARSE_SUBMIT'")
-                .contains("iti.stage_attempt = 0")
-                .contains("iti.stage_retry_count = 0")
-                .contains("iti.next_action_at = ?")
-                .contains("iti.lease_token = null")
-                .contains("iti.parse_request_snapshot = null")
-                .contains("iti.parse_result_object_key = null")
-                .contains("iti.embedding_result_object_key = null");
-        assertThat(boundSql.getParameterMappings())
-                .extracting(mapping -> mapping.getProperty())
-                .containsExactly(
-                        "updatedAt",
-                        "nextDoclingRequestId",
-                        "nextParseAttempt",
-                        "updatedAt",
-                        "kbId",
-                        "taskId",
-                        "itemId",
-                        "expectedParseAttempt");
-    }
-
-    @Test
-    void claim_shouldUseSkipLockedDatabaseLeaseAndStableStageStart() throws Exception {
-        Configuration configuration = loadConfiguration();
-        String namespace = IngestionTaskMapper.class.getName() + ".";
-
-        BoundSql select = configuration.getMappedStatement(namespace + "selectClaimableItemForUpdate")
-                .getBoundSql(Map.of("itemId", "item-1"));
-        assertThat(select.getSql())
-                .contains("for update skip locked")
-                .contains("lease_until <= current_timestamp(6)");
-
-        IngestionTaskItemRecord candidate = new IngestionTaskItemRecord();
-        candidate.setId("item-1");
-        candidate.setExecutionEpoch(3L);
-        candidate.setExecutionStage(IngestionExecutionStage.PARSE_WAIT.name());
-        candidate.setStageAttempt(4);
-        BoundSql claim = configuration.getMappedStatement(namespace + "claimItem")
-                .getBoundSql(Map.of(
-                        "item", candidate,
-                        "leaseToken", "lease-1",
-                        "leaseSeconds", 60L));
-        assertThat(claim.getSql())
-                .contains("stage_retry_count = stage_retry_count + case")
-                .contains("when ? is not null then 1")
-                .contains("lease_until = timestampadd(second, ?, current_timestamp(6))")
-                .contains("stage_attempt = stage_attempt + 1")
-                .contains("stage_started_at = coalesce(stage_started_at, current_timestamp(6))")
-                .contains("status = 'RUNNING'")
-                .contains("execution_epoch = ?")
-                .contains("execution_stage = ?")
-                .contains("stage_attempt = ?");
-    }
-
-    @Test
-    void transition_shouldFenceCompleteNextStateWithoutRequiringLiveLease() throws Exception {
-        Configuration configuration = loadConfiguration();
-        String statement = IngestionTaskMapper.class.getName() + ".transitionClaim";
         IngestionClaimTransition transition = IngestionClaimTransition.builder()
                 .itemId("item-1")
                 .taskId("task-1")
                 .kbId("kb-1")
                 .executionEpoch(2L)
                 .expectedExecutionStage(IngestionExecutionStage.PARSE_WAIT)
-                .expectedStageAttempt(3)
+                .expectedClaimVersion(3)
                 .leaseToken("lease-1")
                 .nextExecutionStage(IngestionExecutionStage.PARSE_PERSIST)
-                .nextStageAttempt(0)
                 .nextStageRetryCount(0)
                 .nextActionAt(LocalDateTime.now())
                 .stage(IngestionStage.PARSE)
@@ -160,25 +181,77 @@ class IngestionTaskMapperXmlTest {
                 .updatedAt(LocalDateTime.now())
                 .build();
 
-        BoundSql boundSql = configuration.getMappedStatement(statement).getBoundSql(transition);
-        assertThat(boundSql.getSql())
-                .contains("execution_stage = ?")
-                .contains("stage_attempt = ?")
-                .contains("stage_retry_count = ?")
-                .contains("stage_started_at = ?")
-                .contains("next_action_at = ?")
-                .contains("parse_request_snapshot = ?")
-                .contains("parse_result_object_key = ?")
-                .contains("embedding_result_object_key = ?")
-                .contains("lease_token = null")
-                .contains("lease_until = null")
-                .contains("execution_epoch = ?")
-                .contains("execution_stage = ?")
-                .contains("stage_attempt = ?")
-                .contains("lease_token = ?")
-                .contains("status = 'RUNNING'")
-                .doesNotContain("lease_until >")
-                .doesNotContain("lease_until &gt;");
+        String executionSql = sql(configuration, "transitionExecution", transition);
+        assertThat(executionSql)
+                .contains("iti.current_execution_id = ie.id")
+                .contains("ie.phase = ?")
+                .contains("ie.claim_version = ?")
+                .contains("ie.execution_status = 'ACTIVE'")
+                .contains("ie.lease_token = ?")
+                .doesNotContain("lease_until >");
+
+        String projectionSql = sql(configuration, "projectTransitionToItem", transition);
+        assertThat(projectionSql)
+                .contains("ie.id = iti.current_execution_id")
+                .contains("ie.execution_epoch = ?")
+                .contains("ie.claim_version = ?")
+                .contains("ie.execution_status = case")
+                .contains("? >= iti.progress");
+    }
+
+    @Test
+    void explicitRetry_shouldLockFailureInsertNewRowsAndCasCurrentPointer() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String selectSql = sql(configuration, "selectFailedItemForRetryForUpdate", Map.of(
+                "kbId", "kb-1",
+                "taskId", "task-1",
+                "itemId", "item-1",
+                "expectedParseAttempt", 7));
+        assertThat(selectSql)
+                .contains("iti.current_execution_id")
+                .contains("ie.execution_status")
+                .contains("ipa.attempt_no")
+                .contains("iti.status = 'FAILED'")
+                .contains("for update");
+
+        String pointerSql = sql(configuration, "resetFailedItemPointer", Map.of(
+                "kbId", "kb-1",
+                "taskId", "task-1",
+                "itemId", "item-1",
+                "expectedCurrentExecutionId", 41L,
+                "nextExecutionId", 42L,
+                "projection", IngestionPublicProjectionPolicy.explicitRetry(),
+                "updatedAt", LocalDateTime.now()));
+        assertThat(pointerSql)
+                .contains("iti.current_execution_id = ?")
+                .contains("iti.stage = ?")
+                .contains("iti.status = ?")
+                .contains("iti.progress = ?")
+                .doesNotContain("iti.status = 'PENDING'")
+                .doesNotContain("iti.stage = 'UPLOAD'")
+                .contains("iti.current_execution_id = ?");
+
+        assertThat(configuration.hasStatement(NAMESPACE + "insertParseAttempt")).isTrue();
+        assertThat(configuration.hasStatement(NAMESPACE + "insertExecution")).isTrue();
+    }
+
+    private void assertPublicItemProjectionIsNarrow(String sql) {
+        assertThat(sql)
+                .contains("iti.updated_at")
+                .doesNotContain("lease_token")
+                .doesNotContain("request_snapshot")
+                .doesNotContain("object_key")
+                .doesNotContain("current_execution_id")
+                .doesNotContain("claim_version")
+                .doesNotContain("parse_attempt")
+                .doesNotContain("ingestion_item_execution");
+    }
+
+    private String sql(Configuration configuration, String statement, Object parameter) {
+        BoundSql boundSql = configuration.getMappedStatement(NAMESPACE + statement)
+                .getBoundSql(parameter);
+        return boundSql.getSql().replaceAll("\\s+", " ").trim();
     }
 
     private Configuration loadConfiguration() throws Exception {

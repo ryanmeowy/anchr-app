@@ -10,7 +10,10 @@ import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
+import com.anchr.core.ingestion.domain.model.IngestionExecutionKind;
+import com.anchr.core.ingestion.domain.model.IngestionRetryConflictException;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
+import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
@@ -19,6 +22,7 @@ import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
+import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -213,6 +217,65 @@ class IngestionApplicationServiceImplTest {
         assertThat(item.getStatus()).isEqualTo(IngestionTaskItemStatus.SKIPPED);
         assertThat(item.getDedupeResult()).isEqualTo(DedupeResult.SKIPPED);
         assertThat(item.getAssetId()).isEqualTo("asset-url");
+    }
+
+    @Test
+    void createTask_shouldUseUrlPendingProjectionForNewUrlAsset() {
+        when(assetRepository.findActiveByHash("kb-1", "hash-url"))
+                .thenReturn(Optional.empty());
+
+        IngestionTask task = service.createTask(
+                "kb-1",
+                command(DedupeStrategy.SKIP, IngestionSourceType.URL, "hash-url")).task();
+
+        IngestionTaskItem item = task.getItems().getFirst();
+        assertThat(item.getStage()).isEqualTo(IngestionStage.PARSE);
+        assertThat(item.getStatus()).isEqualTo(IngestionTaskItemStatus.PENDING);
+        assertThat(item.getProgress()).isEqualTo(10);
+    }
+
+    @Test
+    void genericCreateTask_shouldKeepLegacyUploadProjectionForMaintenanceSourceValues() {
+        for (IngestionSourceType sourceType : List.of(
+                IngestionSourceType.REPARSE,
+                IngestionSourceType.REEMBED,
+                IngestionSourceType.RETRY)) {
+            IngestionTask task = service.createTask(
+                    "kb-1",
+                    command(DedupeStrategy.SKIP, sourceType, "hash-" + sourceType)).task();
+
+            IngestionTaskItem item = task.getItems().getFirst();
+            assertThat(item.getStage()).isEqualTo(IngestionStage.UPLOAD);
+            assertThat(item.getStatus()).isEqualTo(IngestionTaskItemStatus.PENDING);
+            assertThat(item.getProgress()).isZero();
+            assertThat(savedTask.get().getInitialExecutionKind())
+                    .isEqualTo(IngestionExecutionKind.INITIAL);
+        }
+    }
+
+    @Test
+    void createMaintenanceTasks_shouldUseSourceSpecificPendingProjections() {
+        Asset document = existingAsset("asset-1", "hash-a").toBuilder()
+                .parseStatus(DocumentParseStatus.SUCCESS)
+                .build();
+        when(knowledgeBaseService.getDocument("kb-1", "asset-1"))
+                .thenReturn(document);
+
+        IngestionTask reparse = service.createReparseTask("kb-1", "asset-1");
+        assertThat(reparse.getItems().getFirst().getStage()).isEqualTo(IngestionStage.PARSE);
+        assertThat(reparse.getItems().getFirst().getStatus())
+                .isEqualTo(IngestionTaskItemStatus.PENDING);
+        assertThat(reparse.getItems().getFirst().getProgress()).isEqualTo(20);
+        assertThat(savedTask.get().getInitialExecutionKind())
+                .isEqualTo(IngestionExecutionKind.REPARSE);
+
+        IngestionTask reembed = service.createReembedTask("kb-1", "asset-1");
+        assertThat(reembed.getItems().getFirst().getStage()).isEqualTo(IngestionStage.EMBED);
+        assertThat(reembed.getItems().getFirst().getStatus())
+                .isEqualTo(IngestionTaskItemStatus.PENDING);
+        assertThat(reembed.getItems().getFirst().getProgress()).isEqualTo(60);
+        assertThat(savedTask.get().getInitialExecutionKind())
+                .isEqualTo(IngestionExecutionKind.REEMBED);
     }
 
     @Test
@@ -458,7 +521,7 @@ class IngestionApplicationServiceImplTest {
                 .status(IngestionTaskStatus.FAILED)
                 .items(List.of(failedItem))
                 .build());
-        when(ingestionTaskRepository.findItem("kb-1", "task-1", "item-1"))
+        when(ingestionTaskRepository.findRetryItem("kb-1", "task-1", "item-1"))
                 .thenReturn(Optional.of(failedItem));
         when(ingestionTaskRepository.resetFailedItem(
                 eq("kb-1"), eq("task-1"), eq("item-1"),
@@ -514,8 +577,12 @@ class IngestionApplicationServiceImplTest {
                 .status(IngestionTaskStatus.FAILED)
                 .items(List.of(failedItem))
                 .build());
-        when(ingestionTaskRepository.findItem("kb-1", "task-1", "item-1"))
+        when(ingestionTaskRepository.findRetryItem("kb-1", "task-1", "item-1"))
                 .thenReturn(Optional.of(failedItem));
+        when(ingestionTaskRepository.resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-1"),
+                eq(2), eq(3), eq("task-1:item-1:3"), any(LocalDateTime.class)))
+                .thenThrow(new IngestionRetryConflictException("pointer changed"));
 
         BusinessException error = assertThrows(BusinessException.class,
                 () -> service.retryItem("kb-1", "task-1", "item-1"));

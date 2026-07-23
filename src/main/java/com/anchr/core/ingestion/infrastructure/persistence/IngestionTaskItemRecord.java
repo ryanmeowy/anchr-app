@@ -12,30 +12,25 @@ public class IngestionTaskItemRecord {
 
     private String id;
     private String taskId;
+    private Long currentExecutionId;
+    /**
+     * Expand-phase compatibility copy for the legacy non-null item column.
+     *
+     * <p>New read paths obtain the knowledge-base scope from the parent task.</p>
+     */
     private String kbId;
-    private String taskCreatedBy;
     private String assetId;
     private String fileName;
     private String fileHash;
     private String sourceUrl;
-    private Integer parseAttempt;
-    private String doclingRequestId;
-    private String doclingJobId;
-    private String sourceRevision;
-    private String executionStage;
-    private Long executionEpoch;
-    private Integer stageAttempt;
-    private Integer stageRetryCount;
-    private LocalDateTime stageStartedAt;
-    private LocalDateTime nextActionAt;
-    private String leaseToken;
-    private LocalDateTime leaseUntil;
-    private String parseRequestSnapshot;
-    private String parseResultObjectKey;
-    private String embeddingResultObjectKey;
     private String stage;
     private String status;
     private Integer progress;
+    /**
+     * Expand-phase compatibility copy for rollback to the legacy item model.
+     *
+     * <p>The parent task is the source of truth in the split model.</p>
+     */
     private String dedupeStrategy;
     private String dedupeResult;
     private String duplicateAssetId;

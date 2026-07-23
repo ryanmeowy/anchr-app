@@ -4,9 +4,13 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.conversation.application.AnswerGenerationService;
+import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
 import com.anchr.core.conversation.application.ChatResponseService;
-import com.anchr.core.conversation.application.agent.AgentDeferredTask;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
+import com.anchr.core.conversation.application.agent.AgentDeferredTask;
+import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
+import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
+import com.anchr.core.conversation.application.agent.AgentWorkflow;
 import com.anchr.core.conversation.application.ConversationIntentRouter;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.QueryRewriteService;
@@ -27,6 +31,7 @@ import com.anchr.core.conversation.application.model.ConversationIntentResult;
 import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationIntentType;
 import com.anchr.core.conversation.application.model.RewriteResult;
+import com.anchr.core.conversation.config.AgentProperties;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.ConversationSession;
@@ -109,10 +114,17 @@ class ConversationServiceImplTest {
     private AgentConversationCleanupService agentConversationCleanupService;
     @Mock
     private AgentTaskRepository agentTaskRepository;
+    @Mock
+    private AgentRunFinalizer agentRunFinalizer;
+    @Mock
+    private AgentTaskProcessor agentTaskProcessor;
+    @Mock
+    private AgentRuntimeSnapshotService agentRuntimeSnapshotService;
 
     private InMemoryConversationRepository repository;
     private ObjectMapper objectMapper;
     private SimpleMeterRegistry meterRegistry;
+    private TransactionTemplate transactionTemplate;
     private ConversationServiceImpl service;
 
     @BeforeEach
@@ -120,6 +132,12 @@ class ConversationServiceImplTest {
         repository = new InMemoryConversationRepository();
         objectMapper = new ObjectMapper();
         meterRegistry = new SimpleMeterRegistry();
+        transactionTemplate = mock(TransactionTemplate.class);
+        lenient().doAnswer(invocation -> {
+            Consumer<TransactionStatus> callback = invocation.getArgument(0);
+            callback.accept(mock(TransactionStatus.class));
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
         ConversationTurnCodec conversationTurnCodec = new ConversationTurnCodec(objectMapper);
         ConversationMessagePipeline conversationMessagePipeline = new ConversationMessagePipeline(
                 queryRewriteService,
@@ -136,7 +154,10 @@ class ConversationServiceImplTest {
                 conversationIntentRouter,
                 chatResponseService,
                 conversationMessagePipeline,
-                meterRegistry
+                meterRegistry,
+                new AgentProperties(),
+                mock(AgentWorkflow.class),
+                agentRunFinalizer
         );
         lenient().when(kbScopeResolver.resolveVisibleKbIds(any())).thenAnswer(invocation -> {
             List<String> requested = invocation.getArgument(0);
@@ -152,10 +173,13 @@ class ConversationServiceImplTest {
                 meterRegistry,
                 activityEventService,
                 agentTaskRepository,
-                null,
-                Runnable::run
+                transactionTemplate,
+                Runnable::run,
+                agentRunFinalizer,
+                agentTaskProcessor,
+                agentConversationCleanupService,
+                agentRuntimeSnapshotService
         );
-        ReflectionTestUtils.setField(service, "agentConversationCleanupService", agentConversationCleanupService);
     }
 
     @Test
@@ -1002,7 +1026,7 @@ class ConversationServiceImplTest {
     }
 
     private ConversationServiceImpl buildService(ConversationMessageOrchestrator orchestrator) {
-        return buildService(orchestrator, null);
+        return buildService(orchestrator, transactionTemplate);
     }
 
     private ConversationServiceImpl buildService(ConversationMessageOrchestrator orchestrator,
@@ -1019,8 +1043,11 @@ class ConversationServiceImplTest {
                 activityEventService,
                 agentTaskRepository,
                 transactionTemplate,
-                Runnable::run);
-        ReflectionTestUtils.setField(builtService, "agentConversationCleanupService", agentConversationCleanupService);
+                Runnable::run,
+                agentRunFinalizer,
+                agentTaskProcessor,
+                agentConversationCleanupService,
+                agentRuntimeSnapshotService);
         return builtService;
     }
 
@@ -1053,6 +1080,11 @@ class ConversationServiceImplTest {
         @Override
         public synchronized Optional<ConversationSession> findSession(String sessionId) {
             return Optional.ofNullable(sessions.get(sessionId)).map(InMemoryConversationRepository::copySession);
+        }
+
+        @Override
+        public synchronized boolean lockActiveSession(String sessionId) {
+            return sessions.containsKey(sessionId);
         }
 
         @Override
@@ -1143,6 +1175,14 @@ class ConversationServiceImplTest {
                     .sorted(Comparator.comparingLong(ConversationTurn::getCreatedAt).reversed())
                     .limit(Math.max(1, limit))
                     .collect(Collectors.toCollection(ArrayList::new));
+        }
+
+        @Override
+        public Optional<ConversationTurnPosition> findTurnPosition(
+                String sessionId, String turnId) {
+            return findTurn(sessionId, turnId)
+                    .map(turn -> new ConversationTurnPosition(
+                            turn.getTurnId(), turn.getCreatedAt()));
         }
 
         @Override

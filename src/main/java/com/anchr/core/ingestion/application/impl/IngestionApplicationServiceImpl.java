@@ -15,8 +15,11 @@ import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
+import com.anchr.core.ingestion.domain.model.IngestionExecutionKind;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
+import com.anchr.core.ingestion.domain.model.IngestionRetryConflictException;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
-import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
@@ -102,8 +105,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         LocalDateTime now = LocalDateTime.now();
         List<IngestionTaskItem> items = createItems(context, kbId, request.sourceType(),
                 request.dedupeStrategy(), request.items(), now);
-        IngestionTask task = buildTask(context, kbId, request.sourceType(), items, now,
-                request.clientRequestId(), requestHash);
+        IngestionTask task = buildTask(
+                context, kbId, request.sourceType(), IngestionExecutionKind.INITIAL,
+                items, now, request.clientRequestId(), requestHash);
         ingestionTaskRepository.save(task);
         activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
                 task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
@@ -143,7 +147,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
         IngestionTask task = getTask(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
-        var item = ingestionTaskRepository.findItem(kbId, task.getId(), requireText(itemId, "itemId"))
+        var item = ingestionTaskRepository.findRetryItem(
+                        kbId, task.getId(), requireText(itemId, "itemId"))
                 .orElseThrow(() -> new BusinessException(ApiError.INGEST_TASK_ITEM_NOT_FOUND));
         if (item.getStatus() != IngestionTaskItemStatus.FAILED) {
             throw new BusinessException(ApiError.INGEST_RETRY_ONLY_FAILED);
@@ -186,8 +191,17 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                     ApiError.INTERNAL_ERROR, "Parse attempt limit reached.", overflow);
         }
         String nextRequestId = IngestionParseIdentity.requestId(taskId, item.getId(), nextAttempt);
-        boolean reset = ingestionTaskRepository.resetFailedItem(
-                kbId, taskId, item.getId(), expectedAttempt, nextAttempt, nextRequestId, updatedAt);
+        boolean reset;
+        try {
+            reset = ingestionTaskRepository.resetFailedItem(
+                    kbId, taskId, item.getId(),
+                    expectedAttempt, nextAttempt, nextRequestId, updatedAt);
+        } catch (IngestionRetryConflictException conflict) {
+            throw new BusinessException(
+                    ApiError.INGEST_RETRY_ONLY_FAILED,
+                    "Failed item changed while retry was being prepared.",
+                    conflict);
+        }
         if (!reset) {
             throw new BusinessException(
                     ApiError.INGEST_RETRY_ONLY_FAILED,
@@ -199,23 +213,25 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
     @Transactional
     public IngestionTask createReparseTask(String kbId, String assetId) {
 
-        return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REPARSE, IngestionStage.PARSE);
+        return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REPARSE);
     }
 
     @Override
     @Transactional
     public IngestionTask createReembedTask(String kbId, String assetId) {
 
-        return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REEMBED, IngestionStage.EMBED);
+        return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REEMBED);
     }
 
     private IngestionTask createDocumentMaintenanceTask(String kbId, String assetId,
-                                                        IngestionSourceType sourceType, IngestionStage stage) {
+                                                        IngestionSourceType sourceType) {
         Asset document = knowledgeBaseService.getDocument(kbId, assetId);
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
         String taskId = idGen.nextIdStr();
         String itemId = idGen.nextIdStr();
+        IngestionPublicProjection projection =
+                IngestionPublicProjectionPolicy.pending(sourceType);
         IngestionTaskItem item = IngestionTaskItem.builder()
                 .id(itemId)
                 .taskId(taskId)
@@ -228,9 +244,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .doclingRequestId(IngestionParseIdentity.requestId(
                         taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
                 .sourceRevision(IngestionParseIdentity.sourceRevision(document))
-                .stage(stage)
-                .status(IngestionTaskItemStatus.PENDING)
-                .progress(stage == IngestionStage.EMBED ? 60 : 20)
+                .stage(projection.stage())
+                .status(projection.status())
+                .progress(projection.progress())
                 .dedupeStrategy(null)
                 .dedupeResult(null)
                 .duplicateAssetId(null)
@@ -275,6 +291,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                                          IngestionCreateItemCommand command, LocalDateTime now) {
         String fileType = normalizeFileType(command.fileType());
         String fileName = normalizeFileName(command.fileName(), command.sourceUrl());
+        IngestionPublicProjection pendingProjection =
+                IngestionPublicProjectionPolicy.intakePending(sourceType);
         if (sourceType == IngestionSourceType.URL) {
             requireText(command.sourceUrl(), "sourceUrl");
             if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
@@ -300,9 +318,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                     .doclingRequestId(IngestionParseIdentity.requestId(
                             taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
                     .sourceRevision(IngestionParseIdentity.sourceRevision(document))
-                    .stage(IngestionStage.PARSE)
-                    .status(IngestionTaskItemStatus.PENDING)
-                    .progress(10)
+                    .stage(pendingProjection.stage())
+                    .status(pendingProjection.status())
+                    .progress(pendingProjection.progress())
                     .dedupeStrategy(dedupeStrategy)
                     .dedupeResult(decision.result())
                     .duplicateAssetId(decision.duplicateAssetId())
@@ -334,9 +352,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .doclingRequestId(IngestionParseIdentity.requestId(
                         taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
                 .sourceRevision(IngestionParseIdentity.sourceRevision(document))
-                .stage(IngestionStage.UPLOAD)
-                .status(IngestionTaskItemStatus.PENDING)
-                .progress(0)
+                .stage(pendingProjection.stage())
+                .status(pendingProjection.status())
+                .progress(pendingProjection.progress())
                 .dedupeStrategy(dedupeStrategy)
                 .dedupeResult(decision.result())
                 .duplicateAssetId(decision.duplicateAssetId())
@@ -374,12 +392,24 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private IngestionTask buildTask(RequestUserContext context, String kbId, IngestionSourceType sourceType,
                                     List<IngestionTaskItem> items, LocalDateTime now) {
-        return buildTask(context, kbId, sourceType, items, now, null, null);
+        IngestionExecutionKind executionKind = switch (sourceType) {
+            case REPARSE -> IngestionExecutionKind.REPARSE;
+            case REEMBED -> IngestionExecutionKind.REEMBED;
+            case UPLOAD, URL, RETRY -> IngestionExecutionKind.INITIAL;
+        };
+        return buildTask(
+                context, kbId, sourceType, executionKind, items, now, null, null);
     }
 
-    private IngestionTask buildTask(RequestUserContext context, String kbId, IngestionSourceType sourceType,
-                                    List<IngestionTaskItem> items, LocalDateTime now,
-                                    String clientRequestId, String requestHash) {
+    private IngestionTask buildTask(
+            RequestUserContext context,
+            String kbId,
+            IngestionSourceType sourceType,
+            IngestionExecutionKind executionKind,
+            List<IngestionTaskItem> items,
+            LocalDateTime now,
+            String clientRequestId,
+            String requestHash) {
         int successCount = (int) items.stream()
                 .filter(item -> item.getStatus() == IngestionTaskItemStatus.SUCCESS
                         || item.getStatus() == IngestionTaskItemStatus.SKIPPED)
@@ -390,6 +420,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .id(items.get(0).getTaskId())
                 .kbId(kbId)
                 .sourceType(sourceType)
+                .initialExecutionKind(executionKind)
                 .clientRequestId(clientRequestId)
                 .requestHash(requestHash)
                 .status(resolveTaskStatus(items, successCount, failureCount, runningCount))
@@ -410,6 +441,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                                          String sourceUrl, DedupeStrategy dedupeStrategy, String duplicateAssetId,
                                          String errorCode, String errorMessage,
                                          LocalDateTime now) {
+        IngestionPublicProjection projection =
+                IngestionPublicProjectionPolicy.preflightFailure();
         return IngestionTaskItem.builder()
                 .id(idGen.nextIdStr())
                 .taskId(taskId)
@@ -417,9 +450,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .fileName(fileName)
                 .fileHash(trimToNull(fileHash))
                 .sourceUrl(trimToNull(sourceUrl))
-                .stage(IngestionStage.UPLOAD)
-                .status(IngestionTaskItemStatus.FAILED)
-                .progress(0)
+                .stage(projection.stage())
+                .status(projection.status())
+                .progress(projection.progress())
                 .dedupeStrategy(dedupeStrategy)
                 .dedupeResult(null)
                 .duplicateAssetId(duplicateAssetId)
@@ -433,6 +466,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private IngestionTaskItem skippedItem(String kbId, String taskId, Asset existing,
                                           DedupeStrategy dedupeStrategy, LocalDateTime now) {
+        IngestionPublicProjection projection =
+                IngestionPublicProjectionPolicy.skipped();
         return IngestionTaskItem.builder()
                 .id(idGen.nextIdStr())
                 .taskId(taskId)
@@ -441,9 +476,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .fileName(existing.getFileName())
                 .fileHash(existing.getFileHash())
                 .sourceUrl(existing.getSourceUrl())
-                .stage(IngestionStage.ASKABLE)
-                .status(IngestionTaskItemStatus.SKIPPED)
-                .progress(100)
+                .stage(projection.stage())
+                .status(projection.status())
+                .progress(projection.progress())
                 .dedupeStrategy(dedupeStrategy)
                 .dedupeResult(DedupeResult.SKIPPED)
                 .duplicateAssetId(existing.getId())

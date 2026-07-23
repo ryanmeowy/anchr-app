@@ -3,6 +3,7 @@ package com.anchr.core.ingestion.application.artifact;
 import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
 import java.util.List;
@@ -20,7 +21,7 @@ public record IngestionEmbeddingArtifact(
         String assetId,
         int parseAttempt,
         long executionEpoch,
-        int stageAttempt,
+        @JsonProperty("stageAttempt") long claimVersion,
         String requestId,
         String sourceRevision,
         String parseResultObjectKey,

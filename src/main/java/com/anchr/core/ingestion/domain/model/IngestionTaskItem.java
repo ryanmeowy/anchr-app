@@ -6,7 +6,12 @@ import lombok.Value;
 import java.time.LocalDateTime;
 
 /**
- * A single file or URL in an ingestion task.
+ * Expand-phase application compatibility carrier for one ingestion item.
+ *
+ * <p>Persistence no longer maps this class to one physical row: public reads,
+ * retry preparation and claimed execution loading use separate records. The
+ * remaining flat application shape preserves the existing service/DTO and
+ * processor contracts until the later aggregate-boundary refactor.</p>
  */
 @Value
 @Builder(toBuilder = true)
@@ -28,7 +33,7 @@ public class IngestionTaskItem {
     IngestionExecutionStage executionStage;
     @Builder.Default
     long executionEpoch = 1L;
-    int stageAttempt;
+    long claimVersion;
     int stageRetryCount;
     LocalDateTime stageStartedAt;
     LocalDateTime nextActionAt;
@@ -36,7 +41,9 @@ public class IngestionTaskItem {
     LocalDateTime leaseUntil;
     String parseRequestSnapshot;
     String parseResultObjectKey;
+    IngestionArtifactReference parseResultArtifact;
     String embeddingResultObjectKey;
+    IngestionArtifactReference embeddingResultArtifact;
     IngestionStage stage;
     IngestionTaskItemStatus status;
     int progress;

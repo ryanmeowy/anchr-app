@@ -3,9 +3,9 @@ package com.anchr.core.ingestion.application.impl;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
-import com.anchr.core.ingestion.domain.model.IngestionStage;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
-import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
 import com.anchr.core.kb.domain.model.Asset;
@@ -28,9 +28,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class IngestionIndexFinalizer {
 
-    private static final int INDEX_PROGRESS = 75;
-    private static final int DONE_PROGRESS = 100;
-
     private final AssetRepository assetRepository;
     private final IngestionTaskRepository ingestionTaskRepository;
     private final SegmentBulkWriter segmentBulkWriter;
@@ -45,7 +42,7 @@ public class IngestionIndexFinalizer {
                 item.getId(),
                 item.getExecutionEpoch(),
                 IngestionExecutionStage.INDEX,
-                item.getStageAttempt(),
+                item.getClaimVersion(),
                 item.getLeaseToken())) {
             return false;
         }
@@ -53,15 +50,17 @@ public class IngestionIndexFinalizer {
         Asset lockedAsset = assetRepository.findByIdForUpdate(
                 item.getKbId(), sourceAsset.getId()).orElse(null);
         if (lockedAsset == null || lockedAsset.getDeletedAt() != null) {
+            IngestionPublicProjection projection =
+                    IngestionPublicProjectionPolicy.failed(
+                            IngestionExecutionStage.INDEX, item.getProgress());
             IngestionClaimTransition failed = IngestionClaimTransitions.copyOf(item, now)
                     .nextExecutionStage(IngestionExecutionStage.FAILED)
-                    .nextStageAttempt(0)
                     .nextStageRetryCount(item.getStageRetryCount())
                     .nextStageStartedAt(now)
                     .nextActionAt(null)
-                    .stage(IngestionStage.INDEX)
-                    .status(IngestionTaskItemStatus.FAILED)
-                    .progress(Math.max(INDEX_PROGRESS, item.getProgress()))
+                    .stage(projection.stage())
+                    .status(projection.status())
+                    .progress(projection.progress())
                     .errorCode(ApiError.DOCUMENT_NOT_FOUND.name())
                     .errorMessage("Document was deleted before indexing completed.")
                     .finishedAt(now)
@@ -83,15 +82,16 @@ public class IngestionIndexFinalizer {
         if (!assetUpdated) {
             throw new IllegalStateException("Asset disappeared while holding its index finalization lock.");
         }
+        IngestionPublicProjection projection =
+                IngestionPublicProjectionPolicy.success();
         IngestionClaimTransition completed = IngestionClaimTransitions.copyOf(item, now)
                 .nextExecutionStage(IngestionExecutionStage.COMPLETE)
-                .nextStageAttempt(0)
                 .nextStageRetryCount(0)
                 .nextStageStartedAt(now)
                 .nextActionAt(null)
-                .stage(IngestionStage.ASKABLE)
-                .status(IngestionTaskItemStatus.SUCCESS)
-                .progress(DONE_PROGRESS)
+                .stage(projection.stage())
+                .status(projection.status())
+                .progress(projection.progress())
                 .errorCode(null)
                 .errorMessage(null)
                 .finishedAt(now)

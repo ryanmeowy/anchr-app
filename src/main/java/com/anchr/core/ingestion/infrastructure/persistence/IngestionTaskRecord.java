@@ -15,6 +15,7 @@ public class IngestionTaskRecord {
     private String sourceType;
     private String clientRequestId;
     private String requestHash;
+    private String dedupeStrategy;
     private String status;
     private Integer totalCount;
     private Integer successCount;

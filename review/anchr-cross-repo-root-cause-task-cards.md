@@ -2,13 +2,13 @@
 
 ## 文档范围
 
-本文基于三个项目当前 `main` 分支提交，对前端、后端和 Docling 边车的真实调用链进行对齐，并把已确认的问题拆分为可执行任务卡。
+本文最初基于三个项目下列 `main` HEAD 对真实调用链进行审查；各任务卡的“当前流程与根因”保留该审查基线，“实施与验证记录”则按后续开发工作区的实际实现与验证持续更新。
 
 - `anchr-app`: `02031f9b35966ec98200c3ca0dcd9649cd941bfb`
 - `anchr-web`: `35a09a4d5955d336884aa034ad16935268c2a0b8`
 - `anchr-docling`: `c36eeb69d899728a803242d03fc93ae3b64bd490`
 
-> `anchr-app` 当前工作区存在既有暂存/未提交变更。本文后端结论以上述提交 HEAD 为准，不把工作区变更视为主分支实现。
+> 初始审查不把当时的未提交变更视为 `main` 实现；本文当前 ANCHR-106B 的实施记录来自 `anchr-app` 的 `dev/clean-up` 工作区，同样不表示已经合并到 `main` 或发布。
 
 任务拆分原则：
 
@@ -19,7 +19,7 @@
 
 ## 任务总览
 
-> 状态按源码实现与本地验证记录维护；“已完成”不等于已经提交、合并或发布。
+> 状态按每张卡已经完成的实现与验收范围维护；仍有真实环境验收项的任务不得标记为“已完成”。“已完成”也不等于已经提交、合并或发布。
 
 | ID | 任务 | 状态 | 优先级 | 规模 | 项目 | 依赖 |
 |---|---|---|---:|---:|---|---|
@@ -31,7 +31,7 @@
 | ANCHR-104 | 关闭未消费且加密错误的内嵌图片上传链路 | 已完成 | P1 | S/M | app、docling | 101A |
 | ANCHR-105 | 重构 Docling attempt 与幂等协议 | 已完成 | P0 | M | app、docling | 104 |
 | ANCHR-106 | Ingestion 改为数据库驱动的可恢复状态机 | 已完成 | P0 | XL | app、docling、web | 103、105 |
-| ANCHR-106B | 收敛 Ingestion Item 执行模型与持久化边界 | 待执行 | P0 | L | app | 106 |
+| ANCHR-106B | 收敛 Ingestion Item 执行模型与持久化边界 | Expand 源码已实现；待真实 MySQL 与部署验收 | P0 | L | app | 106 |
 | ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 待执行 | P0 | L | app | 106B |
 | ANCHR-108 | 搜索改为稳定结果快照分页 | 待执行 | P1 | L | app、web | 101B、101C、110 |
 | ANCHR-109 | 会话列表 keyset 分页与 Session 原子更新 | 已完成 | P1 | M | app、web | 可独立 |
@@ -65,7 +65,7 @@
 | 104 | 关闭未消费的 embedded-image STS 上传协议 | 现有独立图片 OCR | Docling job 幂等、OCR/图片向量语义、未来 AEAD 实现 |
 | 105 | `parseAttempt/sourceRevision/doclingRequestId/doclingJobId` 与 Docling 指纹协议 | 104 关闭后的请求体 | worker lease、阶段调度、parse artifact 生命周期、ES generation |
 | 106 | `executionEpoch/stageAttempt/lease/nextActionAt` 与可恢复阶段调度 | 105 的 submit/get/ack 和 parse attempt | 创建请求幂等、Docling 指纹、Asset generation、ES alias |
-| 106B | `ingestion_task_item`、current execution、artifact registry 的物理边界；内部 phase 与公开投影的唯一映射；按用例收窄查询模型 | 106 已确定的 stage/retry/lease/attempt/artifact 语义 | 改变任务行为、Docling 协议、Asset generation、通用 DDD/Service 拆分 |
+| 106B | `ingestion_task_item`、current execution、artifact registry 的物理边界；内部 phase 与公开投影的唯一映射；按用例收窄查询模型；从 phase-local `stageAttempt` 到 execution-global `claimVersion` 的内部持久化表示；artifact 登记事务与 post-commit ACK 时序 | 106 已确定的 stage/retry/lease/attempt/artifact 语义和 stale-worker 拒绝结果 | 改变任务行为或 stale-worker 结果、Docling ACK HTTP 幂等协议、Asset generation、通用 DDD/Service 拆分 |
 | 107 | Asset `indexGeneration`、确定性 segmentId、MySQL/ES 可见性和清理事件 | 106B 的 execution/artifact 边界与 106 的 INDEX stage；现有 outbox 能力 | physical index version、embedding profile、检索融合、Outbox 搬包 |
 | 108 | Search Snapshot、cursor、分页稳定性和模型调用一次性 | 101B 输出的已排序结果；101C 的物理索引/profile 标识 | 召回路由、RRF 权重、alias 切换、embedding profile 激活 |
 | 109 | Session 列表 keyset cursor、title CAS、updatedAt 单调更新 | 现有消息/Agent 数据 | 消息历史分页、Agent Activity、Conversation DTO 分层 |
@@ -90,7 +90,7 @@
 - 105 向 106 交付：幂等的 `submit/get/ack` 和 parse attempt 标识；106 只决定何时调用。
 - 106 向 106B 交付：已经验收的阶段、重试、lease、fence、Docling 恢复和公开 DTO 行为；106B 只重排持久化边界与读模型，不重新定义这些行为。
 - 106B 向 107 交付：收敛后的 current execution、通用 artifact registry 和进入 `INDEX` phase 的 fenced context；107 只增加 generation、确定性 ID 与索引激活一致性。
-- 106B 向 110 交付：可扩展 artifact registry；110 只登记新的图片 artifact type，不再向 `ingestion_task_item` 增加图片制品指针列。
+- 106B 向 110 交付：artifact registry 的表结构、登记 API 和事务语义；当前 V15 CHECK 只允许 `PARSE_RESULT/EMBEDDING_RESULT`。110 引入图片 artifact type 时必须通过新的 forward migration 扩展该 CHECK 和对应 Java 枚举/读写测试，不得修改已发布的 V15，也不得再向 `ingestion_task_item` 增加图片制品指针列。
 - 102 向 103/105/106 交付：通用 HTTP 错误信封；各业务卡只定义自己的 errorCode、retryable 和 accepted 语义。
 - 201 只建立守门规则；202–205 分别消除自己拥有的违规；206 最后在不改变行为的前提下拆分类。
 
@@ -98,7 +98,7 @@
 
 | 共享修改面 | 可能涉及的卡 | 强制顺序 | 后卡必须保留的前卡契约 |
 |---|---|---|---|
-| Ingestion create/processor / 后续 stage handler | 101A、103、104、105、106、101B、110 | 101A → 104 → 105；102 → 103；两路汇合 → 106 → 101B → 110 | 图片分支/向量回写；创建幂等；关闭 STS 支线；Parse 协议；execution fencing；单向量 Policy；内嵌图片投影 |
+| Ingestion create/processor / 后续 stage handler | 101A、103、104、105、106、106B、107、101B、101C、110 | 101A → 104 → 105；102 → 103；两路汇合 → 106 → 106B → 107 → 101B → 101C → 110 | 图片分支/向量回写；创建幂等；关闭 STS 支线；Parse 协议；可恢复状态机；normalized execution/artifact 边界；Asset generation/确定性 ID；单向量 Policy；profile 部署；内嵌图片投影 |
 | `Segment` / `SegmentDocument` / mapping / bulk writer | 107、101B、101C、110 | 107 → 101B → 101C → 110 | Asset generation/确定性 ID → 单向量投影契约 → 物理索引部署 → 内嵌图片 schema/回填 |
 | `UnifiedSearchServiceImpl` / ES repository | 107、101B、110、108、206 | 107 → 101B → 110 → 108 → 206 | active generation 过滤 → 共享向量空间 → 图片分路召回/父资产聚合 → 结果快照 → 机械拆分 |
 | Search/Conversation result DTO 与 Preview | 110、202、206 | 110 → 202 → 206 | 图片命中与父文档预览语义 → DTO 边界迁移 → 机械拆分 |
@@ -899,129 +899,137 @@ V10 会让升级时尚未完成的旧 item 从源文件重新 Parse；不会假�
 - [`V10__add_ingestion_execution_state.sql`](../src/main/resources/db/migration/V10__add_ingestion_execution_state.sql)
 - [`IngestionTaskProcessorImpl.java`](../src/main/java/com/anchr/core/ingestion/application/impl/IngestionTaskProcessorImpl.java)
 
-### 修复方案
+### 修复方案与实施结果
 
-#### 1. 任务项只保存业务事实
+#### 1. 采用 Expand，而不是直接破坏性收缩
 
-`ingestion_task_item` 收敛为任务项和公开结果的稳定边界：
+新代码已经把 `ingestion_task_item` 的职责收敛为稳定 item、当前 execution 指针和公开兼容投影：
 
 ```text
-id
-task_id
-current_execution_id
+id / task_id / current_execution_id
 asset_id
 file_name / file_hash / source_url
+stage / status / progress
 dedupe_result / duplicate_asset_id
-status
 error_code / error_message
 created_at / updated_at / finished_at
 ```
 
-- `file_name/file_hash/source_url` 虽与 Asset 部分重复，但它们是创建请求和历史展示的来源快照；Asset 后续修改、软删或 URL 失效时不能反向改写任务历史，因此本卡不直接删除。
-- `kb_id` 从 item 移除，授权和业务作用域统一通过 parent task 获取；迁移前必须核对所有 item 的 `kb_id` 与 parent task 一致，发现脏数据则中止收缩，不静默覆盖。
-- `dedupe_strategy` 移到 `ingestion_task`。迁移前验证同一 task 的非空 strategy 是否唯一；不一致记录必须单独修复，不能任选一个值。
-- `taskCreatedBy` 退出 `IngestionTaskItem`，成为 claim 查询返回的 task context，或由调用方显式传入，不再伪装成 item 属性。
+- `file_name/file_hash/source_url` 是创建请求和历史展示的来源快照，不随 Asset 后续修改或软删而变化。
+- `dedupe_strategy` 的新 source of truth 已移到 `ingestion_task`；V11/V16 会拒绝同一 task 内 strategy 不一致的数据。
+- 授权和作用域读取统一从 parent task 取得 `kb_id`；item 上的 `kb_id/dedupe_strategy` 旧列在 expand 阶段继续写入，但不再作为新读模型的 source of truth。
+- 本轮不直接删除 V10 旧执行列，它们用于迁移核对和延后 contract；新 worker 不再双写其中的 lease/phase/attempt/artifact 字段。因此一旦新 worker 恢复写入，本次发布就是 forward-only，不能把“旧列还在”误解为可直接回滚旧二进制。
 
-#### 2. 每次显式执行建立独立 execution
+#### 2. Parse attempt 与 execution 分开建模
 
-新增 `ingestion_item_execution`，一条记录对应一个 `execution_epoch`：
+V13 新增 `ingestion_item_parse_attempt`，保存 Docling 幂等身份：
 
 ```text
-id
-item_id
-execution_epoch
-phase
-parse_attempt
-docling_request_id / docling_job_id / source_revision
-parse_request_snapshot
-claim_version
-stage_retry_count
-phase_started_at
-next_action_at
-lease_token / lease_until
+id / item_id / attempt_no / status
+request_id / job_id / source_revision / request_snapshot
 created_at / updated_at / finished_at
 ```
 
-- 用户显式 retry 创建新的 execution，而不是清空并覆盖上一轮 execution；旧 execution 留作诊断和审计。
-- `execution_epoch` 与 `parse_attempt` 保留不同语义。当前二者同步增加只是现有业务行为；未来复用 Parse artifact 的 REEMBED/REINDEX 可以增加 execution 而不伪造新的 Docling parse attempt。
-- 将 `stage_attempt` 重命名/收敛为单调 `claim_version`：它负责 ordinal fence 和 producer attempt；`lease_token` 只表示当前 claim owner。两者用途必须由数据库约束和测试明确，不能继续作为两个含义重叠的“保险条件”。
-- `phase` 只保存真实执行位置，例如 `PREPARE/PARSE_SUBMIT/PARSE_WAIT/PARSE_PERSIST/EMBED/INDEX`；不再包含 `COMPLETE/FAILED`。终态由 item `status` 表达，失败 execution 保留最后 phase。
-- `stage_retry_count/phase_started_at/next_action_at/lease_*` 是 106 恢复语义的必要字段，本卡只改变归属，不改变计数、timeout、接管和 backoff 规则。
-
-`current_execution_id` 与 execution 的 `item_id/execution_epoch` 必须有唯一约束；切换 current execution、重置 item status 和创建新 execution 在同一事务完成。旧 execution 的 lease 必须清空或被 current pointer 隔离，不能再次被 scheduler claim。
-
-#### 3. 制品改为可扩展 registry
-
-新增 `ingestion_item_artifact`，替代在 item 上为每个阶段增加 object-key 列：
+V14 新增 `ingestion_item_execution`，保存一次 ingestion 执行：
 
 ```text
-id
-execution_id
-artifact_type
-artifact_version
+id / item_id / execution_epoch
+execution_kind / execution_status / phase
+parse_attempt_id
+claim_version / phase_retry_count
+phase_started_at / next_action_at
+lease_token / lease_until
+error_code / error_message
+created_at / updated_at / finished_at
+```
+
+- `execution_kind` 明确区分 `INITIAL/REPARSE/REEMBED/EXPLICIT_RETRY`。新写入由 Application 显式传递执行意图，不再仅按 `sourceType` 猜测；因此通用 create 即使收到兼容的 `REPARSE/REEMBED/RETRY` source 值仍记为 `INITIAL`，专用维护端点才写 `REPARSE/REEMBED`。V16 对 V10 存量以 task-level `dedupe_strategy is null` 区分专用维护任务，避免把有去重策略的通用 create 误标为维护执行。
+- `phase` 只保存 `PARSE_SUBMIT/PARSE_WAIT/PARSE_PERSIST/EMBED/INDEX` 等真实位置；`SUCCEEDED/FAILED` 由 `execution_status` 表达，失败 execution 不再丢失真实失败 phase。
+- V10 已把旧 terminal 行的 `execution_stage` 覆盖成 `COMPLETE/FAILED`，所以 V16 对旧失败 phase 只能结合公开 stage、artifact 和 jobId 做 best-effort 推断；“精确保留真实失败 phase”只从新 execution 写入开始成立。
+- `claim_version` 是 execution 全周期单调 `BIGINT/long` fence，跨 phase 不清零；`lease_token` 只表示当前 holder。候选和更新 SQL 都防止 `BIGINT` 溢出。
+- 显式 retry 在同一事务内创建新的 parse attempt 和 execution，再 CAS 切换 `current_execution_id`；CAS 失败抛异常并回滚，不能提交孤儿历史。
+- V17 用复合外键 `(current_execution_id, id) -> ingestion_item_execution(id, item_id)` 保证指针不能跨 item。
+- V16 只能根据 V10 每个 item 当前行中仍然存在的信息，回填至多一组 current parse attempt/current execution；V10 已覆盖掉的旧 execution epoch、旧 parse attempt 和旧 artifact 历史无法重建。`SKIPPED` 以及旧模型中从未进入有效执行的创建期或 preflight 失败项可以有意不生成 execution/parse attempt。因此，“历史可审计”只从 normalized model 上线后的新写入开始成立。
+
+#### 3. 制品使用 registry，并校验真实存储字节
+
+V15 新增 `ingestion_item_artifact`：
+
+```text
+execution_id / artifact_type
+artifact_version / provenance
 producer_claim_version
-object_key
-content_sha256
+object_key / content_sha256
 created_at
 ```
 
-- 当前至少支持 `PARSE_RESULT`、`EMBEDDING_RESULT`；
-- 一个 execution 的同一 artifact type 只能登记一个被 fence 接受的 current artifact；
-- OSS 仍保持 ANCHR-106 的 immutable/create-only 语义；stale worker 可能留下未登记的 orphan object，但不能注册或替换 winner artifact；
-- artifact registry 只保存元数据和指针，不把 gzip JSON 内容搬回 MySQL；
-- 110 新增图片制品时只增加 `artifact_type` 和对应契约，不再向 `ingestion_task_item` 增加 `image_*_object_key`。
+- 主键 `(execution_id, artifact_type)` 保证一个 execution 的同类 winner 唯一，CHECK 只允许 `PARSE_RESULT/EMBEDDING_RESULT`。
+- 新产物 `PRODUCED` 必须同时有 producer claim 和 SHA-256；V16 回填的 `LEGACY_BACKFILL` 允许缺少旧数据无法追溯的摘要。
+- SHA-256 针对 OSS 中实际保存的 gzip bytes；create-only replay 会读取并摘要已有对象，而不是摘要本次重新序列化的字节。
+- claimed worker 会加载完整 `IngestionArtifactReference`。读取 `PRODUCED` artifact 时先校验 registry digest，再解压和校验业务 identity；Embedding 还会交叉核对 registry producer claim 与 envelope claim。合法 gzip 但被替换的对象或 producer 元数据漂移都会被拒绝。
+- v1 Embedding artifact 的 JSON wire key 继续叫 `stageAttempt`，Java 语义已经改为全 execution 的 `claimVersion`；这是旧 OSS 对象的兼容约束，不能未经 artifact version 升级直接改 wire key。直接 JSON wire test 必须证明序列化包含 `stageAttempt` 而不包含 `claimVersion`，且旧对象的 `stageAttempt` 可反序列化到 Java `claimVersion`。
+- transition、parse-attempt、item 公开投影、artifact registry 和 task summary 在同一 MySQL 事务提交。106B 不改变 Docling ACK HTTP 协议和幂等规则，但拥有“artifact 的 MySQL 提交完成后才能 ACK”的本地事务时序；Parse artifact ACK 通过 `afterCommit` 执行，stale/冲突/回滚均不能提前 ACK。
+- stale worker 仍可能留下 immutable orphan OSS object，但不能登记或替换 winner；对象清理策略不在本卡扩成生命周期系统。
 
-本卡不替 107 定义 `indexGeneration`，也不将 ES 写入伪装成普通 ingestion artifact。
+本卡不替 107 定义 `indexGeneration`，也不把 ES 写入伪装成 ingestion artifact。
 
-#### 4. 收敛内部状态与公开投影
+#### 4. 保留公开列，但由唯一 Policy 维护
 
-删除 `stage/status/progress/execution_stage` 四套状态同步的设计：
+现有前端直接消费 `stage/status/progress`，而 REEMBED 与 retry 存在不能只按 current phase 无损重算的兼容值，因此本轮选择保留 item 公开投影列，不在迁移时重算历史：
 
-- item `status` 是 lifecycle/result source of truth；
-- current execution `phase` 是 worker position source of truth；
-- API `stage/progress` 由一个集中 projector 根据 `task.sourceType + item.status + execution.phase` 计算；
-- `progress` 当前只是 0/10/20/55/60/75/100 等里程碑，不代表 provider 实时百分比，不能继续作为调度条件。
+| 事件 | 公开投影 |
+|---|---|
+| UPLOAD 创建 | `UPLOAD / PENDING / 0` |
+| URL 创建 | `PARSE / PENDING / 10` |
+| 专用 reparse 端点创建 | `PARSE / PENDING / 20` |
+| 专用 reembed 端点创建 | `EMBED / PENDING / 60` |
+| 通用 create API 传 REPARSE/REEMBED/RETRY | 保持旧行为 `UPLOAD / PENDING / 0` |
+| 首次/后续 Parse claim | `PARSE / RUNNING / max(当前值, 20)` |
+| Embed claim/transition | `EMBED / RUNNING / max(当前值, 55)` |
+| Index claim/transition | `INDEX / RUNNING / max(当前值, 75)` |
+| 显式 retry | `UPLOAD / PENDING / 0`，首次 claim 后为 `PARSE / RUNNING / 20` |
+| 成功 / SKIP | `ASKABLE / SUCCESS或SKIPPED / 100` |
+| phase 失败 | 保留真实 phase 对应 stage，progress 不倒退 |
 
-实现前先用 characterization tests 固化现有创建、PENDING、轮询、失败、SKIPPED、REPARSE、REEMBED 和 retry 响应。若某个旧组合无法由规范状态无损推导，例如 maintenance task 在首次 claim 前后的历史 `stage/progress` 不一致，则必须二选一并写入任务实施记录：
+`IngestionPublicProjectionPolicy` 是唯一 phase/source → 公开值映射。Application 创建、Repository claim/retry、Processor transition/failure 和 Index finalizer 都只消费该 Policy 的结果；Repository 会在写 execution 前校验 transition 的 phase/outcome 与公开投影，SQL 还拒绝 progress 倒退，V12 将公开 stage/status/progress 的值域固化为约束。为了保持 REEMBED 等既有前端进度不倒退，active 投影仍显式使用当前公开 progress 做单调上界，这属于 expand 兼容语义，不伪装成可仅凭 phase 无损重算。
 
-1. 定义并评审新的唯一投影规则，前后端同步接受该兼容性变化；或
-2. 暂时保留明确命名的 `public_stage/public_progress` 兼容读模型，由唯一 projector 更新，禁止 Processor/Mapper 各自写值。
+#### 5. 查询按用例收窄
 
-不得为了“删两列”在未识别兼容差异时直接改变前端可观察行为。
-
-#### 5. 按用例拆查询模型
-
-即使物理拆表尚未完成，也必须先停止所有接口复用完整 `IngestionTaskItemRecord`：
-
-- `IngestionItemViewRecord`：list/get/REST 只读取公开字段；
-- `ClaimCandidateRecord`：claim 扫描只读取主键、current execution 和到期条件；
-- `ClaimedExecutionRecord`：worker 只读取执行所需的 source、attempt、lease 和 artifact 元数据；
-- `FailedItemRetryRecord`：retry 只读取 status、current execution、parse attempt 和 fence；
-- 领域层以 `IngestionItem + IngestionExecution + ArtifactRefs + TaskContext` 组合工作，不再用一个 34 属性对象穿透创建、查询、调度、索引和 REST。
-
-claim 事务必须避免读取不参与 claim 的历史、公开展示和大字段；`parse_request_snapshot` 仅在 Parse phase 实际需要时延迟加载。
+- `IngestionItemViewRecord`：list/get/REST 只读公开字段，不 join execution/parse-attempt，也不读取 lease、snapshot、artifact 或 claim fence。
+- `ClaimCandidateRecord`：加锁扫描只读 item id/progress、current execution id/epoch/phase、claim version 和旧 lease token；大字段只出现在 WHERE 之外的 worker 查询。
+- `ClaimedExecutionRecord`：只为成功 claim 的 worker 装载实际使用的 source、TaskContext、公开 progress、execution fence、parse attempt 和 artifact reference；不再读取 file name/hash、公开 stage/status、error TEXT 或 terminal 展示时间。非 Parse phase 用 SQL `NULL` 分支避免物化 `request_snapshot`。
+- `FailedItemRetryRecord`：单项与批量 retry 只读 status、current execution/epoch/status、parse attempt 和 source revision。
+- `IngestionTaskItemRecord` 不再同时承担 public、claim、retry 和 worker 映射。现有 `IngestionTaskItem` Java 类只保留为 expand 阶段的 application compatibility carrier，不再对应一张物理宽表；进一步把 application carrier 拆成富聚合属于 ANCHR-204，不能在本卡顺手重写整个 Processor。
 
 ### 迁移与发布
 
-默认把 V10 视为可能已经执行，使用新的 forward migration，不回写或重命名已发布 migration。只有在确认 V10 从未进入任何共享环境后，才可以在实施前单独决定是否 squash；不得由开发者自行假设。
+V10 被视为已经发布，106B 只追加 forward migration：
 
-建议采用 expand/migrate/contract：
+MySQL DDL 不能把 V11–V15/V17 视为一组可整体回滚的事务；任一 migration 中途失败都可能留下已提交的列、表、索引或约束，同时 Flyway 记录失败。生产执行前必须在生产等价副本完整演练 V11–V17，保存数据库快照或可验证备份、`flyway_schema_history`、`information_schema` 基线以及 V16 reconciliation 结果，并记录 DDL 锁等待和执行时长。
 
-1. 建新 execution/artifact 表和约束，不删除旧列；
-2. 停止旧 ingestion worker，冻结 claim；
-3. 校验 parent `kb_id`、task dedupe strategy、状态组合和 artifact 指针；
-4. 按 current row 回填 execution 与 artifact registry，并做逐项 reconciliation；
-5. 部署只使用新模型的新 worker，恢复调度；
-6. API 与 scheduler 稳定运行并完成真实 MySQL 验证后，再由后续 contract migration 删除旧执行列和冗余索引。
+**发布前置：** 建立可恢复数据库快照并实际验证恢复流程；停止旧 writer 后再次确认 backlog、活动 lease 和 late write 均为零，再启动 Flyway。
 
-旧、新 worker 不得混跑：旧 worker 只更新 `ingestion_task_item`，无法维护 execution/artifact 新表，滚动混跑会造成双源漂移。
+1. **停止并确认排空所有旧 app ingestion writer/worker；禁止滚动混跑。**
+2. V11：执行 parent KB、task dedupe、公开 `stage/status/progress` 现有数据合法性、精确 terminal 状态配对、artifact 依赖和 request-id 唯一性 preflight；增加 task-level dedupe strategy。
+3. V12：增加 nullable `current_execution_id`、复合索引，并真正建立公开 `stage/status/progress` 的数据库 CHECK 约束。
+4. V13：创建 parse-attempt 表。
+5. V14：创建 execution 表、真实 phase/status/kind 和 ACTIVE-first claim 索引。
+6. V15：创建 artifact registry 及 provenance/digest 约束。
+7. V16：回填 task strategy、parse attempt、execution、legacy artifact 和 current pointer；末尾对 parent KB、task strategy、符合回填条件的 current attempt/execution 状态与全部调度字段、pointer、artifact 数量及元数据做逐字段双向 reconciliation，任一差异使整段 DML 回滚。它不把 V10 已丢失的 retry 历史数量伪装成可恢复数据。
+8. V17：建立 current execution 的同 item 复合外键。
+9. 部署只使用新模型的 app，验证 backlog、lease takeover、retry、artifact、task summary 后恢复流量。
+10. 完成真实 MySQL reconciliation、`EXPLAIN ANALYZE` 和稳定观察后，再编写 contract migration 删除旧执行列和有证据表明冗余的索引。
+
+源码无法让已经运行的旧二进制自动遵守新表协议，所以“停止全部旧 writer”是发布硬前置，不是注释性建议。V16 的末尾 reconciliation 是最后防线，但不能替代部署停写。若要保留应用级回滚能力，必须先实现一版理解 normalized model 的兼容旧版本或额外双写/反向迁移；当前方案在新 worker 首次写入后禁止直接回滚到 V10 writer。
+
+若 V11–V15 或 V17 失败，必须继续保持旧、新 writer 全部停写：先按 `information_schema` 核对实际已落地的 DDL 与 migration 预期，再选择从已验证快照恢复，或精确补齐/撤销部分 DDL。只有 schema 与数据已经恢复到明确一致状态后，才允许执行 `flyway repair` 清理失败记录并重新运行；禁止用 `repair` 掩盖部分 DDL。重试后必须重新执行 V16 全量 reconciliation 和 migration 集成测试，才能启动新 app。
 
 ### 边界
 
 本卡是 106 的持久化与模型收敛延续，只能保持或重表达 106 已确定的行为：
 
-- 不修改 Docling 指纹、ACK、attempt 规则，这些属于 105；
-- 不修改 retry/backoff/lease/timeout/fence 业务语义，这些属于 106；
+- 不修改 Docling 指纹、ACK HTTP 幂等协议和 parse attempt 规则，这些属于 105；artifact 是否已经在 MySQL 提交，以及只能在提交后触发 ACK 的事务时序属于 106B；
+- 不修改 retry/backoff/lease/timeout/stale-worker 的业务结果，这些属于 106；106B 可以把内部 fence 从 phase-local `stageAttempt` 重表达为 execution-global `claimVersion`，但相同 stale worker 必须继续得到与 106 一致的拒绝结果，v1 artifact 的 `stageAttempt` JSON wire key 继续保留；
 - 不增加 `indexGeneration`、确定性 segmentId、ES 可见性或 outbox，这些属于 107；
 - 不定义图片 artifact 内容、图片 Segment 和多模态召回，这些属于 110；
 - 不借机迁移整个模块的 DTO、Port、聚合或拆分大 Service；通用 DDD 治理仍属于 201–206。
@@ -1030,16 +1038,26 @@ claim 事务必须避免读取不参与 claim 的历史、公开展示和大字�
 
 ### 验收
 
-- 创建、查询、轮询、失败展示、SKIP、单项/批量 retry、REPARSE/REEMBED 的现有 REST/SSE 可观察行为有 characterization tests；任何批准的投影修正单独列明。
+- 创建、查询、前端按 taskId 轮询、失败展示、SKIP、单项/批量 retry、REPARSE/REEMBED 的现有 REST JSON 可观察行为有 characterization tests；Ingestion 不存在 SSE 协议，任何批准的公开投影修正应单独列明。
 - app 在 `PARSE_WAIT/EMBED/INDEX` 重启恢复、多实例 lease 接管、stale worker fencing 和 Docling ACK 恢复行为与 106 一致。
-- 显式 retry 创建新 execution，旧 execution 不再被 claim，历史 attempt/artifact 可审计。
+- normalized model 上线后的显式 retry 创建新 execution，旧 execution 不再被 claim，新产生的 attempt/artifact 历史可审计；V10 存量只恢复当前可推导的一组 execution/attempt，不承诺恢复此前 retry 历史，允许符合规则的 `SKIPPED` 或从未开始执行项没有 execution/attempt。
 - list/get 不读取 lease、snapshot、artifact 内部字段；claim candidate 不读取来源 TEXT、错误 TEXT、公开 dedupe 字段。
 - Parse phase 之外不物化 `parse_request_snapshot`；REST DTO 永不装载该 JSON。
-- artifact registry 的唯一约束和 fence 能阻止 stale worker 登记 winner artifact。
+- artifact registry 的唯一约束和 fence 能阻止 stale worker 登记 winner artifact；新 execution 只能登记带完整 digest/producer 的 `PRODUCED` artifact，`LEGACY_BACKFILL` 只能由 V16 迁移生成。
 - backfill reconciliation 覆盖 item 数、current execution、parse attempt、状态/phase、artifact key 和 parent KB；不一致为零才允许 contract。
 - 在真实 MySQL 上对 claim、task list、failed retry 执行 `EXPLAIN ANALYZE` 并记录扫描行、锁等待和延迟；没有这些证据不得声称性能改善。
 - 评估并清理冗余索引：V10 的 `(task_id, status, next_action_at, lease_until, id)` 可能覆盖旧 `idx_task_item_task(task_id)`，但只能在真实执行计划和索引使用证据支持后删除。
-- 前端无生产代码修改时，现有 ingestion/background recovery 测试继续通过。
+- 即使前端无生产代码修改，部署验收仍必须重跑并通过现有 ingestion/background recovery 轮询测试。
+
+### 实施与验证记录
+
+- `anchr-app` 的 Expand 源码实现已落地：V11–V17、parse attempt/execution/artifact 拆分、current pointer、窄读模型、公开投影 Policy、显式 execution intent、显式 retry 新 execution、artifact digest/provenance/fence 和事务内登记均已接入；新写入不能伪装为 `LEGACY_BACKFILL`。
+- 本地 JDK 21 全量 Maven 回归：418 项，0 failure、0 error、29 skipped；29 项全部是当前机器无 Docker 而跳过的 Testcontainers，其中包含 7 项 V11–V17 migration 测试和 6 项 normalized execution 状态/事务测试。
+- 已编写但本机未实际执行的 MySQL 证据包括：精确 terminal 配对拒绝、V16 late-write 故障注入与整段回滚、V17 同 item pointer 外键、lease/fence/retry、PRODUCED artifact 成功登记/复用/stale 拒绝/冲突回滚。它们必须在有 Docker 的 CI 或真实 MySQL 8.4 上通过后才算数据库验收。
+- `git diff --check`、Mapper `xmllint`、主代码编译和非 Testcontainers 定向测试通过。补充的 Spring Bean 构造器契约测试会拒绝生产 Bean 暴露测试专用备用构造路径。Mockito 在受限沙箱内不能自附加，允许 JVM agent 附加后同一组测试通过；这不是源码失败。
+- 尚未执行真实 MySQL `EXPLAIN ANALYZE`、全量数据 reconciliation、索引取舍、迁移演练、部署后 backlog/锁等待观察或真实 OSS smoke，因此不声称已验证性能改善或可上线。
+- `anchr-web` 与 `anchr-docling` 没有 106B 生产代码改动；本轮也没有重跑前端 ingestion/background recovery 测试。REST DTO 字段集合由 app 合同测试保护，但跨仓前端回归仍是部署前验收项。
+- 本卡当前处于“Expand 源码实现及本机可执行验证完成，真实 MySQL 与部署验收待完成”的状态，尚未达到文末“完成定义”；也不表示已 stage、commit、执行数据库迁移、部署或完成 contract migration。
 
 ---
 
@@ -1297,6 +1315,8 @@ EmbeddedImageArtifact {
 6. Markdown 外链/相对路径/data URI 分别定义下载、allowlist、大小限制和失败语义。没有页面布局的 Markdown 图片允许 `pageNo/bboxes=null`，不能让缺失坐标导致整份文档解析失败。
 7. AEAD 凭据协议消费 104 的安全要求：version/keyId/nonce/tag/expiration 和绑定 requestId、bucket、basePath、endpoint 的 AAD；Docling 只允许写入配置白名单中的 bucket/prefix。
 
+`EmbeddedImageArtifact` 进入 registry 前，ANCHR-110 必须确定其 artifact type，并追加新的 forward migration 扩展 V15 的 `artifact_type` CHECK；migration 应先 preflight 现有类型，再替换约束。仅增加 Java enum 或直接插入新字符串不能作为实现，也不得修改已经发布的 V15。
+
 ### 二、投影为父文档下的独立 Segment
 
 每个成功图片制品生成一条独立记录：
@@ -1405,7 +1425,7 @@ Rerank 规则：
 
 ### 边界
 
-本卡唯一拥有内嵌图片 artifact/schema、`DOCUMENT_IMAGE` Segment、图片对象 manifest/清理触发、同一向量字段上的图片召回预算、Rerank 多模态公平性、父文档聚合和图片命中 Preview。它不新增第二 dense 字段，不重定义 101B Projection Policy，不重建 101C profile 状态机，不复制 107 generation/outbox 语义，不修改 108 Search Snapshot，也不实现多模态回答生成或通用 DDD 搬包。
+本卡唯一拥有内嵌图片 artifact/schema、`DOCUMENT_IMAGE` Segment、图片对象 manifest/清理触发、同一向量字段上的图片召回预算、Rerank 多模态公平性、父文档聚合和图片命中 Preview。扩展 artifact registry 的图片类型约束也属于 110，106B 不预先定义图片 artifact 内容。它不新增第二 dense 字段，不重定义 101B Projection Policy，不重建 101C profile 状态机，不复制 107 generation/outbox 语义，不修改 108 Search Snapshot，也不实现多模态回答生成或通用 DDD 搬包。
 
 ### 验收
 
@@ -1755,13 +1775,13 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 - ANCHR-106B：拆分任务项、current execution、artifact registry 和公开查询投影。
 
-必须先用 106 的回归测试锁定状态机行为，再迁移物理边界；旧、新 worker 不得混跑。该 Wave 不增加 Asset generation，不改变前端任务协议，是 107 开始前的强制前置。
+必须先用 106 的回归测试锁定状态机行为，再迁移物理边界；旧、新 worker 不得混跑。106B 的 normalized schema/API 源码稳定后可以开始 107 的源码开发和隔离测试，但 107 不得进入生产发布或接管真实 `INDEX` 流量，直到 106B 在真实 MySQL 上完成 V11–V17 迁移、reconciliation、lease/retry/artifact 验收和部署稳定观察。该 Wave 不增加 Asset generation，也不改变前端任务协议。
 
 ### Wave 5：Asset Segment 写入一致性
 
 - ANCHR-107：Asset indexGeneration、确定性 segmentId、可见性和可重放变化。
 
-该 Wave 只接管 `INDEX` stage；完成后为 101C 提供增量追平输入，不创建 physical index version。
+该 Wave 只接管 `INDEX` stage；完成后为 101C 提供增量追平输入，不创建 physical index version。107 的生产发布必须显式记录所依赖的 106B 数据库验收证据，不能用 107 自身测试替代该门禁。
 
 ### Wave 6：单向量 Profile 投影契约
 
@@ -1848,6 +1868,6 @@ Wave 0
 8. 不修改与任务无关的现有工作区变更。
 9. ANCHR-101B 必须验证 Ingestion/Rebuild 投影一致、单 `embedding` mapping、共享空间 contract 和既有相关性基线；不得隐式增加第二向量字段或承担 110 的业务召回配额。
 10. ANCHR-101C 必须验证 profile fingerprint、同维不同模型、切换期间增量写入、短写屏障、alias 切换和回滚。
-11. ANCHR-106B 必须验证 execution/artifact backfill reconciliation、窄查询、旧 execution 不可领取和公开投影兼容；不得改变 106 的 retry/lease/attempt 行为。
+11. ANCHR-106B 必须在真实 MySQL 上验证 V11–V17 migration、部分 DDL 故障恢复、execution/artifact backfill reconciliation、窄查询、旧 execution 不可领取、公开投影兼容和部署稳定性；必须明确记录旧 retry 历史不可重建及允许无 execution 的存量项，不得改变 106 的 retry/lease/stale-worker 业务结果。
 12. ANCHR-107 必须验证 generation 激活门禁、确定性 ID、部分 bulk、变化重放和清理失败，不承担 101C 的 physical index 验收。
 13. ANCHR-110 必须验证图片 bbox 来自 Picture Item provenance、私有对象签名访问、存量 reparse、对象生命周期、同字段分路召回、父文档聚合和 Preview；不得以 `chunks[].bboxes` 猜测图片位置或增加第二 dense 字段。

@@ -8,14 +8,15 @@ import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactException;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
+import com.anchr.core.ingestion.application.artifact.IngestionStoredArtifact;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
-import com.anchr.core.ingestion.domain.model.IngestionStage;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
+import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
-import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
@@ -44,6 +45,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.security.SecureRandom;
@@ -72,9 +75,6 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
-    private static final int STAGE_PARSE_PROGRESS = 20;
-    private static final int STAGE_EMBED_PROGRESS = 55;
-    private static final int STAGE_INDEX_PROGRESS = 75;
     private static final int ERROR_MESSAGE_MAX_LENGTH = 1000;
     private static final Duration DEFAULT_PARSE_POLL_INTERVAL = Duration.ofSeconds(2);
     private static final Duration DEFAULT_PARSE_STAGE_TIMEOUT = Duration.ofMinutes(45);
@@ -215,7 +215,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             }
         } catch (StaleClaimException stale) {
             log.debug("stale ingestion worker stopped, itemId={}, stage={}, attempt={}",
-                    item.getId(), item.getExecutionStage(), item.getStageAttempt());
+                    item.getId(), item.getExecutionStage(), item.getClaimVersion());
         } catch (RuntimeException e) {
             handleClaimFailure(item, tryFindAsset(item), e);
         }
@@ -241,16 +241,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                         withJob,
                         IngestionExecutionStage.PARSE_WAIT,
                         LocalDateTime.now().plus(effectiveParsePollInterval()),
-                        item.getStageRetryCount(),
-                        IngestionStage.PARSE,
-                        STAGE_PARSE_PROGRESS));
+                        item.getStageRetryCount()));
                 case "succeeded" -> transitionOrStop(runningTransition(
                         withJob,
                         IngestionExecutionStage.PARSE_PERSIST,
                         LocalDateTime.now(),
-                        item.getStageRetryCount(),
-                        IngestionStage.PARSE,
-                        STAGE_PARSE_PROGRESS));
+                        item.getStageRetryCount()));
                 case "failed" -> handleFailedDoclingJob(withJob, asset, job.error());
                 default -> failClaim(item, asset, ApiError.TEXT_PARSE_FAILED,
                         "Docling returned unknown job status: " + clip(job.status(), 128));
@@ -290,16 +286,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     item,
                     IngestionExecutionStage.PARSE_WAIT,
                     LocalDateTime.now().plus(effectiveParsePollInterval()),
-                    item.getStageRetryCount(),
-                    IngestionStage.PARSE,
-                    STAGE_PARSE_PROGRESS));
+                    item.getStageRetryCount()));
             case "succeeded" -> transitionOrStop(runningTransition(
                     item,
                     IngestionExecutionStage.PARSE_PERSIST,
                     LocalDateTime.now(),
-                    item.getStageRetryCount(),
-                    IngestionStage.PARSE,
-                    STAGE_PARSE_PROGRESS));
+                    item.getStageRetryCount()));
             case "failed" -> handleFailedDoclingJob(item, asset, job.error());
             default -> failClaim(item, asset, ApiError.TEXT_PARSE_FAILED,
                     "Docling returned unknown job status: " + clip(job.status(), 128));
@@ -313,10 +305,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     item,
                     IngestionExecutionStage.EMBED,
                     LocalDateTime.now(),
-                    0,
-                    IngestionStage.EMBED,
-                    STAGE_EMBED_PROGRESS));
-            acknowledgeBestEffort(item.getDoclingJobId());
+                    0));
+            acknowledgeAfterCommit(item.getDoclingJobId());
             return;
         }
 
@@ -328,9 +318,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     item,
                     IngestionExecutionStage.PARSE_WAIT,
                     LocalDateTime.now().plus(effectiveParsePollInterval()),
-                    item.getStageRetryCount(),
-                    IngestionStage.PARSE,
-                    STAGE_PARSE_PROGRESS));
+                    item.getStageRetryCount()));
             case "failed" -> handleFailedDoclingJob(item, asset, job.error());
             default -> failClaim(item, asset, ApiError.TEXT_PARSE_FAILED,
                     "Docling returned unknown job status: " + clip(job.status(), 128));
@@ -344,23 +332,26 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     "Docling succeeded without a parse result.");
             return;
         }
-        String objectKey = artifactStore.writeParseResult(item, job.jobId(), result);
+        IngestionStoredArtifact artifact =
+                artifactStore.writeParseArtifact(item, job.jobId(), result);
         IngestionTaskItem withArtifact = item.toBuilder()
-                .parseResultObjectKey(objectKey)
+                .parseResultObjectKey(artifact.objectKey())
                 .build();
-        boolean transitioned = ingestionTaskRepository.transitionClaim(runningTransition(
-                withArtifact,
-                IngestionExecutionStage.EMBED,
-                LocalDateTime.now(),
-                0,
-                IngestionStage.EMBED,
-                STAGE_EMBED_PROGRESS));
+        IngestionClaimTransition transition = runningTransition(
+                        withArtifact,
+                        IngestionExecutionStage.EMBED,
+                        LocalDateTime.now(),
+                        0)
+                .toBuilder()
+                .parseResultSha256(artifact.sha256())
+                .build();
+        boolean transitioned = ingestionTaskRepository.transitionClaim(transition);
         if (!transitioned) {
             // The immutable object may become an orphan, but a stale worker must not ACK the
             // winner's only recoverable Docling result.
             throw new StaleClaimException();
         }
-        acknowledgeBestEffort(job.jobId());
+        acknowledgeAfterCommit(job.jobId());
     }
 
     private void processEmbed(IngestionTaskItem item) {
@@ -379,17 +370,19 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         String imageInput = isImage(asset) ? resolveSourceUrl(asset, item) : null;
         enrichTextEmbeddings(item, asset, chunks, imageInput);
         assertCurrentClaim(item);
-        String embeddingObjectKey = artifactStore.writeEmbeddingResult(item, chunks);
+        IngestionStoredArtifact artifact =
+                artifactStore.writeEmbeddingArtifact(item, chunks);
         IngestionTaskItem withArtifact = item.toBuilder()
-                .embeddingResultObjectKey(embeddingObjectKey)
+                .embeddingResultObjectKey(artifact.objectKey())
                 .build();
         IngestionClaimTransition transition = runningTransition(
                 withArtifact,
                 IngestionExecutionStage.INDEX,
                 LocalDateTime.now(),
-                0,
-                IngestionStage.INDEX,
-                STAGE_INDEX_PROGRESS);
+                0)
+                .toBuilder()
+                .embeddingResultSha256(artifact.sha256())
+                .build();
         boolean transitioned = transactionCoordinator.transitionAndUpdateAssetStatus(
                 transition,
                 asset,
@@ -462,7 +455,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                             .itemId(item.getId())
                             .executionEpoch(item.getExecutionEpoch())
                             .expectedExecutionStage(item.getExecutionStage())
-                            .stageAttempt(item.getStageAttempt())
+                            .claimVersion(item.getClaimVersion())
                             .leaseToken(item.getLeaseToken())
                             .parseAttempt(parseAttempt)
                             .doclingRequestId(requestId)
@@ -659,9 +652,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 withoutJob,
                 IngestionExecutionStage.PARSE_SUBMIT,
                 LocalDateTime.now().plus(retryDelay(retryCount)),
-                retryCount,
-                IngestionStage.PARSE,
-                STAGE_PARSE_PROGRESS));
+                retryCount));
     }
 
     private void retryOrFail(IngestionTaskItem item,
@@ -681,9 +672,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 item,
                 item.getExecutionStage(),
                 LocalDateTime.now().plus(delay),
-                retryCount,
-                publicStage(item.getExecutionStage()),
-                publicProgress(item.getExecutionStage())));
+                retryCount));
     }
 
     private void failClaim(IngestionTaskItem item,
@@ -698,15 +687,17 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         String safeMessage = clip(
                 StringUtils.hasText(message) ? message : error.getMessage(),
                 ERROR_MESSAGE_MAX_LENGTH);
+        IngestionPublicProjection projection =
+                IngestionPublicProjectionPolicy.failed(
+                        item.getExecutionStage(), item.getProgress());
         IngestionClaimTransition transition = IngestionClaimTransitions.copyOf(item, now)
                 .nextExecutionStage(IngestionExecutionStage.FAILED)
-                .nextStageAttempt(0)
                 .nextStageRetryCount(item.getStageRetryCount())
                 .nextStageStartedAt(now)
                 .nextActionAt(null)
-                .stage(publicStage(item.getExecutionStage()))
-                .status(IngestionTaskItemStatus.FAILED)
-                .progress(Math.max(item.getProgress(), publicProgress(item.getExecutionStage())))
+                .stage(projection.stage())
+                .status(projection.status())
+                .progress(projection.progress())
                 .errorCode(error.name())
                 .errorMessage(safeMessage)
                 .finishedAt(now)
@@ -727,21 +718,20 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private IngestionClaimTransition runningTransition(IngestionTaskItem item,
                                                        IngestionExecutionStage nextStage,
                                                        LocalDateTime nextActionAt,
-                                                       int nextRetryCount,
-                                                       IngestionStage publicStage,
-                                                       int progress) {
+                                                       int nextRetryCount) {
         LocalDateTime now = LocalDateTime.now();
         boolean sameStage = item.getExecutionStage() == nextStage;
+        IngestionPublicProjection projection =
+                IngestionPublicProjectionPolicy.running(nextStage, item.getProgress());
         return IngestionClaimTransitions.copyOf(item, now)
                 .nextExecutionStage(nextStage)
-                .nextStageAttempt(sameStage ? item.getStageAttempt() : 0)
                 .nextStageRetryCount(Math.max(0, nextRetryCount))
                 .nextStageStartedAt(sameStage && item.getStageStartedAt() != null
                         ? item.getStageStartedAt() : now)
                 .nextActionAt(nextActionAt)
-                .stage(publicStage)
-                .status(IngestionTaskItemStatus.RUNNING)
-                .progress(Math.max(item.getProgress(), progress))
+                .stage(projection.stage())
+                .status(projection.status())
+                .progress(projection.progress())
                 .errorCode(null)
                 .errorMessage(null)
                 .finishedAt(null)
@@ -759,7 +749,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 item.getId(),
                 item.getExecutionEpoch(),
                 item.getExecutionStage(),
-                item.getStageAttempt(),
+                item.getClaimVersion(),
                 item.getLeaseToken(),
                 effectiveLeaseSeconds())) {
             throw new StaleClaimException();
@@ -948,29 +938,28 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
     }
 
+    private void acknowledgeAfterCommit(String jobId) {
+        if (!StringUtils.hasText(jobId)) {
+            return;
+        }
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            acknowledgeBestEffort(jobId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        acknowledgeBestEffort(jobId);
+                    }
+                });
+    }
+
     private boolean parseStageExpired(IngestionTaskItem item) {
         return item.getStageStartedAt() != null
                 && LocalDateTime.now().isAfter(
                 item.getStageStartedAt().plus(effectiveParseStageTimeout()));
-    }
-
-    private IngestionStage publicStage(IngestionExecutionStage stage) {
-        return switch (stage) {
-            case PARSE_SUBMIT, PARSE_WAIT, PARSE_PERSIST -> IngestionStage.PARSE;
-            case EMBED -> IngestionStage.EMBED;
-            case INDEX -> IngestionStage.INDEX;
-            case COMPLETE -> IngestionStage.ASKABLE;
-            case FAILED -> IngestionStage.PARSE;
-        };
-    }
-
-    private int publicProgress(IngestionExecutionStage stage) {
-        return switch (stage) {
-            case PARSE_SUBMIT, PARSE_WAIT, PARSE_PERSIST, FAILED -> STAGE_PARSE_PROGRESS;
-            case EMBED -> STAGE_EMBED_PROGRESS;
-            case INDEX -> STAGE_INDEX_PROGRESS;
-            case COMPLETE -> 100;
-        };
     }
 
     private boolean isImage(Asset asset) {

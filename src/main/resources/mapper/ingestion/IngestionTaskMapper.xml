@@ -4,12 +4,14 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskMapper">
 
-    <resultMap id="IngestionTaskRecordMap" type="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskRecord">
+    <resultMap id="IngestionTaskRecordMap"
+               type="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskRecord">
         <id property="id" column="id"/>
         <result property="kbId" column="kb_id"/>
         <result property="sourceType" column="source_type"/>
         <result property="clientRequestId" column="client_request_id"/>
         <result property="requestHash" column="request_hash"/>
+        <result property="dedupeStrategy" column="dedupe_strategy"/>
         <result property="status" column="status"/>
         <result property="totalCount" column="total_count"/>
         <result property="successCount" column="success_count"/>
@@ -22,34 +24,19 @@
         <result property="finishedAt" column="finished_at"/>
     </resultMap>
 
-    <resultMap id="IngestionTaskItemRecordMap" type="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskItemRecord">
+    <resultMap id="IngestionItemViewRecordMap"
+               type="com.anchr.core.ingestion.infrastructure.persistence.IngestionItemViewRecord">
         <id property="id" column="id"/>
         <result property="taskId" column="task_id"/>
         <result property="kbId" column="kb_id"/>
-        <result property="taskCreatedBy" column="task_created_by"/>
+        <result property="dedupeStrategy" column="dedupe_strategy"/>
         <result property="assetId" column="asset_id"/>
         <result property="fileName" column="file_name"/>
         <result property="fileHash" column="file_hash"/>
         <result property="sourceUrl" column="source_url"/>
-        <result property="parseAttempt" column="parse_attempt"/>
-        <result property="doclingRequestId" column="docling_request_id"/>
-        <result property="doclingJobId" column="docling_job_id"/>
-        <result property="sourceRevision" column="source_revision"/>
-        <result property="executionStage" column="execution_stage"/>
-        <result property="executionEpoch" column="execution_epoch"/>
-        <result property="stageAttempt" column="stage_attempt"/>
-        <result property="stageRetryCount" column="stage_retry_count"/>
-        <result property="stageStartedAt" column="stage_started_at"/>
-        <result property="nextActionAt" column="next_action_at"/>
-        <result property="leaseToken" column="lease_token"/>
-        <result property="leaseUntil" column="lease_until"/>
-        <result property="parseRequestSnapshot" column="parse_request_snapshot"/>
-        <result property="parseResultObjectKey" column="parse_result_object_key"/>
-        <result property="embeddingResultObjectKey" column="embedding_result_object_key"/>
         <result property="stage" column="stage"/>
         <result property="status" column="status"/>
         <result property="progress" column="progress"/>
-        <result property="dedupeStrategy" column="dedupe_strategy"/>
         <result property="dedupeResult" column="dedupe_result"/>
         <result property="duplicateAssetId" column="duplicate_asset_id"/>
         <result property="errorCode" column="error_code"/>
@@ -59,55 +46,189 @@
         <result property="finishedAt" column="finished_at"/>
     </resultMap>
 
+    <resultMap id="ClaimCandidateRecordMap"
+               type="com.anchr.core.ingestion.infrastructure.persistence.ClaimCandidateRecord">
+        <id property="itemId" column="item_id"/>
+        <result property="itemProgress" column="item_progress"/>
+        <result property="executionId" column="execution_id"/>
+        <result property="executionEpoch" column="execution_epoch"/>
+        <result property="phase" column="phase"/>
+        <result property="claimVersion" column="claim_version"/>
+        <result property="leaseToken" column="lease_token"/>
+    </resultMap>
+
+    <resultMap id="ClaimedExecutionRecordMap"
+               type="com.anchr.core.ingestion.infrastructure.persistence.ClaimedExecutionRecord">
+        <id property="itemId" column="item_id"/>
+        <result property="taskId" column="task_id"/>
+        <result property="kbId" column="kb_id"/>
+        <result property="taskCreatedBy" column="task_created_by"/>
+        <result property="assetId" column="asset_id"/>
+        <result property="sourceUrl" column="source_url"/>
+        <result property="itemProgress" column="item_progress"/>
+        <result property="claimUpdatedAt" column="claim_updated_at"/>
+        <result property="dedupeResult" column="dedupe_result"/>
+        <result property="duplicateAssetId" column="duplicate_asset_id"/>
+        <result property="executionEpoch" column="execution_epoch"/>
+        <result property="phase" column="phase"/>
+        <result property="claimVersion" column="claim_version"/>
+        <result property="phaseRetryCount" column="phase_retry_count"/>
+        <result property="phaseStartedAt" column="phase_started_at"/>
+        <result property="nextActionAt" column="next_action_at"/>
+        <result property="leaseToken" column="lease_token"/>
+        <result property="leaseUntil" column="lease_until"/>
+        <result property="parseAttemptNo" column="parse_attempt_no"/>
+        <result property="requestId" column="request_id"/>
+        <result property="jobId" column="job_id"/>
+        <result property="sourceRevision" column="source_revision"/>
+        <result property="requestSnapshot" column="request_snapshot"/>
+        <result property="parseResultObjectKey" column="parse_result_object_key"/>
+        <result property="parseResultArtifactVersion" column="parse_result_artifact_version"/>
+        <result property="parseResultArtifactProvenance" column="parse_result_artifact_provenance"/>
+        <result property="parseResultProducerClaimVersion" column="parse_result_producer_claim_version"/>
+        <result property="parseResultSha256" column="parse_result_sha256"/>
+        <result property="embeddingResultObjectKey" column="embedding_result_object_key"/>
+        <result property="embeddingResultArtifactVersion" column="embedding_result_artifact_version"/>
+        <result property="embeddingResultArtifactProvenance" column="embedding_result_artifact_provenance"/>
+        <result property="embeddingResultProducerClaimVersion"
+                column="embedding_result_producer_claim_version"/>
+        <result property="embeddingResultSha256" column="embedding_result_sha256"/>
+    </resultMap>
+
+    <resultMap id="FailedItemRetryRecordMap"
+               type="com.anchr.core.ingestion.infrastructure.persistence.FailedItemRetryRecord">
+        <id property="itemId" column="item_id"/>
+        <result property="taskId" column="task_id"/>
+        <result property="kbId" column="kb_id"/>
+        <result property="itemStatus" column="item_status"/>
+        <result property="itemUpdatedAt" column="item_updated_at"/>
+        <result property="currentExecutionId" column="current_execution_id"/>
+        <result property="executionEpoch" column="execution_epoch"/>
+        <result property="executionStatus" column="execution_status"/>
+        <result property="parseAttemptNo" column="parse_attempt_no"/>
+        <result property="sourceRevision" column="source_revision"/>
+    </resultMap>
+
+    <resultMap id="IngestionArtifactRecordMap"
+               type="com.anchr.core.ingestion.infrastructure.persistence.IngestionArtifactRecord">
+        <id property="executionId" column="execution_id"/>
+        <id property="artifactType" column="artifact_type"/>
+        <result property="artifactVersion" column="artifact_version"/>
+        <result property="producerClaimVersion" column="producer_claim_version"/>
+        <result property="objectKey" column="object_key"/>
+        <result property="contentSha256" column="content_sha256"/>
+        <result property="provenance" column="provenance"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
     <sql id="IngestionTaskColumns">
-        id, kb_id, source_type, client_request_id, request_hash, status, total_count, success_count,
-        failure_count, running_count, created_by, updated_by, created_at, updated_at, finished_at
+        id, kb_id, source_type, client_request_id, request_hash, dedupe_strategy,
+        status, total_count, success_count, failure_count, running_count,
+        created_by, updated_by, created_at, updated_at, finished_at
     </sql>
 
-    <sql id="IngestionTaskItemColumns">
-        id, task_id, kb_id, asset_id, file_name, file_hash, source_url,
-        parse_attempt, docling_request_id, docling_job_id, source_revision,
-        execution_stage, execution_epoch, stage_attempt, stage_retry_count,
-        stage_started_at, next_action_at, lease_token, lease_until, parse_request_snapshot,
-        parse_result_object_key, embedding_result_object_key, stage, status,
-        progress, dedupe_strategy, dedupe_result, duplicate_asset_id,
-        error_code, error_message, created_at, updated_at, finished_at
+    <sql id="IngestionItemViewColumns">
+        iti.id,
+        iti.task_id,
+        it.kb_id,
+        it.dedupe_strategy,
+        iti.asset_id,
+        iti.file_name,
+        iti.file_hash,
+        iti.source_url,
+        iti.stage,
+        iti.status,
+        iti.progress,
+        iti.dedupe_result,
+        iti.duplicate_asset_id,
+        iti.error_code,
+        iti.error_message,
+        iti.created_at,
+        iti.updated_at,
+        iti.finished_at
     </sql>
 
-    <insert id="insertTask" parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskRecord">
+    <insert id="insertTask"
+            parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskRecord">
         insert into ingestion_task (
             <include refid="IngestionTaskColumns"/>
         ) values (
-            #{id}, #{kbId}, #{sourceType}, #{clientRequestId}, #{requestHash}, #{status}, #{totalCount}, #{successCount},
-            #{failureCount}, #{runningCount}, #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{finishedAt}
+            #{id}, #{kbId}, #{sourceType}, #{clientRequestId}, #{requestHash}, #{dedupeStrategy},
+            #{status}, #{totalCount}, #{successCount}, #{failureCount}, #{runningCount},
+            #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
     </insert>
 
-    <insert id="insertItem" parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskItemRecord">
+    <insert id="insertItem"
+            parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskItemRecord">
         insert into ingestion_task_item (
-            <include refid="IngestionTaskItemColumns"/>
+            id, task_id, current_execution_id, kb_id, asset_id, file_name, file_hash, source_url,
+            stage, status, progress, dedupe_strategy, dedupe_result, duplicate_asset_id,
+            error_code, error_message, created_at, updated_at, finished_at
         ) values (
-            #{id}, #{taskId}, #{kbId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl},
-            #{parseAttempt}, #{doclingRequestId}, #{doclingJobId}, #{sourceRevision},
-            #{executionStage}, #{executionEpoch}, #{stageAttempt}, #{stageRetryCount},
-            #{stageStartedAt}, #{nextActionAt}, #{leaseToken}, #{leaseUntil}, #{parseRequestSnapshot},
-            #{parseResultObjectKey}, #{embeddingResultObjectKey}, #{stage}, #{status},
-            #{progress}, #{dedupeStrategy}, #{dedupeResult}, #{duplicateAssetId},
+            #{id}, #{taskId}, #{currentExecutionId}, #{kbId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl},
+            #{stage}, #{status}, #{progress}, #{dedupeStrategy}, #{dedupeResult}, #{duplicateAssetId},
             #{errorCode}, #{errorMessage}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
     </insert>
 
+    <insert id="insertParseAttempt"
+            parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionParseAttemptRecord"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        insert into ingestion_item_parse_attempt (
+            item_id, attempt_no, status, request_id, job_id, source_revision,
+            request_snapshot, created_at, updated_at, finished_at
+        ) values (
+            #{itemId}, #{attemptNo}, #{status}, #{requestId}, #{jobId}, #{sourceRevision},
+            cast(#{requestSnapshot} as json), #{createdAt}, #{updatedAt}, #{finishedAt}
+        )
+    </insert>
+
+    <insert id="insertExecution"
+            parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionExecutionRecord"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        insert into ingestion_item_execution (
+            item_id, execution_epoch, execution_kind, execution_status, phase,
+            parse_attempt_id, claim_version, phase_retry_count, phase_started_at,
+            next_action_at, lease_token, lease_until, error_code, error_message,
+            created_at, updated_at, finished_at
+        ) values (
+            #{itemId}, #{executionEpoch}, #{executionKind}, #{executionStatus}, #{phase},
+            #{parseAttemptId}, #{claimVersion}, #{phaseRetryCount}, #{phaseStartedAt},
+            #{nextActionAt}, #{leaseToken}, #{leaseUntil}, #{errorCode}, #{errorMessage},
+            #{createdAt}, #{updatedAt}, #{finishedAt}
+        )
+    </insert>
+
+    <insert id="insertArtifact"
+            parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionArtifactRecord">
+        insert into ingestion_item_artifact (
+            execution_id, artifact_type, artifact_version, provenance,
+            producer_claim_version, object_key, content_sha256, created_at
+        ) values (
+            #{executionId}, #{artifactType}, #{artifactVersion}, #{provenance},
+            #{producerClaimVersion}, #{objectKey}, #{contentSha256}, #{createdAt}
+        )
+        on duplicate key update execution_id = execution_id
+    </insert>
+
+    <update id="pointItemToExecution">
+        update ingestion_task_item
+        set current_execution_id = #{executionId},
+            updated_at = #{updatedAt}
+        where id = #{itemId}
+          and current_execution_id is null
+    </update>
+
     <select id="findTask" resultMap="IngestionTaskRecordMap">
-        select
-            <include refid="IngestionTaskColumns"/>
+        select <include refid="IngestionTaskColumns"/>
         from ingestion_task
         where id = #{taskId}
           and kb_id = #{kbId}
     </select>
 
     <select id="findTaskByClientRequestId" resultMap="IngestionTaskRecordMap">
-        select
-            <include refid="IngestionTaskColumns"/>
+        select <include refid="IngestionTaskColumns"/>
         from ingestion_task
         where created_by = #{createdBy}
           and client_request_id = #{clientRequestId}
@@ -115,61 +236,33 @@
     </select>
 
     <select id="listTasks" resultMap="IngestionTaskRecordMap">
-        select
-            <include refid="IngestionTaskColumns"/>
+        select <include refid="IngestionTaskColumns"/>
         from ingestion_task
         where kb_id = #{kbId}
         <if test="status != null and status != ''">
-          and status = #{status}
+            and status = #{status}
         </if>
         order by created_at desc, id desc
         limit #{limit}
     </select>
 
     <select id="listRecentTasks" resultMap="IngestionTaskRecordMap">
-        select
-            <include refid="IngestionTaskColumns"/>
+        select <include refid="IngestionTaskColumns"/>
         from ingestion_task
         order by created_at desc, id desc
         limit #{limit}
     </select>
 
-    <select id="listItems" resultMap="IngestionTaskItemRecordMap">
-        select
-            <include refid="IngestionTaskItemColumns"/>
-        from ingestion_task_item
-        where task_id = #{taskId}
-        order by created_at asc, id asc
-    </select>
-
-    <select id="listFailedItems" resultMap="IngestionTaskItemRecordMap">
-        select
-            iti.id, iti.task_id, iti.kb_id, iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
-            iti.parse_attempt, iti.docling_request_id, iti.docling_job_id, iti.source_revision,
-            iti.execution_stage, iti.execution_epoch, iti.stage_attempt, iti.stage_retry_count,
-            iti.stage_started_at, iti.next_action_at, iti.lease_token, iti.lease_until,
-            iti.parse_request_snapshot, iti.parse_result_object_key, iti.embedding_result_object_key,
-            iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result, iti.duplicate_asset_id,
-            iti.error_code, iti.error_message,
-            iti.created_at, iti.updated_at, iti.finished_at
+    <select id="listItems" resultMap="IngestionItemViewRecordMap">
+        select <include refid="IngestionItemViewColumns"/>
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        where it.kb_id = #{kbId}
-          and it.id = #{taskId}
-          and iti.status = 'FAILED'
+        where iti.task_id = #{taskId}
         order by iti.created_at asc, iti.id asc
     </select>
 
-    <select id="findItem" resultMap="IngestionTaskItemRecordMap">
-        select
-            iti.id, iti.task_id, iti.kb_id, iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
-            iti.parse_attempt, iti.docling_request_id, iti.docling_job_id, iti.source_revision,
-            iti.execution_stage, iti.execution_epoch, iti.stage_attempt, iti.stage_retry_count,
-            iti.stage_started_at, iti.next_action_at, iti.lease_token, iti.lease_until,
-            iti.parse_request_snapshot, iti.parse_result_object_key, iti.embedding_result_object_key,
-            iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result, iti.duplicate_asset_id,
-            iti.error_code, iti.error_message,
-            iti.created_at, iti.updated_at, iti.finished_at
+    <select id="findItem" resultMap="IngestionItemViewRecordMap">
+        select <include refid="IngestionItemViewColumns"/>
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
         where it.kb_id = #{kbId}
@@ -177,200 +270,432 @@
           and iti.id = #{itemId}
     </select>
 
+    <select id="findRetryItem" resultMap="FailedItemRetryRecordMap">
+        select
+            iti.id as item_id,
+            iti.task_id,
+            it.kb_id,
+            iti.status as item_status,
+            iti.updated_at as item_updated_at,
+            iti.current_execution_id,
+            coalesce(ie.execution_epoch, iti.execution_epoch, 1) as execution_epoch,
+            ie.execution_status,
+            coalesce(ipa.attempt_no, iti.parse_attempt, 1) as parse_attempt_no,
+            coalesce(ipa.source_revision, iti.source_revision) as source_revision
+        from ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        left join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        left join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = iti.id
+        where it.kb_id = #{kbId}
+          and it.id = #{taskId}
+          and iti.id = #{itemId}
+    </select>
+
+    <select id="listFailedItems" resultMap="FailedItemRetryRecordMap">
+        select
+            iti.id as item_id,
+            iti.task_id,
+            it.kb_id,
+            iti.status as item_status,
+            iti.updated_at as item_updated_at,
+            iti.current_execution_id,
+            coalesce(ie.execution_epoch, iti.execution_epoch, 1) as execution_epoch,
+            ie.execution_status,
+            coalesce(ipa.attempt_no, iti.parse_attempt, 1) as parse_attempt_no,
+            coalesce(ipa.source_revision, iti.source_revision) as source_revision
+        from ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        left join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        left join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = iti.id
+        where it.kb_id = #{kbId}
+          and it.id = #{taskId}
+          and iti.status = 'FAILED'
+        order by iti.created_at asc, iti.id asc
+    </select>
+
     <select id="listClaimableItemIds" resultType="java.lang.String">
-        select id
-        from ingestion_task_item
-        where status in ('PENDING', 'RUNNING')
-          and execution_stage not in ('COMPLETE', 'FAILED')
-          and (next_action_at is null or next_action_at &lt;= current_timestamp(6))
-          and (lease_token is null or lease_until &lt;= current_timestamp(6))
-        order by next_action_at asc, id asc
+        select iti.id
+        from ingestion_item_execution ie
+        inner join ingestion_task_item iti
+            on iti.current_execution_id = ie.id
+           and iti.id = ie.item_id
+        where iti.status in ('PENDING', 'RUNNING')
+          and ie.execution_status = 'ACTIVE'
+          and ie.claim_version &lt; 9223372036854775807
+          and (ie.next_action_at is null or ie.next_action_at &lt;= current_timestamp(6))
+          and (ie.lease_token is null or ie.lease_until &lt;= current_timestamp(6))
+        order by ie.next_action_at asc, ie.id asc
         limit #{limit}
     </select>
 
     <select id="listClaimableItemIdsByTask" resultType="java.lang.String">
-        select id
-        from ingestion_task_item
-        where task_id = #{taskId}
-          and status in ('PENDING', 'RUNNING')
-          and execution_stage not in ('COMPLETE', 'FAILED')
-          and (next_action_at is null or next_action_at &lt;= current_timestamp(6))
-          and (lease_token is null or lease_until &lt;= current_timestamp(6))
-        order by next_action_at asc, id asc
+        select iti.id
+        from ingestion_item_execution ie
+        inner join ingestion_task_item iti
+            on iti.current_execution_id = ie.id
+           and iti.id = ie.item_id
+        where iti.task_id = #{taskId}
+          and iti.status in ('PENDING', 'RUNNING')
+          and ie.execution_status = 'ACTIVE'
+          and ie.claim_version &lt; 9223372036854775807
+          and (ie.next_action_at is null or ie.next_action_at &lt;= current_timestamp(6))
+          and (ie.lease_token is null or ie.lease_until &lt;= current_timestamp(6))
+        order by ie.next_action_at asc, ie.id asc
         limit #{limit}
     </select>
 
-    <select id="selectClaimableItemForUpdate" resultMap="IngestionTaskItemRecordMap">
+    <select id="selectClaimableItemForUpdate" resultMap="ClaimCandidateRecordMap">
         select
-            <include refid="IngestionTaskItemColumns"/>
-        from ingestion_task_item
-        where id = #{itemId}
-          and status in ('PENDING', 'RUNNING')
-          and execution_stage not in ('COMPLETE', 'FAILED')
-          and (next_action_at is null or next_action_at &lt;= current_timestamp(6))
-          and (lease_token is null or lease_until &lt;= current_timestamp(6))
+            iti.id as item_id,
+            iti.progress as item_progress,
+            ie.id as execution_id,
+            ie.execution_epoch,
+            ie.phase,
+            ie.claim_version,
+            ie.lease_token
+        from ingestion_task_item iti
+        inner join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        where iti.id = #{itemId}
+          and iti.status in ('PENDING', 'RUNNING')
+          and ie.execution_status = 'ACTIVE'
+          and ie.claim_version &lt; 9223372036854775807
+          and (ie.next_action_at is null or ie.next_action_at &lt;= current_timestamp(6))
+          and (ie.lease_token is null or ie.lease_until &lt;= current_timestamp(6))
         limit 1
         for update skip locked
     </select>
 
-    <update id="claimItem">
-        update ingestion_task_item
-        set stage_retry_count = stage_retry_count + case
-                when #{item.leaseToken} is not null then 1
+    <update id="claimExecution">
+        update ingestion_item_execution ie
+        inner join ingestion_task_item iti
+            on iti.current_execution_id = ie.id
+           and iti.id = ie.item_id
+        set ie.phase_retry_count = ie.phase_retry_count + case
+                when #{candidate.leaseToken} is not null then 1
                 else 0
             end,
-            lease_token = #{leaseToken},
-            lease_until = timestampadd(second, #{leaseSeconds}, current_timestamp(6)),
-            stage_attempt = stage_attempt + 1,
-            stage_started_at = coalesce(stage_started_at, current_timestamp(6)),
-            next_action_at = null,
-            stage = case
-                when execution_stage in ('PARSE_SUBMIT', 'PARSE_WAIT', 'PARSE_PERSIST') then 'PARSE'
-                when execution_stage = 'EMBED' then 'EMBED'
-                when execution_stage = 'INDEX' then 'INDEX'
-                else stage
-            end,
-            status = 'RUNNING',
-            progress = greatest(progress, case
-                when execution_stage in ('PARSE_SUBMIT', 'PARSE_WAIT', 'PARSE_PERSIST') then 20
-                when execution_stage = 'EMBED' then 55
-                when execution_stage = 'INDEX' then 75
-                else progress
-            end),
-            error_code = null,
-            error_message = null,
-            updated_at = current_timestamp(6),
-            finished_at = null
-        where id = #{item.id}
-          and execution_epoch = #{item.executionEpoch}
-          and execution_stage = #{item.executionStage}
-          and stage_attempt = #{item.stageAttempt}
-          and status in ('PENDING', 'RUNNING')
-          and (next_action_at is null or next_action_at &lt;= current_timestamp(6))
-          and (lease_token is null or lease_until &lt;= current_timestamp(6))
+            ie.lease_token = #{leaseToken},
+            ie.lease_until = timestampadd(second, #{leaseSeconds}, current_timestamp(6)),
+            ie.claim_version = ie.claim_version + 1,
+            ie.phase_started_at = coalesce(ie.phase_started_at, current_timestamp(6)),
+            ie.next_action_at = null,
+            ie.updated_at = current_timestamp(6),
+            ie.finished_at = null
+        where ie.id = #{candidate.executionId}
+          and ie.item_id = #{candidate.itemId}
+          and ie.execution_epoch = #{candidate.executionEpoch}
+          and ie.phase = #{candidate.phase}
+          and ie.claim_version = #{candidate.claimVersion}
+          and ie.claim_version &lt; 9223372036854775807
+          and ie.execution_status = 'ACTIVE'
+          and iti.status in ('PENDING', 'RUNNING')
+          and (ie.next_action_at is null or ie.next_action_at &lt;= current_timestamp(6))
+          and (ie.lease_token is null or ie.lease_until &lt;= current_timestamp(6))
     </update>
 
-    <select id="findClaimedItem" resultMap="IngestionTaskItemRecordMap">
+    <update id="projectClaimedItem">
+        update ingestion_task_item iti
+        inner join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        set iti.stage = #{projection.stage},
+            iti.status = #{projection.status},
+            iti.progress = #{projection.progress},
+            iti.error_code = null,
+            iti.error_message = null,
+            iti.updated_at = ie.updated_at,
+            iti.finished_at = null
+        where iti.id = #{itemId}
+          and ie.id = #{executionId}
+          and ie.execution_status = 'ACTIVE'
+          and ie.lease_token is not null
+    </update>
+
+    <select id="findClaimedExecution" resultMap="ClaimedExecutionRecordMap">
         select
-            iti.id, iti.task_id, iti.kb_id, it.created_by as task_created_by,
-            iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
-            iti.parse_attempt, iti.docling_request_id, iti.docling_job_id, iti.source_revision,
-            iti.execution_stage, iti.execution_epoch, iti.stage_attempt, iti.stage_retry_count,
-            iti.stage_started_at, iti.next_action_at, iti.lease_token, iti.lease_until,
-            iti.parse_request_snapshot, iti.parse_result_object_key, iti.embedding_result_object_key,
-            iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result,
-            iti.duplicate_asset_id, iti.error_code, iti.error_message,
-            iti.created_at, iti.updated_at, iti.finished_at
+            iti.id as item_id,
+            iti.task_id,
+            it.kb_id,
+            it.created_by as task_created_by,
+            iti.asset_id,
+            iti.source_url,
+            iti.progress as item_progress,
+            ie.updated_at as claim_updated_at,
+            iti.dedupe_result,
+            iti.duplicate_asset_id,
+            ie.execution_epoch,
+            ie.phase,
+            ie.claim_version,
+            ie.phase_retry_count,
+            ie.phase_started_at,
+            ie.next_action_at,
+            ie.lease_token,
+            ie.lease_until,
+            ipa.attempt_no as parse_attempt_no,
+            ipa.request_id,
+            ipa.job_id,
+            ipa.source_revision,
+            <choose>
+                <when test="includeParseSnapshot">
+                    ipa.request_snapshot as request_snapshot,
+                </when>
+                <otherwise>
+                    null as request_snapshot,
+                </otherwise>
+            </choose>
+            parse_artifact.object_key as parse_result_object_key,
+            parse_artifact.artifact_version as parse_result_artifact_version,
+            parse_artifact.provenance as parse_result_artifact_provenance,
+            parse_artifact.producer_claim_version as parse_result_producer_claim_version,
+            parse_artifact.content_sha256 as parse_result_sha256,
+            embedding_artifact.object_key as embedding_result_object_key,
+            embedding_artifact.artifact_version as embedding_result_artifact_version,
+            embedding_artifact.provenance as embedding_result_artifact_provenance,
+            embedding_artifact.producer_claim_version
+                as embedding_result_producer_claim_version,
+            embedding_artifact.content_sha256 as embedding_result_sha256
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
+        inner join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        left join ingestion_item_parse_attempt ipa on ipa.id = ie.parse_attempt_id
+        left join ingestion_item_artifact parse_artifact
+            on parse_artifact.execution_id = ie.id
+           and parse_artifact.artifact_type = 'PARSE_RESULT'
+        left join ingestion_item_artifact embedding_artifact
+            on embedding_artifact.execution_id = ie.id
+           and embedding_artifact.artifact_type = 'EMBEDDING_RESULT'
         where iti.id = #{itemId}
-          and iti.lease_token = #{leaseToken}
           and iti.status = 'RUNNING'
+          and ie.execution_status = 'ACTIVE'
+          and ie.lease_token = #{leaseToken}
     </select>
 
     <update id="renewClaim">
-        update ingestion_task_item
-        set lease_until = timestampadd(second, #{leaseSeconds}, current_timestamp(6)),
-            updated_at = current_timestamp(6)
-        where id = #{itemId}
-          and execution_epoch = #{executionEpoch}
-          and execution_stage = #{expectedExecutionStage}
-          and stage_attempt = #{stageAttempt}
-          and lease_token = #{leaseToken}
-          and lease_until &gt; current_timestamp(6)
-          and status = 'RUNNING'
+        update ingestion_item_execution ie
+        inner join ingestion_task_item iti
+            on iti.current_execution_id = ie.id
+           and iti.id = ie.item_id
+        set ie.lease_until = timestampadd(second, #{leaseSeconds}, current_timestamp(6)),
+            ie.updated_at = current_timestamp(6)
+        where iti.id = #{itemId}
+          and ie.execution_epoch = #{executionEpoch}
+          and ie.phase = #{expectedExecutionStage}
+          and ie.claim_version = #{claimVersion}
+          and ie.lease_token = #{leaseToken}
+          and ie.lease_until &gt; current_timestamp(6)
+          and ie.execution_status = 'ACTIVE'
+          and iti.status = 'RUNNING'
     </update>
 
     <update id="updateClaimContext"
             parameterType="com.anchr.core.ingestion.domain.model.IngestionClaimContext">
-        update ingestion_task_item
-        set parse_attempt = #{parseAttempt},
-            docling_request_id = #{doclingRequestId},
-            docling_job_id = #{doclingJobId},
-            source_revision = #{sourceRevision},
-            parse_request_snapshot = #{parseRequestSnapshot},
-            updated_at = current_timestamp(6)
-        where id = #{itemId}
-          and execution_epoch = #{executionEpoch}
-          and execution_stage = #{expectedExecutionStage}
-          and stage_attempt = #{stageAttempt}
-          and lease_token = #{leaseToken}
-          and status = 'RUNNING'
-          and parse_attempt = #{parseAttempt}
-          and (docling_request_id is null or docling_request_id = #{doclingRequestId})
-          and (source_revision is null or source_revision = #{sourceRevision})
+        update ingestion_item_parse_attempt ipa
+        inner join ingestion_item_execution ie
+            on ie.parse_attempt_id = ipa.id
+           and ie.item_id = ipa.item_id
+        inner join ingestion_task_item iti
+            on iti.current_execution_id = ie.id
+           and iti.id = ie.item_id
+        set ipa.request_id = #{doclingRequestId},
+            ipa.job_id = #{doclingJobId},
+            ipa.source_revision = #{sourceRevision},
+            ipa.request_snapshot = cast(#{parseRequestSnapshot} as json),
+            ipa.updated_at = current_timestamp(6)
+        where iti.id = #{itemId}
+          and ie.execution_epoch = #{executionEpoch}
+          and ie.phase = #{expectedExecutionStage}
+          and ie.claim_version = #{claimVersion}
+          and ie.lease_token = #{leaseToken}
+          and ie.execution_status = 'ACTIVE'
+          and iti.status = 'RUNNING'
+          and ipa.attempt_no = #{parseAttempt}
+          and (ipa.request_id is null or ipa.request_id = #{doclingRequestId})
+          and (ipa.source_revision is null or ipa.source_revision = #{sourceRevision})
           and (
-              parse_request_snapshot is null
-              or parse_request_snapshot = cast(#{parseRequestSnapshot} as json)
+              ipa.request_snapshot is null
+              or ipa.request_snapshot = cast(#{parseRequestSnapshot} as json)
           )
     </update>
 
-    <update id="transitionClaim"
+    <update id="transitionExecution"
             parameterType="com.anchr.core.ingestion.domain.model.IngestionClaimTransition">
-        update ingestion_task_item
-        set execution_stage = #{nextExecutionStage},
-            stage_attempt = #{nextStageAttempt},
-            stage_retry_count = #{nextStageRetryCount},
-            stage_started_at = #{nextStageStartedAt},
-            next_action_at = #{nextActionAt},
-            stage = #{stage},
-            status = #{status},
-            progress = #{progress},
-            parse_attempt = #{parseAttempt},
-            docling_request_id = #{doclingRequestId},
-            docling_job_id = #{doclingJobId},
-            source_revision = #{sourceRevision},
-            parse_request_snapshot = #{parseRequestSnapshot},
-            parse_result_object_key = #{parseResultObjectKey},
-            embedding_result_object_key = #{embeddingResultObjectKey},
-            error_code = #{errorCode},
-            error_message = #{errorMessage},
-            lease_token = null,
-            lease_until = null,
-            updated_at = coalesce(#{updatedAt}, current_timestamp(6)),
-            finished_at = #{finishedAt}
-        where id = #{itemId}
-          and task_id = #{taskId}
-          and kb_id = #{kbId}
-          and execution_epoch = #{executionEpoch}
-          and execution_stage = #{expectedExecutionStage}
-          and stage_attempt = #{expectedStageAttempt}
-          and lease_token = #{leaseToken}
-          and status = 'RUNNING'
+        update ingestion_item_execution ie
+        inner join ingestion_task_item iti
+            on iti.current_execution_id = ie.id
+           and iti.id = ie.item_id
+        inner join ingestion_task it on it.id = iti.task_id
+        set ie.phase = case
+                when #{nextExecutionStage} in ('COMPLETE', 'FAILED') then ie.phase
+                else #{nextExecutionStage}
+            end,
+            ie.execution_status = case
+                when #{nextExecutionStage} = 'COMPLETE' then 'SUCCEEDED'
+                when #{nextExecutionStage} = 'FAILED' then 'FAILED'
+                else 'ACTIVE'
+            end,
+            ie.phase_retry_count = #{nextStageRetryCount},
+            ie.phase_started_at = case
+                when #{nextExecutionStage} in ('COMPLETE', 'FAILED') then ie.phase_started_at
+                else #{nextStageStartedAt}
+            end,
+            ie.next_action_at = #{nextActionAt},
+            ie.error_code = #{errorCode},
+            ie.error_message = #{errorMessage},
+            ie.lease_token = null,
+            ie.lease_until = null,
+            ie.updated_at = coalesce(#{updatedAt}, current_timestamp(6)),
+            ie.finished_at = #{finishedAt}
+        where iti.id = #{itemId}
+          and iti.task_id = #{taskId}
+          and it.kb_id = #{kbId}
+          and ie.execution_epoch = #{executionEpoch}
+          and ie.phase = #{expectedExecutionStage}
+          and ie.claim_version = #{expectedClaimVersion}
+          and ie.lease_token = #{leaseToken}
+          and ie.execution_status = 'ACTIVE'
+          and iti.status = 'RUNNING'
     </update>
 
-    <select id="findCurrentClaimForUpdate" resultType="java.lang.String">
-        select id
-        from ingestion_task_item
-        where id = #{itemId}
-          and execution_epoch = #{executionEpoch}
-          and execution_stage = #{expectedExecutionStage}
-          and stage_attempt = #{stageAttempt}
-          and lease_token = #{leaseToken}
-          and status = 'RUNNING'
+    <update id="projectTransitionToItem"
+            parameterType="com.anchr.core.ingestion.domain.model.IngestionClaimTransition">
+        update ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        inner join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        set iti.stage = #{stage},
+            iti.status = #{status},
+            iti.progress = #{progress},
+            iti.error_code = #{errorCode},
+            iti.error_message = #{errorMessage},
+            iti.updated_at = coalesce(#{updatedAt}, current_timestamp(6)),
+            iti.finished_at = #{finishedAt}
+        where iti.id = #{itemId}
+          and iti.task_id = #{taskId}
+          and it.kb_id = #{kbId}
+          and ie.execution_epoch = #{executionEpoch}
+          and ie.claim_version = #{expectedClaimVersion}
+          and ie.execution_status = case
+              when #{nextExecutionStage} = 'COMPLETE' then 'SUCCEEDED'
+              when #{nextExecutionStage} = 'FAILED' then 'FAILED'
+              else 'ACTIVE'
+          end
+          and #{progress} &gt;= iti.progress
+    </update>
+
+    <update id="updateParseAttemptFromTransition"
+            parameterType="com.anchr.core.ingestion.domain.model.IngestionClaimTransition">
+        update ingestion_item_parse_attempt ipa
+        inner join ingestion_item_execution ie
+            on ie.parse_attempt_id = ipa.id
+           and ie.item_id = ipa.item_id
+        inner join ingestion_task_item iti
+            on iti.current_execution_id = ie.id
+           and iti.id = ie.item_id
+        set ipa.request_id = #{doclingRequestId},
+            ipa.job_id = #{doclingJobId},
+            ipa.source_revision = #{sourceRevision},
+            ipa.request_snapshot = cast(#{parseRequestSnapshot} as json),
+            ipa.status = case
+                when #{status} = 'FAILED' then 'FAILED'
+                when #{nextExecutionStage} not in ('PARSE_SUBMIT', 'PARSE_WAIT', 'PARSE_PERSIST')
+                    then 'SUCCEEDED'
+                else ipa.status
+            end,
+            ipa.updated_at = coalesce(#{updatedAt}, current_timestamp(6)),
+            ipa.finished_at = case
+                when #{status} = 'FAILED'
+                  or #{nextExecutionStage} not in ('PARSE_SUBMIT', 'PARSE_WAIT', 'PARSE_PERSIST')
+                    then coalesce(#{updatedAt}, current_timestamp(6))
+                else ipa.finished_at
+            end
+        where iti.id = #{itemId}
+          and ie.execution_epoch = #{executionEpoch}
+          and ie.claim_version = #{expectedClaimVersion}
+          and ipa.attempt_no = #{parseAttempt}
+    </update>
+
+    <select id="findCurrentExecutionId" resultType="java.lang.Long">
+        select ie.id
+        from ingestion_task_item iti
+        inner join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        where iti.id = #{itemId}
+          and ie.execution_epoch = #{executionEpoch}
+    </select>
+
+    <select id="findArtifact" resultMap="IngestionArtifactRecordMap">
+        select execution_id, artifact_type, artifact_version, provenance,
+               producer_claim_version, object_key, content_sha256, created_at
+        from ingestion_item_artifact
+        where execution_id = #{executionId}
+          and artifact_type = #{artifactType}
+    </select>
+
+    <select id="findCurrentClaimForUpdate" resultType="java.lang.Long">
+        select ie.id
+        from ingestion_task_item iti
+        inner join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        where iti.id = #{itemId}
+          and ie.execution_epoch = #{executionEpoch}
+          and ie.phase = #{expectedExecutionStage}
+          and ie.claim_version = #{claimVersion}
+          and ie.lease_token = #{leaseToken}
+          and ie.execution_status = 'ACTIVE'
+          and iti.status = 'RUNNING'
         for update
     </select>
 
-    <update id="resetFailedItem">
+    <select id="selectFailedItemForRetryForUpdate" resultMap="FailedItemRetryRecordMap">
+        select
+            iti.id as item_id,
+            iti.task_id,
+            it.kb_id,
+            iti.status as item_status,
+            iti.updated_at as item_updated_at,
+            iti.current_execution_id,
+            coalesce(ie.execution_epoch, iti.execution_epoch, 1) as execution_epoch,
+            ie.execution_status,
+            coalesce(ipa.attempt_no, iti.parse_attempt, 1) as parse_attempt_no,
+            coalesce(ipa.source_revision, iti.source_revision) as source_revision
+        from ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        left join ingestion_item_execution ie
+            on ie.id = iti.current_execution_id
+           and ie.item_id = iti.id
+        left join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = iti.id
+        where it.kb_id = #{kbId}
+          and it.id = #{taskId}
+          and iti.id = #{itemId}
+          and iti.status = 'FAILED'
+          and coalesce(ipa.attempt_no, iti.parse_attempt, 1) = #{expectedParseAttempt}
+        for update
+    </select>
+
+    <update id="resetFailedItemPointer">
         update ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        set iti.stage = 'UPLOAD',
-            iti.status = 'PENDING',
-            iti.progress = 0,
-            iti.execution_epoch = iti.execution_epoch + 1,
-            iti.execution_stage = 'PARSE_SUBMIT',
-            iti.stage_attempt = 0,
-            iti.stage_retry_count = 0,
-            iti.stage_started_at = null,
-            iti.next_action_at = #{updatedAt},
-            iti.lease_token = null,
-            iti.lease_until = null,
-            iti.parse_request_snapshot = null,
-            iti.parse_result_object_key = null,
-            iti.embedding_result_object_key = null,
-            iti.docling_request_id = #{nextDoclingRequestId},
-            iti.parse_attempt = #{nextParseAttempt},
-            iti.docling_job_id = null,
+        set iti.current_execution_id = #{nextExecutionId},
+            iti.stage = #{projection.stage},
+            iti.status = #{projection.status},
+            iti.progress = #{projection.progress},
             iti.error_code = null,
             iti.error_message = null,
             iti.updated_at = #{updatedAt},
@@ -379,40 +704,47 @@
           and it.id = #{taskId}
           and iti.id = #{itemId}
           and iti.status = 'FAILED'
-          and iti.parse_attempt = #{expectedParseAttempt}
+        <choose>
+            <when test="expectedCurrentExecutionId == null">
+                and iti.current_execution_id is null
+            </when>
+            <otherwise>
+                and iti.current_execution_id = #{expectedCurrentExecutionId}
+            </otherwise>
+        </choose>
     </update>
 
     <update id="refreshSummary">
-            update ingestion_task it
-            join (
-                select task_id,
-                    count(1) as total_count,
-                    sum(case when status in ('SUCCESS', 'SKIPPED') then 1 else 0 end) as success_count,
-                    sum(case when status = 'FAILED' then 1 else 0 end) as failure_count,
-                    sum(case when status = 'RUNNING' then 1 else 0 end) as running_count,
-                    sum(case when status = 'PENDING' then 1 else 0 end) as pending_count
-                from ingestion_task_item
-                where task_id = #{taskId}
-                group by task_id
-            ) s on it.id = s.task_id
-            set
-                it.total_count = s.total_count,
-                it.success_count = s.success_count,
-                it.failure_count = s.failure_count,
-                it.running_count = s.running_count,
-                it.status = case
-                    when s.running_count > 0 then 'RUNNING'
-                    when s.pending_count > 0 then 'PENDING'
-                    when s.failure_count = s.total_count then 'FAILED'
-                    when s.success_count = s.total_count then 'SUCCESS'
-                    else 'PARTIAL_SUCCESS'
-                end,
-                it.updated_by = #{updatedBy},
-                it.updated_at = #{updatedAt},
-                it.finished_at = case
-                    when s.running_count + s.pending_count > 0 then null
-                    else #{updatedAt}
-                end
-            where it.kb_id = #{kbId}
+        update ingestion_task it
+        join (
+            select task_id,
+                count(1) as total_count,
+                sum(case when status in ('SUCCESS', 'SKIPPED') then 1 else 0 end) as success_count,
+                sum(case when status = 'FAILED' then 1 else 0 end) as failure_count,
+                sum(case when status = 'RUNNING' then 1 else 0 end) as running_count,
+                sum(case when status = 'PENDING' then 1 else 0 end) as pending_count
+            from ingestion_task_item
+            where task_id = #{taskId}
+            group by task_id
+        ) s on it.id = s.task_id
+        set it.total_count = s.total_count,
+            it.success_count = s.success_count,
+            it.failure_count = s.failure_count,
+            it.running_count = s.running_count,
+            it.status = case
+                when s.running_count > 0 then 'RUNNING'
+                when s.pending_count > 0 then 'PENDING'
+                when s.failure_count = s.total_count then 'FAILED'
+                when s.success_count = s.total_count then 'SUCCESS'
+                else 'PARTIAL_SUCCESS'
+            end,
+            it.updated_by = #{updatedBy},
+            it.updated_at = #{updatedAt},
+            it.finished_at = case
+                when s.running_count + s.pending_count > 0 then null
+                else #{updatedAt}
+            end
+        where it.kb_id = #{kbId}
+          and it.id = #{taskId}
     </update>
 </mapper>

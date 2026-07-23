@@ -1,6 +1,7 @@
 package com.anchr.core.integration.storage;
 
 import com.aliyun.oss.OSS;
+import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSException;
 import com.aliyun.oss.model.OSSObject;
 import com.aliyun.oss.model.ObjectMetadata;
@@ -10,11 +11,13 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.MockedConstruction;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.ByteArrayInputStream;
@@ -26,6 +29,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +44,7 @@ class ConfigDrivenStorageAdapterArtifactTest {
     private OSS oss;
 
     private ConfigDrivenStorageAdapter adapter;
+    private MockedConstruction<OSSClientBuilder> clientBuilders;
 
     @BeforeEach
     void setUp() {
@@ -53,8 +58,17 @@ class ConfigDrivenStorageAdapterArtifactTest {
         when(configRepository.find()).thenReturn(Optional.of(config));
         when(aesUtil.decrypt("encrypted-access")).thenReturn("access");
         when(aesUtil.decrypt("encrypted-secret")).thenReturn("secret");
-        adapter = new ConfigDrivenStorageAdapter(
-                configRepository, aesUtil, (endpoint, accessKey, secretKey) -> oss);
+        clientBuilders = mockConstruction(
+                OSSClientBuilder.class,
+                (builder, context) -> when(builder.build(
+                        "https://oss.example.test", "access", "secret"))
+                        .thenReturn(oss));
+        adapter = new ConfigDrivenStorageAdapter(configRepository, aesUtil);
+    }
+
+    @AfterEach
+    void tearDown() {
+        clientBuilders.close();
     }
 
     @Test

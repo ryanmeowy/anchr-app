@@ -3,6 +3,7 @@ package com.anchr.core.conversation.application.impl;
 import com.anchr.core.conversation.application.*;
 import com.anchr.core.conversation.application.agent.AgentWorkflow;
 import com.anchr.core.conversation.application.agent.AgentWorkflowException;
+import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
 import com.anchr.core.conversation.application.model.*;
 import com.anchr.core.conversation.config.AgentProperties;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
@@ -22,12 +23,13 @@ class ConversationMessageOrchestratorAgentTest {
         ChatResponseService chat = mock(ChatResponseService.class);
         ConversationMessagePipeline pipeline = mock(ConversationMessagePipeline.class);
         AgentWorkflow workflow = mock(AgentWorkflow.class);
+        AgentRunFinalizer finalizer = mock(AgentRunFinalizer.class);
         AgentProperties properties = new AgentProperties(); properties.setEnabled(true);
         when(workflow.execute(any(), any())).thenReturn(new ConversationExecutionResult(null, false, null,
                 "agent answer", AnswerStatus.ANSWERED, null, List.of(), List.of(), null,
                 "run-1", "general-agent-v1", ConversationExecutionMode.AGENT, null));
         var orchestrator = new ConversationMessageOrchestrator(router, chat, pipeline,
-                new SimpleMeterRegistry(), properties, workflow);
+                new SimpleMeterRegistry(), properties, workflow, finalizer);
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("你好"); request.setAgentEnabled(true);
 
@@ -46,9 +48,10 @@ class ConversationMessageOrchestratorAgentTest {
         when(chat.generate("session", "你好")).thenReturn(new ChatResponseResult("你好", AnswerStatus.ANSWERED, null));
         ConversationMessagePipeline pipeline = mock(ConversationMessagePipeline.class);
         AgentWorkflow workflow = mock(AgentWorkflow.class);
+        AgentRunFinalizer finalizer = mock(AgentRunFinalizer.class);
         AgentProperties properties = new AgentProperties(); properties.setEnabled(true);
         var orchestrator = new ConversationMessageOrchestrator(router, chat, pipeline,
-                new SimpleMeterRegistry(), properties, workflow);
+                new SimpleMeterRegistry(), properties, workflow, finalizer);
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("你好"); request.setAgentEnabled(false);
 
@@ -66,6 +69,7 @@ class ConversationMessageOrchestratorAgentTest {
         ChatResponseService chat = mock(ChatResponseService.class);
         ConversationMessagePipeline pipeline = mock(ConversationMessagePipeline.class);
         AgentWorkflow workflow = mock(AgentWorkflow.class);
+        AgentRunFinalizer finalizer = mock(AgentRunFinalizer.class);
         when(workflow.execute(any(), any())).thenThrow(new AgentWorkflowException("agent failed", null));
 
         RewriteResult rewrite = new RewriteResult();
@@ -85,7 +89,7 @@ class ConversationMessageOrchestratorAgentTest {
         properties.setEnabled(true);
         properties.setFallbackToTraditional(true);
         var orchestrator = new ConversationMessageOrchestrator(router, chat, pipeline,
-                new SimpleMeterRegistry(), properties, workflow);
+                new SimpleMeterRegistry(), properties, workflow, finalizer);
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("RAG 是什么");
         request.setAgentEnabled(true);

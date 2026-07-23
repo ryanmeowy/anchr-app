@@ -3,7 +3,9 @@ package com.anchr.core.ingestion.application.artifact;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactException.Reason;
 import com.anchr.core.ingestion.application.artifact.IngestionEmbeddingArtifact.ChunkPayload;
+import com.anchr.core.ingestion.config.IngestionArtifactProperties;
 import com.anchr.core.ingestion.domain.model.Chunk;
+import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -14,13 +16,16 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.time.Clock;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -33,29 +38,25 @@ public class IngestionArtifactStore {
     static final String PARSE_ARTIFACT_TYPE = "anchr.ingestion.parse-result";
     static final String EMBEDDING_ARTIFACT_TYPE = "anchr.ingestion.embedding-result";
     static final int ARTIFACT_VERSION = 1;
-    static final int DEFAULT_MAX_COMPRESSED_BYTES = 32 * 1024 * 1024;
-    static final int DEFAULT_MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
-
     private static final String JSON_CONTENT_TYPE = "application/json";
     private static final String GZIP_CONTENT_ENCODING = "gzip";
+    private static final String PARSE_REGISTRY_TYPE = "PARSE_RESULT";
+    private static final String EMBEDDING_REGISTRY_TYPE = "EMBEDDING_RESULT";
+    private static final String PRODUCED_PROVENANCE = "PRODUCED";
+    private static final String LEGACY_PROVENANCE = "LEGACY_BACKFILL";
+    private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
 
     private final IngestionObjectStoragePort objectStoragePort;
     private final ObjectMapper objectMapper;
-    private final Clock clock;
     private final int maxCompressedBytes;
     private final int maxUncompressedBytes;
 
     public IngestionArtifactStore(IngestionObjectStoragePort objectStoragePort,
-                                  ObjectMapper objectMapper) {
-        this(objectStoragePort, objectMapper, Clock.systemUTC(),
-                DEFAULT_MAX_COMPRESSED_BYTES, DEFAULT_MAX_UNCOMPRESSED_BYTES);
-    }
-
-    IngestionArtifactStore(IngestionObjectStoragePort objectStoragePort,
-                           ObjectMapper objectMapper,
-                           Clock clock,
-                           int maxCompressedBytes,
-                           int maxUncompressedBytes) {
+                                  ObjectMapper objectMapper,
+                                  IngestionArtifactProperties properties) {
+        Objects.requireNonNull(properties);
+        int maxCompressedBytes = properties.getMaxCompressedBytes();
+        int maxUncompressedBytes = properties.getMaxUncompressedBytes();
         if (maxCompressedBytes <= 0 || maxUncompressedBytes <= 0
                 || maxCompressedBytes == Integer.MAX_VALUE
                 || maxUncompressedBytes == Integer.MAX_VALUE) {
@@ -64,17 +65,16 @@ public class IngestionArtifactStore {
         }
         this.objectStoragePort = Objects.requireNonNull(objectStoragePort);
         this.objectMapper = Objects.requireNonNull(objectMapper);
-        this.clock = Objects.requireNonNull(clock);
         this.maxCompressedBytes = maxCompressedBytes;
         this.maxUncompressedBytes = maxUncompressedBytes;
     }
 
     /**
-     * Store a completed Docling response before acknowledging the Docling job.
-     *
-     * @return immutable object key that must be fenced into the item row
+     * Store a completed Docling response and return metadata for the exact gzip
+     * bytes persisted in object storage.
      */
-    public String writeParseResult(IngestionTaskItem item, String jobId, ParseResponse result) {
+    public IngestionStoredArtifact writeParseArtifact(
+            IngestionTaskItem item, String jobId, ParseResponse result) {
         requireItemIdentity(item);
         requirePositive(item.getParseAttempt(), "parseAttempt");
         requireText(jobId, "jobId");
@@ -99,20 +99,21 @@ public class IngestionArtifactStore {
                 jobId,
                 item.getDoclingRequestId(),
                 item.getSourceRevision(),
-                Instant.now(clock),
+                Instant.now(),
                 result);
 
         byte[] compressed = encode(artifact);
         if (putIfAbsent(objectKey, compressed)) {
-            return objectKey;
+            return storedArtifact(objectKey, compressed);
         }
 
-        IngestionParseArtifact existing = readParseArtifact(objectKey);
+        byte[] existingCompressed = readCompressed(objectKey);
+        IngestionParseArtifact existing = readParseArtifact(objectKey, existingCompressed);
         validateParseIdentity(item, objectKey, existing);
         if (!Objects.equals(existing.result(), result)) {
             throw immutableConflict("Existing parse artifact has different content.");
         }
-        return objectKey;
+        return storedArtifact(objectKey, existingCompressed);
     }
 
     /**
@@ -120,23 +121,26 @@ public class IngestionArtifactStore {
      */
     public ParseResponse readParseResult(IngestionTaskItem item) {
         requireItemIdentity(item);
-        String objectKey = requireText(item.getParseResultObjectKey(), "parseResultObjectKey");
-        IngestionParseArtifact artifact = readParseArtifact(objectKey);
+        IngestionArtifactReference reference = item.getParseResultArtifact();
+        String objectKey = resolveObjectKey(
+                item.getParseResultObjectKey(), reference, "parseResultObjectKey");
+        byte[] compressed = readCompressed(objectKey);
+        validateRegistryReference(reference, PARSE_REGISTRY_TYPE, objectKey, compressed);
+        IngestionParseArtifact artifact = readParseArtifact(objectKey, compressed);
         validateParseIdentity(item, objectKey, artifact);
         return artifact.result();
     }
 
     /**
-     * Store the complete chunk set after embedding, so INDEX can resume without
-     * repeating parsing or embedding.
-     *
-     * @return immutable object key that must be fenced into the item row
+     * Store embedded chunks and return metadata for the exact gzip bytes
+     * persisted in object storage.
      */
-    public String writeEmbeddingResult(IngestionTaskItem item, List<Chunk> chunks) {
+    public IngestionStoredArtifact writeEmbeddingArtifact(
+            IngestionTaskItem item, List<Chunk> chunks) {
         requireItemIdentity(item);
         requirePositive(item.getParseAttempt(), "parseAttempt");
         requirePositive(item.getExecutionEpoch(), "executionEpoch");
-        requirePositive(item.getStageAttempt(), "stageAttempt");
+        requirePositive(item.getClaimVersion(), "claimVersion");
         requireText(item.getDoclingRequestId(), "doclingRequestId");
         requireText(item.getSourceRevision(), "sourceRevision");
         requireText(item.getParseResultObjectKey(), "parseResultObjectKey");
@@ -152,24 +156,25 @@ public class IngestionArtifactStore {
                 item.getAssetId(),
                 item.getParseAttempt(),
                 item.getExecutionEpoch(),
-                item.getStageAttempt(),
+                item.getClaimVersion(),
                 item.getDoclingRequestId(),
                 item.getSourceRevision(),
                 item.getParseResultObjectKey(),
-                Instant.now(clock),
+                Instant.now(),
                 payloads);
 
         byte[] compressed = encode(artifact);
         if (putIfAbsent(objectKey, compressed)) {
-            return objectKey;
+            return storedArtifact(objectKey, compressed);
         }
 
-        IngestionEmbeddingArtifact existing = readEmbeddingArtifact(objectKey);
+        byte[] existingCompressed = readCompressed(objectKey);
+        IngestionEmbeddingArtifact existing = readEmbeddingArtifact(objectKey, existingCompressed);
         validateEmbeddingIdentity(item, objectKey, existing);
         if (!Objects.equals(existing.chunks(), payloads)) {
             throw immutableConflict("Existing embedding artifact has different content.");
         }
-        return objectKey;
+        return storedArtifact(objectKey, existingCompressed);
     }
 
     /**
@@ -177,9 +182,16 @@ public class IngestionArtifactStore {
      */
     public List<Chunk> readEmbeddingResult(IngestionTaskItem item) {
         requireItemIdentity(item);
-        String objectKey = requireText(item.getEmbeddingResultObjectKey(), "embeddingResultObjectKey");
-        IngestionEmbeddingArtifact artifact = readEmbeddingArtifact(objectKey);
+        IngestionArtifactReference reference = item.getEmbeddingResultArtifact();
+        String objectKey = resolveObjectKey(
+                item.getEmbeddingResultObjectKey(), reference, "embeddingResultObjectKey");
+        byte[] compressed = readCompressed(objectKey);
+        validateRegistryReference(
+                reference, EMBEDDING_REGISTRY_TYPE, objectKey, compressed);
+        IngestionEmbeddingArtifact artifact =
+                readEmbeddingArtifact(objectKey, compressed);
         validateEmbeddingIdentity(item, objectKey, artifact);
+        validateEmbeddingProducer(reference, artifact);
         return artifact.chunks().stream().map(ChunkPayload::toDomain).toList();
     }
 
@@ -232,7 +244,7 @@ public class IngestionArtifactStore {
         }
     }
 
-    private <T> T decode(String objectKey, Class<T> type) {
+    private byte[] readCompressed(String objectKey) {
         byte[] compressed = storageCall(
                 () -> objectStoragePort.readArtifact(objectKey, maxCompressedBytes));
         if (compressed == null || compressed.length == 0) {
@@ -241,7 +253,10 @@ public class IngestionArtifactStore {
         if (compressed.length > maxCompressedBytes) {
             throw tooLarge("Artifact exceeds the configured compressed-size limit.");
         }
+        return compressed;
+    }
 
+    private <T> T decode(byte[] compressed, Class<T> type) {
         try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
             byte[] json = gzip.readNBytes(maxUncompressedBytes + 1);
             if (json.length > maxUncompressedBytes) {
@@ -260,8 +275,9 @@ public class IngestionArtifactStore {
                 objectKey, compressed, JSON_CONTENT_TYPE, GZIP_CONTENT_ENCODING));
     }
 
-    private IngestionParseArtifact readParseArtifact(String objectKey) {
-        IngestionParseArtifact artifact = decode(objectKey, IngestionParseArtifact.class);
+    private IngestionParseArtifact readParseArtifact(String objectKey, byte[] compressed) {
+        IngestionParseArtifact artifact =
+                decode(compressed, IngestionParseArtifact.class);
         if (artifact == null || artifact.result() == null || artifact.createdAt() == null) {
             throw corrupt("Parse artifact is missing required fields.", null);
         }
@@ -272,8 +288,10 @@ public class IngestionArtifactStore {
         return artifact;
     }
 
-    private IngestionEmbeddingArtifact readEmbeddingArtifact(String objectKey) {
-        IngestionEmbeddingArtifact artifact = decode(objectKey, IngestionEmbeddingArtifact.class);
+    private IngestionEmbeddingArtifact readEmbeddingArtifact(
+            String objectKey, byte[] compressed) {
+        IngestionEmbeddingArtifact artifact =
+                decode(compressed, IngestionEmbeddingArtifact.class);
         if (artifact == null || artifact.createdAt() == null
                 || artifact.chunks() == null || artifact.chunks().isEmpty()) {
             throw corrupt("Embedding artifact is missing required fields.", null);
@@ -284,6 +302,76 @@ public class IngestionArtifactStore {
         }
         validateUniqueSegmentIds(artifact.chunks());
         return artifact;
+    }
+
+    private IngestionStoredArtifact storedArtifact(String objectKey, byte[] compressed) {
+        return new IngestionStoredArtifact(objectKey, ARTIFACT_VERSION, sha256(compressed));
+    }
+
+    private String resolveObjectKey(
+            String itemObjectKey,
+            IngestionArtifactReference reference,
+            String fieldName) {
+        if (reference == null) {
+            throw corrupt("Artifact registry reference is required.", null);
+        }
+        String registeredObjectKey =
+                requireText(reference.getObjectKey(), fieldName + ".objectKey");
+        if (itemObjectKey != null
+                && !itemObjectKey.equals(registeredObjectKey)) {
+            throw identityMismatch(
+                    "Artifact registry object key does not match the claimed execution.");
+        }
+        return registeredObjectKey;
+    }
+
+    private void validateRegistryReference(
+            IngestionArtifactReference reference,
+            String expectedType,
+            String objectKey,
+            byte[] compressed) {
+        if (!expectedType.equals(reference.getArtifactType())
+                || reference.getArtifactVersion() != ARTIFACT_VERSION
+                || !objectKey.equals(reference.getObjectKey())) {
+            throw corrupt("Artifact registry metadata is inconsistent.", null);
+        }
+
+        String provenance = reference.getProvenance();
+        String expectedSha256 = reference.getContentSha256();
+        if (PRODUCED_PROVENANCE.equals(provenance)) {
+            if (reference.getProducerClaimVersion() == null
+                    || reference.getProducerClaimVersion() < 1
+                    || expectedSha256 == null
+                    || !SHA256.matcher(expectedSha256).matches()) {
+                throw corrupt(
+                        "Produced artifact registry metadata is incomplete.", null);
+            }
+        } else if (LEGACY_PROVENANCE.equals(provenance)) {
+            if (reference.getProducerClaimVersion() != null
+                    || (expectedSha256 != null
+                    && !SHA256.matcher(expectedSha256).matches())) {
+                throw corrupt(
+                        "Legacy artifact registry metadata is invalid.", null);
+            }
+        } else {
+            throw corrupt("Artifact registry provenance is unsupported.", null);
+        }
+
+        if (expectedSha256 != null
+                && !expectedSha256.equals(sha256(compressed))) {
+            throw corrupt(
+                    "Ingestion artifact content does not match its registered SHA-256.",
+                    null);
+        }
+    }
+
+    private String sha256(byte[] compressed) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(compressed));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 digest is unavailable.", e);
+        }
     }
 
     private void validateParseIdentity(IngestionTaskItem item, String objectKey,
@@ -325,6 +413,19 @@ public class IngestionArtifactStore {
         }
     }
 
+    private void validateEmbeddingProducer(
+            IngestionArtifactReference reference,
+            IngestionEmbeddingArtifact artifact) {
+        if (reference != null
+                && PRODUCED_PROVENANCE.equals(reference.getProvenance())
+                && !Objects.equals(
+                reference.getProducerClaimVersion(), artifact.claimVersion())) {
+            throw corrupt(
+                    "Embedding artifact producer does not match its registry fence.",
+                    null);
+        }
+    }
+
     private void validateChunkIdentity(IngestionTaskItem item, String kbId, String assetId) {
         if (!Objects.equals(item.getKbId(), kbId) || !Objects.equals(item.getAssetId(), assetId)) {
             throw identityMismatch("Chunk identity does not match the current item.");
@@ -361,7 +462,7 @@ public class IngestionArtifactStore {
         return "ingestion/" + pathSegment(item.getTaskId(), "taskId")
                 + "/" + pathSegment(item.getId(), "itemId")
                 + "/execution/" + item.getExecutionEpoch()
-                + "/embed/" + item.getStageAttempt()
+                + "/embed/" + item.getClaimVersion()
                 + "/embedding-result.v1.json.gz";
     }
 
@@ -369,7 +470,7 @@ public class IngestionArtifactStore {
         return "ingestion/" + pathSegment(artifact.taskId(), "taskId")
                 + "/" + pathSegment(artifact.itemId(), "itemId")
                 + "/execution/" + artifact.executionEpoch()
-                + "/embed/" + artifact.stageAttempt()
+                + "/embed/" + artifact.claimVersion()
                 + "/embedding-result.v1.json.gz";
     }
 

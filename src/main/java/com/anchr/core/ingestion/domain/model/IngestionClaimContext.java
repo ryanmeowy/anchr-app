@@ -13,7 +13,7 @@ public class IngestionClaimContext {
     String itemId;
     long executionEpoch;
     IngestionExecutionStage expectedExecutionStage;
-    int stageAttempt;
+    long claimVersion;
     String leaseToken;
     int parseAttempt;
     String doclingRequestId;
