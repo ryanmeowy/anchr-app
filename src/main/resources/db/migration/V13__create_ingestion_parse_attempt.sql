@@ -1,4 +1,4 @@
-create table ingestion_item_parse_attempt (
+create table if not exists ingestion_item_parse_attempt (
     id bigint auto_increment primary key,
     item_id bigint not null,
     attempt_no int not null,
@@ -12,12 +12,5 @@ create table ingestion_item_parse_attempt (
     finished_at datetime(6) null,
     constraint uk_ingestion_parse_attempt_item_no unique (item_id, attempt_no),
     constraint uk_ingestion_parse_attempt_request unique (request_id),
-    constraint uk_ingestion_parse_attempt_id_item unique (id, item_id),
-    constraint chk_ingestion_parse_attempt_no_positive check (attempt_no >= 1),
-    constraint chk_ingestion_parse_attempt_status check (
-        status in ('ACTIVE', 'SUCCEEDED', 'FAILED')
-    ),
-    constraint fk_ingestion_parse_attempt_item
-        foreign key (item_id) references ingestion_task_item (id)
-        on update restrict on delete restrict
+    constraint uk_ingestion_parse_attempt_id_item unique (id, item_id)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;

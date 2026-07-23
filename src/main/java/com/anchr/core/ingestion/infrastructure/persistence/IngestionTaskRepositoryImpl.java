@@ -43,7 +43,6 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
 
     private static final String SCHEDULER_USER = "ingestion-scheduler";
     private static final String PARSE_ARTIFACT = "PARSE_RESULT";
-    private static final String EMBEDDING_ARTIFACT = "EMBEDDING_RESULT";
     private static final String PRODUCED_ARTIFACT = "PRODUCED";
     private static final String LEGACY_ARTIFACT = "LEGACY_BACKFILL";
     private static final int ARTIFACT_VERSION = 1;
@@ -83,12 +82,6 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                     PARSE_ARTIFACT,
                     item.getParseResultObjectKey(),
                     item.getParseResultArtifact(),
-                    execution.getClaimVersion(),
-                    item.getUpdatedAt());
-            registerInitialArtifact(
-                    execution.getId(), EMBEDDING_ARTIFACT,
-                    item.getEmbeddingResultObjectKey(),
-                    item.getEmbeddingResultArtifact(),
                     execution.getClaimVersion(),
                     item.getUpdatedAt());
             if (mapper.pointItemToExecution(item.getId(), execution.getId(), item.getUpdatedAt()) != 1) {
@@ -237,14 +230,6 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 transition.getParseResultSha256(),
                 transition.getExpectedClaimVersion(),
                 transition.getUpdatedAt());
-        registerProducedArtifact(
-                executionId,
-                EMBEDDING_ARTIFACT,
-                transition.getEmbeddingResultObjectKey(),
-                transition.getEmbeddingResultSha256(),
-                transition.getExpectedClaimVersion(),
-                transition.getUpdatedAt());
-
         mapper.refreshSummary(
                 transition.getKbId(),
                 transition.getTaskId(),
@@ -256,6 +241,12 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     private void validatePublicProjection(IngestionClaimTransition transition) {
+        if (transition.isRetainLease()
+                && (transition.getExpectedExecutionStage() != IngestionExecutionStage.EMBED
+                || transition.getNextExecutionStage() != IngestionExecutionStage.INDEX)) {
+            throw new IllegalArgumentException(
+                    "A claim lease may only be retained while handing EMBED directly to INDEX.");
+        }
         IngestionPublicProjection expected = IngestionPublicProjectionPolicy.transition(
                 transition.getExpectedExecutionStage(),
                 transition.getNextExecutionStage(),
@@ -508,14 +499,6 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                         record.getParseResultArtifactProvenance(),
                         record.getParseResultProducerClaimVersion(),
                         record.getParseResultSha256()))
-                .embeddingResultObjectKey(record.getEmbeddingResultObjectKey())
-                .embeddingResultArtifact(artifactReference(
-                        EMBEDDING_ARTIFACT,
-                        record.getEmbeddingResultObjectKey(),
-                        record.getEmbeddingResultArtifactVersion(),
-                        record.getEmbeddingResultArtifactProvenance(),
-                        record.getEmbeddingResultProducerClaimVersion(),
-                        record.getEmbeddingResultSha256()))
                 .stage(projection.stage())
                 .status(projection.status())
                 .progress(projection.progress())
@@ -695,10 +678,9 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                     "An ingestion item cannot start at EMBED without a parse artifact.");
         }
         if (phase == IngestionExecutionStage.INDEX
-                && (!hasText(item.getParseResultObjectKey())
-                || !hasText(item.getEmbeddingResultObjectKey()))) {
+                && !hasText(item.getParseResultObjectKey())) {
             throw new IllegalArgumentException(
-                    "An ingestion item cannot start at INDEX without parse and embedding artifacts.");
+                    "An ingestion item cannot start at INDEX without a parse artifact.");
         }
     }
 

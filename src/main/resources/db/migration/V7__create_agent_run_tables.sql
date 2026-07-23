@@ -33,7 +33,6 @@ create table if not exists agent_step (
   latency_ms bigint not null default 0,
   error_code varchar(64) null,
   created_at datetime(3) not null,
-  constraint fk_agent_step_run foreign key (run_id) references agent_run(run_id) on delete cascade,
   unique key uk_agent_step_run_order (run_id, step_order)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
 
@@ -64,14 +63,3 @@ create table if not exists agent_task (
   index idx_agent_task_session (session_id, created_at),
   index idx_agent_task_run (run_id)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
-
-alter table conversation_turn
-  modify column intent_type varchar(32) null default null,
-  modify column intent_source varchar(16) null default null,
-  add column agent_run_id varchar(64) null after retrieval_trace,
-  add column workflow_version varchar(64) null after agent_run_id,
-  add column execution_mode varchar(32) not null default 'TRADITIONAL' after workflow_version,
-  add column agent_task_id varchar(64) null after execution_mode;
-
-create index idx_conversation_turn_agent_run on conversation_turn(agent_run_id);
-create index idx_conversation_turn_agent_task on conversation_turn(agent_task_id);

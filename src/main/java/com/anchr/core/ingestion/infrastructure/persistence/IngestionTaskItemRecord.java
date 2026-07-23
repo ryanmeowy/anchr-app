@@ -14,7 +14,7 @@ public class IngestionTaskItemRecord {
     private String taskId;
     private Long currentExecutionId;
     /**
-     * Expand-phase compatibility copy for the legacy non-null item column.
+     * Compatibility copy for the non-null item column.
      *
      * <p>New read paths obtain the knowledge-base scope from the parent task.</p>
      */
@@ -27,7 +27,7 @@ public class IngestionTaskItemRecord {
     private String status;
     private Integer progress;
     /**
-     * Expand-phase compatibility copy for rollback to the legacy item model.
+     * Compatibility copy retained for the item projection.
      *
      * <p>The parent task is the source of truth in the split model.</p>
      */

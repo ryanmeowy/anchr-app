@@ -10,10 +10,9 @@ create table if not exists knowledge_base (
   updated_by varchar(64) not null default 'system',
   created_at timestamp not null,
   updated_at timestamp not null,
-  deleted_at timestamp null
+  deleted_at timestamp null,
+  index idx_kb_updated_at (updated_at)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
-
-create index idx_kb_updated_at on knowledge_base(updated_at);
 
 create table if not exists asset (
   id bigint primary key,
@@ -42,18 +41,20 @@ create table if not exists asset (
   updated_by varchar(64) not null default 'system',
   created_at timestamp not null,
   updated_at timestamp not null,
-  deleted_at timestamp null
+  deleted_at timestamp null,
+  index idx_doc_kb_status (kb_id, parse_status, index_status),
+  index idx_doc_hash (kb_id, file_hash),
+  index idx_doc_created_at (kb_id, created_at),
+  index idx_doc_version_group (kb_id, version_group_id, version_no)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
-
-create index idx_doc_kb_status on asset(kb_id, parse_status, index_status);
-create index idx_doc_hash on asset(kb_id, file_hash);
-create index idx_doc_created_at on asset(kb_id, created_at);
-create index idx_doc_version_group on asset(kb_id, version_group_id, version_no);
 
 create table if not exists ingestion_task (
   id bigint primary key,
   kb_id bigint not null,
   source_type varchar(32) not null,
+  client_request_id varchar(128) character set utf8mb4 collate utf8mb4_bin null,
+  request_hash varchar(80) character set ascii collate ascii_bin null,
+  dedupe_strategy varchar(32) character set ascii collate ascii_bin null,
   status varchar(32) not null,
   total_count int not null default 0,
   success_count int not null default 0,
@@ -63,20 +64,37 @@ create table if not exists ingestion_task (
   updated_by varchar(64) not null default 'system',
   created_at timestamp not null,
   updated_at timestamp not null,
-  finished_at timestamp null
+  finished_at timestamp null,
+  unique key uk_ingestion_task_creator_request (created_by, client_request_id),
+  index idx_task_kb_created (kb_id, created_at),
+  index idx_task_status (status)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
 
-create index idx_task_kb_created on ingestion_task(kb_id, created_at);
-create index idx_task_status on ingestion_task(status);
 
 create table if not exists ingestion_task_item (
   id bigint primary key,
   task_id bigint not null,
+  current_execution_id bigint null,
   kb_id bigint not null,
   asset_id varchar(64),
   file_name varchar(512),
   file_hash varchar(128),
   source_url text,
+  parse_attempt int not null default 1,
+  docling_request_id varchar(200) character set utf8mb4 collate utf8mb4_bin null,
+  docling_job_id varchar(64) character set ascii collate ascii_bin null,
+  source_revision varchar(80) character set ascii collate ascii_bin null,
+  execution_stage varchar(32) character set ascii collate ascii_bin
+    not null default 'PARSE_SUBMIT',
+  execution_epoch bigint not null default 1,
+  stage_attempt int not null default 0,
+  stage_retry_count int not null default 0,
+  stage_started_at datetime(6) null,
+  next_action_at datetime(6) null,
+  lease_token varchar(64) character set ascii collate ascii_bin null,
+  lease_until datetime(6) null,
+  parse_request_snapshot json null,
+  parse_result_object_key varchar(1024) character set utf8mb4 collate utf8mb4_bin null,
   stage varchar(32) not null,
   status varchar(32) not null,
   progress int not null default 0,
@@ -87,12 +105,15 @@ create table if not exists ingestion_task_item (
   error_message text,
   created_at timestamp not null,
   updated_at timestamp not null,
-  finished_at timestamp null
+  finished_at timestamp null,
+  index idx_ingestion_item_current_execution (current_execution_id, id),
+  index idx_ingestion_item_claim (status, next_action_at, lease_until, id),
+  index idx_ingestion_task_claim (task_id, status, next_action_at, lease_until, id),
+  index idx_task_item_task (task_id),
+  index idx_task_item_asset (asset_id),
+  index idx_task_item_kb_status (kb_id, status)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
 
-create index idx_task_item_task on ingestion_task_item(task_id);
-create index idx_task_item_asset on ingestion_task_item(asset_id);
-create index idx_task_item_kb_status on ingestion_task_item(kb_id, status);
 
 create table if not exists activity_event (
   id bigint primary key,
@@ -101,10 +122,9 @@ create table if not exists activity_event (
   resource_type varchar(64),
   resource_id varchar(128),
   payload json,
-  created_at timestamp not null
+  created_at timestamp not null,
+  index idx_activity_type_created (event_type, created_at)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_ai_ci;
-
-create index idx_activity_type_created on activity_event(event_type, created_at);
 
 create table if not exists capability_config (
     id bigint primary key,

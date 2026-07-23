@@ -87,12 +87,6 @@
         <result property="parseResultArtifactProvenance" column="parse_result_artifact_provenance"/>
         <result property="parseResultProducerClaimVersion" column="parse_result_producer_claim_version"/>
         <result property="parseResultSha256" column="parse_result_sha256"/>
-        <result property="embeddingResultObjectKey" column="embedding_result_object_key"/>
-        <result property="embeddingResultArtifactVersion" column="embedding_result_artifact_version"/>
-        <result property="embeddingResultArtifactProvenance" column="embedding_result_artifact_provenance"/>
-        <result property="embeddingResultProducerClaimVersion"
-                column="embedding_result_producer_claim_version"/>
-        <result property="embeddingResultSha256" column="embedding_result_sha256"/>
     </resultMap>
 
     <resultMap id="FailedItemRetryRecordMap"
@@ -457,13 +451,7 @@
             parse_artifact.artifact_version as parse_result_artifact_version,
             parse_artifact.provenance as parse_result_artifact_provenance,
             parse_artifact.producer_claim_version as parse_result_producer_claim_version,
-            parse_artifact.content_sha256 as parse_result_sha256,
-            embedding_artifact.object_key as embedding_result_object_key,
-            embedding_artifact.artifact_version as embedding_result_artifact_version,
-            embedding_artifact.provenance as embedding_result_artifact_provenance,
-            embedding_artifact.producer_claim_version
-                as embedding_result_producer_claim_version,
-            embedding_artifact.content_sha256 as embedding_result_sha256
+            parse_artifact.content_sha256 as parse_result_sha256
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
         inner join ingestion_item_execution ie
@@ -473,9 +461,6 @@
         left join ingestion_item_artifact parse_artifact
             on parse_artifact.execution_id = ie.id
            and parse_artifact.artifact_type = 'PARSE_RESULT'
-        left join ingestion_item_artifact embedding_artifact
-            on embedding_artifact.execution_id = ie.id
-           and embedding_artifact.artifact_type = 'EMBEDDING_RESULT'
         where iti.id = #{itemId}
           and iti.status = 'RUNNING'
           and ie.execution_status = 'ACTIVE'
@@ -553,8 +538,14 @@
             ie.next_action_at = #{nextActionAt},
             ie.error_code = #{errorCode},
             ie.error_message = #{errorMessage},
-            ie.lease_token = null,
-            ie.lease_until = null,
+            ie.lease_token = case
+                when #{retainLease} then ie.lease_token
+                else null
+            end,
+            ie.lease_until = case
+                when #{retainLease} then ie.lease_until
+                else null
+            end,
             ie.updated_at = coalesce(#{updatedAt}, current_timestamp(6)),
             ie.finished_at = #{finishedAt}
         where iti.id = #{itemId}

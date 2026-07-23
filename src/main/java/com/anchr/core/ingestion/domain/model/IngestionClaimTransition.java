@@ -26,6 +26,7 @@ public class IngestionClaimTransition {
     IngestionExecutionStage expectedExecutionStage;
     long expectedClaimVersion;
     String leaseToken;
+    boolean retainLease;
 
     IngestionExecutionStage nextExecutionStage;
     int nextStageRetryCount;
@@ -43,8 +44,6 @@ public class IngestionClaimTransition {
     String parseRequestSnapshot;
     String parseResultObjectKey;
     String parseResultSha256;
-    String embeddingResultObjectKey;
-    String embeddingResultSha256;
 
     String errorCode;
     String errorMessage;

@@ -2,9 +2,7 @@ package com.anchr.core.ingestion.application.artifact;
 
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactException.Reason;
-import com.anchr.core.ingestion.application.artifact.IngestionEmbeddingArtifact.ChunkPayload;
 import com.anchr.core.ingestion.config.IngestionArtifactProperties;
-import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
@@ -19,11 +17,8 @@ import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
@@ -36,12 +31,10 @@ import java.util.zip.GZIPOutputStream;
 public class IngestionArtifactStore {
 
     static final String PARSE_ARTIFACT_TYPE = "anchr.ingestion.parse-result";
-    static final String EMBEDDING_ARTIFACT_TYPE = "anchr.ingestion.embedding-result";
     static final int ARTIFACT_VERSION = 1;
     private static final String JSON_CONTENT_TYPE = "application/json";
     private static final String GZIP_CONTENT_ENCODING = "gzip";
     private static final String PARSE_REGISTRY_TYPE = "PARSE_RESULT";
-    private static final String EMBEDDING_REGISTRY_TYPE = "EMBEDDING_RESULT";
     private static final String PRODUCED_PROVENANCE = "PRODUCED";
     private static final String LEGACY_PROVENANCE = "LEGACY_BACKFILL";
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
@@ -131,95 +124,6 @@ public class IngestionArtifactStore {
         return artifact.result();
     }
 
-    /**
-     * Store embedded chunks and return metadata for the exact gzip bytes
-     * persisted in object storage.
-     */
-    public IngestionStoredArtifact writeEmbeddingArtifact(
-            IngestionTaskItem item, List<Chunk> chunks) {
-        requireItemIdentity(item);
-        requirePositive(item.getParseAttempt(), "parseAttempt");
-        requirePositive(item.getExecutionEpoch(), "executionEpoch");
-        requirePositive(item.getClaimVersion(), "claimVersion");
-        requireText(item.getDoclingRequestId(), "doclingRequestId");
-        requireText(item.getSourceRevision(), "sourceRevision");
-        requireText(item.getParseResultObjectKey(), "parseResultObjectKey");
-        List<ChunkPayload> payloads = toPayloads(item, chunks);
-
-        String objectKey = embeddingObjectKey(item);
-        IngestionEmbeddingArtifact artifact = new IngestionEmbeddingArtifact(
-                EMBEDDING_ARTIFACT_TYPE,
-                ARTIFACT_VERSION,
-                item.getTaskId(),
-                item.getId(),
-                item.getKbId(),
-                item.getAssetId(),
-                item.getParseAttempt(),
-                item.getExecutionEpoch(),
-                item.getClaimVersion(),
-                item.getDoclingRequestId(),
-                item.getSourceRevision(),
-                item.getParseResultObjectKey(),
-                Instant.now(),
-                payloads);
-
-        byte[] compressed = encode(artifact);
-        if (putIfAbsent(objectKey, compressed)) {
-            return storedArtifact(objectKey, compressed);
-        }
-
-        byte[] existingCompressed = readCompressed(objectKey);
-        IngestionEmbeddingArtifact existing = readEmbeddingArtifact(objectKey, existingCompressed);
-        validateEmbeddingIdentity(item, objectKey, existing);
-        if (!Objects.equals(existing.chunks(), payloads)) {
-            throw immutableConflict("Existing embedding artifact has different content.");
-        }
-        return storedArtifact(objectKey, existingCompressed);
-    }
-
-    /**
-     * Load and strictly validate the embedding artifact referenced by an item.
-     */
-    public List<Chunk> readEmbeddingResult(IngestionTaskItem item) {
-        requireItemIdentity(item);
-        IngestionArtifactReference reference = item.getEmbeddingResultArtifact();
-        String objectKey = resolveObjectKey(
-                item.getEmbeddingResultObjectKey(), reference, "embeddingResultObjectKey");
-        byte[] compressed = readCompressed(objectKey);
-        validateRegistryReference(
-                reference, EMBEDDING_REGISTRY_TYPE, objectKey, compressed);
-        IngestionEmbeddingArtifact artifact =
-                readEmbeddingArtifact(objectKey, compressed);
-        validateEmbeddingIdentity(item, objectKey, artifact);
-        validateEmbeddingProducer(reference, artifact);
-        return artifact.chunks().stream().map(ChunkPayload::toDomain).toList();
-    }
-
-    private List<ChunkPayload> toPayloads(IngestionTaskItem item, List<Chunk> chunks) {
-        if (chunks == null || chunks.isEmpty()) {
-            throw new IngestionArtifactException(Reason.CORRUPT,
-                    "Embedding artifact requires at least one chunk.");
-        }
-        try {
-            List<ChunkPayload> payloads = chunks.stream()
-                    .map(chunk -> {
-                        if (chunk == null) {
-                            throw new IllegalArgumentException("Embedding artifact contains a null chunk.");
-                        }
-                        validateChunkIdentity(item, chunk.getKbId(), chunk.getAssetId());
-                        return ChunkPayload.fromDomain(chunk);
-                    })
-                    .toList();
-            validateUniqueSegmentIds(payloads);
-            return payloads;
-        } catch (IngestionArtifactException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            throw new IngestionArtifactException(
-                    Reason.CORRUPT, "Embedding artifact contains invalid chunk data.", e);
-        }
-    }
-
     private byte[] encode(Object artifact) {
         try {
             ByteArrayOutputStream output = new LimitedByteArrayOutputStream(maxCompressedBytes);
@@ -285,22 +189,6 @@ public class IngestionArtifactStore {
                 || artifact.version() != ARTIFACT_VERSION) {
             throw corrupt("Unsupported parse artifact type or version.", null);
         }
-        return artifact;
-    }
-
-    private IngestionEmbeddingArtifact readEmbeddingArtifact(
-            String objectKey, byte[] compressed) {
-        IngestionEmbeddingArtifact artifact =
-                decode(compressed, IngestionEmbeddingArtifact.class);
-        if (artifact == null || artifact.createdAt() == null
-                || artifact.chunks() == null || artifact.chunks().isEmpty()) {
-            throw corrupt("Embedding artifact is missing required fields.", null);
-        }
-        if (!EMBEDDING_ARTIFACT_TYPE.equals(artifact.artifactType())
-                || artifact.version() != ARTIFACT_VERSION) {
-            throw corrupt("Unsupported embedding artifact type or version.", null);
-        }
-        validateUniqueSegmentIds(artifact.chunks());
         return artifact;
     }
 
@@ -391,57 +279,6 @@ public class IngestionArtifactStore {
         }
     }
 
-    private void validateEmbeddingIdentity(IngestionTaskItem item, String objectKey,
-                                           IngestionEmbeddingArtifact artifact) {
-        if (!Objects.equals(item.getTaskId(), artifact.taskId())
-                || !Objects.equals(item.getId(), artifact.itemId())
-                || !Objects.equals(item.getKbId(), artifact.kbId())
-                || !Objects.equals(item.getAssetId(), artifact.assetId())
-                || item.getParseAttempt() != artifact.parseAttempt()
-                || item.getExecutionEpoch() != artifact.executionEpoch()
-                || !Objects.equals(item.getDoclingRequestId(), artifact.requestId())
-                || !Objects.equals(item.getSourceRevision(), artifact.sourceRevision())
-                || !Objects.equals(item.getParseResultObjectKey(), artifact.parseResultObjectKey())
-                || !Objects.equals(objectKey, embeddingObjectKey(artifact))) {
-            throw identityMismatch("Embedding artifact identity does not match the current item.");
-        }
-        for (ChunkPayload chunk : artifact.chunks()) {
-            if (chunk == null) {
-                throw corrupt("Embedding artifact contains a null chunk.", null);
-            }
-            validateChunkIdentity(item, chunk.kbId(), chunk.assetId());
-        }
-    }
-
-    private void validateEmbeddingProducer(
-            IngestionArtifactReference reference,
-            IngestionEmbeddingArtifact artifact) {
-        if (reference != null
-                && PRODUCED_PROVENANCE.equals(reference.getProvenance())
-                && !Objects.equals(
-                reference.getProducerClaimVersion(), artifact.claimVersion())) {
-            throw corrupt(
-                    "Embedding artifact producer does not match its registry fence.",
-                    null);
-        }
-    }
-
-    private void validateChunkIdentity(IngestionTaskItem item, String kbId, String assetId) {
-        if (!Objects.equals(item.getKbId(), kbId) || !Objects.equals(item.getAssetId(), assetId)) {
-            throw identityMismatch("Chunk identity does not match the current item.");
-        }
-    }
-
-    private void validateUniqueSegmentIds(List<ChunkPayload> chunks) {
-        Set<String> segmentIds = new HashSet<>();
-        for (ChunkPayload chunk : chunks) {
-            if (chunk == null || chunk.segmentId() == null || chunk.segmentId().isBlank()
-                    || !segmentIds.add(chunk.segmentId())) {
-                throw corrupt("Embedding artifact contains a missing or duplicate segment id.", null);
-            }
-        }
-    }
-
     private String parseObjectKey(IngestionTaskItem item, String jobId) {
         return "ingestion/" + pathSegment(item.getTaskId(), "taskId")
                 + "/" + pathSegment(item.getId(), "itemId")
@@ -456,22 +293,6 @@ public class IngestionArtifactStore {
                 + "/parse/" + artifact.parseAttempt()
                 + "/jobs/" + pathSegment(artifact.jobId(), "jobId")
                 + "/parse-result.v1.json.gz";
-    }
-
-    private String embeddingObjectKey(IngestionTaskItem item) {
-        return "ingestion/" + pathSegment(item.getTaskId(), "taskId")
-                + "/" + pathSegment(item.getId(), "itemId")
-                + "/execution/" + item.getExecutionEpoch()
-                + "/embed/" + item.getClaimVersion()
-                + "/embedding-result.v1.json.gz";
-    }
-
-    private String embeddingObjectKey(IngestionEmbeddingArtifact artifact) {
-        return "ingestion/" + pathSegment(artifact.taskId(), "taskId")
-                + "/" + pathSegment(artifact.itemId(), "itemId")
-                + "/execution/" + artifact.executionEpoch()
-                + "/embed/" + artifact.claimVersion()
-                + "/embedding-result.v1.json.gz";
     }
 
     private String pathSegment(String value, String name) {

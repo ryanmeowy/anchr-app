@@ -66,7 +66,6 @@ import static org.mockito.Mockito.when;
 class IngestionTaskProcessorImplTest {
 
     private static final String PARSE_ARTIFACT_SHA256 = "a".repeat(64);
-    private static final String EMBEDDING_ARTIFACT_SHA256 = "b".repeat(64);
 
     @Mock
     private IngestionTaskRepository ingestionTaskRepository;
@@ -497,7 +496,7 @@ class IngestionTaskProcessorImplTest {
     }
 
     @Test
-    void embed_shouldPersistCompletedChunksAndAtomicallyAdvanceAsset() {
+    void embed_shouldHandCompletedChunksDirectlyToIndexUnderTheSameLease() {
         IngestionTaskItem item = claimed(IngestionExecutionStage.EMBED).toBuilder()
                 .parseResultObjectKey("parse-result.gz")
                 .sourceRevision("v1:revision")
@@ -520,12 +519,10 @@ class IngestionTaskProcessorImplTest {
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
                 eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
-        IngestionStoredArtifact storedArtifact = new IngestionStoredArtifact(
-                "embedding-result.gz", 1, EMBEDDING_ARTIFACT_SHA256);
-        when(artifactStore.writeEmbeddingArtifact(eq(item), any()))
-                .thenReturn(storedArtifact);
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
+        when(ingestionIndexFinalizer.finalizeIndex(
+                any(IngestionTaskItem.class), eq(asset), any(), eq(1))).thenReturn(true);
 
         processor.processClaim(item);
 
@@ -539,10 +536,16 @@ class IngestionTaskProcessorImplTest {
                 transition.capture(), eq(asset), eq("SUCCESS"), eq("RUNNING"));
         assertThat(transition.getValue().getNextExecutionStage())
                 .isEqualTo(IngestionExecutionStage.INDEX);
-        assertThat(transition.getValue().getEmbeddingResultObjectKey())
-                .isEqualTo(storedArtifact.objectKey());
-        assertThat(transition.getValue().getEmbeddingResultSha256())
-                .isEqualTo(storedArtifact.sha256());
+        assertThat(transition.getValue().isRetainLease()).isTrue();
+        verify(embeddingPort, times(1)).embed("body text", "text");
+        ArgumentCaptor<IngestionTaskItem> indexClaim =
+                ArgumentCaptor.forClass(IngestionTaskItem.class);
+        verify(ingestionIndexFinalizer).finalizeIndex(
+                indexClaim.capture(), eq(asset), any(), eq(1));
+        assertThat(indexClaim.getValue().getExecutionStage())
+                .isEqualTo(IngestionExecutionStage.INDEX);
+        assertThat(indexClaim.getValue().getClaimVersion()).isEqualTo(item.getClaimVersion());
+        assertThat(indexClaim.getValue().getLeaseToken()).isEqualTo(item.getLeaseToken());
     }
 
     @Test
@@ -568,9 +571,6 @@ class IngestionTaskProcessorImplTest {
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
                 eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
-        when(artifactStore.writeEmbeddingArtifact(eq(item), any()))
-                .thenReturn(new IngestionStoredArtifact(
-                        "embedding-result.gz", 1, EMBEDDING_ARTIFACT_SHA256));
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
 
@@ -602,9 +602,6 @@ class IngestionTaskProcessorImplTest {
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
                 eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
-        when(artifactStore.writeEmbeddingArtifact(eq(item), any()))
-                .thenReturn(new IngestionStoredArtifact(
-                        "embedding-result.gz", 1, EMBEDDING_ARTIFACT_SHA256));
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
 
@@ -639,9 +636,6 @@ class IngestionTaskProcessorImplTest {
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
                 eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
-        when(artifactStore.writeEmbeddingArtifact(eq(item), any()))
-                .thenReturn(new IngestionStoredArtifact(
-                        "embedding-result.gz", 1, EMBEDDING_ARTIFACT_SHA256));
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
 
@@ -730,57 +724,106 @@ class IngestionTaskProcessorImplTest {
         }
 
         verifyNoInteractions(transactionCoordinator);
-        verify(artifactStore, never()).writeEmbeddingArtifact(any(), any());
         verify(embeddingPort, never()).embed(any(), any());
     }
 
     @Test
-    void index_shouldResumeOnlyFromEmbeddingArtifact() {
+    void indexRecovery_shouldRebuildEmbeddingsFromParseArtifact() {
         IngestionTaskItem item = claimed(IngestionExecutionStage.INDEX).toBuilder()
                 .parseResultObjectKey("parse-result.gz")
-                .embeddingResultObjectKey("embedding-result.gz")
                 .build();
         Asset asset = pdfAsset("objects/document.pdf", null);
+        ParseResponse parsed = parsedResponse("task-1:item-1:1");
         Chunk chunk = Chunk.builder()
                 .segmentId("segment-1")
                 .kbId("kb-1")
                 .assetId("asset-1")
                 .chunkText("body")
-                .embedding(List.of(0.1f))
                 .build();
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
-        when(artifactStore.readEmbeddingResult(item)).thenReturn(List.of(chunk));
+        when(artifactStore.readParseResult(item)).thenReturn(parsed);
+        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.embed("body", "text")).thenReturn(List.of(0.1f));
+        when(ingestionTaskRepository.renewClaim(
+                eq("item-1"), eq(1L), eq(IngestionExecutionStage.INDEX),
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
         when(ingestionIndexFinalizer.finalizeIndex(
                 eq(item), eq(asset), any(), eq(1))).thenReturn(true);
 
         processor.processClaim(item);
 
-        verify(artifactStore).readEmbeddingResult(item);
-        verify(artifactStore, never()).readParseResult(any());
-        verifyNoInteractions(doclingClient, embeddingPort);
+        assertThat(chunk.getEmbedding()).containsExactly(0.1f);
+        verify(artifactStore).readParseResult(item);
+        verify(embeddingPort).embed("body", "text");
+        verifyNoInteractions(doclingClient);
         verify(knowledgeBaseRepository).refreshDocumentStats("kb-1", "user-a", true);
+    }
+
+    @Test
+    void indexRecoveryRateLimit_shouldRetryIndexWithoutPersistingVectors() {
+        IngestionTaskItem item = claimed(IngestionExecutionStage.INDEX).toBuilder()
+                .parseResultObjectKey("parse-result.gz")
+                .build();
+        Asset asset = pdfAsset("objects/document.pdf", null);
+        ParseResponse parsed = parsedResponse("task-1:item-1:1");
+        Chunk chunk = Chunk.builder()
+                .segmentId("segment-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .chunkText("body")
+                .build();
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(artifactStore.readParseResult(item)).thenReturn(parsed);
+        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.embed("body", "text"))
+                .thenThrow(new AiClient.OpenAiException(429, "quota exhausted"));
+        when(ingestionTaskRepository.renewClaim(
+                eq("item-1"), eq(1L), eq(IngestionExecutionStage.INDEX),
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        when(ingestionTaskRepository.transitionClaim(any())).thenReturn(true);
+
+        processor.processClaim(item);
+
+        ArgumentCaptor<IngestionClaimTransition> retry =
+                ArgumentCaptor.forClass(IngestionClaimTransition.class);
+        verify(ingestionTaskRepository).transitionClaim(retry.capture());
+        assertThat(retry.getValue().getExpectedExecutionStage())
+                .isEqualTo(IngestionExecutionStage.INDEX);
+        assertThat(retry.getValue().getNextExecutionStage())
+                .isEqualTo(IngestionExecutionStage.INDEX);
+        assertThat(retry.getValue().getNextStageRetryCount()).isEqualTo(1);
+        assertThat(retry.getValue().getNextActionAt()).isAfter(LocalDateTime.now());
+        verifyNoInteractions(ingestionIndexFinalizer);
     }
 
     @Test
     void index_shouldPreserveExistingOverwrittenAssetCleanup() {
         IngestionTaskItem item = claimed(IngestionExecutionStage.INDEX).toBuilder()
                 .parseResultObjectKey("parse-result.gz")
-                .embeddingResultObjectKey("embedding-result.gz")
                 .dedupeResult(DedupeResult.OVERWRITTEN)
                 .duplicateAssetId("asset-old")
                 .build();
         Asset asset = pdfAsset("objects/document.pdf", null);
+        ParseResponse parsed = parsedResponse("task-1:item-1:1");
         Chunk chunk = Chunk.builder()
                 .segmentId("segment-1")
                 .kbId("kb-1")
                 .assetId("asset-1")
                 .chunkText("body")
-                .embedding(List.of(0.1f))
                 .build();
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
-        when(artifactStore.readEmbeddingResult(item)).thenReturn(List.of(chunk));
+        when(artifactStore.readParseResult(item)).thenReturn(parsed);
+        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.embed("body", "text")).thenReturn(List.of(0.1f));
+        when(ingestionTaskRepository.renewClaim(
+                eq("item-1"), eq(1L), eq(IngestionExecutionStage.INDEX),
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
         when(ingestionIndexFinalizer.finalizeIndex(
                 eq(item), eq(asset), any(), eq(1))).thenReturn(true);
         when(assetRepository.markDeleted(

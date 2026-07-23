@@ -130,7 +130,7 @@ class IngestionTaskRepositoryImplTest {
     @Test
     void explicitEmbedStartMustRequireParseArtifact() {
         IngestionTask task = taskWithExplicitStage(
-                IngestionExecutionStage.EMBED, null, null);
+                IngestionExecutionStage.EMBED, null);
 
         assertThatThrownBy(() -> new IngestionTaskRepositoryImpl(mapper).save(task))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -138,20 +138,20 @@ class IngestionTaskRepositoryImplTest {
     }
 
     @Test
-    void explicitIndexStartMustRequireBothArtifacts() {
+    void explicitIndexStartMustRequireParseArtifact() {
         IngestionTask task = taskWithExplicitStage(
-                IngestionExecutionStage.INDEX, "parse-result.gz", null);
+                IngestionExecutionStage.INDEX, null);
 
         assertThatThrownBy(() -> new IngestionTaskRepositoryImpl(mapper).save(task))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("parse and embedding artifacts");
+                .hasMessageContaining("parse artifact");
     }
 
     @Test
     void newExecutionMustNotTurnBareObjectKeyIntoLegacyArtifact() {
         LocalDateTime now = LocalDateTime.now();
         IngestionTask task = taskWithExplicitStage(
-                IngestionExecutionStage.EMBED, "parse-result.gz", null);
+                IngestionExecutionStage.EMBED, "parse-result.gz");
         stubGeneratedIds(103L, 203L);
 
         assertThatThrownBy(() -> new IngestionTaskRepositoryImpl(mapper).save(task))
@@ -417,6 +417,24 @@ class IngestionTaskRepositoryImplTest {
         verify(mapper, never()).transitionExecution(any());
     }
 
+    @Test
+    void retainLeaseMustOnlyBeUsedForEmbedToIndexHandoff() {
+        IngestionClaimTransition invalid = IngestionClaimTransition.builder()
+                .expectedExecutionStage(IngestionExecutionStage.INDEX)
+                .nextExecutionStage(IngestionExecutionStage.INDEX)
+                .retainLease(true)
+                .stage(IngestionStage.INDEX)
+                .status(IngestionTaskItemStatus.RUNNING)
+                .progress(75)
+                .build();
+
+        assertThatThrownBy(() ->
+                new IngestionTaskRepositoryImpl(mapper).transitionClaim(invalid))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("EMBED directly to INDEX");
+        verify(mapper, never()).transitionExecution(any());
+    }
+
     private void stubGeneratedIds(long parseAttemptId, long executionId) {
         doAnswer(invocation -> {
             IngestionParseAttemptRecord record = invocation.getArgument(0);
@@ -431,13 +449,11 @@ class IngestionTaskRepositoryImplTest {
     }
 
     private IngestionTask taskWithExplicitStage(IngestionExecutionStage executionStage,
-                                                String parseArtifact,
-                                                String embeddingArtifact) {
+                                                String parseArtifact) {
         LocalDateTime now = LocalDateTime.now();
         IngestionTaskItem item = baseItem(now)
                 .executionStage(executionStage)
                 .parseResultObjectKey(parseArtifact)
-                .embeddingResultObjectKey(embeddingArtifact)
                 .stage(executionStage == IngestionExecutionStage.INDEX
                         ? IngestionStage.INDEX : IngestionStage.EMBED)
                 .status(IngestionTaskItemStatus.PENDING)

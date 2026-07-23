@@ -140,7 +140,6 @@ class IngestionIndexFinalizerTest {
                 .doclingRequestId("task-1:item-1:2")
                 .sourceRevision("v1:revision")
                 .parseResultObjectKey("parse.gz")
-                .embeddingResultObjectKey("embed.gz")
                 .build();
     }
 

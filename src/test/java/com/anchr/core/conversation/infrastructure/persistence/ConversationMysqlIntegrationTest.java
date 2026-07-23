@@ -84,7 +84,7 @@ class ConversationMysqlIntegrationTest {
     }
 
     @Test
-    void shouldPersistAtomicSessionMetadataOrderLimitAndCascadeDelete() {
+    void shouldPersistAtomicSessionMetadataOrderLimitAndSoftDelete() {
         ConversationSession older = session("cvs_older", 1_000L, List.of("kb_1"));
         ConversationSession newer = session("cvs_newer", 2_000L, List.of("kb_2"));
         repository.createSession(older);

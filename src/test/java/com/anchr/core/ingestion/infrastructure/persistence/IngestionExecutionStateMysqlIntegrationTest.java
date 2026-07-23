@@ -95,7 +95,7 @@ class IngestionExecutionStateMysqlIntegrationTest {
     void claimAndTransition_shouldFenceStaleWorkerAndKeepClaimVersionMonotonicAcrossPhases() {
         savePendingItem(
                 "9200", "9201", "9301", "sample.pdf",
-                IngestionExecutionStage.PARSE_SUBMIT, null, null,
+                IngestionExecutionStage.PARSE_SUBMIT, null,
                 "v1:" + "a".repeat(64));
         long executionId = currentExecutionId("9201");
 
@@ -201,10 +201,10 @@ class IngestionExecutionStateMysqlIntegrationTest {
     }
 
     @Test
-    void producedArtifacts_shouldRegisterReuseAndRollbackConflictingMetadata() {
+    void parseArtifact_shouldRegisterReuseAndRollbackConflictingMetadata() {
         savePendingItem(
                 "9250", "9251", "9351", "artifact.pdf",
-                IngestionExecutionStage.PARSE_PERSIST, null, null,
+                IngestionExecutionStage.PARSE_PERSIST, null,
                 "v1:" + "b".repeat(64));
         long executionId = currentExecutionId("9251");
         IngestionTaskItem parseClaim = transaction.execute(status ->
@@ -238,47 +238,14 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 """, executionId);
         IngestionTaskItem embedClaim = transaction.execute(status ->
                 repository.claimOne("9251", 60).orElseThrow());
-        String embeddingKey = "ingestion/9250/9251/embed/result.json.gz";
-        String embeddingSha = "b".repeat(64);
-        IngestionClaimTransition embeddingProduced = transition(
-                embedClaim, IngestionExecutionStage.INDEX, null).toBuilder()
-                .embeddingResultObjectKey(embeddingKey)
-                .embeddingResultSha256(embeddingSha)
-                .build();
-        assertThat(Boolean.TRUE.equals(transaction.execute(status ->
-                repository.transitionClaim(embeddingProduced)))).isTrue();
-
-        assertThat(artifacts(executionId))
-                .extracting(row -> row.get("artifact_type"))
-                .containsExactly("EMBEDDING_RESULT", "PARSE_RESULT");
-        assertThat(artifacts(executionId))
-                .filteredOn(row -> "EMBEDDING_RESULT".equals(
-                        row.get("artifact_type")))
-                .singleElement()
-                .satisfies(row -> {
-                    assertThat(row.get("provenance")).isEqualTo("PRODUCED");
-                    assertThat(row.get("object_key")).isEqualTo(embeddingKey);
-                    assertThat(row.get("content_sha256")).isEqualTo(embeddingSha);
-                    assertThat(((Number) row.get(
-                            "producer_claim_version")).longValue())
-                            .isEqualTo(embedClaim.getClaimVersion());
-                });
-
-        jdbc.update("""
-                update ingestion_item_execution
-                set next_action_at = current_timestamp(6)
-                where id = ?
-                """, executionId);
-        IngestionTaskItem indexClaim = transaction.execute(status ->
-                repository.claimOne("9251", 60).orElseThrow());
         Map<String, Object> executionBefore = execution(executionId);
         Map<String, Object> itemBefore = projectedItem("9251");
         Map<String, Object> taskBefore = taskSummary("9250");
         List<Map<String, Object>> artifactsBefore = artifacts(executionId);
         IngestionClaimTransition conflicting = transition(
-                indexClaim, IngestionExecutionStage.INDEX, null).toBuilder()
-                .embeddingResultObjectKey("ingestion/9250/9251/embed/conflict.json.gz")
-                .embeddingResultSha256("c".repeat(64))
+                embedClaim, IngestionExecutionStage.EMBED, null).toBuilder()
+                .parseResultObjectKey("ingestion/9250/9251/parse/conflict.json.gz")
+                .parseResultSha256("c".repeat(64))
                 .build();
 
         assertThatThrownBy(() -> transaction.executeWithoutResult(ignored ->
@@ -290,6 +257,38 @@ class IngestionExecutionStateMysqlIntegrationTest {
         assertThat(projectedItem("9251")).isEqualTo(itemBefore);
         assertThat(taskSummary("9250")).isEqualTo(taskBefore);
         assertThat(artifacts(executionId)).isEqualTo(artifactsBefore);
+    }
+
+    @Test
+    void embedToIndexHandoff_shouldRetainTheCurrentLease() {
+        savePendingItem(
+                "9260", "9261", "9361", "handoff.pdf",
+                IngestionExecutionStage.EMBED,
+                "ingestion/9260/9261/parse/result.json.gz",
+                "v1:" + "c".repeat(64));
+        long executionId = currentExecutionId("9261");
+        IngestionTaskItem embedClaim = transaction.execute(status ->
+                repository.claimOne("9261", 60).orElseThrow());
+
+        IngestionClaimTransition handoff = transition(
+                embedClaim, IngestionExecutionStage.INDEX, null).toBuilder()
+                .retainLease(true)
+                .build();
+        assertThat(Boolean.TRUE.equals(transaction.execute(status ->
+                repository.transitionClaim(handoff)))).isTrue();
+
+        Map<String, Object> execution = execution(executionId);
+        assertThat(execution.get("phase")).isEqualTo("INDEX");
+        assertThat(execution.get("lease_token")).isEqualTo(embedClaim.getLeaseToken());
+        assertThat(execution.get("lease_until")).isNotNull();
+        assertThat(repository.claimOne("9261", 60)).isEmpty();
+        assertThat(repository.renewClaim(
+                "9261",
+                embedClaim.getExecutionEpoch(),
+                IngestionExecutionStage.INDEX,
+                embedClaim.getClaimVersion(),
+                embedClaim.getLeaseToken(),
+                60)).isTrue();
     }
 
     @Test
@@ -358,7 +357,7 @@ class IngestionExecutionStateMysqlIntegrationTest {
     void explicitRetry_shouldCreateNewExecutionAndPreserveFailedExecutionHistory() {
         savePendingItem(
                 "9400", "9401", "9501", "failed.pdf",
-                IngestionExecutionStage.PARSE_SUBMIT, null, null,
+                IngestionExecutionStage.PARSE_SUBMIT, null,
                 "v1:" + "b".repeat(64));
         long failedExecutionId = currentExecutionId("9401");
         long failedParseAttemptId = parseAttemptId(failedExecutionId);
@@ -405,8 +404,6 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 """, failedAt, failedAt);
         insertProducedArtifact(
                 failedExecutionId, "PARSE_RESULT", "parse/old.json.gz", "c".repeat(64), 6);
-        insertProducedArtifact(
-                failedExecutionId, "EMBEDDING_RESULT", "embed/old.json.gz", "d".repeat(64), 7);
 
         boolean reset = Boolean.TRUE.equals(transaction.execute(status ->
                 repository.resetFailedItem(
@@ -468,7 +465,7 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 order by artifact_type
                 """, failedExecutionId))
                 .extracting(row -> row.get("object_key"))
-                .containsExactly("embed/old.json.gz", "parse/old.json.gz");
+                .containsExactly("parse/old.json.gz");
 
         assertThat(jdbc.queryForObject("""
                 select count(*)
@@ -507,7 +504,7 @@ class IngestionExecutionStateMysqlIntegrationTest {
     void retryPointerConflict_shouldRollbackPreparedAttemptAndExecution() {
         savePendingItem(
                 "9500", "9501", "9551", "conflict.pdf",
-                IngestionExecutionStage.PARSE_SUBMIT, null, null,
+                IngestionExecutionStage.PARSE_SUBMIT, null,
                 "v1:" + "9".repeat(64));
         long executionId = currentExecutionId("9501");
         long attemptId = parseAttemptId(executionId);
@@ -570,7 +567,7 @@ class IngestionExecutionStateMysqlIntegrationTest {
         savePendingItem(
                 "9600", "9601", "9701", "rollback.pdf",
                 IngestionExecutionStage.EMBED,
-                "parse/rollback.json.gz", null,
+                "parse/rollback.json.gz",
                 "v1:" + "e".repeat(64));
         long executionId = currentExecutionId("9601");
         IngestionTaskItem claimed = transaction.execute(status ->
@@ -652,7 +649,6 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 .sourceRevision(claim.getSourceRevision())
                 .parseRequestSnapshot(requestSnapshot)
                 .parseResultObjectKey(claim.getParseResultObjectKey())
-                .embeddingResultObjectKey(claim.getEmbeddingResultObjectKey())
                 .errorCode(null)
                 .errorMessage(null)
                 .finishedAt(null)
@@ -668,7 +664,6 @@ class IngestionExecutionStateMysqlIntegrationTest {
             String fileName,
             IngestionExecutionStage phase,
             String parseObjectKey,
-            String embeddingObjectKey,
             String sourceRevision) {
         LocalDateTime now = LocalDateTime.now().minusSeconds(2);
         IngestionStage publicStage = switch (phase) {
@@ -681,8 +676,7 @@ class IngestionExecutionStateMysqlIntegrationTest {
             case INDEX -> 75;
             default -> 0;
         };
-        long initialClaimVersion =
-                parseObjectKey == null && embeddingObjectKey == null ? 0L : 1L;
+        long initialClaimVersion = parseObjectKey == null ? 0L : 1L;
         IngestionTaskItem item = IngestionTaskItem.builder()
                 .id(itemId)
                 .taskId(taskId)
@@ -698,13 +692,9 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 .claimVersion(initialClaimVersion)
                 .nextActionAt(now)
                 .parseResultObjectKey(parseObjectKey)
-                .embeddingResultObjectKey(embeddingObjectKey)
                 .parseResultArtifact(artifactReference(
                         "PARSE_RESULT", parseObjectKey, initialClaimVersion,
                         "a".repeat(64)))
-                .embeddingResultArtifact(artifactReference(
-                        "EMBEDDING_RESULT", embeddingObjectKey,
-                        initialClaimVersion, "b".repeat(64)))
                 .stage(publicStage)
                 .status(IngestionTaskItemStatus.PENDING)
                 .progress(progress)

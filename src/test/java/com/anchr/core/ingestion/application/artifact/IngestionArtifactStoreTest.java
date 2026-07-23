@@ -1,10 +1,8 @@
 package com.anchr.core.ingestion.application.artifact;
 
-import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactException.Reason;
 import com.anchr.core.ingestion.config.IngestionArtifactProperties;
-import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
@@ -14,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
@@ -25,8 +22,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class IngestionArtifactStoreTest {
-
-    private static final Instant NOW = Instant.parse("2026-07-23T08:00:00Z");
 
     private InMemoryObjectStoragePort storage;
     private IngestionArtifactStore store;
@@ -161,165 +156,6 @@ class IngestionArtifactStoreTest {
     }
 
     @Test
-    void embeddingResult_shouldRoundTripFullChunksAndAllowLaterClaimAttemptToRead() {
-        IngestionTaskItem item = item();
-        String parseKey = store.writeParseArtifact(
-                item, "job-1", parseResponse("request-1", "hello")).objectKey();
-        IngestionTaskItem embedClaim = item.toBuilder()
-                .parseResultObjectKey(parseKey)
-                .executionEpoch(3)
-                .claimVersion(7)
-                .build();
-        List<Chunk> chunks = List.of(chunk());
-
-        IngestionStoredArtifact stored = store.writeEmbeddingArtifact(embedClaim, chunks);
-        String embeddingKey = stored.objectKey();
-        IngestionTaskItem indexClaim = embedClaim.toBuilder()
-                .claimVersion(8)
-                .embeddingResultObjectKey(embeddingKey)
-                .embeddingResultArtifact(reference(
-                        "EMBEDDING_RESULT", stored, "PRODUCED", 7L))
-                .build();
-
-        assertThat(embeddingKey).isEqualTo(
-                "ingestion/task-1/item-1/execution/3/embed/7/embedding-result.v1.json.gz");
-        assertThat(stored.version()).isEqualTo(IngestionArtifactStore.ARTIFACT_VERSION);
-        assertThat(stored.sha256()).matches("[0-9a-f]{64}");
-        assertThat(stored.sha256()).isEqualTo(sha256(storage.content(embeddingKey)));
-        assertThat(store.readEmbeddingResult(indexClaim)).isEqualTo(chunks);
-    }
-
-    @Test
-    void embeddingArtifactV1_shouldKeepStageAttemptJsonWireName() throws Exception {
-        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
-        IngestionEmbeddingArtifact artifact = new IngestionEmbeddingArtifact(
-                "EMBEDDING_RESULT",
-                1,
-                "task-1",
-                "item-1",
-                "kb-1",
-                "asset-1",
-                2,
-                3,
-                7,
-                "request-1",
-                "v1:source",
-                "parse/result.json.gz",
-                NOW,
-                List.of());
-
-        String json = mapper.writeValueAsString(artifact);
-        IngestionEmbeddingArtifact restored =
-                mapper.readValue(json, IngestionEmbeddingArtifact.class);
-
-        assertThat(json).contains("\"stageAttempt\":7");
-        assertThat(json).doesNotContain("\"claimVersion\"");
-        assertThat(restored.claimVersion()).isEqualTo(7);
-    }
-
-    @Test
-    void embeddingResult_shouldAllowLegacyRegistryReferenceWithoutProducerMetadata() {
-        IngestionTaskItem item = item();
-        String parseKey = store.writeParseArtifact(
-                item, "job-1", parseResponse("request-1", "hello")).objectKey();
-        IngestionTaskItem embedClaim = item.toBuilder()
-                .parseResultObjectKey(parseKey)
-                .executionEpoch(3)
-                .claimVersion(7)
-                .build();
-        IngestionStoredArtifact stored =
-                store.writeEmbeddingArtifact(embedClaim, List.of(chunk()));
-        IngestionTaskItem legacy = embedClaim.toBuilder()
-                .claimVersion(8)
-                .embeddingResultObjectKey(stored.objectKey())
-                .embeddingResultArtifact(IngestionArtifactReference.builder()
-                        .artifactType("EMBEDDING_RESULT")
-                        .artifactVersion(1)
-                        .provenance("LEGACY_BACKFILL")
-                        .objectKey(stored.objectKey())
-                        .build())
-                .build();
-
-        assertThat(store.readEmbeddingResult(legacy)).containsExactly(chunk());
-    }
-
-    @Test
-    void embeddingResult_shouldRejectRegistryProducerThatDiffersFromEnvelope() {
-        IngestionTaskItem item = item();
-        String parseKey = store.writeParseArtifact(
-                item, "job-1", parseResponse("request-1", "hello")).objectKey();
-        IngestionTaskItem embedClaim = item.toBuilder()
-                .parseResultObjectKey(parseKey)
-                .executionEpoch(3)
-                .claimVersion(7)
-                .build();
-        IngestionStoredArtifact stored =
-                store.writeEmbeddingArtifact(embedClaim, List.of(chunk()));
-        IngestionTaskItem inconsistent = embedClaim.toBuilder()
-                .claimVersion(8)
-                .embeddingResultObjectKey(stored.objectKey())
-                .embeddingResultArtifact(reference(
-                        "EMBEDDING_RESULT", stored, "PRODUCED", 6L))
-                .build();
-
-        assertThatThrownBy(() -> store.readEmbeddingResult(inconsistent))
-                .isInstanceOfSatisfying(IngestionArtifactException.class,
-                        exception -> assertThat(exception.getReason())
-                                .isEqualTo(Reason.CORRUPT));
-    }
-
-    @Test
-    void embeddingResult_shouldRejectDuplicateSegmentIds() {
-        IngestionTaskItem embedClaim = item().toBuilder()
-                .parseResultObjectKey("ingestion/parse.json.gz")
-                .claimVersion(1)
-                .build();
-
-        assertThatThrownBy(() -> store.writeEmbeddingArtifact(
-                embedClaim, List.of(chunk(), chunk())))
-                .isInstanceOfSatisfying(IngestionArtifactException.class,
-                        exception -> assertThat(exception.getReason())
-                                .isEqualTo(Reason.CORRUPT));
-    }
-
-    @Test
-    void embeddingResult_shouldRejectValidReplacementThatDoesNotMatchRegistryDigest() {
-        IngestionTaskItem item = item();
-        String parseKey = store.writeParseArtifact(
-                item, "job-1", parseResponse("request-1", "hello")).objectKey();
-        IngestionTaskItem embedClaim = item.toBuilder()
-                .parseResultObjectKey(parseKey)
-                .executionEpoch(3)
-                .claimVersion(7)
-                .build();
-        IngestionStoredArtifact stored =
-                store.writeEmbeddingArtifact(embedClaim, List.of(chunk()));
-
-        InMemoryObjectStoragePort replacementStorage = new InMemoryObjectStoragePort();
-        IngestionArtifactStore replacementStore = new IngestionArtifactStore(
-                replacementStorage,
-                new ObjectMapper().findAndRegisterModules(),
-                artifactProperties(1024 * 1024, 4 * 1024 * 1024));
-        Chunk changed = chunk();
-        changed.setChunkText("tampered");
-        replacementStore.writeEmbeddingArtifact(embedClaim, List.of(changed));
-        storage.replace(
-                stored.objectKey(), replacementStorage.content(stored.objectKey()));
-
-        IngestionTaskItem registered = embedClaim.toBuilder()
-                .claimVersion(8)
-                .embeddingResultObjectKey(stored.objectKey())
-                .embeddingResultArtifact(reference(
-                        "EMBEDDING_RESULT", stored, "PRODUCED", 7L))
-                .build();
-
-        assertThatThrownBy(() -> store.readEmbeddingResult(registered))
-                .isInstanceOfSatisfying(IngestionArtifactException.class,
-                        exception -> assertThat(exception.getReason())
-                                .isEqualTo(Reason.CORRUPT));
-    }
-
-    @Test
     void read_shouldRejectCorruptGzip() {
         IngestionTaskItem item = item();
         IngestionStoredArtifact stored = store.writeParseArtifact(
@@ -431,30 +267,6 @@ class IngestionArtifactStoreTest {
                         List.of("Heading"))),
                 List.of(),
                 List.of());
-    }
-
-    private Chunk chunk() {
-        return Chunk.builder()
-                .segmentId("segment-1")
-                .kbId("kb-1")
-                .assetId("asset-1")
-                .title("Heading")
-                .pageNo(1)
-                .chunkText("hello")
-                .chunkOrder(1)
-                .sourceRef("documents/source.pdf")
-                .embedding(List.of(0.1F, 0.2F, 0.3F))
-                .bboxInfos(List.of(BboxInfo.builder()
-                        .pageNo(1)
-                        .bbox(BboxInfo.Bbox.builder()
-                                .l(0.1)
-                                .t(0.2)
-                                .r(0.3)
-                                .b(0.4)
-                                .coordOrigin("TOPLEFT")
-                                .build())
-                        .build()))
-                .build();
     }
 
     private IngestionArtifactReference reference(

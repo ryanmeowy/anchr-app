@@ -44,9 +44,4 @@ public class ClaimedExecutionRecord {
     private String parseResultArtifactProvenance;
     private Long parseResultProducerClaimVersion;
     private String parseResultSha256;
-    private String embeddingResultObjectKey;
-    private Integer embeddingResultArtifactVersion;
-    private String embeddingResultArtifactProvenance;
-    private Long embeddingResultProducerClaimVersion;
-    private String embeddingResultSha256;
 }

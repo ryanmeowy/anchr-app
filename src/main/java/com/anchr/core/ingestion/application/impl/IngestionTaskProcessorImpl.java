@@ -67,8 +67,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Database-driven, restart-safe ingestion stage scheduler.
  *
- * <p>Each worker owns one fenced database claim and performs at most one durable stage. No
- * correctness decision depends on this JVM's queues, locks or process lifetime.</p>
+ * <p>Each worker owns one fenced database claim. The EMBED-to-INDEX handoff retains that
+ * claim so freshly generated vectors can be indexed from memory. If the process exits after
+ * the handoff, the recovered INDEX claim regenerates vectors from the durable parse artifact.</p>
  */
 @Slf4j
 @Service
@@ -197,6 +198,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         if (item == null || item.getExecutionStage() == null) {
             return;
         }
+        IngestionTaskItem failureContext = item;
         try {
             if (item.getStageRetryCount() > effectiveStageMaxRetries()) {
                 failClaim(item, tryFindAsset(item), ApiError.INTERNAL_ERROR,
@@ -207,7 +209,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 case PARSE_SUBMIT -> processParseSubmit(item);
                 case PARSE_WAIT -> processParseWait(item);
                 case PARSE_PERSIST -> processParsePersist(item);
-                case EMBED -> processEmbed(item);
+                case EMBED -> {
+                    PreparedIndex prepared = processEmbed(item);
+                    failureContext = prepared.item();
+                    processIndex(prepared.item(), prepared.asset(), prepared.chunks());
+                }
                 case INDEX -> processIndex(item);
                 case COMPLETE, FAILED -> log.debug(
                         "terminal ingestion item was unexpectedly claimed, itemId={}, stage={}",
@@ -217,7 +223,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             log.debug("stale ingestion worker stopped, itemId={}, stage={}, attempt={}",
                     item.getId(), item.getExecutionStage(), item.getClaimVersion());
         } catch (RuntimeException e) {
-            handleClaimFailure(item, tryFindAsset(item), e);
+            handleClaimFailure(failureContext, tryFindAsset(failureContext), e);
         }
     }
 
@@ -354,8 +360,42 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         acknowledgeAfterCommit(job.jobId());
     }
 
-    private void processEmbed(IngestionTaskItem item) {
+    private PreparedIndex processEmbed(IngestionTaskItem item) {
         Asset asset = findAsset(item);
+        List<Chunk> chunks = prepareEmbeddedChunks(item, asset);
+        LocalDateTime now = LocalDateTime.now();
+        IngestionClaimTransition transition = runningTransition(
+                        item,
+                        IngestionExecutionStage.INDEX,
+                        now,
+                        0)
+                .toBuilder()
+                .retainLease(true)
+                .build();
+        boolean transitioned = transactionCoordinator.transitionAndUpdateAssetStatus(
+                transition,
+                asset,
+                DocumentParseStatus.SUCCESS.name(),
+                DocumentIndexStatus.RUNNING.name());
+        if (!transitioned) {
+            throw new StaleClaimException();
+        }
+        IngestionTaskItem indexClaim = item.toBuilder()
+                .executionStage(IngestionExecutionStage.INDEX)
+                .stageRetryCount(0)
+                .stageStartedAt(transition.getNextStageStartedAt())
+                .nextActionAt(transition.getNextActionAt())
+                .stage(transition.getStage())
+                .status(transition.getStatus())
+                .progress(transition.getProgress())
+                .errorCode(null)
+                .errorMessage(null)
+                .finishedAt(null)
+                .build();
+        return new PreparedIndex(indexClaim, asset, chunks);
+    }
+
+    private List<Chunk> prepareEmbeddedChunks(IngestionTaskItem item, Asset asset) {
         ParseResponse parsed = artifactStore.readParseResult(item);
         if (parsed.chunks() == null || parsed.chunks().isEmpty()) {
             throw new BusinessException(
@@ -370,32 +410,17 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         String imageInput = isImage(asset) ? resolveSourceUrl(asset, item) : null;
         enrichTextEmbeddings(item, asset, chunks, imageInput);
         assertCurrentClaim(item);
-        IngestionStoredArtifact artifact =
-                artifactStore.writeEmbeddingArtifact(item, chunks);
-        IngestionTaskItem withArtifact = item.toBuilder()
-                .embeddingResultObjectKey(artifact.objectKey())
-                .build();
-        IngestionClaimTransition transition = runningTransition(
-                withArtifact,
-                IngestionExecutionStage.INDEX,
-                LocalDateTime.now(),
-                0)
-                .toBuilder()
-                .embeddingResultSha256(artifact.sha256())
-                .build();
-        boolean transitioned = transactionCoordinator.transitionAndUpdateAssetStatus(
-                transition,
-                asset,
-                DocumentParseStatus.SUCCESS.name(),
-                DocumentIndexStatus.RUNNING.name());
-        if (!transitioned) {
-            throw new StaleClaimException();
-        }
+        return chunks;
     }
 
     private void processIndex(IngestionTaskItem item) {
         Asset asset = findAsset(item);
-        List<Chunk> chunks = artifactStore.readEmbeddingResult(item);
+        List<Chunk> chunks = prepareEmbeddedChunks(item, asset);
+        processIndex(item, asset, chunks);
+    }
+
+    private void processIndex(
+            IngestionTaskItem item, Asset asset, List<Chunk> chunks) {
         List<Segment> segments = buildSegments(asset, chunks);
         boolean indexed = ingestionIndexFinalizer.finalizeIndex(
                 item, asset, segments, chunks.size());
@@ -579,12 +604,16 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             failClaim(item, asset, businessFailure.getError(), businessFailure.getMessage());
             return;
         }
-        if (item.getExecutionStage() == IngestionExecutionStage.EMBED
-                && isRateLimitError(exception)) {
-            retryOrFail(item, asset, ApiError.EMBEDDING_FAILED,
-                    exception.getMessage(), effectiveEmbeddingMaxRetries(),
-                    Duration.ofMillis(resolveEmbeddingBackoffMs(
-                            item.getStageRetryCount() + 1)));
+        if (exception instanceof EmbeddingCallException embeddingFailure) {
+            if (isRateLimitError(embeddingFailure)) {
+                retryOrFail(item, asset, ApiError.EMBEDDING_FAILED,
+                        embeddingFailure.getMessage(), effectiveEmbeddingMaxRetries(),
+                        Duration.ofMillis(resolveEmbeddingBackoffMs(
+                                item.getStageRetryCount() + 1)));
+            } else {
+                retryOrFail(item, asset, ApiError.INTERNAL_ERROR,
+                        embeddingFailure.getMessage(), effectiveStageMaxRetries(), null);
+            }
             return;
         }
         retryOrFail(item, asset, ApiError.INTERNAL_ERROR,
@@ -864,7 +893,15 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         assertCurrentClaim(item);
         reserveEmbeddingCallSlot();
         assertCurrentClaim(item);
-        return embeddingPort.embed(input, inputType);
+        try {
+            return embeddingPort.embed(input, inputType);
+        } catch (StaleClaimException | WorkerInterruptedException e) {
+            throw e;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new EmbeddingCallException(e);
+        }
     }
 
     private void reserveEmbeddingCallSlot() {
@@ -1057,5 +1094,15 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         private WorkerInterruptedException(Throwable cause) {
             super(cause);
         }
+    }
+
+    private static final class EmbeddingCallException extends RuntimeException {
+        private EmbeddingCallException(Throwable cause) {
+            super(cause == null ? null : cause.getMessage(), cause);
+        }
+    }
+
+    private record PreparedIndex(
+            IngestionTaskItem item, Asset asset, List<Chunk> chunks) {
     }
 }

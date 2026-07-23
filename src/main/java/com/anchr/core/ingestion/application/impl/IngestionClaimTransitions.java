@@ -34,7 +34,6 @@ final class IngestionClaimTransitions {
                 .sourceRevision(item.getSourceRevision())
                 .parseRequestSnapshot(item.getParseRequestSnapshot())
                 .parseResultObjectKey(item.getParseResultObjectKey())
-                .embeddingResultObjectKey(item.getEmbeddingResultObjectKey())
                 .errorCode(item.getErrorCode())
                 .errorMessage(item.getErrorMessage())
                 .finishedAt(item.getFinishedAt())

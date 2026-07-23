@@ -6,7 +6,7 @@ import lombok.Value;
 import java.time.LocalDateTime;
 
 /**
- * Expand-phase application compatibility carrier for one ingestion item.
+ * Application compatibility carrier for one ingestion item.
  *
  * <p>Persistence no longer maps this class to one physical row: public reads,
  * retry preparation and claimed execution loading use separate records. The
@@ -42,8 +42,6 @@ public class IngestionTaskItem {
     String parseRequestSnapshot;
     String parseResultObjectKey;
     IngestionArtifactReference parseResultArtifact;
-    String embeddingResultObjectKey;
-    IngestionArtifactReference embeddingResultArtifact;
     IngestionStage stage;
     IngestionTaskItemStatus status;
     int progress;
