@@ -1,5 +1,7 @@
 package com.anchr.core.ingestion.application.impl;
 
+import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
+import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
 import com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskItemRecord;
 import com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskMapper;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
@@ -188,21 +190,42 @@ class IngestionIdempotencyMysqlIntegrationTest {
         assertThat(afterStaleRetry.getDoclingRequestId()).isEqualTo("3001:4001:2");
         assertThat(afterStaleRetry.getDoclingJobId()).isEqualTo("job-current");
 
-        assertThat(ingestionTaskMapper.prepareParseAttempt(
-                "1", "3001", "4001", 2, "3001:4001:2",
-                "v1:" + "c".repeat(64), LocalDateTime.now())).isZero();
-        assertThat(ingestionTaskMapper.prepareParseAttempt(
-                "1", "3001", "4001", 2, "3001:4001:2",
-                revision, LocalDateTime.now())).isEqualTo(1);
-
-        assertThat(ingestionTaskMapper.recordDoclingJob(
-                "1", "3001", "4001", "3001:4001:1", "job-stale", LocalDateTime.now()))
-                .isZero();
-        assertThat(ingestionTaskMapper.recordDoclingJob(
-                "1", "3001", "4001", "3001:4001:2", "job-new", LocalDateTime.now()))
-                .isEqualTo(1);
+        jdbc.update("""
+                update ingestion_task_item
+                set status = 'RUNNING',
+                    stage_attempt = 1,
+                    lease_token = 'lease-current',
+                    lease_until = timestampadd(second, 60, current_timestamp(6))
+                where id = 4001
+                """);
+        assertThat(ingestionTaskMapper.updateClaimContext(parseContext(
+                "3001:4001:2", "job-wrong-revision",
+                "v1:" + "c".repeat(64)))).isZero();
+        assertThat(ingestionTaskMapper.updateClaimContext(parseContext(
+                "3001:4001:1", "job-stale", revision))).isZero();
+        assertThat(ingestionTaskMapper.updateClaimContext(parseContext(
+                "3001:4001:2", "job-new", revision))).isEqualTo(1);
         assertThat(ingestionTaskMapper.findItem("1", "3001", "4001")
                 .orElseThrow().getDoclingJobId()).isEqualTo("job-new");
+    }
+
+    private IngestionClaimContext parseContext(String requestId,
+                                               String jobId,
+                                               String sourceRevision) {
+        return IngestionClaimContext.builder()
+                .itemId("4001")
+                .executionEpoch(2L)
+                .expectedExecutionStage(IngestionExecutionStage.PARSE_SUBMIT)
+                .stageAttempt(1)
+                .leaseToken("lease-current")
+                .parseAttempt(2)
+                .doclingRequestId(requestId)
+                .doclingJobId(jobId)
+                .sourceRevision(sourceRevision)
+                .parseRequestSnapshot("""
+                        {"artifactVersion":1,"contractVersion":2,"fileName":"sample.pdf"}
+                        """.trim())
+                .build();
     }
 
     private Callable<String> createAttempt(String taskId, String assetId,

@@ -1,6 +1,9 @@
 package com.anchr.core.ingestion.domain.repository;
 
 import com.anchr.core.ingestion.domain.model.IngestionTask;
+import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
+import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
+import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 
@@ -29,27 +32,34 @@ public interface IngestionTaskRepository {
 
     Optional<IngestionTaskItem> findItem(String kbId, String taskId, String itemId);
 
+    List<String> listClaimableItemIds(int limit);
+
+    List<String> listClaimableItemIds(String taskId, int limit);
+
+    Optional<IngestionTaskItem> claimOne(String itemId, long leaseSeconds);
+
+    boolean renewClaim(String itemId, long executionEpoch,
+                       IngestionExecutionStage expectedExecutionStage,
+                       int stageAttempt, String leaseToken, long leaseSeconds);
+
+    boolean updateClaimContext(IngestionClaimContext context);
+
+    boolean transitionClaim(IngestionClaimTransition transition);
+
+    /**
+     * Locks and validates a claim inside an existing transaction.
+     *
+     * <p>The caller must already own the transaction that contains the related
+     * asset/index write. Lease expiry alone does not invalidate a claim; a newer
+     * claimant changes the token and/or stage attempt.</p>
+     */
+    boolean isClaimCurrentForUpdate(String itemId, long executionEpoch,
+                                    IngestionExecutionStage expectedExecutionStage,
+                                    int stageAttempt, String leaseToken);
+
     boolean resetFailedItem(String kbId, String taskId, String itemId,
                             int expectedParseAttempt, int nextParseAttempt,
                             String nextDoclingRequestId, LocalDateTime updatedAt);
-
-    boolean prepareParseAttempt(String kbId, String taskId, String itemId,
-                                int parseAttempt, String doclingRequestId, String sourceRevision,
-                                LocalDateTime updatedAt);
-
-    boolean recordDoclingJob(String kbId, String taskId, String itemId,
-                             String doclingRequestId, String doclingJobId,
-                             LocalDateTime updatedAt);
-
-    boolean markItemRunning(String kbId, String taskId, String itemId,
-                            String stage, int progress, LocalDateTime updatedAt);
-
-    boolean markItemSuccess(String kbId, String taskId, String itemId,
-                            String stage, int progress, LocalDateTime updatedAt);
-
-    boolean markItemFailed(String kbId, String taskId, String itemId,
-                           String stage, int progress, String errorCode, String errorMessage,
-                           LocalDateTime updatedAt);
 
     void refreshSummary(String kbId, String taskId, String updatedBy, LocalDateTime updatedAt);
 }

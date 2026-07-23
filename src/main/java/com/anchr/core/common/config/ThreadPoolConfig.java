@@ -32,10 +32,13 @@ public class ThreadPoolConfig {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(4);
         executor.setMaxPoolSize(8);
-        executor.setQueueCapacity(200);
+        executor.setQueueCapacity(64);
         executor.setKeepAliveSeconds(60);
         executor.setThreadNamePrefix("ingestion-task-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        // A rejected dispatch must remain in the database for a later scheduler pass. Running
+        // ingestion work on the request or transaction callback thread would make overload
+        // change API latency and could strand a claimed item if that thread is interrupted.
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;
     }

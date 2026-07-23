@@ -1,7 +1,6 @@
 package com.anchr.core.integration.ai.client;
 
 import com.anchr.core.common.model.ParseRequest;
-import com.anchr.core.common.model.ParseResponse;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -34,81 +33,93 @@ class DoclingClientTest {
     }
 
     @Test
-    void parseShouldAuthenticatePollAndAcknowledge() throws Exception {
-        AtomicInteger polls = new AtomicInteger();
-        AtomicInteger deletes = new AtomicInteger();
+    void submitJobShouldAuthenticateSerializeRequestAndValidateIdentity() throws Exception {
         AtomicReference<String> authorization = new AtomicReference<>();
         AtomicReference<String> submittedBody = new AtomicReference<>();
         server = startServer(exchange -> {
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
-            String path = exchange.getRequestURI().getPath();
-            if ("POST".equals(exchange.getRequestMethod()) && "/v1/jobs".equals(path)) {
-                submittedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-                respond(exchange, 202, jobJson("queued", "null", "null"));
-            } else if ("GET".equals(exchange.getRequestMethod())) {
-                if (polls.getAndIncrement() == 0) {
-                    respond(exchange, 200, jobJson("running", "null", "null"));
-                } else {
-                    respond(exchange, 200, jobJson("succeeded", resultJson(), "null"));
-                }
-            } else if ("DELETE".equals(exchange.getRequestMethod())) {
-                deletes.incrementAndGet();
-                respond(exchange, 204, "");
-            } else {
-                respond(exchange, 404, "{}");
-            }
+            submittedBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8));
+            respond(exchange, 202, jobJson("queued", "null", "null"));
         });
 
-        ParseResponse response = client(Duration.ofSeconds(2)).parse(request());
+        DoclingClient.DoclingJob job = client().submitJob(request());
 
         assertEquals("Bearer " + TOKEN, authorization.get());
         assertTrue(submittedBody.get().contains("\"includeEmbeddedImages\":false"));
         assertFalse(submittedBody.get().contains("\"oss\""));
-        assertEquals("parsed", response.text());
-        assertEquals(1, deletes.get());
+        assertEquals("job-1", job.jobId());
+        assertEquals("task-1:item-1:1", job.requestId());
     }
 
     @Test
-    void parseShouldResubmitAfterJobIsLost() throws Exception {
-        AtomicInteger submissions = new AtomicInteger();
-        AtomicInteger polls = new AtomicInteger();
+    void getJobShouldValidateEnvelopeAndSucceededResultIdentity() throws Exception {
+        AtomicInteger gets = new AtomicInteger();
         server = startServer(exchange -> {
-            if ("POST".equals(exchange.getRequestMethod())) {
-                submissions.incrementAndGet();
-                respond(exchange, 202, jobJson("queued", "null", "null"));
-            } else if ("GET".equals(exchange.getRequestMethod()) && polls.getAndIncrement() == 0) {
-                respond(exchange, 404, "{}");
-            } else if ("GET".equals(exchange.getRequestMethod())) {
-                respond(exchange, 200, jobJson("succeeded", resultJson(), "null"));
-            } else {
-                respond(exchange, 204, "");
-            }
+            gets.incrementAndGet();
+            respond(exchange, 200, jobJson("succeeded", resultJson(), "null"));
         });
 
-        ParseResponse response = client(Duration.ofSeconds(2)).parse(request());
+        DoclingClient.DoclingJob job = client().getJob("job-1", "task-1:item-1:1");
 
-        assertEquals("parsed", response.text());
-        assertEquals(2, submissions.get());
+        assertEquals("succeeded", job.normalizedStatus());
+        assertEquals("parsed", job.result().text());
+        assertEquals(1, gets.get());
     }
 
     @Test
-    void parseShouldSurfaceFailedJob() throws Exception {
-        server = startServer(exchange -> {
-            if ("POST".equals(exchange.getRequestMethod())) {
-                respond(exchange, 202, jobJson("queued", "null", "null"));
-            } else {
-                respond(exchange, 200, jobJson(
-                        "failed",
-                        "null",
-                        "{\"code\":\"QUEUE_TIMEOUT\",\"message\":\"queue expired\"}"));
-            }
-        });
+    void getJobShouldRejectMismatchedRequestIdentity() throws Exception {
+        server = startServer(exchange -> respond(exchange, 200,
+                "{\"jobId\":\"job-1\",\"requestId\":\"another-request\",\"status\":\"running\"}"));
 
-        RuntimeException error = assertThrows(
-                RuntimeException.class,
-                () -> client(Duration.ofSeconds(2)).parse(request()));
+        DoclingClient.DoclingClientException error = assertThrows(
+                DoclingClient.DoclingClientException.class,
+                () -> client().getJob("job-1", "task-1:item-1:1"));
 
-        assertTrue(error.getMessage().contains("QUEUE_TIMEOUT"));
+        assertEquals(DoclingClient.FailureKind.PERMANENT, error.kind());
+        assertTrue(error.getMessage().contains("mismatched job identity"));
+    }
+
+    @Test
+    void getJobShouldRejectMismatchedSucceededResultIdentity() throws Exception {
+        server = startServer(exchange -> respond(exchange, 200,
+                jobJson("succeeded", resultJson("another-request"), "null")));
+
+        DoclingClient.DoclingClientException error = assertThrows(
+                DoclingClient.DoclingClientException.class,
+                () -> client().getJob("job-1", "task-1:item-1:1"));
+
+        assertEquals(DoclingClient.FailureKind.PERMANENT, error.kind());
+        assertTrue(error.getMessage().contains("mismatched result identity"));
+    }
+
+    @Test
+    void getJobShouldRejectSucceededJobWithoutResult() throws Exception {
+        server = startServer(exchange ->
+                respond(exchange, 200, jobJson("succeeded", "null", "null")));
+
+        DoclingClient.DoclingClientException error = assertThrows(
+                DoclingClient.DoclingClientException.class,
+                () -> client().getJob("job-1", "task-1:item-1:1"));
+
+        assertEquals(DoclingClient.FailureKind.PERMANENT, error.kind());
+        assertTrue(error.getMessage().contains("without a result identity"));
+    }
+
+    @Test
+    void getJobShouldExposeFailedJobErrorForStageClassification() throws Exception {
+        server = startServer(exchange -> respond(exchange, 200, jobJson(
+                "failed",
+                "null",
+                "{\"code\":\"QUEUE_TIMEOUT\",\"message\":\"queue expired\"}")));
+
+        DoclingClient.DoclingJob job =
+                client().getJob("job-1", "task-1:item-1:1");
+
+        assertEquals("failed", job.normalizedStatus());
+        assertEquals("QUEUE_TIMEOUT", job.error().code());
+        assertEquals("queue expired", job.error().message());
     }
 
     @ParameterizedTest
@@ -129,17 +140,40 @@ class DoclingClientTest {
 
         DoclingClient.DoclingClientException error = assertThrows(
                 DoclingClient.DoclingClientException.class,
-                () -> client(Duration.ofSeconds(2)).submitJob(request()));
+                () -> client().submitJob(request()));
 
         assertEquals(expected, error.kind());
         assertEquals(status, error.statusCode());
     }
 
     @Test
-    void ackJobShouldTreatMissingJobAsAlreadyAcknowledged() throws Exception {
-        server = startServer(exchange -> respond(exchange, 404, "{}"));
+    void transientFailureShouldExposeBoundedRetryAfter() throws Exception {
+        server = startServer(exchange -> {
+            exchange.getResponseHeaders().add("Retry-After", "99");
+            respond(exchange, 429, "{\"detail\":\"busy\"}");
+        });
 
-        client(Duration.ofSeconds(2)).ackJob("job-expired");
+        DoclingClient.DoclingClientException error = assertThrows(
+                DoclingClient.DoclingClientException.class,
+                () -> client().submitJob(request()));
+
+        assertEquals(DoclingClient.FailureKind.TRANSIENT, error.kind());
+        assertEquals(Duration.ofSeconds(30), error.retryAfter());
+    }
+
+    @Test
+    void ackJobShouldBeIdempotentForDeletedOrExpiredJob() throws Exception {
+        AtomicInteger deletes = new AtomicInteger();
+        server = startServer(exchange -> {
+            int attempt = deletes.incrementAndGet();
+            respond(exchange, attempt == 1 ? 204 : 404, attempt == 1 ? "" : "{}");
+        });
+
+        DoclingClient client = client();
+        client.ackJob("job-1");
+        client.ackJob("job-1");
+
+        assertEquals(2, deletes.get());
     }
 
     @Test
@@ -149,18 +183,34 @@ class DoclingClientTest {
 
         DoclingClient.DoclingClientException error = assertThrows(
                 DoclingClient.DoclingClientException.class,
-                () -> client(Duration.ofSeconds(2)).submitJob(request()));
+                () -> client().submitJob(request()));
 
         assertEquals(DoclingClient.FailureKind.PERMANENT, error.kind());
     }
 
-    private DoclingClient client(Duration maxWait) {
+    @Test
+    void getJobShouldRejectResponseAboveConfiguredLimit() throws Exception {
+        server = startServer(exchange -> respond(exchange, 200,
+                "{\"jobId\":\"job-1\",\"requestId\":\"task-1:item-1:1\","
+                        + "\"status\":\"running\",\"padding\":\"" + "x".repeat(512) + "\"}"));
+
+        DoclingClient.DoclingClientException error = assertThrows(
+                DoclingClient.DoclingClientException.class,
+                () -> client(128).getJob("job-1", "task-1:item-1:1"));
+
+        assertEquals(DoclingClient.FailureKind.PERMANENT, error.kind());
+        assertTrue(error.getMessage().contains("configured size limit"));
+    }
+
+    private DoclingClient client() {
+        return client(268435456);
+    }
+
+    private DoclingClient client(int maxResponseBytes) {
         return new DoclingClient(
                 "http://127.0.0.1:" + server.getAddress().getPort(),
                 TOKEN,
-                Duration.ofMillis(5),
-                maxWait,
-                2);
+                maxResponseBytes);
     }
 
     private ParseRequest request() {
@@ -196,7 +246,11 @@ class DoclingClientTest {
     }
 
     private static String resultJson() {
-        return "{\"requestId\":\"task-1:item-1:1\",\"parser\":\"docling\","
+        return resultJson("task-1:item-1:1");
+    }
+
+    private static String resultJson(String requestId) {
+        return "{\"requestId\":\"" + requestId + "\",\"parser\":\"docling\","
                 + "\"format\":\"chunks\",\"text\":\"parsed\",\"fileType\":\"pdf\","
                 + "\"pages\":[],\"chunks\":[],\"images\":[],\"warnings\":[]}";
     }

@@ -82,7 +82,10 @@ public class OutboxEventProcessor {
         }
     }
 
-    @Scheduled(cron = "${app.outbox.cleanup-cron:0 0 3 * * *}")
+    @Scheduled(
+            cron = "${app.outbox.cleanup-cron:0 0 3 * * *}" ,
+            zone = "Asia/Shanghai"
+    )
     public void cleanupDoneEvents() {
         LocalDateTime processedBefore = LocalDateTime.now().minusDays(retentionDays);
         int deleted = outboxEventRepository.deleteDoneBefore(processedBefore, cleanupBatchSize);

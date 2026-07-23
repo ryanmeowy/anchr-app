@@ -15,6 +15,7 @@ public class IngestionTaskItem {
     String id;
     String taskId;
     String kbId;
+    String taskCreatedBy;
     String assetId;
     String fileName;
     String fileHash;
@@ -24,6 +25,18 @@ public class IngestionTaskItem {
     String doclingRequestId;
     String doclingJobId;
     String sourceRevision;
+    IngestionExecutionStage executionStage;
+    @Builder.Default
+    long executionEpoch = 1L;
+    int stageAttempt;
+    int stageRetryCount;
+    LocalDateTime stageStartedAt;
+    LocalDateTime nextActionAt;
+    String leaseToken;
+    LocalDateTime leaseUntil;
+    String parseRequestSnapshot;
+    String parseResultObjectKey;
+    String embeddingResultObjectKey;
     IngestionStage stage;
     IngestionTaskItemStatus status;
     int progress;

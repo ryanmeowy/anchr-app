@@ -13,6 +13,7 @@ public class IngestionTaskItemRecord {
     private String id;
     private String taskId;
     private String kbId;
+    private String taskCreatedBy;
     private String assetId;
     private String fileName;
     private String fileHash;
@@ -21,6 +22,17 @@ public class IngestionTaskItemRecord {
     private String doclingRequestId;
     private String doclingJobId;
     private String sourceRevision;
+    private String executionStage;
+    private Long executionEpoch;
+    private Integer stageAttempt;
+    private Integer stageRetryCount;
+    private LocalDateTime stageStartedAt;
+    private LocalDateTime nextActionAt;
+    private String leaseToken;
+    private LocalDateTime leaseUntil;
+    private String parseRequestSnapshot;
+    private String parseResultObjectKey;
+    private String embeddingResultObjectKey;
     private String stage;
     private String status;
     private Integer progress;

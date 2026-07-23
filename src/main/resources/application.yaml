@@ -66,6 +66,14 @@ app:
     ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
     ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
     ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
+  ingestion:
+    poll-interval-ms: ${APP_INGESTION_POLL_INTERVAL_MS:1000}
+    poll-initial-delay-ms: ${APP_INGESTION_POLL_INITIAL_DELAY_MS:1000}
+    claim-batch-size: ${APP_INGESTION_CLAIM_BATCH_SIZE:32}
+    claim-lease-seconds: ${APP_INGESTION_CLAIM_LEASE_SECONDS:300}
+    parse-poll-interval: ${APP_INGESTION_PARSE_POLL_INTERVAL:2s}
+    parse-stage-timeout: ${APP_INGESTION_PARSE_STAGE_TIMEOUT:45m}
+    stage-max-retries: ${APP_INGESTION_STAGE_MAX_RETRIES:5}
   outbox:
     poll-interval-ms: ${APP_OUTBOX_POLL_INTERVAL_MS:3000}
     batch-size: ${APP_OUTBOX_BATCH_SIZE:20}
@@ -77,9 +85,7 @@ app:
   docling:
     base-url: ${APP_DOCLING_BASE_URL}
     api-token: ${APP_DOCLING_API_TOKEN}
-    poll-interval: ${APP_DOCLING_POLL_INTERVAL:2s}
-    max-wait: ${APP_DOCLING_MAX_WAIT:45m}
-    max-resubmits: ${APP_DOCLING_MAX_RESUBMITS:2}
+    max-response-bytes: ${APP_DOCLING_MAX_RESPONSE_BYTES:268435456}
     embedded-image-upload-enabled: ${APP_DOCLING_EMBEDDED_IMAGE_UPLOAD_ENABLED:false}
   segment:
     index-name: kb_segment
