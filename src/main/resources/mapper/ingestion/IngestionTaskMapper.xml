@@ -30,6 +30,10 @@
         <result property="fileName" column="file_name"/>
         <result property="fileHash" column="file_hash"/>
         <result property="sourceUrl" column="source_url"/>
+        <result property="parseAttempt" column="parse_attempt"/>
+        <result property="doclingRequestId" column="docling_request_id"/>
+        <result property="doclingJobId" column="docling_job_id"/>
+        <result property="sourceRevision" column="source_revision"/>
         <result property="stage" column="stage"/>
         <result property="status" column="status"/>
         <result property="progress" column="progress"/>
@@ -49,7 +53,8 @@
     </sql>
 
     <sql id="IngestionTaskItemColumns">
-        id, task_id, kb_id, asset_id, file_name, file_hash, source_url, stage, status,
+        id, task_id, kb_id, asset_id, file_name, file_hash, source_url,
+        parse_attempt, docling_request_id, docling_job_id, source_revision, stage, status,
         progress, dedupe_strategy, dedupe_result, duplicate_asset_id,
         error_code, error_message, created_at, updated_at, finished_at
     </sql>
@@ -67,7 +72,8 @@
         insert into ingestion_task_item (
             <include refid="IngestionTaskItemColumns"/>
         ) values (
-            #{id}, #{taskId}, #{kbId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl}, #{stage}, #{status},
+            #{id}, #{taskId}, #{kbId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl},
+            #{parseAttempt}, #{doclingRequestId}, #{doclingJobId}, #{sourceRevision}, #{stage}, #{status},
             #{progress}, #{dedupeStrategy}, #{dedupeResult}, #{duplicateAssetId},
             #{errorCode}, #{errorMessage}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
@@ -121,6 +127,7 @@
     <select id="listFailedItems" resultMap="IngestionTaskItemRecordMap">
         select
             iti.id, iti.task_id, iti.kb_id, iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
+            iti.parse_attempt, iti.docling_request_id, iti.docling_job_id, iti.source_revision,
             iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result, iti.duplicate_asset_id,
             iti.error_code, iti.error_message,
             iti.created_at, iti.updated_at, iti.finished_at
@@ -135,6 +142,7 @@
     <select id="findItem" resultMap="IngestionTaskItemRecordMap">
         select
             iti.id, iti.task_id, iti.kb_id, iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
+            iti.parse_attempt, iti.docling_request_id, iti.docling_job_id, iti.source_revision,
             iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result, iti.duplicate_asset_id,
             iti.error_code, iti.error_message,
             iti.created_at, iti.updated_at, iti.finished_at
@@ -151,6 +159,9 @@
         set iti.stage = 'UPLOAD',
             iti.status = 'PENDING',
             iti.progress = 0,
+            iti.docling_request_id = #{nextDoclingRequestId},
+            iti.parse_attempt = #{nextParseAttempt},
+            iti.docling_job_id = null,
             iti.error_code = null,
             iti.error_message = null,
             iti.updated_at = #{updatedAt},
@@ -159,21 +170,33 @@
           and it.id = #{taskId}
           and iti.id = #{itemId}
           and iti.status = 'FAILED'
+          and iti.parse_attempt = #{expectedParseAttempt}
     </update>
 
-    <update id="resetFailedItems">
+    <update id="prepareParseAttempt">
         update ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        set iti.stage = 'UPLOAD',
-            iti.status = 'PENDING',
-            iti.progress = 0,
-            iti.error_code = null,
-            iti.error_message = null,
-            iti.updated_at = #{updatedAt},
-            iti.finished_at = null
+        set iti.parse_attempt = #{parseAttempt},
+            iti.docling_request_id = #{doclingRequestId},
+            iti.source_revision = #{sourceRevision},
+            iti.updated_at = #{updatedAt}
         where it.kb_id = #{kbId}
           and it.id = #{taskId}
-          and iti.status = 'FAILED'
+          and iti.id = #{itemId}
+          and iti.parse_attempt = #{parseAttempt}
+          and (iti.docling_request_id is null or iti.docling_request_id = #{doclingRequestId})
+          and (iti.source_revision is null or iti.source_revision = #{sourceRevision})
+    </update>
+
+    <update id="recordDoclingJob">
+        update ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        set iti.docling_job_id = #{doclingJobId},
+            iti.updated_at = #{updatedAt}
+        where it.kb_id = #{kbId}
+          and it.id = #{taskId}
+          and iti.id = #{itemId}
+          and iti.docling_request_id = #{doclingRequestId}
     </update>
 
     <update id="markItemRunning">

@@ -80,13 +80,27 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
 
     @Override
     public boolean resetFailedItem(String kbId, String taskId,
-                                   String itemId, LocalDateTime updatedAt) {
-        return mapper.resetFailedItem(kbId, taskId, itemId, updatedAt) > 0;
+                                   String itemId, int expectedParseAttempt,
+                                   int nextParseAttempt, String nextDoclingRequestId,
+                                   LocalDateTime updatedAt) {
+        return mapper.resetFailedItem(kbId, taskId, itemId, expectedParseAttempt,
+                nextParseAttempt, nextDoclingRequestId, updatedAt) > 0;
     }
 
     @Override
-    public boolean resetFailedItems(String kbId, String taskId, LocalDateTime updatedAt) {
-        return mapper.resetFailedItems(kbId, taskId, updatedAt) > 0;
+    public boolean prepareParseAttempt(String kbId, String taskId, String itemId,
+                                       int parseAttempt, String doclingRequestId, String sourceRevision,
+                                       LocalDateTime updatedAt) {
+        return mapper.prepareParseAttempt(kbId, taskId, itemId, parseAttempt,
+                doclingRequestId, sourceRevision, updatedAt) > 0;
+    }
+
+    @Override
+    public boolean recordDoclingJob(String kbId, String taskId, String itemId,
+                                    String doclingRequestId, String doclingJobId,
+                                    LocalDateTime updatedAt) {
+        return mapper.recordDoclingJob(kbId, taskId, itemId, doclingRequestId,
+                doclingJobId, updatedAt) > 0;
     }
 
     @Override
@@ -143,6 +157,10 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         record.setFileName(item.getFileName());
         record.setFileHash(item.getFileHash());
         record.setSourceUrl(item.getSourceUrl());
+        record.setParseAttempt(item.getParseAttempt());
+        record.setDoclingRequestId(item.getDoclingRequestId());
+        record.setDoclingJobId(item.getDoclingJobId());
+        record.setSourceRevision(item.getSourceRevision());
         record.setStage(item.getStage().name());
         record.setStatus(item.getStatus().name());
         record.setProgress(item.getProgress());
@@ -187,6 +205,10 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .fileName(record.getFileName())
                 .fileHash(record.getFileHash())
                 .sourceUrl(record.getSourceUrl())
+                .parseAttempt(record.getParseAttempt() == null ? 1 : record.getParseAttempt())
+                .doclingRequestId(record.getDoclingRequestId())
+                .doclingJobId(record.getDoclingJobId())
+                .sourceRevision(record.getSourceRevision())
                 .stage(IngestionStage.valueOf(record.getStage()))
                 .status(IngestionTaskItemStatus.valueOf(record.getStatus()))
                 .progress(defaultInt(record.getProgress()))

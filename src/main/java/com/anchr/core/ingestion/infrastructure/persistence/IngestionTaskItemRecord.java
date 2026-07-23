@@ -17,6 +17,10 @@ public class IngestionTaskItemRecord {
     private String fileName;
     private String fileHash;
     private String sourceUrl;
+    private Integer parseAttempt;
+    private String doclingRequestId;
+    private String doclingJobId;
+    private String sourceRevision;
     private String stage;
     private String status;
     private Integer progress;

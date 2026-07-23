@@ -6,6 +6,8 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -109,6 +111,49 @@ class DoclingClientTest {
         assertTrue(error.getMessage().contains("QUEUE_TIMEOUT"));
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "408, TRANSIENT",
+            "425, TRANSIENT",
+            "429, TRANSIENT",
+            "500, TRANSIENT",
+            "503, TRANSIENT",
+            "404, NOT_FOUND",
+            "409, CONFLICT",
+            "401, CONFIGURATION",
+            "422, PERMANENT"
+    })
+    void submitJobShouldClassifyHttpFailure(int status, DoclingClient.FailureKind expected)
+            throws Exception {
+        server = startServer(exchange -> respond(exchange, status, "{\"detail\":\"failure\"}"));
+
+        DoclingClient.DoclingClientException error = assertThrows(
+                DoclingClient.DoclingClientException.class,
+                () -> client(Duration.ofSeconds(2)).submitJob(request()));
+
+        assertEquals(expected, error.kind());
+        assertEquals(status, error.statusCode());
+    }
+
+    @Test
+    void ackJobShouldTreatMissingJobAsAlreadyAcknowledged() throws Exception {
+        server = startServer(exchange -> respond(exchange, 404, "{}"));
+
+        client(Duration.ofSeconds(2)).ackJob("job-expired");
+    }
+
+    @Test
+    void submitJobShouldRejectMismatchedSuccessfulEnvelope() throws Exception {
+        server = startServer(exchange -> respond(exchange, 202,
+                "{\"jobId\":\"job-1\",\"requestId\":\"another-request\",\"status\":\"queued\"}"));
+
+        DoclingClient.DoclingClientException error = assertThrows(
+                DoclingClient.DoclingClientException.class,
+                () -> client(Duration.ofSeconds(2)).submitJob(request()));
+
+        assertEquals(DoclingClient.FailureKind.PERMANENT, error.kind());
+    }
+
     private DoclingClient client(Duration maxWait) {
         return new DoclingClient(
                 "http://127.0.0.1:" + server.getAddress().getPort(),
@@ -120,7 +165,9 @@ class DoclingClientTest {
 
     private ParseRequest request() {
         return new ParseRequest(
-                "task-1:item-1",
+                "task-1:item-1:1",
+                2,
+                "v1:" + "a".repeat(64),
                 "https://anchr.oss-cn-shanghai.aliyuncs.com/file.pdf",
                 "file.pdf",
                 ParseRequest.Options.chunkModel(),
@@ -144,12 +191,12 @@ class DoclingClientTest {
     }
 
     private static String jobJson(String status, String result, String error) {
-        return "{\"jobId\":\"job-1\",\"requestId\":\"task-1:item-1\",\"status\":\""
+        return "{\"jobId\":\"job-1\",\"requestId\":\"task-1:item-1:1\",\"status\":\""
                 + status + "\",\"result\":" + result + ",\"error\":" + error + "}";
     }
 
     private static String resultJson() {
-        return "{\"requestId\":\"task-1:item-1\",\"parser\":\"docling\","
+        return "{\"requestId\":\"task-1:item-1:1\",\"parser\":\"docling\","
                 + "\"format\":\"chunks\",\"text\":\"parsed\",\"fileType\":\"pdf\","
                 + "\"pages\":[],\"chunks\":[],\"images\":[],\"warnings\":[]}";
     }

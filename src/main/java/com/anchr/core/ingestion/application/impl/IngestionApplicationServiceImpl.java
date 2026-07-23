@@ -149,7 +149,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
             throw new BusinessException(ApiError.INGEST_RETRY_ONLY_FAILED);
         }
         LocalDateTime now = LocalDateTime.now();
-        ingestionTaskRepository.resetFailedItem(kbId, task.getId(), item.getId(), now);
+        resetFailedItemForRetry(kbId, task.getId(), item, now);
         ingestionTaskRepository.refreshSummary(kbId, task.getId(), context.userId(), now);
         submitAfterCommit(kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
@@ -167,10 +167,32 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
             throw new BusinessException(ApiError.INGEST_NO_FAILED_ITEMS);
         }
         LocalDateTime now = LocalDateTime.now();
-        ingestionTaskRepository.resetFailedItems(kbId, task.getId(), now);
+        for (IngestionTaskItem item : failedItems) {
+            resetFailedItemForRetry(kbId, task.getId(), item, now);
+        }
         ingestionTaskRepository.refreshSummary(kbId, task.getId(), context.userId(), now);
         submitAfterCommit(kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
+    }
+
+    private void resetFailedItemForRetry(String kbId, String taskId,
+                                         IngestionTaskItem item, LocalDateTime updatedAt) {
+        int expectedAttempt = Math.max(IngestionParseIdentity.INITIAL_ATTEMPT, item.getParseAttempt());
+        int nextAttempt;
+        try {
+            nextAttempt = Math.addExact(expectedAttempt, 1);
+        } catch (ArithmeticException overflow) {
+            throw new BusinessException(
+                    ApiError.INTERNAL_ERROR, "Parse attempt limit reached.", overflow);
+        }
+        String nextRequestId = IngestionParseIdentity.requestId(taskId, item.getId(), nextAttempt);
+        boolean reset = ingestionTaskRepository.resetFailedItem(
+                kbId, taskId, item.getId(), expectedAttempt, nextAttempt, nextRequestId, updatedAt);
+        if (!reset) {
+            throw new BusinessException(
+                    ApiError.INGEST_RETRY_ONLY_FAILED,
+                    "Failed item changed while retry was being prepared.");
+        }
     }
 
     @Override
@@ -193,14 +215,19 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
         String taskId = idGen.nextIdStr();
+        String itemId = idGen.nextIdStr();
         IngestionTaskItem item = IngestionTaskItem.builder()
-                .id(idGen.nextIdStr())
+                .id(itemId)
                 .taskId(taskId)
                 .kbId(kbId)
                 .assetId(document.getId())
                 .fileName(document.getFileName())
                 .fileHash(document.getFileHash())
                 .sourceUrl(document.getSourceUrl())
+                .parseAttempt(IngestionParseIdentity.INITIAL_ATTEMPT)
+                .doclingRequestId(IngestionParseIdentity.requestId(
+                        taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
+                .sourceRevision(IngestionParseIdentity.sourceRevision(document))
                 .stage(stage)
                 .status(IngestionTaskItemStatus.PENDING)
                 .progress(stage == IngestionStage.EMBED ? 60 : 20)
@@ -260,14 +287,19 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
             }
             Asset document = createDocument(context, kbId, command, fileName, fileType, decision, now);
             assetRepository.save(document);
+            String itemId = idGen.nextIdStr();
             return IngestionTaskItem.builder()
-                    .id(idGen.nextIdStr())
+                    .id(itemId)
                     .taskId(taskId)
                     .kbId(kbId)
                     .assetId(document.getId())
                     .fileName(fileName)
                     .fileHash(trimToNull(command.fileHash()))
                     .sourceUrl(trimToNull(command.sourceUrl()))
+                    .parseAttempt(IngestionParseIdentity.INITIAL_ATTEMPT)
+                    .doclingRequestId(IngestionParseIdentity.requestId(
+                            taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
+                    .sourceRevision(IngestionParseIdentity.sourceRevision(document))
                     .stage(IngestionStage.PARSE)
                     .status(IngestionTaskItemStatus.PENDING)
                     .progress(10)
@@ -289,14 +321,19 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
         Asset document = createDocument(context, kbId, command, fileName, fileType, decision, now);
         assetRepository.save(document);
+        String itemId = idGen.nextIdStr();
         return IngestionTaskItem.builder()
-                .id(idGen.nextIdStr())
+                .id(itemId)
                 .taskId(taskId)
                 .kbId(kbId)
                 .assetId(document.getId())
                 .fileName(fileName)
                 .fileHash(trimToNull(command.fileHash()))
                 .sourceUrl(trimToNull(command.sourceUrl()))
+                .parseAttempt(IngestionParseIdentity.INITIAL_ATTEMPT)
+                .doclingRequestId(IngestionParseIdentity.requestId(
+                        taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
+                .sourceRevision(IngestionParseIdentity.sourceRevision(document))
                 .stage(IngestionStage.UPLOAD)
                 .status(IngestionTaskItemStatus.PENDING)
                 .progress(0)

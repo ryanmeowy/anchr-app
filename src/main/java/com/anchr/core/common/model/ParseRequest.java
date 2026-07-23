@@ -9,6 +9,8 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ParseRequest(
         String requestId,
+        Integer contractVersion,
+        String sourceRevision,
         String sourceUrl,
         String fileName,
         Options options,

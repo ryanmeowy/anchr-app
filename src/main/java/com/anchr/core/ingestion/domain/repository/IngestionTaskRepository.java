@@ -29,9 +29,17 @@ public interface IngestionTaskRepository {
 
     Optional<IngestionTaskItem> findItem(String kbId, String taskId, String itemId);
 
-    boolean resetFailedItem(String kbId, String taskId, String itemId, LocalDateTime updatedAt);
+    boolean resetFailedItem(String kbId, String taskId, String itemId,
+                            int expectedParseAttempt, int nextParseAttempt,
+                            String nextDoclingRequestId, LocalDateTime updatedAt);
 
-    boolean resetFailedItems(String kbId, String taskId, LocalDateTime updatedAt);
+    boolean prepareParseAttempt(String kbId, String taskId, String itemId,
+                                int parseAttempt, String doclingRequestId, String sourceRevision,
+                                LocalDateTime updatedAt);
+
+    boolean recordDoclingJob(String kbId, String taskId, String itemId,
+                             String doclingRequestId, String doclingJobId,
+                             LocalDateTime updatedAt);
 
     boolean markItemRunning(String kbId, String taskId, String itemId,
                             String stage, int progress, LocalDateTime updatedAt);

@@ -30,6 +30,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -145,6 +146,10 @@ class IngestionApplicationServiceImplTest {
         assertThat(item.getDedupeResult()).isEqualTo(DedupeResult.NEW);
         assertThat(item.getDedupeStrategy()).isEqualTo(DedupeStrategy.SKIP);
         assertThat(item.getDuplicateAssetId()).isNull();
+        assertThat(item.getParseAttempt()).isEqualTo(1);
+        assertThat(item.getDoclingRequestId()).matches("[0-9]+:[0-9]+:1");
+        assertThat(item.getSourceRevision()).startsWith("v1:").hasSize(67);
+        assertThat(item.getDoclingJobId()).isNull();
         verify(assetRepository).save(any());
     }
 
@@ -446,6 +451,81 @@ class IngestionApplicationServiceImplTest {
         verify(ingestionTaskRepository, never()).save(any());
     }
 
+    @Test
+    void retryItem_shouldAdvanceParseIdentityWithExplicitCasValues() {
+        IngestionTaskItem failedItem = failedItem("item-1", 3, "task-1:item-1:3");
+        savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
+                .status(IngestionTaskStatus.FAILED)
+                .items(List.of(failedItem))
+                .build());
+        when(ingestionTaskRepository.findItem("kb-1", "task-1", "item-1"))
+                .thenReturn(Optional.of(failedItem));
+        when(ingestionTaskRepository.resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-1"),
+                eq(3), eq(4), eq("task-1:item-1:4"), any(LocalDateTime.class)))
+                .thenReturn(true);
+
+        service.retryItem("kb-1", "task-1", "item-1");
+
+        verify(ingestionTaskRepository).resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-1"),
+                eq(3), eq(4), eq("task-1:item-1:4"), any(LocalDateTime.class));
+        verify(ingestionTaskRepository)
+                .refreshSummary(eq("kb-1"), eq("task-1"), eq("user-a"), any(LocalDateTime.class));
+        verify(ingestionTaskProcessor).submit("kb-1", "task-1", "user-a");
+    }
+
+    @Test
+    void retryFailed_shouldAdvanceEveryIdentityIncludingLegacyNullRequestId() {
+        IngestionTaskItem legacyItem = failedItem("item-legacy", 1, null);
+        IngestionTaskItem currentItem = failedItem("item-current", 4, "task-1:item-current:4");
+        savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
+                .status(IngestionTaskStatus.FAILED)
+                .items(List.of(legacyItem, currentItem))
+                .build());
+        when(ingestionTaskRepository.listFailedItems("kb-1", "task-1"))
+                .thenReturn(List.of(legacyItem, currentItem));
+        when(ingestionTaskRepository.resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-legacy"),
+                eq(1), eq(2), eq("task-1:item-legacy:2"), any(LocalDateTime.class)))
+                .thenReturn(true);
+        when(ingestionTaskRepository.resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-current"),
+                eq(4), eq(5), eq("task-1:item-current:5"), any(LocalDateTime.class)))
+                .thenReturn(true);
+
+        service.retryFailed("kb-1", "task-1");
+
+        verify(ingestionTaskRepository).resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-legacy"),
+                eq(1), eq(2), eq("task-1:item-legacy:2"), any(LocalDateTime.class));
+        verify(ingestionTaskRepository).resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-current"),
+                eq(4), eq(5), eq("task-1:item-current:5"), any(LocalDateTime.class));
+        verify(ingestionTaskRepository)
+                .refreshSummary(eq("kb-1"), eq("task-1"), eq("user-a"), any(LocalDateTime.class));
+        verify(ingestionTaskProcessor).submit("kb-1", "task-1", "user-a");
+    }
+
+    @Test
+    void retryItem_whenCasLosesRace_shouldRejectWithoutSchedulingProcessor() {
+        IngestionTaskItem failedItem = failedItem("item-1", 2, "task-1:item-1:2");
+        savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
+                .status(IngestionTaskStatus.FAILED)
+                .items(List.of(failedItem))
+                .build());
+        when(ingestionTaskRepository.findItem("kb-1", "task-1", "item-1"))
+                .thenReturn(Optional.of(failedItem));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.retryItem("kb-1", "task-1", "item-1"));
+
+        assertThat(error.getError()).isEqualTo(ApiError.INGEST_RETRY_ONLY_FAILED);
+        verify(ingestionTaskRepository, never())
+                .refreshSummary(any(), any(), any(), any(LocalDateTime.class));
+        verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
+    }
+
     private IngestionApplicationService.IngestionCreateCommand command(DedupeStrategy strategy,
                                                                        IngestionSourceType sourceType,
                                                                        String fileHash) {
@@ -498,6 +578,20 @@ class IngestionApplicationServiceImplTest {
                 .createdBy("user-a")
                 .updatedBy("user-a")
                 .items(List.of())
+                .build();
+    }
+
+    private IngestionTaskItem failedItem(String itemId, int parseAttempt, String doclingRequestId) {
+        return IngestionTaskItem.builder()
+                .id(itemId)
+                .taskId("task-1")
+                .kbId("kb-1")
+                .assetId("asset-" + itemId)
+                .fileName(itemId + ".pdf")
+                .parseAttempt(parseAttempt)
+                .doclingRequestId(doclingRequestId)
+                .sourceRevision("v1:" + "a".repeat(64))
+                .status(IngestionTaskItemStatus.FAILED)
                 .build();
     }
 

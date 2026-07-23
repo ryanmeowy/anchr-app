@@ -134,8 +134,31 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         assetRepository.updateStatuses(kbId, asset.getId(),
                 DocumentParseStatus.RUNNING.name(), DocumentIndexStatus.PENDING.name(), userId, LocalDateTime.now());
 
+        int parseAttempt = Math.max(IngestionParseIdentity.INITIAL_ATTEMPT, item.getParseAttempt());
+        String doclingRequestId = StringUtils.hasText(item.getDoclingRequestId())
+                ? item.getDoclingRequestId()
+                : IngestionParseIdentity.requestId(taskId, item.getId(), parseAttempt);
+        String sourceRevision = StringUtils.hasText(item.getSourceRevision())
+                ? item.getSourceRevision()
+                : IngestionParseIdentity.sourceRevision(asset);
+        boolean prepared = ingestionTaskRepository.prepareParseAttempt(
+                kbId, taskId, item.getId(), parseAttempt, doclingRequestId,
+                sourceRevision, LocalDateTime.now());
+        if (!prepared) {
+            throw new IllegalStateException("parse attempt is stale or no longer exists");
+        }
+
         String downloadUrl = objectStoragePort.buildDownloadUrl(asset.getObjectKey());
-        ParseResponse parsed = doclingClient.parse(buildParseRequest(asset, taskId, item.getId(), downloadUrl));
+        ParseRequest parseRequest = buildParseRequest(
+                asset, doclingRequestId, sourceRevision, downloadUrl);
+        ParseResponse parsed = doclingClient.parse(parseRequest, job -> {
+            boolean recorded = ingestionTaskRepository.recordDoclingJob(
+                    kbId, taskId, item.getId(), doclingRequestId,
+                    job.jobId(), LocalDateTime.now());
+            if (!recorded) {
+                throw new IllegalStateException("docling job belongs to a stale parse attempt");
+            }
+        });
         if (parsed.chunks() == null || parsed.chunks().isEmpty()) {
             throw new BusinessException(ApiError.TEXT_PARSE_FAILED, "docling returned empty chunks.");
         }
@@ -159,20 +182,17 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         return indexed;
     }
 
-    private ParseRequest buildParseRequest(Asset asset, String taskId, String itemId, String downloadUrl) {
+    private ParseRequest buildParseRequest(Asset asset, String doclingRequestId,
+                                           String sourceRevision, String downloadUrl) {
         return ParseRequest.builder()
-                .requestId(buildRequestId(taskId, itemId))
+                .requestId(doclingRequestId)
+                .contractVersion(2)
+                .sourceRevision(sourceRevision)
                 .fileName(asset.getFileName())
                 .sourceUrl(downloadUrl)
                 .options(ParseRequest.Options.chunkModel(embeddedImageUploadEnabled))
                 .oss(embeddedImageUploadEnabled ? buildOssConfig() : null)
                 .build();
-    }
-
-    private String buildRequestId(String taskId, String itemId) {
-        taskId = StringUtils.hasText(taskId) ? taskId : UUID.randomUUID().toString();
-        itemId = StringUtils.hasText(itemId) ? itemId : UUID.randomUUID().toString();
-        return String.format("%s:%s", taskId, itemId);
     }
 
     private ParseRequest.Oss buildOssConfig() {

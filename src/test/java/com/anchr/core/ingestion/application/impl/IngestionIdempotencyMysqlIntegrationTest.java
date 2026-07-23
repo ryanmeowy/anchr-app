@@ -1,6 +1,17 @@
 package com.anchr.core.ingestion.application.impl;
 
+import com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskItemRecord;
+import com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskMapper;
+import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.io.Resources;
+import org.apache.ibatis.mapping.Environment;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.SqlSession;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.apache.ibatis.session.SqlSessionFactoryBuilder;
+import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +24,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -37,6 +49,8 @@ class IngestionIdempotencyMysqlIntegrationTest {
 
     private JdbcTemplate jdbc;
     private IngestionCreateTransactionRunner transactionRunner;
+    private SqlSession sqlSession;
+    private IngestionTaskMapper ingestionTaskMapper;
 
     @BeforeAll
     static void migrate() {
@@ -53,9 +67,33 @@ class IngestionIdempotencyMysqlIntegrationTest {
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
         jdbc = new JdbcTemplate(dataSource);
         transactionRunner = new IngestionCreateTransactionRunner(new JdbcTransactionManager(dataSource));
+        Configuration configuration = new Configuration(new Environment(
+                "mysql-test", new JdbcTransactionFactory(), dataSource));
+        configuration.addMapper(IngestionTaskMapper.class);
+        try {
+            String resource = "mapper/ingestion/IngestionTaskMapper.xml";
+            XMLMapperBuilder builder = new XMLMapperBuilder(
+                    Resources.getResourceAsStream(resource),
+                    configuration,
+                    resource,
+                    configuration.getSqlFragments());
+            builder.parse();
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to load ingestion mapper", e);
+        }
+        SqlSessionFactory sqlSessionFactory = new SqlSessionFactoryBuilder().build(configuration);
+        sqlSession = sqlSessionFactory.openSession(true);
+        ingestionTaskMapper = sqlSession.getMapper(IngestionTaskMapper.class);
         jdbc.update("delete from ingestion_task_item");
         jdbc.update("delete from ingestion_task");
         jdbc.update("delete from asset");
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (sqlSession != null) {
+            sqlSession.close();
+        }
     }
 
     @Test
@@ -102,6 +140,69 @@ class IngestionIdempotencyMysqlIntegrationTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void parseAttempt_shouldPersistIdentityIncrementOnExplicitRetryAndFenceOldJob() {
+        assertThat(column("ingestion_task_item", "docling_request_id"))
+                .containsExactly("varchar", 200L, "utf8mb4_bin");
+        assertThat(column("ingestion_task_item", "docling_job_id"))
+                .containsExactly("varchar", 64L, "ascii_bin");
+        assertThat(column("ingestion_task_item", "source_revision"))
+                .containsExactly("varchar", 80L, "ascii_bin");
+
+        insertTask("3001");
+        String revision = "v1:" + "b".repeat(64);
+        jdbc.update("""
+                insert into ingestion_task_item (
+                    id, task_id, kb_id, asset_id, file_name, file_hash, source_url,
+                    parse_attempt, docling_request_id, docling_job_id, source_revision,
+                    stage, status, progress, created_at, updated_at
+                ) values (
+                    4001, 3001, 1, 5001, 'sample.pdf', 'hash-a', null,
+                    1, '3001:4001:1', 'job-old', ?,
+                    'PARSE', 'FAILED', 20, now(), now()
+                )
+                """, revision);
+
+        assertThat(ingestionTaskMapper.resetFailedItem(
+                "1", "3001", "4001",
+                1, 2, "3001:4001:2", LocalDateTime.now())).isEqualTo(1);
+        IngestionTaskItemRecord retried = ingestionTaskMapper.findItem("1", "3001", "4001")
+                .orElseThrow();
+        assertThat(retried.getParseAttempt()).isEqualTo(2);
+        assertThat(retried.getDoclingRequestId()).isEqualTo("3001:4001:2");
+        assertThat(retried.getDoclingJobId()).isNull();
+        assertThat(retried.getSourceRevision()).isEqualTo(revision);
+        jdbc.update("""
+                update ingestion_task_item
+                set status = 'FAILED', docling_job_id = 'job-current'
+                where id = 4001
+                """);
+        assertThat(ingestionTaskMapper.resetFailedItem(
+                "1", "3001", "4001",
+                1, 2, "3001:4001:2", LocalDateTime.now())).isZero();
+        IngestionTaskItemRecord afterStaleRetry = ingestionTaskMapper.findItem("1", "3001", "4001")
+                .orElseThrow();
+        assertThat(afterStaleRetry.getParseAttempt()).isEqualTo(2);
+        assertThat(afterStaleRetry.getDoclingRequestId()).isEqualTo("3001:4001:2");
+        assertThat(afterStaleRetry.getDoclingJobId()).isEqualTo("job-current");
+
+        assertThat(ingestionTaskMapper.prepareParseAttempt(
+                "1", "3001", "4001", 2, "3001:4001:2",
+                "v1:" + "c".repeat(64), LocalDateTime.now())).isZero();
+        assertThat(ingestionTaskMapper.prepareParseAttempt(
+                "1", "3001", "4001", 2, "3001:4001:2",
+                revision, LocalDateTime.now())).isEqualTo(1);
+
+        assertThat(ingestionTaskMapper.recordDoclingJob(
+                "1", "3001", "4001", "3001:4001:1", "job-stale", LocalDateTime.now()))
+                .isZero();
+        assertThat(ingestionTaskMapper.recordDoclingJob(
+                "1", "3001", "4001", "3001:4001:2", "job-new", LocalDateTime.now()))
+                .isEqualTo(1);
+        assertThat(ingestionTaskMapper.findItem("1", "3001", "4001")
+                .orElseThrow().getDoclingJobId()).isEqualTo("job-new");
     }
 
     private Callable<String> createAttempt(String taskId, String assetId,
@@ -162,16 +263,20 @@ class IngestionIdempotencyMysqlIntegrationTest {
     }
 
     private List<Object> column(String columnName) {
+        return column("ingestion_task", columnName);
+    }
+
+    private List<Object> column(String tableName, String columnName) {
         return jdbc.queryForObject("""
                 select data_type, character_maximum_length, collation_name
                 from information_schema.columns
                 where table_schema = database()
-                  and table_name = 'ingestion_task'
+                  and table_name = ?
                   and column_name = ?
                 """, (resultSet, rowNum) -> List.of(
                 resultSet.getString("data_type"),
                 resultSet.getLong("character_maximum_length"),
-                resultSet.getString("collation_name")), columnName);
+                resultSet.getString("collation_name")), tableName, columnName);
     }
 
     private int count(String table) {

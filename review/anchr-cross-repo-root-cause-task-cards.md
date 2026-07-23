@@ -29,7 +29,7 @@
 | ANCHR-102 | 建立正确的 HTTP 错误与上传清理契约 | 已完成 | P0 | M | app、web | 无 |
 | ANCHR-103 | Ingestion 创建请求幂等与前端恢复 | 已完成 | P0 | M | app、web | 102 |
 | ANCHR-104 | 关闭未消费且加密错误的内嵌图片上传链路 | 已完成 | P1 | S/M | app、docling | 101A |
-| ANCHR-105 | 重构 Docling attempt 与幂等协议 | 待执行 | P0 | M | app、docling | 104 |
+| ANCHR-105 | 重构 Docling attempt 与幂等协议 | 已完成 | P0 | M | app、docling | 104 |
 | ANCHR-106 | Ingestion 改为数据库驱动的可恢复状态机 | 待执行 | P0 | XL | app、docling、web | 103、105 |
 | ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 待执行 | P0 | L | app | 106 |
 | ANCHR-108 | 搜索改为稳定结果快照分页 | 待执行 | P1 | L | app、web | 101B、101C、110 |
@@ -649,7 +649,9 @@ source_revision
 
 requestId 改为 `taskId:itemId:parseAttempt`：网络重试和 Docling 404 重提不增加 parse attempt；用户显式重新解析或确定性失败后的业务重试才增加。
 
-Docling 请求增加 `contractVersion=2` 和 `sourceRevision`。v2 指纹只包含 requestId、sourceRevision、fileName、parse options、contractVersion 和稳定输出配置，不包含 sourceUrl 签名、STS 密文或过期时间。旧请求继续使用旧指纹，保证滚动升级。
+Docling 请求增加 `contractVersion=2` 和 `sourceRevision`，并要求 v2 的 `fileName` 非空；旧协议仍允许缺省 `fileName` 并从 URL path 推断类型。v2 指纹只包含 requestId、sourceRevision、fileName、parse options、contractVersion 和稳定输出配置，不包含 sourceUrl 签名、STS 密文或过期时间。旧请求继续使用旧指纹，保证滚动升级。
+
+Docling 是有界内存边车，`requestId -> fingerprint/job` 冲突记录只在对应内存任务存续期间有效；ACK、TTL、容量淘汰或进程重启后允许用同一 attempt 身份重新创建 job，本卡不为边车增加持久化 fingerprint ledger。App 数据库中的 `parseAttempt/requestId/sourceRevision` 是跨边车生命周期的身份事实源，记录消失后的可靠恢复和 stale worker fencing 由 106 消费这些字段完成。
 
 HTTP 分类：
 
@@ -662,15 +664,28 @@ app client 同时交付非阻塞的 `submitJob/getJob/ackJob` 协议方法；为
 
 ### 边界
 
-本卡只定义一次 Parse 业务尝试在 app 与 Docling 之间的身份、指纹、HTTP 分类和 submit/get/ack 幂等语义。何时调度这些调用、worker lease、`PARSE_WAIT` 轮询节奏和 artifact 持久化归 106；本卡不新增通用调度器。`parse_attempt` 不能与 106 的 `execution_epoch/stage_attempt` 合并。
+本卡只定义一次 Parse 业务尝试在 app 与 Docling 之间的持久身份、内存记录存续期间的指纹冲突语义、HTTP 分类和 submit/get/ack 幂等语义。何时调度这些调用、边车记录消失后的恢复、worker lease、`PARSE_WAIT` 轮询节奏、所有业务状态写入的 stale worker fencing 和 artifact 持久化归 106；本卡不新增通用调度器。`parse_attempt` 不能与 106 的 `execution_epoch/stage_attempt` 合并。
 
 ### 验收
 
-- 同 parse attempt 重复提交返回同一 job。
-- 仅签名 URL 变化不冲突。
-- sourceRevision 改变但复用 requestId 必须 409。
+- 对应内存记录存续期间，同 parse attempt 重复提交返回同一 job。
+- 对应内存记录存续期间，仅签名 URL 变化不冲突。
+- 对应内存记录存续期间，sourceRevision 改变但复用 requestId 必须 409。
 - 显式重新解析生成新 parseAttempt/requestId/job。
-- Docling 重启导致 job 404 时，同一 parse attempt 可按协议幂等重提；跨进程调度恢复由 106 验收。
+- ACK、TTL、容量淘汰或 Docling 重启导致 job 404 时，App 必须使用数据库中同一 parse attempt 的 requestId、sourceRevision 和稳定参数重提；新 job 的恢复调度与 stale worker fencing 由 106 验收。
+
+### 实现与验证记录
+
+- `anchr-app` 通过 V9 为 `ingestion_task_item` 增加 `parse_attempt/docling_request_id/docling_job_id/source_revision`；首次可解析 item 写入 attempt 1 和 `taskId:itemId:1`，旧存量 item 在首次处理时补齐稳定身份。
+- `sourceRevision` 优先使用文件 hash，其次使用 objectKey、原始 sourceUrl、assetId，并以 `v1:<sha256>` 落库。每次重新生成的 OSS 签名 URL 不参与 revision。
+- 单项重试和批量失败重试由应用层显式计算 `expectedAttempt/nextAttempt/nextRequestId`，再以 `status=FAILED + expectedAttempt` 做 CAS 更新并清空旧 jobId，不再依赖多表 `UPDATE` 的 `SET` 求值顺序。批量最多 50 项并处于同一事务，任一 CAS 失败则整批回滚。jobId 回写以 requestId 为 fence；旧 worker 对业务状态的完整 fencing 归 106。
+- `DoclingClient` 已提供单次、非阻塞语义的 `submitJob/getJob/ackJob`，并明确分类 408/425/429/5xx、404、409、401 和其他永久错误。现有 Processor 暂时继续使用由这三个方法组成的同步 `parse()` facade，长轮询移除仍归 106。
+- `anchr-docling` 的 v2 指纹只覆盖 requestId、sourceRevision、fileName、解析选项和稳定输出位置；排除 sourceUrl 签名、STS 密文和过期信息。缺少 `contractVersion` 的旧请求继续使用完整 JSON 指纹。
+- `anchr-docling` 对 v2 强制校验 `fileName` 非空并规范化首尾空白，缺失或纯空白返回 422；显式 v1 和未带版本的 legacy 请求仍允许缺失，不改变旧协议行为。
+- Docling ACK 已幂等：终态结果已经确认、TTL 过期或重启丢失时重复 DELETE 仍返回 204；运行中 job 仍返回 409。
+- 发布顺序为 `anchr-docling 双协议版本 -> V9 DDL -> anchr-app v2 请求`，不能让 App 先发送 v2。
+- `anchr-docling` 全量 20 项测试和 10 个 subtests 通过；改动文件 Ruff 通过。全仓 Ruff 当前有 15 个既有问题：核心 `src` 9 个、`scripts` 6 个。
+- `anchr-app` compile、test-compile 和全量测试通过：327 项，0 failure，0 error，16 skipped。16 项均为当前环境无 Docker 而跳过的 Testcontainers 测试；其中 V9 字段、显式 retry CAS 和旧 job fencing 的真实 MySQL 测试已编写但未在本机执行，上线前必须在有 Docker/真实 MySQL 的 CI 验收。
 
 ---
 
@@ -729,6 +744,8 @@ ingestion/{taskId}/{itemId}/parse/{parseAttempt}/parse-result.json.gz
 
 持久化引用后再 ACK。后续 embedding/index 从 artifact 恢复。
 
+当 ACK、TTL、容量淘汰或边车重启使 Docling 内存幂等记录消失时，状态机必须从数据库读取并复用 ANCHR-105 已持久化的 `parse_attempt/docling_request_id/source_revision` 和稳定解析参数重提；不得在恢复过程中静默生成新 parse attempt 或改变 sourceRevision。
+
 数据库调度上线后把 ingestion executor 改为 `AbortPolicy`；拒绝仅代表本轮未执行，任务仍可重新领取。
 
 ### 边界
@@ -742,6 +759,7 @@ ingestion/{taskId}/{itemId}/parse/{parseAttempt}/parse-result.json.gz
 - app 在 PARSE_WAIT、EMBED、INDEX 重启均可恢复。
 - 多实例不会同时推进同一 execution epoch/stage attempt。
 - Docling 429 不占用 Java worker。
+- Docling 记录在 ACK、TTL 或重启后丢失时，恢复仍复用同一 parse attempt 的持久身份。
 - executor 拒绝不会遗失任务。
 - stale worker 无法覆盖新 execution epoch。
 

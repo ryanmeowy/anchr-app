@@ -34,6 +34,7 @@ import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -169,16 +170,34 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1")).thenReturn(Optional.of(asset));
         when(objectStoragePort.buildDownloadUrl("images/image.png"))
                 .thenReturn("https://example.test/image.png");
-        when(doclingClient.parse(any())).thenReturn(parsed);
+        when(ingestionTaskRepository.prepareParseAttempt(
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq(1),
+                eq("task-1:item-1:1"), any(), any())).thenReturn(true);
+        when(ingestionTaskRepository.recordDoclingJob(
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq("task-1:item-1:1"),
+                eq("job-1"), any())).thenReturn(true);
+        when(doclingClient.parse(any(), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Consumer<DoclingClient.DoclingJob> accepted = invocation.getArgument(1);
+            accepted.accept(new DoclingClient.DoclingJob(
+                    "job-1", "task-1:item-1:1", "queued", null, null));
+            return parsed;
+        });
         when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of());
 
         processor.submit("kb-1", "task-1", "user-a");
 
         ArgumentCaptor<ParseRequest> requestCaptor = ArgumentCaptor.forClass(ParseRequest.class);
-        verify(doclingClient).parse(requestCaptor.capture());
+        verify(doclingClient).parse(requestCaptor.capture(), any());
         ParseRequest request = requestCaptor.getValue();
+        assertEquals(2, request.contractVersion());
+        assertEquals("task-1:item-1:1", request.requestId());
+        assertEquals(IngestionParseIdentity.sourceRevision(asset), request.sourceRevision());
         assertFalse(request.options().includeEmbeddedImages());
         assertNull(request.oss());
+        verify(ingestionTaskRepository).recordDoclingJob(
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq("task-1:item-1:1"),
+                eq("job-1"), any());
         verifyNoInteractions(storageConfigRepository, aesUtil);
         verify(ingestionTaskRepository).markItemFailed(
                 eq("kb-1"), eq("task-1"), eq("item-1"), eq("PARSE"), eq(10),

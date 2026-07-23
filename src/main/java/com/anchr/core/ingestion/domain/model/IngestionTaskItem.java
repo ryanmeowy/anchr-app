@@ -19,6 +19,11 @@ public class IngestionTaskItem {
     String fileName;
     String fileHash;
     String sourceUrl;
+    @Builder.Default
+    int parseAttempt = 1;
+    String doclingRequestId;
+    String doclingJobId;
+    String sourceRevision;
     IngestionStage stage;
     IngestionTaskItemStatus status;
     int progress;

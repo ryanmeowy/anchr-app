@@ -41,10 +41,24 @@ public interface IngestionTaskMapper {
     int resetFailedItem(@Param("kbId") String kbId,
                         @Param("taskId") String taskId,
                         @Param("itemId") String itemId,
+                        @Param("expectedParseAttempt") int expectedParseAttempt,
+                        @Param("nextParseAttempt") int nextParseAttempt,
+                        @Param("nextDoclingRequestId") String nextDoclingRequestId,
                         @Param("updatedAt") LocalDateTime updatedAt);
 
-    int resetFailedItems(@Param("kbId") String kbId,
+    int prepareParseAttempt(@Param("kbId") String kbId,
+                            @Param("taskId") String taskId,
+                            @Param("itemId") String itemId,
+                            @Param("parseAttempt") int parseAttempt,
+                            @Param("doclingRequestId") String doclingRequestId,
+                            @Param("sourceRevision") String sourceRevision,
+                            @Param("updatedAt") LocalDateTime updatedAt);
+
+    int recordDoclingJob(@Param("kbId") String kbId,
                          @Param("taskId") String taskId,
+                         @Param("itemId") String itemId,
+                         @Param("doclingRequestId") String doclingRequestId,
+                         @Param("doclingJobId") String doclingJobId,
                          @Param("updatedAt") LocalDateTime updatedAt);
 
     int markItemRunning(@Param("kbId") String kbId,
