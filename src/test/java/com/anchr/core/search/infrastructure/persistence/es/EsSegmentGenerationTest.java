@@ -3,10 +3,14 @@ package com.anchr.core.search.infrastructure.persistence.es;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
+import com.anchr.core.search.domain.model.SegmentType;
+import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import com.anchr.core.search.infrastructure.persistence.es.repository.EsSegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import org.junit.jupiter.api.Test;
@@ -20,6 +24,10 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,6 +66,31 @@ class EsSegmentGenerationTest {
         assertThat(generationFilter.should().get(1)
                 .bool().mustNot().getFirst().exists().field())
                 .isEqualTo("indexGeneration");
+    }
+
+    @Test
+    void assetTextListingShouldExcludeImageVisualSegments() throws IOException {
+        EsSegmentRepository repository = repository();
+        when(indexManager.status()).thenReturn(writable());
+        @SuppressWarnings("unchecked")
+        SearchResponse<SegmentDocument> response =
+                mock(SearchResponse.class, RETURNS_DEEP_STUBS);
+        when(response.hits().hits()).thenReturn(List.of());
+        when(client.search(any(SearchRequest.class), eq(SegmentDocument.class)))
+                .thenReturn(response);
+
+        repository.listByAssetId(
+                "kb-1", "asset-1", 3L, null, null, 20);
+
+        ArgumentCaptor<SearchRequest> request =
+                ArgumentCaptor.forClass(SearchRequest.class);
+        verify(client).search(request.capture(), eq(SegmentDocument.class));
+        var exclusions = request.getValue().query().bool().mustNot();
+        assertThat(exclusions).singleElement().satisfies(query -> {
+            assertThat(query.term().field()).isEqualTo("segmentType");
+            assertThat(query.term().value().stringValue())
+                    .isEqualTo(SegmentType.IMAGE_VISUAL.name());
+        });
     }
 
     private EsSegmentRepository repository() {

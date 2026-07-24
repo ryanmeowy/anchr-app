@@ -1,6 +1,7 @@
 package com.anchr.core.search.application.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.ClearScrollRequest;
@@ -16,6 +17,7 @@ import co.elastic.clients.json.JsonData;
 import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
 import com.anchr.core.search.domain.port.EmbeddingProfileProvider;
@@ -43,6 +45,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -512,7 +515,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private record MigrationDocument(String id, SegmentDocument document) {
     }
 
-    private record MigrationResult(long sourceCount, long migratedCount, long targetCount) {
+    private record MigrationResult(long sourceCount, long processedCount, long targetCount) {
     }
 
     private void doRebuild(EmbeddingProfile targetProfile, EmbeddingSession embeddingSession)
@@ -551,7 +554,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
             stateRef.updateAndGet(current -> current.withRebuildProgress(
                     new RebuildProgressState(
-                            migration.migratedCount(), migration.sourceCount(), "COMPLETED")));
+                            migration.processedCount(), migration.sourceCount(), "COMPLETED")));
 
             // Keep the old physical index as a rollback snapshot. Cleanup must be explicit.
             log.info("Rebuild: old index [{}] retained for rollback; new index [{}] has {} documents",
@@ -571,7 +574,10 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             EmbeddingProfile targetProfile,
             EmbeddingSession embeddingSession
     ) throws Exception {
-        long migrated = 0;
+        long processed = 0;
+        long projected = 0;
+        SegmentRebuildProjectionPlanner projectionPlanner =
+                new SegmentRebuildProjectionPlanner(targetProfile.capability());
         stateRef.updateAndGet(current -> current.withRebuildProgress(
                 new RebuildProgressState(0, totalDocs, "MIGRATING")));
 
@@ -581,6 +587,16 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     SearchRequest.of(s -> s
                             .index(oldIndex)
                             .size(SCROLL_BATCH_SIZE)
+                            .sort(sort -> sort.field(field -> field
+                                    .field("assetId").order(SortOrder.Asc)))
+                            .sort(sort -> sort.field(field -> field
+                                    .field("indexGeneration").order(SortOrder.Asc)
+                                    .missing("_first")))
+                            .sort(sort -> sort.field(field -> field
+                                    .field("segmentType").order(SortOrder.Desc)
+                                    .missing("_last")))
+                            .sort(sort -> sort.field(field -> field
+                                    .field("segmentId").order(SortOrder.Asc)))
                             .scroll(t -> t.time(SCROLL_KEEP_ALIVE_MINUTES + "m"))),
                     SegmentDocument.class);
 
@@ -589,14 +605,16 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
             while (!hits.isEmpty()) {
                 List<MigrationDocument> batch = prepareMigrationBatch(
-                        hits, targetProfile, embeddingSession);
+                        hits, targetProfile, embeddingSession, projectionPlanner);
                 writeMigrationBatch(newIndex, batch);
 
-                migrated += batch.size();
-                long migratedCount = migrated;
+                processed += hits.size();
+                projected += batch.size();
+                long processedCount = processed;
                 stateRef.updateAndGet(current -> current.withRebuildProgress(
-                        new RebuildProgressState(migratedCount, totalDocs, "MIGRATING")));
-                log.info("Rebuild: migrated {}/{} documents", migrated, totalDocs);
+                        new RebuildProgressState(processedCount, totalDocs, "MIGRATING")));
+                log.info("Rebuild: processed {}/{} source documents, projected {} target documents",
+                        processed, totalDocs, projected);
 
                 String currentScrollId = scrollId;
                 ScrollResponse<SegmentDocument> scrollResponse = esClient.scroll(
@@ -612,20 +630,21 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
         esClient.indices().refresh(r -> r.index(newIndex));
         long targetDocs = esClient.count(c -> c.index(newIndex)).count();
-        validateMigrationCounts(totalDocs, migrated, targetDocs);
+        validateMigrationCounts(totalDocs, processed, projected, targetDocs);
 
-        long migratedCount = migrated;
+        long processedCount = processed;
         stateRef.updateAndGet(current -> current.withRebuildProgress(
-                new RebuildProgressState(migratedCount, totalDocs, "SWITCHING_ALIAS")));
-        log.info("Rebuild: data migration validated, source={}, migrated={}, target={}",
-                totalDocs, migrated, targetDocs);
-        return new MigrationResult(totalDocs, migrated, targetDocs);
+                new RebuildProgressState(processedCount, totalDocs, "SWITCHING_ALIAS")));
+        log.info("Rebuild: data migration validated, source={}, projected={}, target={}",
+                totalDocs, projected, targetDocs);
+        return new MigrationResult(totalDocs, processed, targetDocs);
     }
 
     private List<MigrationDocument> prepareMigrationBatch(
             List<Hit<SegmentDocument>> hits,
             EmbeddingProfile targetProfile,
-            EmbeddingSession embeddingSession
+            EmbeddingSession embeddingSession,
+            SegmentRebuildProjectionPlanner projectionPlanner
     ) {
         List<MigrationDocument> batch = new ArrayList<>(hits.size());
         for (Hit<SegmentDocument> hit : hits) {
@@ -643,12 +662,28 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 document.setSegmentId(documentId);
             }
 
-            sleepUninterruptibly(EMBEDDING_CALL_INTERVAL_MS);
-            List<Float> embedding = computeNewEmbedding(
-                    document, documentId, targetProfile, embeddingSession);
-            validateEmbedding(documentId, embedding, targetProfile.dimension());
-            document.setEmbedding(embedding);
-            batch.add(new MigrationDocument(documentId, document));
+            List<SegmentRebuildProjectionPlanner.PlannedDocument> planned =
+                    projectionPlanner.plan(documentId, document);
+            for (SegmentRebuildProjectionPlanner.PlannedDocument target : planned) {
+                EmbeddingProjection projection = target.projection();
+                if (projection != null) {
+                    sleepUninterruptibly(EMBEDDING_CALL_INTERVAL_MS);
+                    String source = projection.inputType()
+                            == EmbeddingProjection.InputType.IMAGE
+                            ? resolveRebuildImageInput(projection.source())
+                            : projection.source();
+                    List<Float> embedding = callEmbeddingWithRetry(
+                            () -> embeddingSession.embed(
+                                    source, projection.inputType().requestValue()),
+                            target.id(),
+                            projection.inputType().requestValue());
+                    validateEmbedding(
+                            target.id(), embedding, targetProfile.dimension());
+                    target.document().setEmbedding(embedding);
+                }
+                batch.add(new MigrationDocument(
+                        target.id(), target.document()));
+            }
         }
         return batch;
     }
@@ -688,34 +723,18 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         return item.id() + "=" + item.error().reason();
     }
 
-    private List<Float> computeNewEmbedding(
-            SegmentDocument doc,
-            String documentId,
-            EmbeddingProfile targetProfile,
-            EmbeddingSession embeddingSession
-    ) {
-        boolean image = "IMAGE".equalsIgnoreCase(doc.getAssetType());
-        boolean targetSupportsImage = "MULTI_EMBEDDING".equalsIgnoreCase(targetProfile.capability());
-        if (image && targetSupportsImage) {
-            if (!StringUtils.hasText(doc.getThumbnail())) {
-                throw new IllegalStateException(
-                        "Rebuild IMAGE document " + documentId + " has no thumbnail");
-            }
-            String imageUrl = storagePort.buildAiImageInput(doc.getThumbnail(),
-                    SearchObjectStoragePort.AiInputValidity.SHORT);
-            return callEmbeddingWithRetry(
-                    () -> embeddingSession.embed(imageUrl, "image"), documentId, "image");
-        }
-
-        String text = StringUtils.hasText(doc.getContentText())
-                ? doc.getContentText()
-                : doc.getOcrText();
-        if (!StringUtils.hasText(text)) {
+    String resolveRebuildImageInput(String stableSource) {
+        if (!StringUtils.hasText(stableSource)) {
             throw new IllegalStateException(
-                    "Rebuild document " + documentId + " has no text content for embedding");
+                    "Rebuild IMAGE_VISUAL has no stable original image source.");
         }
-        return callEmbeddingWithRetry(
-                () -> embeddingSession.embed(text, "text"), documentId, "text");
+        String normalized = stableSource.trim();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            return normalized;
+        }
+        return storagePort.buildAiImageInput(
+                normalized, SearchObjectStoragePort.AiInputValidity.SHORT);
     }
 
     static void validateEmbedding(String documentId, List<Float> embedding, int expectedDim) {
@@ -783,12 +802,19 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
     }
 
-    static void validateMigrationCounts(long sourceDocs, long migratedDocs, long targetDocs) {
-        if (sourceDocs != migratedDocs || sourceDocs != targetDocs) {
+    static void validateMigrationCounts(
+            long sourceDocs,
+            long processedSourceDocs,
+            long projectedTargetDocs,
+            long actualTargetDocs
+    ) {
+        if (sourceDocs != processedSourceDocs
+                || projectedTargetDocs != actualTargetDocs) {
             throw new IllegalStateException(
                     "Rebuild document count mismatch: source=" + sourceDocs
-                            + ", migrated=" + migratedDocs
-                            + ", target=" + targetDocs);
+                            + ", processed=" + processedSourceDocs
+                            + ", projected=" + projectedTargetDocs
+                            + ", target=" + actualTargetDocs);
         }
     }
 

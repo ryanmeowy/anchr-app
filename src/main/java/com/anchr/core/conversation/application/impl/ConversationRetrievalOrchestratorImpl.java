@@ -118,7 +118,8 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
                 .score(topChunk == null ? item.getScore() : topChunk.getScore())
                 .pageNo(topChunk == null ? item.getPageNo() : topChunk.getPageNo())
                 .anchor(toCandidateAnchor(topChunk == null ? item.getAnchor() : topChunk.getAnchor()))
-                .explain(toCandidateExplain(item.getExplain()))
+                .explain(toCandidateExplain(topChunk == null
+                        ? item.getExplain() : topChunk.getExplain()))
                 .build();
     }
 

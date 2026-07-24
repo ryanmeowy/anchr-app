@@ -24,7 +24,7 @@
 | ID | 任务 | 状态 | 优先级 | 规模 | 项目 | 依赖 |
 |---|---|---|---:|---:|---|---|
 | ANCHR-101A | 修复当前单向量结构下图片分块未写入向量 | 已完成 | P0 | S | app | 无 |
-| ANCHR-101B | 固化单 embedding 的 Profile 投影与检索契约 | 待执行 | P1 | M | app | 101A、107 |
+| ANCHR-101B | 固化单 embedding 的 Profile 投影与检索契约 | 源码与目标测试已完成；待真实 ES 隔离索引验证与部署验收 | P1 | M | app | 101A、107 |
 | ANCHR-101C | 建立 Embedding Profile 部署与物理索引安全切换 | 待执行 | P1 | L | app、web | 101B、107 |
 | ANCHR-102 | 建立正确的 HTTP 错误与上传清理契约 | 已完成 | P0 | M | app、web | 无 |
 | ANCHR-103 | Ingestion 创建请求幂等与前端恢复 | 已完成 | P0 | M | app、web | 102 |
@@ -58,7 +58,7 @@
 | 主责卡 | 唯一拥有 | 只消费 | 明确不负责 |
 |---|---|---|---|
 | 101A | 当前单向量结构下 IMAGE 的分支前置条件、输入选择和向量回写 | 现有 Asset/Chunk/embedding 接口 | OCR+图片双 dense 写入、检索重构、模型切换 |
-| 101B | 单 `embedding` 的 Profile 投影 Policy、图片视觉投影单元、共享向量空间和来源契约 | 现有 BM25/RRF/Rerank；101A 的单载体线上修复；107 的确定性 ID | desired/serving profile、物理索引迁移、第二向量字段、文档内嵌图片制品/召回配额、分页快照、Asset generation |
+| 101B | 单 `embedding` 的 Profile 投影 Policy、图片视觉投影单元、同一模型配置和来源契约 | 现有 BM25/RRF/Rerank；101A 的单载体线上修复；107 的确定性 ID | desired/serving profile、物理索引迁移、第二向量字段、文档内嵌图片制品/召回配额、分页快照、Asset generation |
 | 101C | desired/serving/target profile、physical index version、重建、alias 切换、回滚 | 101B 的单向量投影 Policy；107 的变更序列/幂等写入 | 投影输入规则、第二路 KNN、Asset generation、搜索 cursor/snapshot |
 | 102 | HTTP status/error metadata 与 OSS 清理许可契约 | 各业务卡提供的 errorCode 语义 | 创建幂等、任务恢复和业务重试策略 |
 | 103 | `clientRequestId/requestHash` 和创建响应丢失恢复 | 102 的错误元数据 | Docling attempt、任务执行调度、ES 幂等 |
@@ -100,7 +100,7 @@
 |---|---|---|---|
 | Ingestion create/processor / 后续 stage handler | 101A、103、104、105、106、106B、107、101B、101C、110 | 101A → 104 → 105；102 → 103；两路汇合 → 106 → 106B → 107 → 101B → 101C → 110 | 图片分支/向量回写；创建幂等；关闭 STS 支线；Parse 协议；可恢复状态机；normalized execution/artifact 边界；Asset generation/确定性 ID；单向量 Policy；profile 部署；内嵌图片投影 |
 | `Segment` / `SegmentDocument` / mapping / bulk writer | 107、101B、101C、110 | 107 → 101B → 101C → 110 | Asset generation/确定性 ID → 单向量投影契约 → 物理索引部署 → 内嵌图片 schema/回填 |
-| `UnifiedSearchServiceImpl` / ES repository | 107、101B、110、108、206 | 107 → 101B → 110 → 108 → 206 | active generation 过滤 → 共享向量空间 → 图片分路召回/父资产聚合 → 结果快照 → 机械拆分 |
+| `UnifiedSearchServiceImpl` / ES repository | 107、101B、110、108、206 | 107 → 101B → 110 → 108 → 206 | active generation 过滤 → 同一模型与单向量字段 → 图片分路召回/父资产聚合 → 结果快照 → 机械拆分 |
 | Search/Conversation result DTO 与 Preview | 110、202、206 | 110 → 202 → 206 | 图片命中与父文档预览语义 → DTO 边界迁移 → 机械拆分 |
 | Capability settings / `SegmentIndexManagerImpl` | 101C、203、206 | 101C → 203 → 206 | profile 部署状态机 → 依赖倒置 → 机械拆分 |
 | `ConversationServiceImpl` / Session repository | 109、202、204、206 | 109 → 202 → 204 → 206 | keyset/CAS 结果 → DTO 边界 → 领域方法 → 机械拆分 |
@@ -173,7 +173,7 @@ IMAGE
 ├─ 文本资产：chunkText → embedding
 └─ 图片资产：非空 ocrText → embedding；无 OCR 则无 dense 向量
 
-多模态 embedding profile（文本/图片共享向量空间）
+多模态 embedding profile
 ├─ 文本资产：chunkText → embedding
 └─ 图片资产：N 条 OCR chunk → 只写 ocrText，不生成 OCR dense vector
              1 条 IMAGE_VISUAL 投影 → 原始图片 → embedding
@@ -182,7 +182,7 @@ IMAGE
 成立前提：
 
 1. 纯文本与多模态 embedding 配置互斥，同一时刻只有一个 serving profile。
-2. 多模态模型明确保证文本输入和图片输入输出在同一维度、同一可比较空间。
+2. 多模态文本请求和图片请求使用同一个已启用的 `modelName/dimensions`；应用不再额外判断模型内部实现。
 3. 一个物理索引只包含同一 profile fingerprint 生成的向量；切换模型必须由 101C 重建，不能混写。
 4. 当前产品不要求多模态模式下同时执行“OCR dense recall + visual dense recall”；OCR 通过 `ocrText` BM25 和 Rerank 文本参与检索。
 
@@ -224,12 +224,12 @@ EmbeddingProjection {
 4. 纯文本 profile 不产生 `IMAGE_VISUAL` 投影；有文本的图片 OCR chunks 各自使用 `ocrText` 生成现有单 `embedding`，无 OCR 的 chunk 保持无向量。从多模态切到纯文本时由 101C 重建目标索引，不能把旧视觉向量复制到 OCR 记录。
 5. Query 固定以 `sourceType=TEXT` 使用当前 serving profile 生成 query vector；多模态 profile 下，该文本 query vector与同一 `embedding` 字段中的文本/图片向量比较。
 6. ES mapping 继续只有一个 `embedding`，维度来自 profile；`_source` 普通读取继续排除该字段。
-7. BM25 继续检索 `title/contentText/ocrText`，基线 KNN 继续检索唯一 `embedding` 字段，再按现有 RRF/Rerank 流程融合；本卡不增加按业务类型分配召回配额，该行为归 ANCHR-110。
+7. BM25 继续检索有正文的 Segment 的 `title/contentText/ocrText`，没有正文的 `IMAGE_VISUAL` 不进入 BM25；基线 KNN 继续检索唯一 `embedding` 字段，再按现有 RRF/Rerank 流程融合。本卡不调整 RRF/Rerank 参数，也不增加按业务类型分配召回配额，该行为归 ANCHR-110。
 8. 可增加非向量元数据 `embeddingSourceKind` 用于覆盖率、重建校验和问题定位，但它不能参与决定 profile，也不能替代 physical index metadata。
 
 ### 边界
 
-本卡负责单向量投影规则、`IMAGE_VISUAL` 投影单元、Ingestion/Rebuild 共用 Policy、唯一向量字段契约和输入来源指标；不改变模型启用时序、profile 部署状态、physical index rebuild/alias、Asset generation、Search Snapshot 或 RRF 参数。`IMAGE_VISUAL` 的确定性 ID 和可见性消费 107，不在本卡重新定义 generation。ANCHR-110 只能消费本卡 Policy 为文档内嵌图片生成向量，并可在同一字段上增加按 `segmentType` 过滤的召回通道；不得复制或改写投影规则。
+本卡负责单向量投影规则、`IMAGE_VISUAL` 投影单元、Ingestion/Rebuild 共用 Policy、唯一向量字段和输入来源契约；不改变模型启用时序、profile 部署状态、physical index rebuild/alias、Asset generation、Search Snapshot 或 RRF 参数。`IMAGE_VISUAL` 的确定性 ID 和可见性消费 107，不在本卡重新定义 generation。ANCHR-110 只能消费本卡 Policy 为文档内嵌图片生成向量，并可在同一字段上增加按 `segmentType` 过滤的召回通道；不得复制或改写投影规则。
 
 101A 只修当前线上分支提前跳过和重复视觉向量的缺陷，使用首个有效 OCR chunk 作为兼容载体；101B 再把 Asset 级视觉信号从 OCR chunk 中拆成唯一 `IMAGE_VISUAL` 投影并收口成统一 Policy。101C 消费 Policy 对目标索引重新生成投影和 `embedding`，但不能复制其输入选择规则。
 
@@ -239,9 +239,20 @@ EmbeddingProjection {
 - 多模态 profile：文本 chunk 使用文本输入；每个图片 Asset 恰好一条 `IMAGE_VISUAL` 记录使用原图输入；任意数量 OCR chunks 只保存 `ocrText`，不含 dense vector。
 - 一个图片 Asset 不会因 Docling 返回多个 OCR chunks 而在 KNN topK 中出现重复的原图向量记录。
 - Ingestion 与 rebuild 对同一 fixture 产生相同 `sourceType/sourceKind`，不存在路径漂移。
-- 多模态文本 query 可在同一个 KNN route 召回文本与图片 fixture，前提是模型 contract test 证明共享空间和相同维度。
+- 多模态文本 query 使用 `sourceType=text`，`IMAGE_VISUAL` 使用 `sourceType=image`；两者使用同一个已启用的 `modelName/dimensions` 和同一个 `embedding` 字段。
 - ES mapping 仍只有一个 dense vector；没有新增 `textEmbedding/imageEmbedding`。本卡基线保持一条 KNN，后续 ANCHR-110 的同字段分路召回单独验收。
 - BM25/RRF/Rerank 的既有输入和顺序不变，相关性基线不回退。
+
+### 实施与验证记录（2026-07-24）
+
+- Ingestion 已按上述矩阵直接生成 `Segment`：普通文本在两种 profile 下都以 `chunkText` 调用 `sourceType=text`；文本 profile 的图片仅对非空 `ocrText` 生成向量；多模态 profile 的图片保留全部 OCR Segment，并按 `assetId + indexGeneration` 额外生成且只生成一条 `IMAGE_VISUAL`，原图只调用一次 `sourceType=image`。图片没有 OCR 时仍可生成视觉向量；图片向量为空会使当前 item 失败。
+- Ingestion 与索引重建共用 `EmbeddingProjectionPolicy`。重建到文本 profile 时删除旧 `IMAGE_VISUAL`、按非空 OCR 重新生成文本向量；重建到多模态 profile 时清空 OCR 旧向量，并从原始 `sourceRef` 重新生成一条视觉记录。跨 scroll batch 复用同一个 Planner，不会为同一 `assetId + indexGeneration` 重复生成视觉记录。
+- ES 仍只有一个 `embedding` 字段。文本查询固定调用 `sourceType=text`；KNN 仍检索该字段且保留 `IMAGE_VISUAL`。`IMAGE_VISUAL` 不进入 BM25，不改 RRF/Rerank 参数和执行顺序。
+- `IMAGE_VISUAL` 可以作为搜索命中展示并通过 `sourceRef` 预览原图，但它没有正文，不进入 Search Answer、普通 Ask 的回答候选或 Agent 可引用证据。资产聚合后每个 TopChunk 保留自己的命中原因；视觉命中排第一时，同资产 OCR 仍可用于回答、引用和追问。全文读取 `listByAssetId` 排除视觉记录；普通 ES `_source` 读取排除 `embedding`。
+- `asset.segment_count/indexed_segment_count` 只统计用户可读的 OCR/文本 Segment，不把内部 `IMAGE_VISUAL` 投影计入“片段数量”。删除仍按 Asset 或 generation 执行，视觉记录会与同代数据一起删除。
+- 本卡未增加数据库表或 migration，未修改 `anchr-web`、`anchr-docling` 生产代码，也未增加第二向量字段。
+- 验证：`mvn test-compile` 通过；101B 的 23 个目标测试类共 88 个测试全部通过；全仓共执行 497 个测试，0 failure、0 error，其中 27 个依赖 Docker/Testcontainers 的测试因当前机器没有 Docker 而跳过。
+- 尚未在真实 Elasticsearch 上执行隔离索引的完整 rebuild、alias 前校验、实际 KNN 查询和结果相关性回归，也未执行部署观察。因此本卡当前状态是“源码与目标测试已完成”，不是已经发布；真实 ES 与部署验收完成前不标记为“已完成”。
 
 ---
 
@@ -1806,7 +1817,7 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 - ANCHR-101B：单 `embedding`、统一 Projection Policy、唯一向量字段和输入来源指标。
 
-使用隔离索引验证单 `embedding` mapping 和共享空间 contract，保留 107 的 generation/ID/可见性契约；本 Wave 不新增向量字段、不切换生产 alias。
+使用隔离索引验证：文本请求和图片请求使用同一个多模态模型配置，查询和写入都只访问 `embedding` 字段；保留 107 的 generation/ID/可见性规则。本 Wave 不新增向量字段、不切换生产 alias。
 
 ### Wave 7：Embedding Profile 部署
 
@@ -1855,7 +1866,7 @@ Wave 0
 |---|---|---|---|
 | IMAGE + 文本模型 OCR embedding（101A） | 分支输入、单元、ES 集成 | 图片/OCR 搜索回归 | OCR fixture |
 | IMAGE + 多模态模型视觉 embedding（101A） | 每 Asset 一次调用、单载体回写、无重复 KNN 候选、失败传播 | 图片视觉搜索回归 | 原图输入与多 chunk 契约 |
-| 单 embedding Profile 投影（101B） | Ingestion/Rebuild 同源 Policy、唯一向量字段、BM25/RRF 基线不变 | 文本/OCR/图片结果回归 | 文本与图片共享空间 contract |
+| 单 embedding Profile 投影（101B） | Ingestion/Rebuild 使用同一规则、文本和图片请求共用同一个 `modelName/dimensions`、唯一向量字段、BM25/RRF 基线不变 | 文本/OCR/图片结果回归 | 不涉及 |
 | 多模态 → 纯文本切换（101C） | serving/target profile、增量追平、alias、回滚 | 切换期间搜索/上传连续性 | 不涉及 |
 | 同维度不同模型切换 | fingerprint 门禁、禁止跨空间查询 | 相关性回归 | 不涉及 |
 | 无 OCR 图片切换影响 | 覆盖率报告、TEXT_VECTOR_UNAVAILABLE | 降级确认展示（如产品提供） | OCR 重试 fixture |
@@ -1885,7 +1896,7 @@ Wave 0
 6. 覆盖网络超时、服务重启、重复请求、并发和部分成功故障注入。
 7. 明确区分通过项、环境阻塞和仓库既有失败。
 8. 不修改与任务无关的现有工作区变更。
-9. ANCHR-101B 必须验证 Ingestion/Rebuild 投影一致、单 `embedding` mapping、共享空间 contract 和既有相关性基线；不得隐式增加第二向量字段或承担 110 的业务召回配额。
+9. ANCHR-101B 必须验证 Ingestion/Rebuild 对文本、OCR、原图使用相同的输入规则；多模态文本和图片请求使用同一个 `modelName/dimensions`；ES 只有一个 `embedding` 字段；既有 BM25/RRF/Rerank 顺序不变。不得增加第二向量字段或承担 110 的业务召回配额。
 10. ANCHR-101C 必须验证 profile fingerprint、同维不同模型、切换期间增量写入、短写屏障、alias 切换和回滚。
 11. ANCHR-106B 必须在真实 MySQL 上验证 fresh→V18 与 normalized V15→V18 两条路径、17 列 item、无 ingestion CHECK/FK、窄查询、坏 ownership/旧 execution 不可领取、公开投影兼容和部署稳定性；不得改变 106 的 retry/lease/stale-worker 业务结果。
 12. ANCHR-107 必须验证 generation 激活门禁、确定性 ID、部分 bulk、变化重放和清理失败，不承担 101C 的 physical index 验收。

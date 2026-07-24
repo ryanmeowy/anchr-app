@@ -66,8 +66,27 @@ class DoclingChunkMapperTest {
 
         assertThat(first)
                 .matches("[0-9a-f]{64}")
+                .isEqualTo(
+                        "da1466f17471b069bbd3ca625acae5ad8485a895399a0afcaee59c3ca89050ee")
                 .isEqualTo(retried)
                 .isNotEqualTo(nextGeneration);
+    }
+
+    @Test
+    void toTextChunks_shouldKeepStableSourceUrlWhenObjectKeyIsMissing() {
+        Asset asset = Asset.builder()
+                .id("asset-1")
+                .kbId("kb-1")
+                .fileName("remote.png")
+                .fileType("IMAGE")
+                .sourceUrl("https://cdn.example.test/remote.png")
+                .build();
+
+        Chunk result = mapper.toTextChunks(
+                asset, response("image", "recognized text"), 1L).getFirst();
+
+        assertThat(result.getSourceRef())
+                .isEqualTo("https://cdn.example.test/remote.png");
     }
 
     @Test

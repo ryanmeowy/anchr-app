@@ -59,6 +59,7 @@ public class SearchResultDTO implements Serializable {
         private String title;
         private String content;
         private String snippet;
+        private SearchExplainDTO explain;
         private Double score;
         private Integer pageNo;
         private Anchor anchor;

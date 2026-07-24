@@ -2,6 +2,7 @@ package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.model.ParseRequest;
 import com.anchr.core.common.model.ParseResponse;
+import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
 import com.anchr.core.ingestion.application.artifact.IngestionStoredArtifact;
@@ -25,6 +26,9 @@ import com.anchr.core.integration.storage.StorageTokenIssuer;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
+import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentIdentity;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -499,7 +503,7 @@ class IngestionTaskProcessorImplTest {
     }
 
     @Test
-    void embed_shouldHandCompletedChunksDirectlyToIndexUnderTheSameLease() {
+    void embedWithMultimodalModel_shouldUseTextInputForOrdinaryDocument() {
         IngestionTaskItem item = claimed(IngestionExecutionStage.EMBED).toBuilder()
                 .parseResultObjectKey("parse-result.gz")
                 .sourceRevision("v1:revision")
@@ -517,7 +521,7 @@ class IngestionTaskProcessorImplTest {
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
         when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
                 .thenReturn(List.of(chunk));
-        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.isMulti()).thenReturn(true);
         when(embeddingPort.embed("body text", "text"))
                 .thenReturn(List.of(0.1f, 0.2f));
         when(ingestionTaskRepository.renewClaim(
@@ -530,7 +534,6 @@ class IngestionTaskProcessorImplTest {
 
         processor.processClaim(item);
 
-        assertThat(chunk.getEmbedding()).containsExactly(0.1f, 0.2f);
         verify(ingestionTaskRepository, times(3)).renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
                 eq(2L), eq("lease-1"), anyLong());
@@ -544,12 +547,19 @@ class IngestionTaskProcessorImplTest {
         verify(embeddingPort, times(1)).embed("body text", "text");
         ArgumentCaptor<IngestionTaskItem> indexClaim =
                 ArgumentCaptor.forClass(IngestionTaskItem.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Segment>> segments =
+                ArgumentCaptor.forClass(List.class);
         verify(ingestionIndexFinalizer).finalizeIndex(
-                indexClaim.capture(), eq(asset), any());
+                indexClaim.capture(), eq(asset), segments.capture());
         assertThat(indexClaim.getValue().getExecutionStage())
                 .isEqualTo(IngestionExecutionStage.INDEX);
         assertThat(indexClaim.getValue().getClaimVersion()).isEqualTo(item.getClaimVersion());
         assertThat(indexClaim.getValue().getLeaseToken()).isEqualTo(item.getLeaseToken());
+        assertThat(segments.getValue()).singleElement().satisfies(segment -> {
+            assertThat(segment.getSegmentType()).isEqualTo(SegmentType.TEXT_CHUNK);
+            assertThat(segment.getEmbedding()).containsExactly(0.1f, 0.2f);
+        });
     }
 
     @Test
@@ -567,8 +577,6 @@ class IngestionTaskProcessorImplTest {
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
         when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
                 .thenReturn(List.of(blankOcr, textOcr));
-        when(objectStoragePort.buildDownloadUrl("images/image.png"))
-                .thenReturn("https://signed.example.test/image.png");
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("detected text", "text"))
                 .thenReturn(List.of(0.3f, 0.4f));
@@ -580,9 +588,21 @@ class IngestionTaskProcessorImplTest {
 
         processor.processClaim(item);
 
-        assertThat(blankOcr.getEmbedding()).isNull();
-        assertThat(textOcr.getEmbedding()).containsExactly(0.3f, 0.4f);
+        List<Segment> segments = capturedSegments(asset);
+        assertThat(segments).hasSize(2);
+        assertThat(segments).allMatch(segment ->
+                segment.getSegmentType() == SegmentType.IMAGE_OCR_BLOCK);
+        assertThat(segments).filteredOn(segment ->
+                        "segment-1".equals(segment.getSegmentId()))
+                .singleElement()
+                .satisfies(segment -> assertThat(segment.getEmbedding()).isNull());
+        assertThat(segments).filteredOn(segment ->
+                        "segment-2".equals(segment.getSegmentId()))
+                .singleElement()
+                .satisfies(segment -> assertThat(segment.getEmbedding())
+                        .containsExactly(0.3f, 0.4f));
         verify(embeddingPort, times(1)).embed("detected text", "text");
+        verify(objectStoragePort, never()).buildDownloadUrl(any());
         verify(transactionCoordinator).transitionAndUpdateAssetStatus(
                 any(), eq(asset), eq("SUCCESS"), eq("RUNNING"));
     }
@@ -601,8 +621,6 @@ class IngestionTaskProcessorImplTest {
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
         when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
                 .thenReturn(List.of(blankOcr));
-        when(objectStoragePort.buildDownloadUrl("images/image.png"))
-                .thenReturn("https://signed.example.test/image.png");
         when(embeddingPort.isMulti()).thenReturn(false);
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
@@ -612,22 +630,37 @@ class IngestionTaskProcessorImplTest {
 
         processor.processClaim(item);
 
-        assertThat(blankOcr.getEmbedding()).isNull();
+        assertThat(capturedSegments(asset)).singleElement().satisfies(segment -> {
+            assertThat(segment.getSegmentType())
+                    .isEqualTo(SegmentType.IMAGE_OCR_BLOCK);
+            assertThat(segment.getEmbedding()).isNull();
+        });
         verify(embeddingPort, never()).embed(any(), any());
+        verify(objectStoragePort, never()).buildDownloadUrl(any());
         verify(transactionCoordinator).transitionAndUpdateAssetStatus(
                 any(), eq(asset), eq("SUCCESS"), eq("RUNNING"));
     }
 
     @Test
-    void embedImageWithMultimodalModel_shouldUseOneCarrierChunk() {
+    void embedImageWithMultimodalModel_shouldCreateOneAssetVisualSegment() {
         IngestionTaskItem item = claimed(IngestionExecutionStage.EMBED).toBuilder()
                 .parseResultObjectKey("parse-result.gz")
                 .sourceRevision("v1:revision")
                 .build();
         Asset asset = imageAsset();
         ParseResponse parsed = parsedResponse("task-1:item-1:1");
-        Chunk first = imageChunk("segment-1", "first");
-        Chunk second = imageChunk("segment-2", "second");
+        BboxInfo firstBox = BboxInfo.builder()
+                .pageNo(1)
+                .bbox(BboxInfo.Bbox.builder()
+                        .l(1).t(2).r(3).b(4).build())
+                .build();
+        Chunk first = imageChunk("segment-1", " ");
+        first.setPageNo(1);
+        first.setChunkOrder(4);
+        first.setBboxInfos(List.of(firstBox));
+        Chunk second = imageChunk("segment-2", null);
+        second.setPageNo(2);
+        second.setChunkOrder(8);
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
@@ -646,10 +679,81 @@ class IngestionTaskProcessorImplTest {
 
         processor.processClaim(item);
 
-        assertThat(first.getEmbedding()).containsExactly(0.8f, 0.9f);
-        assertThat(second.getEmbedding()).isNull();
+        List<Segment> segments = capturedSegments(asset);
+        assertThat(segments).hasSize(3);
+        assertThat(segments).filteredOn(segment ->
+                        segment.getSegmentType() == SegmentType.IMAGE_OCR_BLOCK)
+                .hasSize(2)
+                .allSatisfy(segment -> assertThat(segment.getEmbedding()).isNull());
+        assertThat(segments).filteredOn(segment ->
+                        segment.getSegmentType() == SegmentType.IMAGE_OCR_BLOCK)
+                .extracting(
+                        Segment::getSegmentId,
+                        Segment::getOcrText,
+                        Segment::getPageNo,
+                        Segment::getChunkOrder)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                "segment-1", " ", 1, 4),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "segment-2", null, 2, 8));
+        assertThat(segments).filteredOn(segment ->
+                        "segment-1".equals(segment.getSegmentId()))
+                .singleElement()
+                .satisfies(segment -> assertThat(segment.getBbox())
+                        .containsExactly(firstBox));
+        assertThat(segments).filteredOn(segment ->
+                        segment.getSegmentType() == SegmentType.IMAGE_VISUAL)
+                .singleElement()
+                .satisfies(segment -> {
+                    assertThat(segment.getSegmentId()).isEqualTo(
+                            SegmentIdentity.imageVisual("asset-1", 1L));
+                    assertThat(segment.getEmbedding()).containsExactly(0.8f, 0.9f);
+                    assertThat(segment.getOcrText()).isNull();
+                    assertThat(segment.getChunkOrder()).isNull();
+                    assertThat(segment.getSourceRef()).isEqualTo("images/image.png");
+                });
         verify(embeddingPort, times(1))
                 .embed("https://signed.example.test/image.png", "image");
+    }
+
+    @Test
+    void embedImageWithMultimodalModel_shouldFailWhenImageEmbeddingIsEmpty() {
+        IngestionTaskItem item = claimed(IngestionExecutionStage.EMBED)
+                .toBuilder()
+                .parseResultObjectKey("parse-result.gz")
+                .sourceRevision("v1:revision")
+                .build();
+        Asset asset = imageAsset();
+        ParseResponse parsed = parsedResponse("task-1:item-1:1");
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(artifactStore.readParseResult(item)).thenReturn(parsed);
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(imageChunk("segment-1", null)));
+        when(objectStoragePort.buildDownloadUrl("images/image.png"))
+                .thenReturn("https://signed.example.test/image.png");
+        when(embeddingPort.isMulti()).thenReturn(true);
+        when(embeddingPort.embed(
+                "https://signed.example.test/image.png", "image"))
+                .thenReturn(List.of());
+        when(ingestionTaskRepository.renewClaim(
+                eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        when(transactionCoordinator.transitionFailed(
+                any(), eq(asset), any(), any(), anyInt(), anyInt()))
+                .thenReturn(true);
+
+        processor.processClaim(item);
+
+        ArgumentCaptor<IngestionClaimTransition> failed =
+                ArgumentCaptor.forClass(IngestionClaimTransition.class);
+        verify(transactionCoordinator).transitionFailed(
+                failed.capture(), eq(asset), eq("FAILED"), eq("FAILED"),
+                eq(0), eq(0));
+        assertThat(failed.getValue().getErrorCode())
+                .isEqualTo("EMBEDDING_RESULT_EMPTY");
+        verifyNoInteractions(ingestionIndexFinalizer);
     }
 
     @Test
@@ -763,7 +867,8 @@ class IngestionTaskProcessorImplTest {
 
         processor.processClaim(item);
 
-        assertThat(chunk.getEmbedding()).containsExactly(0.1f);
+        assertThat(capturedSegments(asset)).singleElement().satisfies(segment ->
+                assertThat(segment.getEmbedding()).containsExactly(0.1f));
         verify(artifactStore).readParseResult(item);
         verify(embeddingPort).embed("body", "text");
         verifyNoInteractions(doclingClient);
@@ -863,6 +968,15 @@ class IngestionTaskProcessorImplTest {
                 .isEqualTo(IngestionExecutionStage.FAILED);
         assertThat(transition.getValue().getErrorCode())
                 .isEqualTo("DOCUMENT_NOT_FOUND");
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Segment> capturedSegments(Asset asset) {
+        ArgumentCaptor<List<Segment>> segments =
+                ArgumentCaptor.forClass(List.class);
+        verify(ingestionIndexFinalizer).finalizeIndex(
+                any(IngestionTaskItem.class), eq(asset), segments.capture());
+        return segments.getValue();
     }
 
     private IngestionTaskProcessorImpl processor(Executor executor) {

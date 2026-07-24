@@ -12,6 +12,7 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import org.junit.jupiter.api.BeforeEach;
@@ -133,6 +134,10 @@ class SegmentBulkWriterTest {
                 document -> {
                     assertThat(document.getSegmentId()).isEqualTo("segment-1");
                     assertThat(document.getIndexGeneration()).isEqualTo(9L);
+                    assertThat(document.getSegmentType())
+                            .isEqualTo(SegmentType.IMAGE_VISUAL.name());
+                    assertThat(document.getEmbedding())
+                            .containsExactly(0.1f, 0.2f);
                 });
     }
 
@@ -142,6 +147,8 @@ class SegmentBulkWriterTest {
                 .kbId("kb-1")
                 .assetId("asset-1")
                 .indexGeneration(indexGeneration)
+                .segmentType(SegmentType.IMAGE_VISUAL)
+                .embedding(List.of(0.1f, 0.2f))
                 .build();
     }
 

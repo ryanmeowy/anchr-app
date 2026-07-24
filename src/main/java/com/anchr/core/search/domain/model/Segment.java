@@ -10,7 +10,7 @@ import java.util.List;
  * Unified retrieval unit for both text and image assets.
  */
 @Value
-@Builder
+@Builder(toBuilder = true)
 public class Segment {
 
     String segmentId;

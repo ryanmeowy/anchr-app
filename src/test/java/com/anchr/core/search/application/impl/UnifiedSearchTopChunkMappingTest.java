@@ -4,7 +4,9 @@ import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchRerankPort;
+import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -25,6 +27,39 @@ import static org.mockito.Mockito.when;
 class UnifiedSearchTopChunkMappingTest {
 
     @Test
+    void visualProjectionShouldRemainAResultWithoutPretendingItsTitleIsEvidence() {
+        UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
+                null, null, null, null, null, null, null, null);
+        Segment segment = Segment.builder()
+                .segmentId("visual-1")
+                .assetId("asset-1")
+                .segmentType(SegmentType.IMAGE_VISUAL)
+                .title("architecture.png")
+                .sourceRef("images/architecture.png")
+                .build();
+        SegmentRerankCandidate candidate = new SegmentRerankCandidate(
+                "visual-1",
+                segment,
+                Map.of("title", "architecture.png"),
+                0.9D,
+                0.9D,
+                1,
+                true);
+
+        SearchResultDTO result = ReflectionTestUtils.invokeMethod(
+                service, "toResult", candidate, "architecture");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getSegmentType())
+                .isEqualTo(SegmentType.IMAGE_VISUAL.name());
+        assertThat(result.getTitle()).isEqualTo("architecture.png");
+        assertThat(result.getSourceRef())
+                .isEqualTo("images/architecture.png");
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getSnippet()).isEmpty();
+    }
+
+    @Test
     void toTopChunk_shouldKeepOriginalContentAndDocumentPosition() {
         UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
                 null, null, null, null, null, null, null, null);
@@ -33,6 +68,9 @@ class UnifiedSearchTopChunkMappingTest {
                 .title("2.1 Retrieval")
                 .content("full original content")
                 .snippet("short snippet")
+                .explain(SearchExplainDTO.builder()
+                        .hitSources(List.of("OCR"))
+                        .build())
                 .pageNo(3)
                 .anchor(SearchResultDTO.Anchor.builder().pageNo(3).chunkOrder(12).build())
                 .build();
@@ -43,6 +81,8 @@ class UnifiedSearchTopChunkMappingTest {
         assertThat(topChunk.getTitle()).isEqualTo("2.1 Retrieval");
         assertThat(topChunk.getContent()).isEqualTo("full original content");
         assertThat(topChunk.getAnchor().getChunkOrder()).isEqualTo(12);
+        assertThat(topChunk.getExplain().getHitSources())
+                .containsExactly("OCR");
     }
 
     @Test

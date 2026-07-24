@@ -12,6 +12,7 @@ import com.anchr.core.kb.application.support.AssetIndexChangeRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -142,7 +143,13 @@ class IngestionIndexFinalizerTest {
     void finalizeIndex_shouldWriteAndCompleteUnderItemAndAssetLocks() {
         IngestionTaskItem item = claimedIndexItem();
         Asset source = asset("asset-1", 0L, null);
-        List<Segment> segments = List.of(segment("segment-1", "asset-1", 1L));
+        List<Segment> segments = List.of(
+                segment("ocr-1", "asset-1", 1L,
+                        SegmentType.IMAGE_OCR_BLOCK),
+                segment("ocr-2", "asset-1", 1L,
+                        SegmentType.IMAGE_OCR_BLOCK),
+                segment("visual", "asset-1", 1L,
+                        SegmentType.IMAGE_VISUAL));
         when(ingestionTaskRepository.isClaimCurrentForUpdate(
                 "item-1", 3L, IngestionExecutionStage.INDEX, 4, "lease-1"))
                 .thenReturn(true);
@@ -150,7 +157,7 @@ class IngestionIndexFinalizerTest {
                 .thenReturn(Optional.of(source));
         when(assetRepository.activateIndexGeneration(
                 eq("kb-1"), eq("asset-1"), eq(0L), eq(1L),
-                any(), any(), eq(1), eq(1), eq("user-a"), any()))
+                any(), any(), eq(2), eq(2), eq("user-a"), any()))
                 .thenReturn(true);
         when(ingestionTaskRepository.transitionClaim(any())).thenReturn(true);
 
@@ -172,7 +179,7 @@ class IngestionIndexFinalizerTest {
         order.verify(segmentBulkWriter).write(segments);
         order.verify(assetRepository).activateIndexGeneration(
                 eq("kb-1"), eq("asset-1"), eq(0L), eq(1L),
-                any(), any(), eq(1), eq(1), eq("user-a"), any());
+                any(), any(), eq(2), eq(2), eq("user-a"), any());
         order.verify(assetIndexChangeRecorder).generationActivated(
                 eq("kb-1"), eq("asset-1"), eq(1L), eq(0L),
                 eq("user-a"), any());
@@ -264,10 +271,18 @@ class IngestionIndexFinalizerTest {
     private Segment segment(String segmentId,
                             String assetId,
                             long indexGeneration) {
+        return segment(segmentId, assetId, indexGeneration, null);
+    }
+
+    private Segment segment(String segmentId,
+                            String assetId,
+                            long indexGeneration,
+                            SegmentType segmentType) {
         return Segment.builder()
                 .segmentId(segmentId)
                 .assetId(assetId)
                 .indexGeneration(indexGeneration)
+                .segmentType(segmentType)
                 .build();
     }
 }

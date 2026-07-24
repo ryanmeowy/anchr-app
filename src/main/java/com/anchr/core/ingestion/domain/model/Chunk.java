@@ -21,6 +21,5 @@ public class Chunk {
     private String ocrText;
     private Integer chunkOrder;
     private String sourceRef;
-    private List<Float> embedding;
     private List<BboxInfo> bboxInfos;
 }

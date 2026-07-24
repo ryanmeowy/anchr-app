@@ -16,6 +16,7 @@ import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Serializes the final index write with document deletion through the asset row lock.
@@ -78,11 +80,12 @@ public class IngestionIndexFinalizer {
         segmentBulkWriter.write(segments);
         String updatedBy = StringUtils.hasText(item.getTaskCreatedBy())
                 ? item.getTaskCreatedBy() : "system";
+        int readableSegmentCount = countReadableSegments(segments);
         boolean assetUpdated = assetRepository.activateIndexGeneration(
                 item.getKbId(), lockedAsset.getId(),
                 previousGeneration, targetGeneration,
                 DocumentParseStatus.SUCCESS.name(), DocumentIndexStatus.SUCCESS.name(),
-                segments.size(), segments.size(), updatedBy, now);
+                readableSegmentCount, readableSegmentCount, updatedBy, now);
         if (!assetUpdated) {
             throw new IllegalStateException(
                     "Asset generation changed while holding its index finalization lock.");
@@ -170,6 +173,17 @@ public class IngestionIndexFinalizer {
                         "Segment generation does not match the ingestion target.");
             }
         }
+    }
+
+    static int countReadableSegments(List<Segment> segments) {
+        if (segments == null || segments.isEmpty()) {
+            return 0;
+        }
+        return (int) segments.stream()
+                .filter(Objects::nonNull)
+                .filter(segment -> segment.getSegmentType()
+                        != SegmentType.IMAGE_VISUAL)
+                .count();
     }
 
     private void deleteOverwrittenAsset(IngestionTaskItem item,

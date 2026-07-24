@@ -372,8 +372,11 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             hitSources.add("TAG");
         }
 
+        boolean visualProjection =
+                segment.getSegmentType() == SegmentType.IMAGE_VISUAL;
         String content = resolveContent(segment);
-        String snippet = pickSnippet(content, highlights);
+        String snippet = visualProjection
+                ? "" : pickSnippet(content, highlights);
         SearchResultDTO.Anchor anchor = SearchResultDTO.Anchor.builder()
                 .pageNo(segment.getPageNo())
                 .chunkOrder(segment.getChunkOrder())
@@ -463,6 +466,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .title(segmentItem.getTitle())
                 .content(segmentItem.getContent())
                 .snippet(segmentItem.getSnippet())
+                .explain(segmentItem.getExplain())
                 .score(segmentItem.getScore())
                 .pageNo(segmentItem.getPageNo())
                 .anchor(segmentItem.getAnchor())
@@ -554,6 +558,9 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
     private String resolveContent(Segment segment) {
         if (segment == null) {
+            return "";
+        }
+        if (segment.getSegmentType() == SegmentType.IMAGE_VISUAL) {
             return "";
         }
         if (StringUtils.hasText(segment.getContentText())) {

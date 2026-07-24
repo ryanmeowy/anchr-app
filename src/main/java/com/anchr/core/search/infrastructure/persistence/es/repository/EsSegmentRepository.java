@@ -8,6 +8,7 @@ import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
+import co.elastic.clients.elasticsearch.core.GetRequest;
 import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
@@ -119,9 +120,9 @@ public class EsSegmentRepository implements SegmentRepository {
             return Optional.empty();
         }
         try {
-            GetResponse<SegmentDocument> response = esClient.get(g -> g
-                    .index(kbSegmentConfig.getReadTargetName())
-                    .id(segmentId.trim()), SegmentDocument.class);
+            GetResponse<SegmentDocument> response = esClient.get(
+                    buildFindBySegmentIdRequest(segmentId),
+                    SegmentDocument.class);
             if (response == null || !response.found() || response.source() == null) {
                 return Optional.empty();
             }
@@ -136,6 +137,13 @@ public class EsSegmentRepository implements SegmentRepository {
         }
     }
 
+    GetRequest buildFindBySegmentIdRequest(String segmentId) {
+        return GetRequest.of(g -> g
+                .index(kbSegmentConfig.getReadTargetName())
+                .id(segmentId.trim())
+                .sourceExcludes("embedding"));
+    }
+
     @Override
     public List<Segment> listByAssetId(String kbId,
                                        String assetId,
@@ -148,20 +156,11 @@ public class EsSegmentRepository implements SegmentRepository {
             return List.of();
         }
         try {
-            SearchRequest.Builder builder = new SearchRequest.Builder()
-                    .index(kbSegmentConfig.getReadTargetName())
-                    .size(Math.min(limit, 100))
-                    .query(q -> q.bool(b -> b
-                            .filter(f -> f.term(t -> t.field("kbId").value(kbId.trim())))
-                            .filter(f -> f.term(t -> t.field("assetId").value(assetId.trim())))
-                            .filter(indexGenerationFilter(activeIndexGeneration))))
-                    .sort(s -> s.field(f -> f.field("chunkOrder").order(SortOrder.Asc).missing("_last")))
-                    .sort(s -> s.field(f -> f.field("segmentId").order(SortOrder.Asc)))
-                    .source(src -> src.filter(f -> f.excludes("embedding")));
-            if (afterChunkOrder != null && StringUtils.hasText(afterSegmentId)) {
-                builder.searchAfter(FieldValue.of(afterChunkOrder), FieldValue.of(afterSegmentId.trim()));
-            }
-            SearchResponse<SegmentDocument> response = esClient.search(builder.build(), SegmentDocument.class);
+            SearchRequest request = buildAssetSegmentsRequest(
+                    kbId, assetId, activeIndexGeneration,
+                    afterChunkOrder, afterSegmentId, limit);
+            SearchResponse<SegmentDocument> response =
+                    esClient.search(request, SegmentDocument.class);
             if (response == null || response.hits() == null || response.hits().hits() == null) {
                 return List.of();
             }
@@ -174,6 +173,42 @@ public class EsSegmentRepository implements SegmentRepository {
             log.error("kb asset segment listing failed, kbId={}, assetId={}", kbId, assetId, e);
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
+    }
+
+    SearchRequest buildAssetSegmentsRequest(
+            String kbId,
+            String assetId,
+            long activeIndexGeneration,
+            Integer afterChunkOrder,
+            String afterSegmentId,
+            int limit
+    ) {
+        SearchRequest.Builder builder = new SearchRequest.Builder()
+                .index(kbSegmentConfig.getReadTargetName())
+                .size(Math.min(limit, 100))
+                .query(q -> q.bool(b -> b
+                        .filter(f -> f.term(t -> t
+                                .field("kbId").value(kbId.trim())))
+                        .filter(f -> f.term(t -> t
+                                .field("assetId").value(assetId.trim())))
+                        .filter(indexGenerationFilter(activeIndexGeneration))
+                        .mustNot(n -> n.term(t -> t
+                                .field("segmentType")
+                                .value(SegmentType.IMAGE_VISUAL.name())))))
+                .sort(s -> s.field(f -> f
+                        .field("chunkOrder")
+                        .order(SortOrder.Asc)
+                        .missing("_last")))
+                .sort(s -> s.field(f -> f
+                        .field("segmentId")
+                        .order(SortOrder.Asc)))
+                .source(src -> src.filter(f -> f.excludes("embedding")));
+        if (afterChunkOrder != null && StringUtils.hasText(afterSegmentId)) {
+            builder.searchAfter(
+                    FieldValue.of(afterChunkOrder.longValue()),
+                    FieldValue.of(afterSegmentId.trim()));
+        }
+        return builder.build();
     }
 
     @Override
@@ -309,10 +344,10 @@ public class EsSegmentRepository implements SegmentRepository {
      * its analyzed terms, while the outer bool query requires all keywords
      * when there are at most two and 70% when there are more than two.
      */
-    private SearchRequest buildTextSearchRequest(String query,
-                                                  List<String> keywords,
-                                                  int limit,
-                                                  SearchFilter filter) {
+    SearchRequest buildTextSearchRequest(String query,
+                                         List<String> keywords,
+                                         int limit,
+                                         SearchFilter filter) {
         List<String> effectiveKeywords = keywords == null
                 ? List.of()
                 : keywords.stream()
@@ -329,6 +364,9 @@ public class EsSegmentRepository implements SegmentRepository {
                 .size(limit)
                 .query(q -> q.bool(b -> {
                     applyFilters(b, filter);
+                    b.mustNot(n -> n.term(t -> t
+                            .field("segmentType")
+                            .value(SegmentType.IMAGE_VISUAL.name())));
                     for (String textQuery : textQueries) {
                         b.should(sh -> sh.combinedFields(cf -> cf
                                 .query(textQuery)
@@ -348,7 +386,11 @@ public class EsSegmentRepository implements SegmentRepository {
         );
     }
 
-    private SearchRequest buildVectorSearchRequest(List<Float> queryVector, int topK, SearchFilter filter) {
+    SearchRequest buildVectorSearchRequest(
+            List<Float> queryVector,
+            int topK,
+            SearchFilter filter
+    ) {
         int numCandidates = Math.max(EmbeddingConstant.DEFAULT_NUM_CANDIDATES, topK * EmbeddingConstant.NUM_CANDIDATES_FACTOR);
         return SearchRequest.of(s -> s
                 .index(kbSegmentConfig.getReadTargetName())

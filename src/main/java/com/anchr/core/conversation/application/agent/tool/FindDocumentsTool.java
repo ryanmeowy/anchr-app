@@ -7,6 +7,7 @@ import com.anchr.core.conversation.application.agent.AgentToolResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -50,7 +51,9 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
         List<ConversationRetrievalCandidate> evidence = new ArrayList<>();
         for (ConversationRetrievalCandidate candidate : retrieved.getTopCandidates()) {
             if (!StringUtils.hasText(candidate.getAssetId()) || !allowed(candidate.getAssetId(), context)) continue;
-            evidence.add(candidate);
+            if (!SegmentType.isImageVisual(candidate.getSegmentType())) {
+                evidence.add(candidate);
+            }
             DocumentMatch match = matches.computeIfAbsent(candidate.getAssetId(), id -> load(candidate, context));
             if (match != null) match.add(candidate);
         }

@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.search.application.UnifiedSearchService;
+import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -87,6 +88,33 @@ class ConversationRetrievalOrchestratorImplTest {
                 .containsExactly(4, 20);
         assertThat(result.getTopCandidates()).extracting("title")
                 .containsExactly("section seg-earlier", "section seg-later");
+    }
+
+    @Test
+    void retrieveShouldKeepEachTopChunksOwnHitExplanation() {
+        when(unifiedSearchService.search(any(SearchQueryDTO.class)))
+                .thenReturn(List.of(SearchResultDTO.builder()
+                        .assetId("asset-1")
+                        .explain(SearchExplainDTO.builder()
+                                .hitSources(List.of("VECTOR"))
+                                .build())
+                        .topChunks(List.of(SearchResultDTO.TopChunk.builder()
+                                .segmentId("ocr-1")
+                                .segmentType("IMAGE_OCR_BLOCK")
+                                .explain(SearchExplainDTO.builder()
+                                        .hitSources(List.of("OCR"))
+                                        .build())
+                                .score(0.8D)
+                                .build()))
+                        .build()));
+
+        var result = orchestrator.retrieve(
+                "diagram", 10, List.of("kb-1"), List.of("MIXED"), null);
+
+        assertThat(result.getTopCandidates()).singleElement()
+                .satisfies(candidate -> assertThat(
+                        candidate.getExplain().getHitSources())
+                        .containsExactly("OCR"));
     }
 
     private SearchResultDTO result(String segmentId, String segmentType) {

@@ -3,6 +3,7 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.CitationReasonGenerationService;
 import com.anchr.core.search.application.UnifiedSearchService;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.interfaces.rest.dto.SearchAnswerDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
@@ -121,7 +122,9 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
 
         Map<String, SearchAnswerDTO.CitationDTO> groups = new LinkedHashMap<>();
         for (CitationSource source : sources) {
-            if (!StringUtils.hasText(source.segmentId()) || !StringUtils.hasText(source.snippet())) {
+            if (SegmentType.isImageVisual(source.segmentType())
+                    || !StringUtils.hasText(source.segmentId())
+                    || !StringUtils.hasText(source.snippet())) {
                 continue;
             }
             String assetKey = StringUtils.hasText(source.result().getAssetId())
@@ -151,7 +154,7 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
                         .content(source.content())
                         .snippet(source.snippet())
                         .anchor(source.anchor())
-                        .why(buildCitationWhy(source.result(), source.score()))
+                        .why(buildCitationWhy(source.explain(), source.score()))
                         .build());
             }
         }
@@ -185,8 +188,10 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
         return query == null || !StringUtils.hasText(query.getAnswerMode()) ? "STRICT" : query.getAnswerMode().trim();
     }
 
-    private SearchAnswerDTO.CitationWhy buildCitationWhy(SearchResultDTO result, Double score) {
-        SearchExplainDTO explain = result.getExplain();
+    private SearchAnswerDTO.CitationWhy buildCitationWhy(
+            SearchExplainDTO explain,
+            Double score
+    ) {
         List<String> hitSources = explain != null && explain.getHitSources() != null
                 ? List.copyOf(explain.getHitSources()) : List.of();
         SearchAnswerDTO.CitationWhy.MatchedBy matchedBy = null;
@@ -228,6 +233,11 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
             return topChunk == null ? result.getSegmentId() : topChunk.getSegmentId();
         }
 
+        private String segmentType() {
+            return topChunk == null
+                    ? result.getSegmentType() : topChunk.getSegmentType();
+        }
+
         private String snippet() {
             return topChunk == null ? result.getSnippet() : topChunk.getSnippet();
         }
@@ -245,6 +255,11 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
 
         private Double score() {
             return topChunk == null ? result.getScore() : topChunk.getScore();
+        }
+
+        private SearchExplainDTO explain() {
+            return topChunk == null
+                    ? result.getExplain() : topChunk.getExplain();
         }
 
         private Integer pageNo() {

@@ -6,6 +6,7 @@ import com.anchr.core.conversation.application.agent.AgentExecutionContext;
 import com.anchr.core.conversation.application.agent.AgentTool;
 import com.anchr.core.conversation.application.agent.AgentToolResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -47,7 +48,11 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
                 rewrite.getRewrittenQuery(), input.limit() == null ? 8 : input.limit(), context.kbIds(),
                 normalizeModalities(input.modalities()), assets);
         List<ConversationRetrievalCandidate> evidence = retrieval.getTopCandidates() == null
-                ? List.of() : retrieval.getTopCandidates();
+                ? List.of()
+                : retrieval.getTopCandidates().stream()
+                        .filter(candidate -> !SegmentType.isImageVisual(
+                                candidate.getSegmentType()))
+                        .toList();
         try {
             return AgentToolResult.success(objectMapper.writeValueAsString(Map.of(
                     "success", true,

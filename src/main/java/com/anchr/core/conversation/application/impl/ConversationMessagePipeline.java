@@ -20,6 +20,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.search.application.CitationReasonGenerationService;
+import com.anchr.core.search.domain.model.SegmentType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -74,6 +75,8 @@ public class ConversationMessagePipeline {
         List<ConversationRetrievalCandidate> answerCandidates = retrievalResult.getTopCandidates()
                 .stream()
                 .filter(candidate -> isTraceableCandidate(candidate, resultCardSegmentIds))
+                .filter(candidate -> !SegmentType.isImageVisual(
+                        candidate.getSegmentType()))
                 .limit(ANSWER_CITATION_LIMIT)
                 .toList();
         List<ConversationCitation> candidateCitations = conversationCitationMapper.mapFromSearchResults(answerCandidates);
