@@ -10,7 +10,6 @@ import com.anchr.core.ingestion.application.artifact.IngestionArtifactException;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
 import com.anchr.core.ingestion.application.artifact.IngestionStoredArtifact;
 import com.anchr.core.ingestion.domain.model.Chunk;
-import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
@@ -34,7 +33,6 @@ import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
-import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -95,7 +93,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final StorageTokenIssuer storageTokenIssuer;
     private final IngestionIndexFinalizer ingestionIndexFinalizer;
     private final IngestionStageTransactionCoordinator transactionCoordinator;
-    private final SegmentRepository segmentRepository;
     private final IngestionObjectStoragePort objectStoragePort;
     private final StorageConfigRepository storageConfigRepository;
     private final DoclingChunkMapper doclingChunkMapper;
@@ -200,6 +197,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
         IngestionTaskItem failureContext = item;
         try {
+            item = transactionCoordinator.ensureTargetIndexGeneration(item);
+            failureContext = item;
             if (item.getStageRetryCount() > effectiveStageMaxRetries()) {
                 failClaim(item, tryFindAsset(item), ApiError.INTERNAL_ERROR,
                         "Ingestion stage exceeded its recovery-attempt limit.");
@@ -401,7 +400,9 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             throw new BusinessException(
                     ApiError.TEXT_PARSE_FAILED, "Docling returned empty chunks.");
         }
-        List<Chunk> chunks = doclingChunkMapper.toTextChunks(asset, parsed);
+        long targetIndexGeneration = requireTargetIndexGeneration(item);
+        List<Chunk> chunks = doclingChunkMapper.toTextChunks(
+                asset, parsed, targetIndexGeneration);
         if (chunks == null || chunks.isEmpty()) {
             throw new BusinessException(
                     ApiError.TEXT_PARSE_FAILED, "Docling returned no usable chunks.");
@@ -421,13 +422,14 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private void processIndex(
             IngestionTaskItem item, Asset asset, List<Chunk> chunks) {
-        List<Segment> segments = buildSegments(asset, chunks);
+        long targetIndexGeneration = requireTargetIndexGeneration(item);
+        List<Segment> segments = buildSegments(
+                asset, chunks, targetIndexGeneration);
         boolean indexed = ingestionIndexFinalizer.finalizeIndex(
-                item, asset, segments, chunks.size());
+                item, asset, segments);
         if (!indexed) {
             return;
         }
-        cleanupOverwrittenAsset(item.getKbId(), item, updatedBy(item));
         try {
             knowledgeBaseRepository.refreshDocumentStats(
                     item.getKbId(), updatedBy(item), true);
@@ -829,7 +831,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 ApiError.TEXT_PARSE_FAILED, "Document has no parseable source location.");
     }
 
-    private List<Segment> buildSegments(Asset asset, List<Chunk> chunks) {
+    private List<Segment> buildSegments(
+            Asset asset, List<Chunk> chunks, long targetIndexGeneration) {
         return chunks.stream()
                 .filter(Objects::nonNull)
                 .filter(chunk -> StringUtils.hasText(chunk.getSegmentId()))
@@ -837,6 +840,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                         .segmentId(chunk.getSegmentId())
                         .kbId(chunk.getKbId())
                         .assetId(asset.getId())
+                        .indexGeneration(targetIndexGeneration)
                         .assetType(asset.getFileType())
                         .segmentType(isImage(asset)
                                 ? SegmentType.IMAGE_OCR_BLOCK : SegmentType.TEXT_CHUNK)
@@ -851,6 +855,15 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                         .bbox(chunk.getBboxInfos())
                         .build())
                 .toList();
+    }
+
+    private long requireTargetIndexGeneration(IngestionTaskItem item) {
+        if (item.getTargetIndexGeneration() == null
+                || item.getTargetIndexGeneration() < 1L) {
+            throw new IllegalStateException(
+                    "Ingestion item has no valid target index generation.");
+        }
+        return item.getTargetIndexGeneration();
     }
 
     private void enrichTextEmbeddings(IngestionTaskItem item,
@@ -933,32 +946,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             }
         }
         return null;
-    }
-
-    private void cleanupOverwrittenAsset(String kbId,
-                                         IngestionTaskItem item,
-                                         String userId) {
-        if (item.getDedupeResult() != DedupeResult.OVERWRITTEN
-                || !StringUtils.hasText(item.getDuplicateAssetId())
-                || item.getDuplicateAssetId().equals(item.getAssetId())) {
-            return;
-        }
-        String oldAssetId = item.getDuplicateAssetId().trim();
-        try {
-            boolean deleted = assetRepository.markDeleted(
-                    kbId, oldAssetId, userId, LocalDateTime.now());
-            if (!deleted) {
-                log.warn("overwritten asset cleanup skipped, old asset not found, kbId={}, oldAssetId={}",
-                        kbId, oldAssetId);
-                return;
-            }
-            segmentRepository.deleteByAssetId(oldAssetId);
-        } catch (RuntimeException e) {
-            // Reliable overwrite cleanup and its outbox belong to ANCHR-107. Preserve the
-            // existing best-effort behavior here without rolling back a completed item.
-            log.warn("overwritten asset cleanup failed, kbId={}, oldAssetId={}: {}",
-                    kbId, oldAssetId, e.getMessage());
-        }
     }
 
     private void acknowledgeBestEffort(String jobId) {

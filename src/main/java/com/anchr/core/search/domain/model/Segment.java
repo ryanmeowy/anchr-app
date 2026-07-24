@@ -16,6 +16,7 @@ public class Segment {
     String segmentId;
     String kbId;
     String assetId;
+    long indexGeneration;
     String assetType;
     SegmentType segmentType;
     String title;

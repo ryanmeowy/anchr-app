@@ -58,6 +58,23 @@ class OutboxEventProcessorTest {
     }
 
     @Test
+    void process_shouldDeleteOnlyRequestedGenerationAndMarkDone() {
+        OutboxEvent event = event(
+                OutboxEventType.DELETE_ASSET_GENERATION,
+                0,
+                generationPayload(4L));
+        when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any())).thenReturn(true);
+
+        processor.process(event);
+
+        verify(segmentRepository).deleteByAssetGeneration("asset-1", 4L);
+        verify(segmentRepository, never()).deleteByAssetId(any());
+        verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
+        verify(outboxEventRepository, never())
+                .markRetry(anyLong(), anyString(), anyInt(), any(), any(), any());
+    }
+
+    @Test
     void process_shouldScheduleFirstRetryAfterOneMinute() {
         OutboxEvent event = event(0, validPayload());
         doThrow(new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE))
@@ -72,6 +89,29 @@ class OutboxEventProcessorTest {
         verify(outboxEventRepository).markRetry(
                 eq(1L), eq("claim-1"), eq(1), retryAt.capture(), any(), any());
         assertThat(retryAt.getValue()).isBetween(before.plusSeconds(59), before.plusSeconds(62));
+    }
+
+    @Test
+    void process_shouldRetryGenerationDeleteAfterTransientFailure() {
+        OutboxEvent event = event(
+                OutboxEventType.DELETE_ASSET_GENERATION,
+                0,
+                generationPayload(4L));
+        doThrow(new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE))
+                .when(segmentRepository).deleteByAssetGeneration("asset-1", 4L);
+        when(outboxEventRepository.markRetry(
+                eq(1L), eq("claim-1"), eq(1), any(), any(), any()))
+                .thenReturn(true);
+        ArgumentCaptor<LocalDateTime> retryAt = ArgumentCaptor.forClass(LocalDateTime.class);
+        LocalDateTime before = LocalDateTime.now();
+
+        processor.process(event);
+
+        verify(outboxEventRepository).markRetry(
+                eq(1L), eq("claim-1"), eq(1), retryAt.capture(), any(), any());
+        assertThat(retryAt.getValue()).isBetween(
+                before.plusSeconds(59), before.plusSeconds(62));
+        verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());
     }
 
     @Test
@@ -98,6 +138,26 @@ class OutboxEventProcessorTest {
 
         verify(outboxEventRepository).markFailed(eq(1L), eq("claim-1"), eq(0), any(), any());
         verify(segmentRepository, never()).deleteByAssetId(any());
+        verify(segmentRepository, never()).deleteByAssetGeneration(any(), anyLong());
+    }
+
+    @Test
+    void process_shouldPermanentlyFailInvalidGenerationPayload() {
+        OutboxEvent event = event(
+                OutboxEventType.DELETE_ASSET_GENERATION,
+                0,
+                generationPayload(-1L));
+        when(outboxEventRepository.markFailed(
+                eq(1L), eq("claim-1"), eq(0), any(), any()))
+                .thenReturn(true);
+
+        processor.process(event);
+
+        verify(outboxEventRepository).markFailed(
+                eq(1L), eq("claim-1"), eq(0), any(), any());
+        verify(segmentRepository, never()).deleteByAssetId(any());
+        verify(segmentRepository, never()).deleteByAssetGeneration(any(), anyLong());
+        verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());
     }
 
     @Test
@@ -111,12 +171,18 @@ class OutboxEventProcessorTest {
 
         verify(outboxEventRepository).markFailed(eq(1L), eq("claim-1"), eq(0), any(), any());
         verify(segmentRepository, never()).deleteByAssetId(any());
+        verify(segmentRepository, never()).deleteByAssetGeneration(any(), anyLong());
     }
 
     private OutboxEvent event(int retryCount, String payload) {
+        return event(OutboxEventType.DELETE_ASSET, retryCount, payload);
+    }
+
+    private OutboxEvent event(
+            OutboxEventType eventType, int retryCount, String payload) {
         return OutboxEvent.builder()
                 .id(1L)
-                .eventType(OutboxEventType.DELETE_ASSET)
+                .eventType(eventType)
                 .aggregateType("ASSET")
                 .aggregateId("asset-1")
                 .payload(payload)
@@ -128,5 +194,10 @@ class OutboxEventProcessorTest {
 
     private String validPayload() {
         return "{\"kbId\":\"kb-1\",\"assetId\":\"asset-1\"}";
+    }
+
+    private String generationPayload(long indexGeneration) {
+        return "{\"kbId\":\"kb-1\",\"assetId\":\"asset-1\",\"indexGeneration\":"
+                + indexGeneration + "}";
     }
 }

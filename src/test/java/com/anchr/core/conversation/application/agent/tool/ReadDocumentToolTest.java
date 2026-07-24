@@ -28,12 +28,13 @@ class ReadDocumentToolTest {
                 new AgentBudget(12, 8, System.currentTimeMillis() + 10_000));
         Asset asset = Asset.builder().id("asset-1").kbId("kb-1")
                 .fileName("Corrective Retrieval Augmented Generation.pdf")
-                .title("CRAG").build();
+                .title("CRAG").activeIndexGeneration(7L).build();
         Segment segment = Segment.builder().segmentId("seg-1").kbId("kb-1").assetId("asset-1")
                 .segmentType(SegmentType.TEXT_CHUNK).contentText("不同置信度对应不同动作")
                 .pageNo(3).chunkOrder(7).build();
         when(scopeGuard.requireAsset("asset-1", context)).thenReturn(asset);
-        when(segments.listByAssetId("kb-1", "asset-1", null, null, 21)).thenReturn(List.of(segment));
+        when(segments.listByAssetId("kb-1", "asset-1", 7L, null, null, 21))
+                .thenReturn(List.of(segment));
 
         var result = tool.execute(new ReadDocumentTool.Input("asset-1", null, 20), context);
 

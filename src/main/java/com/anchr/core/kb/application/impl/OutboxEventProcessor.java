@@ -1,6 +1,7 @@
 package com.anchr.core.kb.application.impl;
 
 import com.anchr.core.kb.domain.model.DocumentIndexDeletePayload;
+import com.anchr.core.kb.domain.model.DocumentIndexGenerationDeletePayload;
 import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
@@ -63,12 +64,24 @@ public class OutboxEventProcessor {
 
     void process(OutboxEvent event) {
         try {
-            if (event.getEventType() != OutboxEventType.DELETE_ASSET) {
-                failPermanently(event, "Unsupported outbox event type: " + event.getEventType());
-                return;
+            switch (event.getEventType()) {
+                case DELETE_ASSET -> {
+                    DocumentIndexDeletePayload payload = readDeletePayload(event);
+                    segmentRepository.deleteByAssetId(payload.assetId());
+                }
+                case DELETE_ASSET_GENERATION -> {
+                    DocumentIndexGenerationDeletePayload payload =
+                            readGenerationDeletePayload(event);
+                    segmentRepository.deleteByAssetGeneration(
+                            payload.assetId(), payload.indexGeneration());
+                }
+                case UNKNOWN -> {
+                    failPermanently(
+                            event,
+                            "Unsupported outbox event type: " + event.getEventType());
+                    return;
+                }
             }
-            DocumentIndexDeletePayload payload = readDeletePayload(event);
-            segmentRepository.deleteByAssetId(payload.assetId());
             boolean updated = outboxEventRepository.markDone(
                     event.getId(), event.getLockToken(), LocalDateTime.now());
             if (!updated) {
@@ -107,6 +120,29 @@ public class OutboxEventProcessor {
             return new DocumentIndexDeletePayload(payload.kbId().trim(), payload.assetId().trim());
         } catch (JsonProcessingException | IllegalArgumentException e) {
             throw new PermanentEventException("Invalid document index delete payload.", e);
+        }
+    }
+
+    private DocumentIndexGenerationDeletePayload readGenerationDeletePayload(
+            OutboxEvent event) {
+        try {
+            DocumentIndexGenerationDeletePayload payload = objectMapper.readValue(
+                    event.getPayload(), DocumentIndexGenerationDeletePayload.class);
+            if (payload == null
+                    || !StringUtils.hasText(payload.kbId())
+                    || !StringUtils.hasText(payload.assetId())
+                    || payload.indexGeneration() < 0L
+                    || !payload.assetId().trim().equals(event.getAggregateId())) {
+                throw new PermanentEventException(
+                        "Invalid document index generation delete payload.");
+            }
+            return new DocumentIndexGenerationDeletePayload(
+                    payload.kbId().trim(),
+                    payload.assetId().trim(),
+                    payload.indexGeneration());
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            throw new PermanentEventException(
+                    "Invalid document index generation delete payload.", e);
         }
     }
 

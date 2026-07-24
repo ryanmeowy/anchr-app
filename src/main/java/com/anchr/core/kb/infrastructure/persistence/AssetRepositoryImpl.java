@@ -10,7 +10,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -35,6 +38,18 @@ public class AssetRepositoryImpl implements AssetRepository {
     @Override
     public Optional<Asset> findByIdForUpdate(String kbId, String assetId) {
         return mapper.findByIdForUpdate(kbId, assetId).map(this::toDomain);
+    }
+
+    @Override
+    public Map<String, Long> findActiveIndexGenerations(Collection<String> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Long> generations = new LinkedHashMap<>();
+        for (AssetRecord record : mapper.findActiveIndexGenerations(assetIds)) {
+            generations.put(record.getId(), defaultLong(record.getActiveIndexGeneration()));
+        }
+        return Map.copyOf(generations);
     }
 
     @Override
@@ -109,6 +124,18 @@ public class AssetRepositoryImpl implements AssetRepository {
     }
 
     @Override
+    public boolean activateIndexGeneration(String kbId, String assetId,
+                                           long expectedActiveGeneration, long targetGeneration,
+                                           String parseStatus, String indexStatus, int segmentCount,
+                                           int indexedSegmentCount,
+                                           String updatedBy, LocalDateTime updatedAt) {
+        return mapper.activateIndexGeneration(
+                kbId, assetId, expectedActiveGeneration, targetGeneration,
+                parseStatus, indexStatus, segmentCount, indexedSegmentCount,
+                updatedBy, updatedAt) == 1;
+    }
+
+    @Override
     public boolean markDeleted(String kbId, String assetId,
                                String updatedBy, LocalDateTime updatedAt) {
         return mapper.markDeleted(kbId, assetId, updatedBy, updatedAt) > 0;
@@ -135,6 +162,7 @@ public class AssetRepositoryImpl implements AssetRepository {
                 .indexStatus(indexStatus(record.getIndexStatus()))
                 .segmentCount(defaultInt(record.getSegmentCount()))
                 .indexedSegmentCount(defaultInt(record.getIndexedSegmentCount()))
+                .activeIndexGeneration(defaultLong(record.getActiveIndexGeneration()))
                 .embeddingProfile(record.getEmbeddingProfile())
                 .errorCode(record.getErrorCode())
                 .errorMessage(record.getErrorMessage())
@@ -167,6 +195,7 @@ public class AssetRepositoryImpl implements AssetRepository {
         record.setIndexStatus(asset.getIndexStatus().name());
         record.setSegmentCount(asset.getSegmentCount());
         record.setIndexedSegmentCount(asset.getIndexedSegmentCount());
+        record.setActiveIndexGeneration(asset.getActiveIndexGeneration());
         record.setEmbeddingProfile(asset.getEmbeddingProfile());
         record.setErrorCode(asset.getErrorCode());
         record.setErrorMessage(asset.getErrorMessage());
@@ -188,6 +217,10 @@ public class AssetRepositoryImpl implements AssetRepository {
 
     private int defaultInt(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private long defaultLong(Long value) {
+        return value == null ? 0L : value;
     }
 
     private int toInt(Long value) {

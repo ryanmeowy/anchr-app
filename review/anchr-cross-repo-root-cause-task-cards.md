@@ -32,7 +32,7 @@
 | ANCHR-105 | 重构 Docling attempt 与幂等协议 | 已完成 | P0 | M | app、docling | 104 |
 | ANCHR-106 | Ingestion 改为数据库驱动的可恢复状态机 | 已完成 | P0 | XL | app、docling、web | 103、105 |
 | ANCHR-106B | 收敛 Ingestion Item 执行模型与持久化边界 | 源码与 V18 已收口；独立 MySQL 8.4 迁移验证通过；待业务库修复失败历史、停机迁移与部署验收 | P0 | L | app | 106 |
-| ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 待执行 | P0 | L | app | 106B |
+| ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 源码与本地回归已完成；待 V19 迁移、真实 ES 故障演练与部署验收 | P0 | L | app | 106B |
 | ANCHR-108 | 搜索改为稳定结果快照分页 | 待执行 | P1 | L | app、web | 101B、101C、110 |
 | ANCHR-109 | 会话列表 keyset 分页与 Session 原子更新 | 已完成 | P1 | M | app、web | 可独立 |
 | ANCHR-110 | 文档内嵌图片制品化、独立 Segment 与跨模态检索 | 待执行 | P1 | XL | app、docling、web | 104–106B、107、101B、101C |
@@ -1048,14 +1048,14 @@ V18 不是旧/新 worker 可混跑的 expand-contract 迁移；MySQL DDL 也不�
 - list/get 不读取 lease、snapshot、artifact 内部字段；claim candidate 不读取来源 TEXT、错误 TEXT、公开 dedupe 字段。
 - Parse phase 之外不物化 `parse_request_snapshot`；REST DTO 永不装载该 JSON。
 - artifact registry 的唯一键和应用层 fence 能阻止 stale worker 登记 winner artifact；新 execution 只能登记带完整 digest/producer 的 `PRODUCED` artifact。
-- fresh schema 与带 normalized 数据、artifact、历史 embedding 列和残留 CHECK/FK 的 V15 schema 都能迁移到相同 V18 契约；迁移后 item 恰好 17 列、三张 ingestion 表无 CHECK/FK、current pointer 和 normalized history 不变。
+- fresh schema 与带 normalized 数据、artifact、历史 embedding 列和残留 CHECK/FK 的 V15 schema 都能迁移到相同 V18 契约；在 V18 检查点 item 恰好 17 列、三张 ingestion 表无 CHECK/FK、current pointer 和 normalized history 不变。后续 V19 由 ANCHR-107 单独增加 `target_index_generation`，不回写为 106B 的字段。
 - 在真实 MySQL 上对 claim、task list、failed retry 执行 `EXPLAIN ANALYZE` 并记录扫描行、锁等待和延迟；没有这些证据不得声称性能改善。
 - V18 已删除旧 item claim/kb 索引并保留 `PRIMARY/current_execution/task/asset` 四组索引；是否需要新增 task-scoped covering index 只能由真实执行计划决定。
 - 即使前端无生产代码修改，部署验收仍必须重跑并通过现有 ingestion/background recovery 轮询测试。
 
 ### 实施与验证记录
 
-- `anchr-app` 源码已收口：V13–V15 normalized model、V18 物理收缩、17 列 item、窄读模型、公开投影 Policy、显式 execution intent/retry、全链路 ownership join、应用层计数/lease/transition 校验，以及 Parse artifact digest/provenance/producer fence 均已接入。Embedding 向量仍只在同 lease 内存交给 INDEX，恢复时从 Parse artifact 重算。
+- `anchr-app` 源码已收口：V13–V15 normalized model、V18 物理收缩、V18 检查点的 17 列 item、窄读模型、公开投影 Policy、显式 execution intent/retry、全链路 ownership join、应用层计数/lease/transition 校验，以及 Parse artifact digest/provenance/producer fence 均已接入。Embedding 向量仍只在同 lease 内存交给 INDEX，恢复时从 Parse artifact 重算。ANCHR-107 的 V19 在该检查点之后增加第 18 个稳定业务列 `target_index_generation`。
 - 当前业务库已做只读数据对账，normalized 行和 ownership 满足 V18 前置条件；但热重载曾留下失败的 V18 history。失败耗时 325 ms，第一条 ALTER 未生效，列、索引和数据仍为迁移前状态；根因是库中仍有源码已经删除的 ingestion CHECK/FK。修正版已覆盖该真实 schema 差异，但本轮没有 repair 或迁移业务库。
 - 使用项目同一组 Flyway migration 和 MySQL 8.4，本机创建了两个隔离临时库并真实执行 V15→V18：一条为 fresh/no-legacy 分支，另一条带代表性数据、current pointer、历史 embedding 列和残留 CHECK/FK。两条都迁移成功，17 列/目标索引/无 CHECK-FK/normalized 数据保留断言通过，临时库已清理。
 - 同样的两条迁移路径已固化为 Testcontainers 回归：fresh 契约在 `IngestionExecutionStateMysqlIntegrationTest`，带数据/制品/残留约束升级在 `IngestionItemStorageMigrationMysqlIntegrationTest`。本机没有 `/var/run/docker.sock`，所以 14 个 ingestion MySQL 用例只确认编译和被 Surefire 发现，不能冒充容器实跑通过。
@@ -1068,6 +1068,8 @@ V18 不是旧/新 worker 可混跑的 expand-contract 迁移；MySQL DDL 也不�
 ---
 
 ## ANCHR-107：建立 Asset Segment generation 与 ES 写入幂等一致性
+
+**状态：** 源码与本地回归已完成；业务库 V19、真实 Elasticsearch 故障演练和部署验收待完成。107 不得绕过 106B 的 V18 业务库迁移门禁进入生产。
 
 **目标：** 解决 ES 已写入但 MySQL 回滚、部分 bulk 成功、重跑随机 segmentId、overwrite 绕过 outbox。
 
@@ -1137,6 +1139,17 @@ occurredAt
 - overwrite 删除失败进入 outbox。
 - 删除与 ingestion 并发不会复活资产。
 - generation 激活/删除变化可从任意 watermark 幂等重放，供 101C 增量追平。
+
+### 实施与验证记录
+
+- V19 增加 `asset.active_index_generation`、`ingestion_task_item.target_index_generation` 和只追加的 `asset_index_change`；没有新增业务 CHECK 或外键。旧 Asset/旧 ES 文档兼容为 generation 0。
+- 新建 Asset 固定从 generation 1 开始；REPARSE/REEMBED 在 Asset 行锁内按 `max(active generation, 已分配 target generation) + 1` 分配，旧数据中 target 为空的 item 在首次 claim 时用相同规则补齐。target 只保存在稳定 item，不复制到 execution。
+- `DoclingChunkMapper` 使用 Asset、target generation 和 Docling chunk identity 生成 SHA-256 segmentId；缺少 chunkId 时使用 page、chunkOrder 和规范化文本。`SegmentBulkWriter` 使用该 ID 覆盖写入，设置 `refresh=wait_for` 保证激活前新 generation 已可搜索，并拒绝空 ID、响应数量不一致和任一部分失败。
+- INDEX finalizer 先校验当前 claim 并锁定 Asset，再清理同一未激活 target generation 的重试残留、bulk 覆盖写、CAS 激活 generation，最后在同一 MySQL 事务写变化记录、旧 generation 清理 outbox 和 item COMPLETE。数据库提交失败时新 generation 留在 ES 但不满足 active gate；后续同 target 重试会先清掉残留。
+- 搜索在 RRF 合并后、Rerank 前一次批量读取候选 Asset 的 active generation，按原顺序 fail-closed 过滤；全文读取在分页开始时固定同一个 active generation。generation 0 查询同时兼容显式 `0` 和旧文档缺字段。
+- 普通删除与 overwrite 都在 Asset 行锁事务内 soft delete，并同时追加 `ASSET_DELETED` 变化和 `DELETE_ASSET` outbox；旧 generation 使用 `DELETE_ASSET_GENERATION` 复用现有 claim、lease、backoff 和失败重试，不再直接删 ES 或吞异常。
+- JDK 21 全量回归共 463 项，0 failure、0 error、27 skipped；27 项均为当前机器无 Docker 而跳过的 Testcontainers 用例。`git diff --check`、三个变更 Mapper 的 `xmllint`、ES mapping JSON 校验、主代码编译和测试代码编译通过。
+- 尚未执行业务库 V19、真实 Elasticsearch partial-bulk/DB-rollback/crash 故障演练或部署观察，因此当前状态不表示已迁移、发布或接管生产 INDEX 流量。`anchr-web`、`anchr-docling` 不在本卡实现边界内，没有生产代码改动。
 
 ---
 

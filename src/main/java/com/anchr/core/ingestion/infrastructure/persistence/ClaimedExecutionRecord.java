@@ -19,6 +19,7 @@ public class ClaimedExecutionRecord {
     private String kbId;
     private String taskCreatedBy;
     private String assetId;
+    private Long targetIndexGeneration;
     private String sourceUrl;
     private Integer itemProgress;
     private LocalDateTime claimUpdatedAt;

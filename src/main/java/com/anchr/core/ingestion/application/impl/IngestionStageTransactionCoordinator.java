@@ -1,5 +1,7 @@
 package com.anchr.core.ingestion.application.impl;
 
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
@@ -20,6 +22,30 @@ public class IngestionStageTransactionCoordinator {
 
     private final IngestionTaskRepository ingestionTaskRepository;
     private final AssetRepository assetRepository;
+
+    @Transactional(rollbackFor = Exception.class)
+    public IngestionTaskItem ensureTargetIndexGeneration(IngestionTaskItem item) {
+        if (item.getTargetIndexGeneration() != null) {
+            return item;
+        }
+        Asset asset = assetRepository.findByIdForUpdate(item.getKbId(), item.getAssetId())
+                .filter(candidate -> candidate.getDeletedAt() == null)
+                .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
+        long targetGeneration = Math.addExact(
+                Math.max(asset.getActiveIndexGeneration(),
+                        ingestionTaskRepository.findMaxTargetIndexGeneration(asset.getId())),
+                1L);
+        boolean assigned = ingestionTaskRepository.assignTargetIndexGeneration(
+                item.getId(), asset.getId(), targetGeneration, LocalDateTime.now());
+        long storedGeneration = assigned
+                ? targetGeneration
+                : ingestionTaskRepository.findTargetIndexGeneration(item.getId(), asset.getId())
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Ingestion target generation disappeared during allocation."));
+        return item.toBuilder()
+                .targetIndexGeneration(storedGeneration)
+                .build();
+    }
 
     @Transactional(rollbackFor = Exception.class)
     public boolean updateAssetStatusForCurrentClaim(IngestionTaskItem item,

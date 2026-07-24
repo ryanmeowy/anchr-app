@@ -22,6 +22,7 @@ public class IngestionTaskItem {
     String kbId;
     String taskCreatedBy;
     String assetId;
+    Long targetIndexGeneration;
     String fileName;
     String fileHash;
     String sourceUrl;

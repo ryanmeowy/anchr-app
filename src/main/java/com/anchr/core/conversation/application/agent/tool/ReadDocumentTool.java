@@ -48,7 +48,7 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
         Cursor cursor = decode(input.cursor());
         int limit = input.limit() == null ? 20 : Math.max(MIN_PAGE_SIZE, input.limit());
         List<Segment> segments = segmentRepository.listByAssetId(asset.getKbId(), asset.getId(),
-                cursor.chunkOrder(), cursor.segmentId(), limit + 1);
+                asset.getActiveIndexGeneration(), cursor.chunkOrder(), cursor.segmentId(), limit + 1);
         boolean hasMore = segments.size() > limit;
         List<Segment> page = hasMore ? segments.subList(0, limit) : segments;
         int chars = 0;

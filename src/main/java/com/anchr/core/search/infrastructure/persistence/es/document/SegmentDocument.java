@@ -26,6 +26,9 @@ public class SegmentDocument {
     @Field(type = FieldType.Keyword)
     private String assetId;
 
+    @Field(type = FieldType.Long)
+    private Long indexGeneration;
+
     @Field(type = FieldType.Keyword)
     private String assetType;
 

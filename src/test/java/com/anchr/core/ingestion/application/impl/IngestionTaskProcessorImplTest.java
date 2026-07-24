@@ -25,7 +25,6 @@ import com.anchr.core.integration.storage.StorageTokenIssuer;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,10 +55,12 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -84,8 +85,6 @@ class IngestionTaskProcessorImplTest {
     @Mock
     private IngestionStageTransactionCoordinator transactionCoordinator;
     @Mock
-    private SegmentRepository segmentRepository;
-    @Mock
     private IngestionObjectStoragePort objectStoragePort;
     @Mock
     private StorageConfigRepository storageConfigRepository;
@@ -102,6 +101,8 @@ class IngestionTaskProcessorImplTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper().findAndRegisterModules();
+        lenient().when(transactionCoordinator.ensureTargetIndexGeneration(any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         processor = processor(Runnable::run);
     }
 
@@ -276,7 +277,9 @@ class IngestionTaskProcessorImplTest {
         processor.processClaim(item);
 
         verify(ingestionTaskRepository, never()).transitionClaim(any());
-        verifyNoInteractions(doclingClient, transactionCoordinator);
+        verifyNoInteractions(doclingClient);
+        verify(transactionCoordinator).ensureTargetIndexGeneration(item);
+        verifyNoMoreInteractions(transactionCoordinator);
     }
 
     @Test
@@ -512,7 +515,8 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(chunk));
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("body text", "text"))
                 .thenReturn(List.of(0.1f, 0.2f));
@@ -522,7 +526,7 @@ class IngestionTaskProcessorImplTest {
         when(transactionCoordinator.transitionAndUpdateAssetStatus(
                 any(), eq(asset), any(), any())).thenReturn(true);
         when(ingestionIndexFinalizer.finalizeIndex(
-                any(IngestionTaskItem.class), eq(asset), any(), eq(1))).thenReturn(true);
+                any(IngestionTaskItem.class), eq(asset), any())).thenReturn(true);
 
         processor.processClaim(item);
 
@@ -541,7 +545,7 @@ class IngestionTaskProcessorImplTest {
         ArgumentCaptor<IngestionTaskItem> indexClaim =
                 ArgumentCaptor.forClass(IngestionTaskItem.class);
         verify(ingestionIndexFinalizer).finalizeIndex(
-                indexClaim.capture(), eq(asset), any(), eq(1));
+                indexClaim.capture(), eq(asset), any());
         assertThat(indexClaim.getValue().getExecutionStage())
                 .isEqualTo(IngestionExecutionStage.INDEX);
         assertThat(indexClaim.getValue().getClaimVersion()).isEqualTo(item.getClaimVersion());
@@ -561,7 +565,7 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed))
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
                 .thenReturn(List.of(blankOcr, textOcr));
         when(objectStoragePort.buildDownloadUrl("images/image.png"))
                 .thenReturn("https://signed.example.test/image.png");
@@ -595,7 +599,8 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(blankOcr));
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(blankOcr));
         when(objectStoragePort.buildDownloadUrl("images/image.png"))
                 .thenReturn("https://signed.example.test/image.png");
         when(embeddingPort.isMulti()).thenReturn(false);
@@ -626,7 +631,7 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed))
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
                 .thenReturn(List.of(first, second));
         when(objectStoragePort.buildDownloadUrl("images/image.png"))
                 .thenReturn("https://signed.example.test/image.png");
@@ -667,7 +672,8 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(chunk));
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("body text", "text"))
                 .thenThrow(new AiClient.OpenAiException(429, "quota exhausted"));
@@ -707,7 +713,8 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(chunk));
         when(embeddingPort.isMulti()).thenReturn(false);
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
@@ -723,7 +730,8 @@ class IngestionTaskProcessorImplTest {
             Thread.interrupted();
         }
 
-        verifyNoInteractions(transactionCoordinator);
+        verify(transactionCoordinator).ensureTargetIndexGeneration(item);
+        verifyNoMoreInteractions(transactionCoordinator);
         verify(embeddingPort, never()).embed(any(), any());
     }
 
@@ -743,14 +751,15 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(chunk));
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("body", "text")).thenReturn(List.of(0.1f));
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.INDEX),
                 eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
         when(ingestionIndexFinalizer.finalizeIndex(
-                eq(item), eq(asset), any(), eq(1))).thenReturn(true);
+                eq(item), eq(asset), any())).thenReturn(true);
 
         processor.processClaim(item);
 
@@ -777,7 +786,8 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(chunk));
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("body", "text"))
                 .thenThrow(new AiClient.OpenAiException(429, "quota exhausted"));
@@ -801,7 +811,7 @@ class IngestionTaskProcessorImplTest {
     }
 
     @Test
-    void index_shouldPreserveExistingOverwrittenAssetCleanup() {
+    void index_shouldDelegateOverwrittenAssetCleanupToFinalizer() {
         IngestionTaskItem item = claimed(IngestionExecutionStage.INDEX).toBuilder()
                 .parseResultObjectKey("parse-result.gz")
                 .dedupeResult(DedupeResult.OVERWRITTEN)
@@ -818,23 +828,20 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
-        when(doclingChunkMapper.toTextChunks(asset, parsed)).thenReturn(List.of(chunk));
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(chunk));
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("body", "text")).thenReturn(List.of(0.1f));
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.INDEX),
                 eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
         when(ingestionIndexFinalizer.finalizeIndex(
-                eq(item), eq(asset), any(), eq(1))).thenReturn(true);
-        when(assetRepository.markDeleted(
-                eq("kb-1"), eq("asset-old"), eq("user-a"), any(LocalDateTime.class)))
-                .thenReturn(true);
-
+                eq(item), eq(asset), any())).thenReturn(true);
         processor.processClaim(item);
 
-        verify(assetRepository).markDeleted(
+        verify(ingestionIndexFinalizer).finalizeIndex(eq(item), eq(asset), any());
+        verify(assetRepository, never()).markDeleted(
                 eq("kb-1"), eq("asset-old"), eq("user-a"), any(LocalDateTime.class));
-        verify(segmentRepository).deleteByAssetId("asset-old");
     }
 
     @Test
@@ -869,7 +876,6 @@ class IngestionTaskProcessorImplTest {
                 storageTokenIssuer,
                 ingestionIndexFinalizer,
                 transactionCoordinator,
-                segmentRepository,
                 objectStoragePort,
                 storageConfigRepository,
                 doclingChunkMapper,
@@ -887,6 +893,7 @@ class IngestionTaskProcessorImplTest {
                 .kbId("kb-1")
                 .taskCreatedBy("user-a")
                 .assetId("asset-1")
+                .targetIndexGeneration(1L)
                 .fileName("document.pdf")
                 .parseAttempt(1)
                 .doclingRequestId("task-1:item-1:1")

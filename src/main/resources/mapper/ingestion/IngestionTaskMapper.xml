@@ -64,6 +64,7 @@
         <result property="kbId" column="kb_id"/>
         <result property="taskCreatedBy" column="task_created_by"/>
         <result property="assetId" column="asset_id"/>
+        <result property="targetIndexGeneration" column="target_index_generation"/>
         <result property="sourceUrl" column="source_url"/>
         <result property="itemProgress" column="item_progress"/>
         <result property="claimUpdatedAt" column="claim_updated_at"/>
@@ -156,11 +157,13 @@
     <insert id="insertItem"
             parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskItemRecord">
         insert into ingestion_task_item (
-            id, task_id, current_execution_id, asset_id, file_name, file_hash, source_url,
+            id, task_id, current_execution_id, asset_id, target_index_generation,
+            file_name, file_hash, source_url,
             stage, status, progress, dedupe_result, duplicate_asset_id,
             error_code, error_message, created_at, updated_at, finished_at
         ) values (
-            #{id}, #{taskId}, #{currentExecutionId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl},
+            #{id}, #{taskId}, #{currentExecutionId}, #{assetId}, #{targetIndexGeneration},
+            #{fileName}, #{fileHash}, #{sourceUrl},
             #{stage}, #{status}, #{progress}, #{dedupeResult}, #{duplicateAssetId},
             #{errorCode}, #{errorMessage}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
@@ -443,6 +446,7 @@
             it.kb_id,
             it.created_by as task_created_by,
             iti.asset_id,
+            iti.target_index_generation,
             iti.source_url,
             iti.progress as item_progress,
             ie.updated_at as claim_updated_at,
@@ -489,6 +493,28 @@
           and ie.execution_status = 'ACTIVE'
           and ie.lease_token = #{leaseToken}
     </select>
+
+    <select id="findMaxTargetIndexGeneration" resultType="java.lang.Long">
+        select coalesce(max(target_index_generation), 0)
+        from ingestion_task_item
+        where asset_id = #{assetId}
+    </select>
+
+    <select id="findTargetIndexGeneration" resultType="java.lang.Long">
+        select target_index_generation
+        from ingestion_task_item
+        where id = #{itemId}
+          and asset_id = #{assetId}
+    </select>
+
+    <update id="assignTargetIndexGeneration">
+        update ingestion_task_item
+        set target_index_generation = #{targetIndexGeneration},
+            updated_at = #{updatedAt}
+        where id = #{itemId}
+          and asset_id = #{assetId}
+          and target_index_generation is null
+    </update>
 
     <update id="renewClaim">
         update ingestion_item_execution ie

@@ -5,6 +5,7 @@ import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch._types.KnnSearch;
 import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
 import co.elastic.clients.elasticsearch.core.GetResponse;
@@ -138,6 +139,7 @@ public class EsSegmentRepository implements SegmentRepository {
     @Override
     public List<Segment> listByAssetId(String kbId,
                                        String assetId,
+                                       long activeIndexGeneration,
                                        Integer afterChunkOrder,
                                        String afterSegmentId,
                                        int limit) {
@@ -151,7 +153,8 @@ public class EsSegmentRepository implements SegmentRepository {
                     .size(Math.min(limit, 100))
                     .query(q -> q.bool(b -> b
                             .filter(f -> f.term(t -> t.field("kbId").value(kbId.trim())))
-                            .filter(f -> f.term(t -> t.field("assetId").value(assetId.trim())))))
+                            .filter(f -> f.term(t -> t.field("assetId").value(assetId.trim())))
+                            .filter(indexGenerationFilter(activeIndexGeneration))))
                     .sort(s -> s.field(f -> f.field("chunkOrder").order(SortOrder.Asc).missing("_last")))
                     .sort(s -> s.field(f -> f.field("segmentId").order(SortOrder.Asc)))
                     .source(src -> src.filter(f -> f.excludes("embedding")));
@@ -181,6 +184,15 @@ public class EsSegmentRepository implements SegmentRepository {
         indexWriteBarrier.withWritePermit(() -> doDeleteByAssetId(assetId.trim()));
     }
 
+    @Override
+    public void deleteByAssetGeneration(String assetId, long indexGeneration) {
+        if (!StringUtils.hasText(assetId) || indexGeneration < 0L) {
+            return;
+        }
+        indexWriteBarrier.withWritePermit(
+                () -> doDeleteByAssetGeneration(assetId.trim(), indexGeneration));
+    }
+
     private void doDeleteByAssetId(String assetId) {
         assertIndexWritable();
         try {
@@ -200,6 +212,50 @@ public class EsSegmentRepository implements SegmentRepository {
         } catch (Exception e) {
             log.error("kb segment delete by asset failed, assetId={}", assetId, e);
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+        }
+    }
+
+    private void doDeleteByAssetGeneration(String assetId, long indexGeneration) {
+        assertIndexWritable();
+        try {
+            DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
+                    .index(kbSegmentConfig.getWriteTargetName())
+                    .refresh(true)
+                    .query(q -> q.bool(b -> b
+                            .filter(f -> f.term(t -> t.field("assetId").value(assetId)))
+                            .filter(indexGenerationFilter(indexGeneration)))));
+            assertDeleteCompleted(esClient.deleteByQuery(request));
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("kb segment delete by asset generation failed, assetId={}, generation={}",
+                    assetId, indexGeneration, e);
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
+        }
+    }
+
+    private Query indexGenerationFilter(long indexGeneration) {
+        if (indexGeneration == 0L) {
+            return Query.of(q -> q.bool(b -> b
+                    .should(s -> s.term(t -> t
+                            .field("indexGeneration")
+                            .value(0L)))
+                    .should(s -> s.bool(missing -> missing
+                            .mustNot(n -> n.exists(e -> e.field("indexGeneration")))))
+                    .minimumShouldMatch("1")));
+        }
+        return Query.of(q -> q.term(t -> t
+                .field("indexGeneration")
+                .value(indexGeneration)));
+    }
+
+    private void assertDeleteCompleted(DeleteByQueryResponse response) {
+        if (response == null
+                || response.timedOut()
+                || response.versionConflicts() > 0
+                || (response.failures() != null && !response.failures().isEmpty())) {
+            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                    "Search index delete did not complete successfully.");
         }
     }
 
@@ -432,6 +488,7 @@ public class EsSegmentRepository implements SegmentRepository {
                 .segmentId(doc.getSegmentId())
                 .kbId(doc.getKbId())
                 .assetId(doc.getAssetId())
+                .indexGeneration(doc.getIndexGeneration() == null ? 0L : doc.getIndexGeneration())
                 .assetType(doc.getAssetType())
                 .segmentType(parseSegmentType(doc.getSegmentType()))
                 .title(doc.getTitle())

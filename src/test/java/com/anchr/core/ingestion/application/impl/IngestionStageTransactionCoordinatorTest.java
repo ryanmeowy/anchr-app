@@ -3,6 +3,7 @@ package com.anchr.core.ingestion.application.impl;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
+import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.kb.domain.model.Asset;
@@ -21,10 +22,12 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -64,6 +67,40 @@ class IngestionStageTransactionCoordinatorTest {
                 transition.getUpdatedAt());
         assertThat(transactionManager.commits).isZero();
         assertThat(transactionManager.rollbacks).isEqualTo(1);
+    }
+
+    @Test
+    void ensureTargetIndexGeneration_shouldAllocateAfterLockingAsset() {
+        IngestionStageTransactionCoordinator coordinator =
+                transactionalCoordinator(new RecordingTransactionManager());
+        IngestionTaskItem item = IngestionTaskItem.builder()
+                .id("item-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .build();
+        Asset asset = Asset.builder()
+                .id("asset-1")
+                .kbId("kb-1")
+                .activeIndexGeneration(3L)
+                .build();
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-1"))
+                .thenReturn(5L);
+        when(ingestionTaskRepository.assignTargetIndexGeneration(
+                org.mockito.ArgumentMatchers.eq("item-1"),
+                org.mockito.ArgumentMatchers.eq("asset-1"),
+                org.mockito.ArgumentMatchers.eq(6L),
+                org.mockito.ArgumentMatchers.any(LocalDateTime.class)))
+                .thenReturn(true);
+
+        IngestionTaskItem allocated =
+                coordinator.ensureTargetIndexGeneration(item);
+
+        assertThat(allocated.getTargetIndexGeneration()).isEqualTo(6L);
+        verify(assetRepository).findByIdForUpdate("kb-1", "asset-1");
+        verify(ingestionTaskRepository)
+                .findMaxTargetIndexGeneration("asset-1");
     }
 
     private IngestionStageTransactionCoordinator transactionalCoordinator(

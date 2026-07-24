@@ -31,6 +31,7 @@ public class Asset {
     DocumentIndexStatus indexStatus;
     int segmentCount;
     int indexedSegmentCount;
+    long activeIndexGeneration;
     String embeddingProfile;
     String errorCode;
     String errorMessage;

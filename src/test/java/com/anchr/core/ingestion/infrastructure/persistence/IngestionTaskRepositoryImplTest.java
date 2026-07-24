@@ -112,6 +112,7 @@ class IngestionTaskRepositoryImplTest {
         IngestionTaskItem item = baseItem(now)
                 .status(IngestionTaskItemStatus.PENDING)
                 .stage(IngestionStage.PARSE)
+                .targetIndexGeneration(3L)
                 .dedupeStrategy(DedupeStrategy.OVERWRITE)
                 .build();
         stubGeneratedIds(11L, 22L);
@@ -126,6 +127,27 @@ class IngestionTaskRepositoryImplTest {
         order.verify(mapper).insertParseAttempt(any());
         order.verify(mapper).insertExecution(any());
         order.verify(mapper).pointItemToExecution("item-1", 22L, now);
+        ArgumentCaptor<IngestionTaskItemRecord> itemRecord =
+                ArgumentCaptor.forClass(IngestionTaskItemRecord.class);
+        verify(mapper).insertItem(itemRecord.capture());
+        assertThat(itemRecord.getValue().getTargetIndexGeneration()).isEqualTo(3L);
+    }
+
+    @Test
+    void targetGenerationAssignment_shouldOnlyAcceptPositiveValues() {
+        IngestionTaskRepositoryImpl repository =
+                new IngestionTaskRepositoryImpl(mapper);
+        LocalDateTime now = LocalDateTime.now();
+
+        when(mapper.assignTargetIndexGeneration(
+                "item-1", "asset-1", 2L, now)).thenReturn(1);
+
+        assertThat(repository.assignTargetIndexGeneration(
+                "item-1", "asset-1", 2L, now)).isTrue();
+        assertThatThrownBy(() -> repository.assignTargetIndexGeneration(
+                "item-1", "asset-1", 0L, now))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("positive");
     }
 
     @Test

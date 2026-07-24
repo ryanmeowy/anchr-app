@@ -105,6 +105,7 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 "task_id",
                 "current_execution_id",
                 "asset_id",
+                "target_index_generation",
                 "file_name",
                 "file_hash",
                 "source_url",
@@ -130,6 +131,7 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 .containsExactlyInAnyOrder(
                         "PRIMARY",
                         "idx_ingestion_item_current_execution",
+                        "idx_ingestion_item_asset_generation",
                         "idx_task_item_asset",
                         "idx_task_item_task")
                 .doesNotContain(

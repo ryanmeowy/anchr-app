@@ -14,6 +14,7 @@ public class IngestionTaskItemRecord {
     private String taskId;
     private Long currentExecutionId;
     private String assetId;
+    private Long targetIndexGeneration;
     private String fileName;
     private String fileHash;
     private String sourceUrl;

@@ -10,6 +10,7 @@ import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -44,6 +45,7 @@ public class AgentTaskProcessor {
     private final ConversationRepository conversationRepository;
     private final AgentTraceRepository traceRepository;
     private final SegmentRepository segmentRepository;
+    private final AssetRepository assetRepository;
     private final ConversationGenerationPort generationPort;
     private final ConversationCitationMapper citationMapper;
     private final ConversationTurnCodec turnCodec;
@@ -153,10 +155,15 @@ public class AgentTaskProcessor {
     private List<EvidenceText> readAll(AgentTask task, SummaryRequest request, long deadline) {
         List<EvidenceText> result = new ArrayList<>(); int chars = 0;
         for (AssetRef asset : request.assets()) {
+            long activeGeneration = assetRepository.findActiveById(asset.kbId(), asset.assetId())
+                    .orElseThrow(() -> new PermanentTaskException(
+                            "DOCUMENT_NOT_FOUND", "文档不存在或已删除"))
+                    .getActiveIndexGeneration();
             Integer order = null; String segmentId = null;
             while (true) {
                 ensureActive(task, deadline);
-                List<Segment> page = segmentRepository.listByAssetId(asset.kbId(), asset.assetId(), order, segmentId, 20);
+                List<Segment> page = segmentRepository.listByAssetId(
+                        asset.kbId(), asset.assetId(), activeGeneration, order, segmentId, 20);
                 if (page.isEmpty()) break;
                 for (Segment segment : page) {
                     String text = text(segment); if (!StringUtils.hasText(text)) continue;

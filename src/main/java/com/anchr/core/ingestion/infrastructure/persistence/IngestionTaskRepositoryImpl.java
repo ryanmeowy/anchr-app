@@ -188,6 +188,35 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     @Override
+    public long findMaxTargetIndexGeneration(String assetId) {
+        requireText(assetId, "assetId");
+        Long value = mapper.findMaxTargetIndexGeneration(assetId);
+        return value == null ? 0L : Math.max(0L, value);
+    }
+
+    @Override
+    public Optional<Long> findTargetIndexGeneration(String itemId, String assetId) {
+        requireText(itemId, "itemId");
+        requireText(assetId, "assetId");
+        return mapper.findTargetIndexGeneration(itemId, assetId);
+    }
+
+    @Override
+    public boolean assignTargetIndexGeneration(String itemId, String assetId,
+                                               long targetIndexGeneration,
+                                               LocalDateTime updatedAt) {
+        requireText(itemId, "itemId");
+        requireText(assetId, "assetId");
+        if (targetIndexGeneration < 1L) {
+            throw new IllegalArgumentException(
+                    "targetIndexGeneration must be positive.");
+        }
+        Objects.requireNonNull(updatedAt, "updatedAt");
+        return mapper.assignTargetIndexGeneration(
+                itemId, assetId, targetIndexGeneration, updatedAt) == 1;
+    }
+
+    @Override
     public boolean renewClaim(String itemId, long executionEpoch,
                               IngestionExecutionStage expectedExecutionStage,
                               long claimVersion, String leaseToken, long leaseSeconds) {
@@ -407,6 +436,7 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         record.setId(item.getId());
         record.setTaskId(item.getTaskId());
         record.setAssetId(item.getAssetId());
+        record.setTargetIndexGeneration(item.getTargetIndexGeneration());
         record.setFileName(item.getFileName());
         record.setFileHash(item.getFileHash());
         record.setSourceUrl(item.getSourceUrl());
@@ -526,6 +556,7 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .kbId(record.getKbId())
                 .taskCreatedBy(record.getTaskCreatedBy())
                 .assetId(record.getAssetId())
+                .targetIndexGeneration(record.getTargetIndexGeneration())
                 .sourceUrl(record.getSourceUrl())
                 .parseAttempt(defaultAttempt(record.getParseAttemptNo()))
                 .doclingRequestId(record.getRequestId())
@@ -773,6 +804,11 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
             }
             if (item.getExecutionEpoch() < 1) {
                 throw new IllegalArgumentException("item.executionEpoch must be positive.");
+            }
+            if (item.getTargetIndexGeneration() != null
+                    && item.getTargetIndexGeneration() < 1L) {
+                throw new IllegalArgumentException(
+                        "item.targetIndexGeneration must be positive when present.");
             }
             if (item.getClaimVersion() < 0) {
                 throw new IllegalArgumentException(

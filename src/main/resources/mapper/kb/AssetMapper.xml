@@ -24,6 +24,7 @@
         <result property="indexStatus" column="index_status"/>
         <result property="segmentCount" column="segment_count"/>
         <result property="indexedSegmentCount" column="indexed_segment_count"/>
+        <result property="activeIndexGeneration" column="active_index_generation"/>
         <result property="embeddingProfile" column="embedding_profile"/>
         <result property="errorCode" column="error_code"/>
         <result property="errorMessage" column="error_message"/>
@@ -38,7 +39,8 @@
         id, kb_id, file_name, title, file_type, mime_type,
         size_bytes, file_hash, version_group_id, version_no, previous_asset_id,
         object_key, preview_object_key, thumbnail_key,
-        source_url, parse_status, index_status, segment_count, indexed_segment_count, embedding_profile,
+        source_url, parse_status, index_status, segment_count, indexed_segment_count,
+        active_index_generation, embedding_profile,
         error_code, error_message, created_by, updated_by, created_at, updated_at, deleted_at
     </sql>
 
@@ -49,7 +51,8 @@
             #{id}, #{kbId}, #{fileName}, #{title}, #{fileType}, #{mimeType},
             #{sizeBytes}, #{fileHash}, #{versionGroupId}, #{versionNo}, #{previousAssetId},
             #{objectKey}, #{previewObjectKey}, #{thumbnailKey},
-            #{sourceUrl}, #{parseStatus}, #{indexStatus}, #{segmentCount}, #{indexedSegmentCount}, #{embeddingProfile},
+            #{sourceUrl}, #{parseStatus}, #{indexStatus}, #{segmentCount}, #{indexedSegmentCount},
+            #{activeIndexGeneration}, #{embeddingProfile},
             #{errorCode}, #{errorMessage}, #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{deletedAt}
         )
     </insert>
@@ -61,6 +64,16 @@
         where id = #{assetId}
           and kb_id = #{kbId}
           and deleted_at is null
+    </select>
+
+    <select id="findActiveIndexGenerations" resultMap="AssetRecordMap">
+        select id, active_index_generation
+        from asset
+        where deleted_at is null
+          and id in
+        <foreach collection="assetIds" item="assetId" open="(" separator="," close=")">
+            #{assetId}
+        </foreach>
     </select>
 
     <select id="findByIdForUpdate" resultMap="AssetRecordMap">
@@ -183,6 +196,24 @@
         where id = #{assetId}
           and kb_id = #{kbId}
           and deleted_at is null
+    </update>
+
+    <update id="activateIndexGeneration">
+        update asset
+        set parse_status = #{parseStatus},
+            index_status = #{indexStatus},
+            segment_count = #{segmentCount},
+            indexed_segment_count = #{indexedSegmentCount},
+            active_index_generation = #{targetGeneration},
+            error_code = null,
+            error_message = null,
+            updated_by = #{updatedBy},
+            updated_at = #{updatedAt}
+        where id = #{assetId}
+          and kb_id = #{kbId}
+          and deleted_at is null
+          and active_index_generation = #{expectedActiveGeneration}
+          and active_index_generation &lt; #{targetGeneration}
     </update>
 
     <update id="markDeleted">

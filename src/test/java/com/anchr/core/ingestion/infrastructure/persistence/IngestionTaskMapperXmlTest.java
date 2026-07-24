@@ -38,6 +38,10 @@ class IngestionTaskMapperXmlTest {
                 .isTrue();
         assertThat(configuration.hasStatement(NAMESPACE + "resetFailedItemPointer")).isTrue();
         assertThat(configuration.hasStatement(NAMESPACE + "findRetryItem")).isTrue();
+        assertThat(configuration.hasStatement(
+                NAMESPACE + "findMaxTargetIndexGeneration")).isTrue();
+        assertThat(configuration.hasStatement(
+                NAMESPACE + "assignTargetIndexGeneration")).isTrue();
 
         assertThat(configuration.hasStatement(NAMESPACE + "claimItem")).isFalse();
         assertThat(configuration.hasStatement(NAMESPACE + "transitionClaim")).isFalse();
@@ -137,6 +141,7 @@ class IngestionTaskMapperXmlTest {
 
         assertThat(sql)
                 .contains("iti.progress as item_progress")
+                .contains("iti.target_index_generation")
                 .contains("ie.phase")
                 .contains("ie.claim_version")
                 .doesNotContain("iti.file_name")
@@ -151,6 +156,29 @@ class IngestionTaskMapperXmlTest {
         assertThat(sql)
                 .contains("inner join ingestion_item_parse_attempt ipa")
                 .contains("ipa.item_id = iti.id");
+    }
+
+    @Test
+    void targetGenerationAllocation_shouldBeStableOnTheItem() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String maxSql = sql(configuration, "findMaxTargetIndexGeneration",
+                Map.of("assetId", "asset-1"));
+        String assignSql = sql(configuration, "assignTargetIndexGeneration", Map.of(
+                "itemId", "item-1",
+                "assetId", "asset-1",
+                "targetIndexGeneration", 4L,
+                "updatedAt", LocalDateTime.now()));
+
+        assertThat(maxSql)
+                .contains("max(target_index_generation)")
+                .contains("asset_id = ?");
+        assertThat(assignSql)
+                .contains("target_index_generation = ?")
+                .contains("id = ?")
+                .contains("asset_id = ?")
+                .contains("target_index_generation is null")
+                .doesNotContain("ingestion_item_execution");
     }
 
     @Test

@@ -53,7 +53,7 @@ class IngestionItemStorageMigrationMysqlIntegrationTest {
     }
 
     @Test
-    void v18_shouldRemoveLegacyItemStateWithoutChangingNormalizedExecution() {
+    void v19_shouldKeepNormalizedExecutionAndAddOnlyStableTargetGeneration() {
         List<String> itemColumns = jdbc.queryForList("""
                 select column_name
                 from information_schema.columns
@@ -66,6 +66,7 @@ class IngestionItemStorageMigrationMysqlIntegrationTest {
                 "task_id",
                 "current_execution_id",
                 "asset_id",
+                "target_index_generation",
                 "file_name",
                 "file_hash",
                 "source_url",
@@ -89,6 +90,7 @@ class IngestionItemStorageMigrationMysqlIntegrationTest {
         assertThat(itemIndexes).containsExactlyInAnyOrder(
                 "PRIMARY",
                 "idx_ingestion_item_current_execution",
+                "idx_ingestion_item_asset_generation",
                 "idx_task_item_asset",
                 "idx_task_item_task");
 

@@ -54,6 +54,12 @@ class OutboxMysqlIntegrationTest {
             assertThat(columnExists(connection, "outbox_event", "lock_token")).isTrue();
             assertThat(indexExists(connection, "outbox_event", "idx_outbox_poll")).isTrue();
             assertThat(indexExists(connection, "outbox_event", "idx_outbox_locked")).isTrue();
+            assertThat(columnExists(connection, "asset", "active_index_generation")).isTrue();
+            assertThat(columnExists(connection, "asset_index_change", "revision")).isTrue();
+            assertThat(indexExists(
+                    connection,
+                    "asset_index_change",
+                    "idx_asset_index_change_kb_revision")).isTrue();
         }
     }
 
@@ -129,7 +135,8 @@ class OutboxMysqlIntegrationTest {
                     event_type, aggregate_type, aggregate_id, payload, status,
                     retry_count, created_by, created_at, updated_at
                 ) values (
-                    'DOCUMENT_INDEX_DELETE_REQUESTED', 'ASSET', ?, json_object('assetId', ?),
+                    'DELETE_ASSET', 'ASSET', ?,
+                    json_object('kbId', '2001', 'assetId', ?),
                     'PENDING', 0, 'test', now(), now()
                 )
                 """)) {

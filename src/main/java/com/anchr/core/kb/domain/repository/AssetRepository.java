@@ -5,7 +5,9 @@ import com.anchr.core.kb.domain.model.AssetHealthStats;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -21,6 +23,12 @@ public interface AssetRepository {
      * Locks the asset row even when it is soft-deleted. Must be invoked inside a transaction.
      */
     Optional<Asset> findByIdForUpdate(String kbId, String assetId);
+
+    /**
+     * Returns active logical index generations for non-deleted assets.
+     * Missing asset ids are intentionally omitted so callers can fail closed.
+     */
+    Map<String, Long> findActiveIndexGenerations(Collection<String> assetIds);
 
     List<Asset> listActive(String kbId, String keyword, String fileType, int limit, int offset);
 
@@ -49,6 +57,12 @@ public interface AssetRepository {
                                   int indexedSegmentCount,
                                   String errorCode, String errorMessage,
                                   String updatedBy, LocalDateTime updatedAt);
+
+    boolean activateIndexGeneration(String kbId, String assetId,
+                                    long expectedActiveGeneration, long targetGeneration,
+                                    String parseStatus, String indexStatus, int segmentCount,
+                                    int indexedSegmentCount,
+                                    String updatedBy, LocalDateTime updatedAt);
 
     boolean markDeleted(String kbId, String assetId, String updatedBy, LocalDateTime updatedAt);
 }

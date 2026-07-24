@@ -1,6 +1,7 @@
 package com.anchr.core.ingestion.infrastructure.persistence.es;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.Refresh;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import com.anchr.core.common.config.SegmentIndexConfig;
@@ -35,7 +36,22 @@ public class SegmentBulkWriter {
         if (segments == null || segments.isEmpty()) {
             return;
         }
+        validateSegments(segments);
         indexWriteBarrier.withWritePermit(() -> doWrite(segments));
+    }
+
+    private void validateSegments(List<Segment> segments) {
+        for (int index = 0; index < segments.size(); index++) {
+            Segment segment = segments.get(index);
+            if (segment == null) {
+                throw new IllegalArgumentException(
+                        "segments[" + index + "] cannot be null.");
+            }
+            if (!StringUtils.hasText(segment.getSegmentId())) {
+                throw new IllegalArgumentException(
+                        "segments[" + index + "].segmentId cannot be blank.");
+            }
+        }
     }
 
     private void doWrite(List<Segment> segments) {
@@ -47,26 +63,30 @@ public class SegmentBulkWriter {
         String indexName = kbSegmentConfig.getWriteTargetName();
         try {
             var requestBuilder = new co.elastic.clients.elasticsearch.core.BulkRequest.Builder();
-            int operationCount = 0;
+            requestBuilder.refresh(Refresh.WaitFor);
             for (Segment segment : segments) {
-                if (segment == null || !StringUtils.hasText(segment.getSegmentId())) {
-                    continue;
-                }
                 requestBuilder.operations(op -> op.index(i -> i
                         .index(indexName)
                         .id(segment.getSegmentId())
                         .document(toDocument(segment))
                 ));
-                operationCount++;
-            }
-            if (operationCount == 0) {
-                return;
             }
             BulkResponse response = esClient.bulk(requestBuilder.build());
-            if (response.errors()) {
-                String reason = response.items().stream()
+            List<BulkResponseItem> responseItems =
+                    response == null ? null : response.items();
+            if (responseItems == null || responseItems.size() != segments.size()) {
+                int actualCount = responseItems == null ? 0 : responseItems.size();
+                throw new BusinessException(
+                        ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                        "kb_segment bulk response size mismatch: expected "
+                                + segments.size() + ", actual " + actualCount);
+            }
+            List<BulkResponseItem> failures = responseItems.stream()
+                    .filter(item -> item.error() != null)
+                    .toList();
+            if (response.errors() || !failures.isEmpty()) {
+                String reason = failures.stream()
                         .map(BulkResponseItem::error)
-                        .filter(java.util.Objects::nonNull)
                         .map(error -> error.reason())
                         .filter(StringUtils::hasText)
                         .findFirst()
@@ -86,6 +106,7 @@ public class SegmentBulkWriter {
         document.setSegmentId(segment.getSegmentId());
         document.setKbId(segment.getKbId());
         document.setAssetId(segment.getAssetId());
+        document.setIndexGeneration(segment.getIndexGeneration());
         document.setAssetType(segment.getAssetType());
         document.setSegmentType(segment.getSegmentType() == null ? null : segment.getSegmentType().name());
         document.setTitle(segment.getTitle());

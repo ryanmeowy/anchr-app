@@ -81,6 +81,16 @@ public interface IngestionTaskMapper {
             @Param("leaseToken") String leaseToken,
             @Param("includeParseSnapshot") boolean includeParseSnapshot);
 
+    Long findMaxTargetIndexGeneration(@Param("assetId") String assetId);
+
+    Optional<Long> findTargetIndexGeneration(@Param("itemId") String itemId,
+                                             @Param("assetId") String assetId);
+
+    int assignTargetIndexGeneration(@Param("itemId") String itemId,
+                                    @Param("assetId") String assetId,
+                                    @Param("targetIndexGeneration") long targetIndexGeneration,
+                                    @Param("updatedAt") LocalDateTime updatedAt);
+
     int renewClaim(@Param("itemId") String itemId,
                    @Param("executionEpoch") long executionEpoch,
                    @Param("expectedExecutionStage") IngestionExecutionStage expectedExecutionStage,

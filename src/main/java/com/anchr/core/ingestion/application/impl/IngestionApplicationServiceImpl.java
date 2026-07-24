@@ -232,7 +232,14 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private IngestionTask createDocumentMaintenanceTask(String kbId, String assetId,
                                                         IngestionSourceType sourceType) {
-        Asset document = knowledgeBaseService.getDocument(kbId, assetId);
+        knowledgeBaseService.getDocument(kbId, assetId);
+        Asset document = assetRepository.findByIdForUpdate(kbId, assetId)
+                .filter(asset -> asset.getDeletedAt() == null)
+                .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
+        long targetIndexGeneration = Math.addExact(
+                Math.max(document.getActiveIndexGeneration(),
+                        ingestionTaskRepository.findMaxTargetIndexGeneration(document.getId())),
+                1L);
         RequestUserContext context = UserContextHolder.get();
         LocalDateTime now = LocalDateTime.now();
         String taskId = idGen.nextIdStr();
@@ -244,6 +251,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .taskId(taskId)
                 .kbId(kbId)
                 .assetId(document.getId())
+                .targetIndexGeneration(targetIndexGeneration)
                 .fileName(document.getFileName())
                 .fileHash(document.getFileHash())
                 .sourceUrl(document.getSourceUrl())
@@ -321,6 +329,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                     .taskId(taskId)
                     .kbId(kbId)
                     .assetId(document.getId())
+                    .targetIndexGeneration(1L)
                     .fileName(fileName)
                     .fileHash(trimToNull(command.fileHash()))
                     .sourceUrl(trimToNull(command.sourceUrl()))
@@ -358,6 +367,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .taskId(taskId)
                 .kbId(kbId)
                 .assetId(document.getId())
+                .targetIndexGeneration(1L)
                 .fileName(fileName)
                 .fileHash(trimToNull(command.fileHash()))
                 .sourceUrl(trimToNull(command.sourceUrl()))

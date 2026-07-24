@@ -40,6 +40,14 @@ public interface IngestionTaskRepository {
 
     Optional<IngestionTaskItem> claimOne(String itemId, long leaseSeconds);
 
+    long findMaxTargetIndexGeneration(String assetId);
+
+    Optional<Long> findTargetIndexGeneration(String itemId, String assetId);
+
+    boolean assignTargetIndexGeneration(String itemId, String assetId,
+                                        long targetIndexGeneration,
+                                        LocalDateTime updatedAt);
+
     boolean renewClaim(String itemId, long executionEpoch,
                        IngestionExecutionStage expectedExecutionStage,
                        long claimVersion, String leaseToken, long leaseSeconds);

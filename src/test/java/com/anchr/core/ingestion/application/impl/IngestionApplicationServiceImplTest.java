@@ -154,6 +154,7 @@ class IngestionApplicationServiceImplTest {
         assertThat(item.getDoclingRequestId()).matches("[0-9]+:[0-9]+:1");
         assertThat(item.getSourceRevision()).startsWith("v1:").hasSize(67);
         assertThat(item.getDoclingJobId()).isNull();
+        assertThat(item.getTargetIndexGeneration()).isEqualTo(1L);
         verify(assetRepository).save(any());
     }
 
@@ -260,12 +261,18 @@ class IngestionApplicationServiceImplTest {
                 .build();
         when(knowledgeBaseService.getDocument("kb-1", "asset-1"))
                 .thenReturn(document);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(document));
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-1"))
+                .thenReturn(0L, 1L);
 
         IngestionTask reparse = service.createReparseTask("kb-1", "asset-1");
         assertThat(reparse.getItems().getFirst().getStage()).isEqualTo(IngestionStage.PARSE);
         assertThat(reparse.getItems().getFirst().getStatus())
                 .isEqualTo(IngestionTaskItemStatus.PENDING);
         assertThat(reparse.getItems().getFirst().getProgress()).isEqualTo(20);
+        assertThat(reparse.getItems().getFirst().getTargetIndexGeneration())
+                .isEqualTo(1L);
         assertThat(savedTask.get().getInitialExecutionKind())
                 .isEqualTo(IngestionExecutionKind.REPARSE);
 
@@ -274,6 +281,8 @@ class IngestionApplicationServiceImplTest {
         assertThat(reembed.getItems().getFirst().getStatus())
                 .isEqualTo(IngestionTaskItemStatus.PENDING);
         assertThat(reembed.getItems().getFirst().getProgress()).isEqualTo(60);
+        assertThat(reembed.getItems().getFirst().getTargetIndexGeneration())
+                .isEqualTo(2L);
         assertThat(savedTask.get().getInitialExecutionKind())
                 .isEqualTo(IngestionExecutionKind.REEMBED);
     }

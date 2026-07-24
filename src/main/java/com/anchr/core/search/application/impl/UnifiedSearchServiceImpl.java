@@ -4,6 +4,7 @@ import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.KbScopeResolver;
 import com.anchr.core.search.application.UnifiedSearchService;
@@ -35,6 +36,7 @@ import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -53,6 +55,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private final SegmentRepository kbSegmentRepository;
     private final QueryEmbeddingService kbQueryEmbeddingService;
     private final KbScopeResolver kbScopeResolver;
+    private final AssetRepository assetRepository;
     private final SearchRerankPort searchRerankPort;
     private final AppSearchProperties appSearchProperties;
     private final MeterRegistry meterRegistry;
@@ -123,7 +126,13 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 vectorHits,
                 appSearchProperties.getRrf().getRankConstant()
         );
+        int recalledCandidateCount = candidates.size();
+        candidates = filterActiveIndexGeneration(candidates);
         int fusedCount = candidates.size();
+        if (recalledCandidateCount != fusedCount) {
+            log.info("kb search generation gate filtered candidates, recalled={}, visible={}",
+                    recalledCandidateCount, fusedCount);
+        }
         RerankOutcome rerankOutcome = applyRerank(rawQuery, candidates, limit);
         List<SegmentRerankCandidate> rankedCandidates = rerankOutcome.candidates();
         int rerankCount = rankedCandidates.size();
@@ -236,6 +245,50 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .map(this::toCandidate)
                 .filter(Objects::nonNull)
                 .toList();
+    }
+
+    private List<SegmentRerankCandidate> filterActiveIndexGeneration(
+            List<SegmentRerankCandidate> candidates
+    ) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> assetIds = new LinkedHashSet<>();
+        for (SegmentRerankCandidate candidate : candidates) {
+            Segment segment = candidate == null ? null : candidate.segment();
+            if (segment != null && StringUtils.hasText(segment.getAssetId())) {
+                assetIds.add(segment.getAssetId().trim());
+            }
+        }
+        if (assetIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, Long> activeGenerationByAsset =
+                assetRepository.findActiveIndexGenerations(assetIds);
+        if (activeGenerationByAsset == null || activeGenerationByAsset.isEmpty()) {
+            return List.of();
+        }
+        return candidates.stream()
+                .filter(candidate -> isActiveGeneration(candidate, activeGenerationByAsset))
+                .toList();
+    }
+
+    private boolean isActiveGeneration(
+            SegmentRerankCandidate candidate,
+            Map<String, Long> activeGenerationByAsset
+    ) {
+        Segment segment = candidate == null ? null : candidate.segment();
+        if (segment == null || !StringUtils.hasText(segment.getAssetId())) {
+            return false;
+        }
+        String assetId = segment.getAssetId().trim();
+        if (!activeGenerationByAsset.containsKey(assetId)) {
+            return false;
+        }
+        Long activeGeneration = activeGenerationByAsset.get(assetId);
+        long expectedGeneration = activeGeneration == null ? 0L : activeGeneration;
+        return expectedGeneration == segment.getIndexGeneration();
     }
 
     private void ingest(List<SegmentHit> ranking,

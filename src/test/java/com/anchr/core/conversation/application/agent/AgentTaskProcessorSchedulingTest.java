@@ -84,6 +84,7 @@ class AgentTaskProcessorSchedulingTest {
                 null,
                 null,
                 null,
+                null,
                 properties,
                 null,
                 null,
