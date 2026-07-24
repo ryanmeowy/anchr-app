@@ -165,15 +165,13 @@ class IngestionIdempotencyMysqlIntegrationTest {
         String revision = "v1:" + "b".repeat(64);
         jdbc.update("""
                 insert into ingestion_task_item (
-                    id, task_id, kb_id, asset_id, file_name, file_hash, source_url,
-                    parse_attempt, docling_request_id, docling_job_id, source_revision,
-                    stage, status, progress, created_at, updated_at
+                    id, task_id, asset_id, file_name, file_hash, source_url,
+                    stage, status, progress, created_at, updated_at, finished_at
                 ) values (
-                    4001, 3001, 1, 5001, 'sample.pdf', 'hash-a', null,
-                    1, '3001:4001:1', 'job-old', ?,
-                    'PARSE', 'FAILED', 20, now(), now()
+                    4001, 3001, 5001, 'sample.pdf', 'hash-a', null,
+                    'PARSE', 'FAILED', 20, now(), now(), now()
                 )
-                """, revision);
+                """);
 
         long firstParseAttemptId = insertParseAttempt(
                 1, "3001:4001:1", "job-old", revision, "FAILED");
@@ -241,7 +239,8 @@ class IngestionIdempotencyMysqlIntegrationTest {
                 """, currentExecutionId);
         jdbc.update("""
                 update ingestion_task_item
-                set status = 'FAILED'
+                set status = 'FAILED',
+                    finished_at = now()
                 where id = 4001
                 """);
         assertThat(ingestionTaskRepository.resetFailedItem(
@@ -280,7 +279,8 @@ class IngestionIdempotencyMysqlIntegrationTest {
                 """, currentExecutionId);
         jdbc.update("""
                 update ingestion_task_item
-                set status = 'RUNNING'
+                set status = 'RUNNING',
+                    finished_at = null
                 where id = 4001
                 """);
         assertThat(ingestionTaskMapper.updateClaimContext(parseContext(

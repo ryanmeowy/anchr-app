@@ -156,12 +156,12 @@
     <insert id="insertItem"
             parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskItemRecord">
         insert into ingestion_task_item (
-            id, task_id, current_execution_id, kb_id, asset_id, file_name, file_hash, source_url,
-            stage, status, progress, dedupe_strategy, dedupe_result, duplicate_asset_id,
+            id, task_id, current_execution_id, asset_id, file_name, file_hash, source_url,
+            stage, status, progress, dedupe_result, duplicate_asset_id,
             error_code, error_message, created_at, updated_at, finished_at
         ) values (
-            #{id}, #{taskId}, #{currentExecutionId}, #{kbId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl},
-            #{stage}, #{status}, #{progress}, #{dedupeStrategy}, #{dedupeResult}, #{duplicateAssetId},
+            #{id}, #{taskId}, #{currentExecutionId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl},
+            #{stage}, #{status}, #{progress}, #{dedupeResult}, #{duplicateAssetId},
             #{errorCode}, #{errorMessage}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
     </insert>
@@ -207,11 +207,17 @@
     </insert>
 
     <update id="pointItemToExecution">
-        update ingestion_task_item
-        set current_execution_id = #{executionId},
-            updated_at = #{updatedAt}
-        where id = #{itemId}
-          and current_execution_id is null
+        update ingestion_task_item iti
+        inner join ingestion_item_execution ie
+            on ie.id = #{executionId}
+           and ie.item_id = iti.id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = iti.id
+        set iti.current_execution_id = ie.id,
+            iti.updated_at = #{updatedAt}
+        where iti.id = #{itemId}
+          and iti.current_execution_id is null
     </update>
 
     <select id="findTask" resultMap="IngestionTaskRecordMap">
@@ -272,21 +278,23 @@
             iti.status as item_status,
             iti.updated_at as item_updated_at,
             iti.current_execution_id,
-            coalesce(ie.execution_epoch, iti.execution_epoch, 1) as execution_epoch,
+            ie.execution_epoch,
             ie.execution_status,
-            coalesce(ipa.attempt_no, iti.parse_attempt, 1) as parse_attempt_no,
-            coalesce(ipa.source_revision, iti.source_revision) as source_revision
+            ipa.attempt_no as parse_attempt_no,
+            ipa.source_revision
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        left join ingestion_item_execution ie
+        inner join ingestion_item_execution ie
             on ie.id = iti.current_execution_id
            and ie.item_id = iti.id
-        left join ingestion_item_parse_attempt ipa
+        inner join ingestion_item_parse_attempt ipa
             on ipa.id = ie.parse_attempt_id
            and ipa.item_id = iti.id
         where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.id = #{itemId}
+          and iti.status = 'FAILED'
+          and ie.execution_status = 'FAILED'
     </select>
 
     <select id="listFailedItems" resultMap="FailedItemRetryRecordMap">
@@ -297,21 +305,22 @@
             iti.status as item_status,
             iti.updated_at as item_updated_at,
             iti.current_execution_id,
-            coalesce(ie.execution_epoch, iti.execution_epoch, 1) as execution_epoch,
+            ie.execution_epoch,
             ie.execution_status,
-            coalesce(ipa.attempt_no, iti.parse_attempt, 1) as parse_attempt_no,
-            coalesce(ipa.source_revision, iti.source_revision) as source_revision
+            ipa.attempt_no as parse_attempt_no,
+            ipa.source_revision
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        left join ingestion_item_execution ie
+        inner join ingestion_item_execution ie
             on ie.id = iti.current_execution_id
            and ie.item_id = iti.id
-        left join ingestion_item_parse_attempt ipa
+        inner join ingestion_item_parse_attempt ipa
             on ipa.id = ie.parse_attempt_id
            and ipa.item_id = iti.id
         where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.status = 'FAILED'
+          and ie.execution_status = 'FAILED'
         order by iti.created_at asc, iti.id asc
     </select>
 
@@ -321,6 +330,9 @@
         inner join ingestion_task_item iti
             on iti.current_execution_id = ie.id
            and iti.id = ie.item_id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         where iti.status in ('PENDING', 'RUNNING')
           and ie.execution_status = 'ACTIVE'
           and ie.claim_version &lt; 9223372036854775807
@@ -336,6 +348,9 @@
         inner join ingestion_task_item iti
             on iti.current_execution_id = ie.id
            and iti.id = ie.item_id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         where iti.task_id = #{taskId}
           and iti.status in ('PENDING', 'RUNNING')
           and ie.execution_status = 'ACTIVE'
@@ -359,6 +374,9 @@
         inner join ingestion_item_execution ie
             on ie.id = iti.current_execution_id
            and ie.item_id = iti.id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         where iti.id = #{itemId}
           and iti.status in ('PENDING', 'RUNNING')
           and ie.execution_status = 'ACTIVE'
@@ -374,6 +392,9 @@
         inner join ingestion_task_item iti
             on iti.current_execution_id = ie.id
            and iti.id = ie.item_id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         set ie.phase_retry_count = ie.phase_retry_count + case
                 when #{candidate.leaseToken} is not null then 1
                 else 0
@@ -457,7 +478,9 @@
         inner join ingestion_item_execution ie
             on ie.id = iti.current_execution_id
            and ie.item_id = iti.id
-        left join ingestion_item_parse_attempt ipa on ipa.id = ie.parse_attempt_id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = iti.id
         left join ingestion_item_artifact parse_artifact
             on parse_artifact.execution_id = ie.id
            and parse_artifact.artifact_type = 'PARSE_RESULT'
@@ -472,6 +495,9 @@
         inner join ingestion_task_item iti
             on iti.current_execution_id = ie.id
            and iti.id = ie.item_id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         set ie.lease_until = timestampadd(second, #{leaseSeconds}, current_timestamp(6)),
             ie.updated_at = current_timestamp(6)
         where iti.id = #{itemId}
@@ -520,6 +546,9 @@
         inner join ingestion_task_item iti
             on iti.current_execution_id = ie.id
            and iti.id = ie.item_id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         inner join ingestion_task it on it.id = iti.task_id
         set ie.phase = case
                 when #{nextExecutionStage} in ('COMPLETE', 'FAILED') then ie.phase
@@ -566,6 +595,9 @@
         inner join ingestion_item_execution ie
             on ie.id = iti.current_execution_id
            and ie.item_id = iti.id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         set iti.stage = #{stage},
             iti.status = #{status},
             iti.progress = #{progress},
@@ -624,6 +656,9 @@
         inner join ingestion_item_execution ie
             on ie.id = iti.current_execution_id
            and ie.item_id = iti.id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         where iti.id = #{itemId}
           and ie.execution_epoch = #{executionEpoch}
     </select>
@@ -642,6 +677,9 @@
         inner join ingestion_item_execution ie
             on ie.id = iti.current_execution_id
            and ie.item_id = iti.id
+        inner join ingestion_item_parse_attempt ipa
+            on ipa.id = ie.parse_attempt_id
+           and ipa.item_id = ie.item_id
         where iti.id = #{itemId}
           and ie.execution_epoch = #{executionEpoch}
           and ie.phase = #{expectedExecutionStage}
@@ -660,29 +698,37 @@
             iti.status as item_status,
             iti.updated_at as item_updated_at,
             iti.current_execution_id,
-            coalesce(ie.execution_epoch, iti.execution_epoch, 1) as execution_epoch,
+            ie.execution_epoch,
             ie.execution_status,
-            coalesce(ipa.attempt_no, iti.parse_attempt, 1) as parse_attempt_no,
-            coalesce(ipa.source_revision, iti.source_revision) as source_revision
+            ipa.attempt_no as parse_attempt_no,
+            ipa.source_revision
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        left join ingestion_item_execution ie
+        inner join ingestion_item_execution ie
             on ie.id = iti.current_execution_id
            and ie.item_id = iti.id
-        left join ingestion_item_parse_attempt ipa
+        inner join ingestion_item_parse_attempt ipa
             on ipa.id = ie.parse_attempt_id
            and ipa.item_id = iti.id
         where it.kb_id = #{kbId}
           and it.id = #{taskId}
           and iti.id = #{itemId}
           and iti.status = 'FAILED'
-          and coalesce(ipa.attempt_no, iti.parse_attempt, 1) = #{expectedParseAttempt}
+          and ie.execution_status = 'FAILED'
+          and ipa.attempt_no = #{expectedParseAttempt}
         for update
     </select>
 
     <update id="resetFailedItemPointer">
         update ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
+        inner join ingestion_item_execution next_ie
+            on next_ie.id = #{nextExecutionId}
+           and next_ie.item_id = iti.id
+           and next_ie.execution_status = 'ACTIVE'
+        inner join ingestion_item_parse_attempt next_ipa
+            on next_ipa.id = next_ie.parse_attempt_id
+           and next_ipa.item_id = iti.id
         set iti.current_execution_id = #{nextExecutionId},
             iti.stage = #{projection.stage},
             iti.status = #{projection.status},

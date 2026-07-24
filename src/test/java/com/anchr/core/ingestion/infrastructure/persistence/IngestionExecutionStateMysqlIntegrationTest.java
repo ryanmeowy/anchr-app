@@ -92,6 +92,195 @@ class IngestionExecutionStateMysqlIntegrationTest {
     }
 
     @Test
+    void migration_shouldLeaveOnlyStableItemProjectionAndNormalizedOwnershipIndexes() {
+        List<String> itemColumns = jdbc.queryForList("""
+                select column_name
+                from information_schema.columns
+                where table_schema = database()
+                  and table_name = 'ingestion_task_item'
+                order by ordinal_position
+                """, String.class);
+        assertThat(itemColumns).containsExactly(
+                "id",
+                "task_id",
+                "current_execution_id",
+                "asset_id",
+                "file_name",
+                "file_hash",
+                "source_url",
+                "stage",
+                "status",
+                "progress",
+                "dedupe_result",
+                "duplicate_asset_id",
+                "error_code",
+                "error_message",
+                "created_at",
+                "updated_at",
+                "finished_at");
+
+        List<String> itemIndexes = jdbc.queryForList("""
+                select distinct index_name
+                from information_schema.statistics
+                where table_schema = database()
+                  and table_name = 'ingestion_task_item'
+                order by index_name
+                """, String.class);
+        assertThat(itemIndexes)
+                .containsExactlyInAnyOrder(
+                        "PRIMARY",
+                        "idx_ingestion_item_current_execution",
+                        "idx_task_item_asset",
+                        "idx_task_item_task")
+                .doesNotContain(
+                        "idx_ingestion_item_claim",
+                        "idx_ingestion_task_claim",
+                        "idx_task_item_kb_status");
+
+        assertThat(jdbc.queryForList("""
+                select index_name
+                from information_schema.statistics
+                where table_schema = database()
+                  and (
+                    (table_name = 'ingestion_item_parse_attempt'
+                      and index_name = 'uk_ingestion_parse_attempt_id_item')
+                    or
+                    (table_name = 'ingestion_item_execution'
+                      and index_name = 'uk_ingestion_execution_id_item')
+                  )
+                """, String.class)).isEmpty();
+
+        assertThat(jdbc.queryForList("""
+                select table_name, constraint_name, constraint_type
+                from information_schema.table_constraints
+                where table_schema = database()
+                  and table_name in (
+                    'ingestion_task_item',
+                    'ingestion_item_parse_attempt',
+                    'ingestion_item_execution'
+                  )
+                  and constraint_type in ('CHECK', 'FOREIGN KEY')
+                """)).isEmpty();
+    }
+
+    @Test
+    void ownershipGuards_shouldRejectCrossItemExecutionAndParseAttemptPointers() {
+        savePendingItem(
+                "9100", "9101", "9151", "first.pdf",
+                IngestionExecutionStage.PARSE_SUBMIT, null,
+                "v1:" + "1".repeat(64));
+        savePendingItem(
+                "9110", "9111", "9152", "second.pdf",
+                IngestionExecutionStage.PARSE_SUBMIT, null,
+                "v1:" + "2".repeat(64));
+        long firstExecutionId = currentExecutionId("9101");
+        long secondExecutionId = currentExecutionId("9111");
+        long secondAttemptId = parseAttemptId(secondExecutionId);
+
+        jdbc.update(
+                "update ingestion_task_item set current_execution_id = null where id = 9101");
+        assertThat(mapper.pointItemToExecution(
+                "9101", secondExecutionId, LocalDateTime.now())).isZero();
+        jdbc.update(
+                "update ingestion_task_item set current_execution_id = ? where id = 9101",
+                firstExecutionId);
+
+        jdbc.update(
+                "update ingestion_item_execution set parse_attempt_id = ? where id = ?",
+                secondAttemptId, firstExecutionId);
+        assertThat(repository.listClaimableItemIds(10)).doesNotContain("9101");
+        IngestionTaskItem unexpectedClaim = transaction.execute(status ->
+                repository.claimOne("9101", 60).orElse(null));
+        assertThat(unexpectedClaim).isNull();
+        assertThat(execution(firstExecutionId).get("lease_token")).isNull();
+
+        LocalDateTime failedAt = LocalDateTime.now();
+        jdbc.update("""
+                update ingestion_item_execution
+                set execution_status = 'FAILED',
+                    finished_at = ?,
+                    updated_at = ?
+                where id = ?
+                """, failedAt, failedAt, firstExecutionId);
+        jdbc.update("""
+                update ingestion_task_item
+                set status = 'FAILED',
+                    finished_at = ?,
+                    updated_at = ?
+                where id = 9101
+                """, failedAt, failedAt);
+        assertThat(mapper.findRetryItem("1", "9100", "9101")).isEmpty();
+        assertThat(mapper.listFailedItems("1", "9100"))
+                .extracting(FailedItemRetryRecord::getItemId)
+                .doesNotContain("9101");
+        assertThat(Boolean.TRUE.equals(transaction.execute(status ->
+                repository.resetFailedItem(
+                        "1", "9100", "9101", 1, 2,
+                        "9100:9101:2", LocalDateTime.now())))).isFalse();
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                from ingestion_item_execution
+                where item_id = 9101
+                """, Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                select count(*)
+                from ingestion_item_parse_attempt
+                where item_id = 9101
+                """, Integer.class)).isEqualTo(1);
+
+        assertThat(mapper.resetFailedItemPointer(
+                "1",
+                "9100",
+                "9101",
+                firstExecutionId,
+                secondExecutionId,
+                IngestionPublicProjectionPolicy.explicitRetry(),
+                LocalDateTime.now())).isZero();
+        assertThat(currentExecutionId("9101")).isEqualTo(firstExecutionId);
+    }
+
+    @Test
+    void heldClaim_shouldLoseEveryFenceWhenParseAttemptOwnershipBreaks() {
+        savePendingItem(
+                "9120", "9121", "9161", "held.pdf",
+                IngestionExecutionStage.PARSE_SUBMIT, null,
+                "v1:" + "3".repeat(64));
+        savePendingItem(
+                "9130", "9131", "9162", "other.pdf",
+                IngestionExecutionStage.PARSE_SUBMIT, null,
+                "v1:" + "4".repeat(64));
+        IngestionTaskItem claim = transaction.execute(status ->
+                repository.claimOne("9121", 60).orElseThrow());
+        long claimedExecutionId = currentExecutionId("9121");
+        long otherAttemptId = parseAttemptId(currentExecutionId("9131"));
+
+        jdbc.update(
+                "update ingestion_item_execution set parse_attempt_id = ? where id = ?",
+                otherAttemptId, claimedExecutionId);
+
+        assertThat(repository.renewClaim(
+                claim.getId(),
+                claim.getExecutionEpoch(),
+                claim.getExecutionStage(),
+                claim.getClaimVersion(),
+                claim.getLeaseToken(),
+                60)).isFalse();
+        assertThat(Boolean.TRUE.equals(transaction.execute(status ->
+                repository.isClaimCurrentForUpdate(
+                        claim.getId(),
+                        claim.getExecutionEpoch(),
+                        claim.getExecutionStage(),
+                        claim.getClaimVersion(),
+                        claim.getLeaseToken())))).isFalse();
+        assertThat(Boolean.TRUE.equals(transaction.execute(status ->
+                repository.transitionClaim(transition(
+                        claim, IngestionExecutionStage.PARSE_WAIT, "{}"))))).isFalse();
+        assertThat(execution(claimedExecutionId))
+                .containsEntry("phase", "PARSE_SUBMIT")
+                .containsEntry("execution_status", "ACTIVE");
+    }
+
+    @Test
     void claimAndTransition_shouldFenceStaleWorkerAndKeepClaimVersionMonotonicAcrossPhases() {
         savePendingItem(
                 "9200", "9201", "9301", "sample.pdf",

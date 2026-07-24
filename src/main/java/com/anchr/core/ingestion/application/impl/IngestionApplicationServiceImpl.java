@@ -147,12 +147,19 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
         IngestionTask task = getTask(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
-        var item = ingestionTaskRepository.findRetryItem(
-                        kbId, task.getId(), requireText(itemId, "itemId"))
+        String normalizedItemId = requireText(itemId, "itemId");
+        IngestionTaskItem visibleItem = task.getItems().stream()
+                .filter(candidate -> normalizedItemId.equals(candidate.getId()))
+                .findFirst()
                 .orElseThrow(() -> new BusinessException(ApiError.INGEST_TASK_ITEM_NOT_FOUND));
-        if (item.getStatus() != IngestionTaskItemStatus.FAILED) {
+        if (visibleItem.getStatus() != IngestionTaskItemStatus.FAILED) {
             throw new BusinessException(ApiError.INGEST_RETRY_ONLY_FAILED);
         }
+        var item = ingestionTaskRepository.findRetryItem(
+                        kbId, task.getId(), normalizedItemId)
+                .orElseThrow(() -> new BusinessException(
+                        ApiError.INGEST_RETRY_ONLY_FAILED,
+                        "Failed item has no retryable execution."));
         LocalDateTime now = LocalDateTime.now();
         resetFailedItemForRetry(kbId, task.getId(), item, now);
         ingestionTaskRepository.refreshSummary(kbId, task.getId(), context.userId(), now);
@@ -244,6 +251,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .doclingRequestId(IngestionParseIdentity.requestId(
                         taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
                 .sourceRevision(IngestionParseIdentity.sourceRevision(document))
+                .executionEpoch(1L)
+                .claimVersion(0L)
+                .stageRetryCount(0)
                 .stage(projection.stage())
                 .status(projection.status())
                 .progress(projection.progress())
@@ -318,6 +328,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                     .doclingRequestId(IngestionParseIdentity.requestId(
                             taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
                     .sourceRevision(IngestionParseIdentity.sourceRevision(document))
+                    .executionEpoch(1L)
+                    .claimVersion(0L)
+                    .stageRetryCount(0)
                     .stage(pendingProjection.stage())
                     .status(pendingProjection.status())
                     .progress(pendingProjection.progress())
@@ -352,6 +365,9 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .doclingRequestId(IngestionParseIdentity.requestId(
                         taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
                 .sourceRevision(IngestionParseIdentity.sourceRevision(document))
+                .executionEpoch(1L)
+                .claimVersion(0L)
+                .stageRetryCount(0)
                 .stage(pendingProjection.stage())
                 .status(pendingProjection.status())
                 .progress(pendingProjection.progress())

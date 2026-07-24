@@ -2,6 +2,7 @@ package com.anchr.core.ingestion.infrastructure.persistence;
 
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
 import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
+import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionKind;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
@@ -221,12 +222,14 @@ class IngestionTaskRepositoryImplTest {
                 .status(IngestionTaskItemStatus.SKIPPED)
                 .stage(IngestionStage.ASKABLE)
                 .dedupeStrategy(DedupeStrategy.VERSIONED)
+                .finishedAt(now)
                 .build();
         IngestionTaskItem second = baseItem(now)
                 .id("item-2")
                 .status(IngestionTaskItemStatus.SKIPPED)
                 .stage(IngestionStage.ASKABLE)
                 .dedupeStrategy(DedupeStrategy.VERSIONED)
+                .finishedAt(now)
                 .build();
 
         new IngestionTaskRepositoryImpl(mapper).save(task(
@@ -247,12 +250,14 @@ class IngestionTaskRepositoryImplTest {
                 .status(IngestionTaskItemStatus.SKIPPED)
                 .stage(IngestionStage.ASKABLE)
                 .dedupeStrategy(DedupeStrategy.SKIP)
+                .finishedAt(now)
                 .build();
         IngestionTaskItem second = baseItem(now)
                 .id("item-2")
                 .status(IngestionTaskItemStatus.SKIPPED)
                 .stage(IngestionStage.ASKABLE)
                 .dedupeStrategy(DedupeStrategy.OVERWRITE)
+                .finishedAt(now)
                 .build();
 
         assertThatThrownBy(() -> new IngestionTaskRepositoryImpl(mapper).save(task(
@@ -307,6 +312,31 @@ class IngestionTaskRepositoryImplTest {
         assertThat(execution.getValue().getExecutionEpoch()).isEqualTo(4L);
         assertThat(execution.getValue().getExecutionKind()).isEqualTo("EXPLICIT_RETRY");
         assertThat(execution.getValue().getPhase()).isEqualTo("PARSE_SUBMIT");
+    }
+
+    @Test
+    void retry_shouldRejectPreflightFailureWithoutCreatingExecutionHistory() {
+        LocalDateTime now = LocalDateTime.now();
+        FailedItemRetryRecord failed = new FailedItemRetryRecord();
+        failed.setItemId("item-1");
+        failed.setTaskId("task-1");
+        failed.setKbId("kb-1");
+        failed.setCurrentExecutionId(null);
+        failed.setExecutionEpoch(null);
+        failed.setExecutionStatus(null);
+        failed.setParseAttemptNo(1);
+        when(mapper.selectFailedItemForRetryForUpdate(
+                "kb-1", "task-1", "item-1", 1)).thenReturn(Optional.of(failed));
+
+        boolean reset = new IngestionTaskRepositoryImpl(mapper).resetFailedItem(
+                "kb-1", "task-1", "item-1",
+                1, 2, "task-1:item-1:2", now);
+
+        assertThat(reset).isFalse();
+        verify(mapper, never()).insertParseAttempt(any());
+        verify(mapper, never()).insertExecution(any());
+        verify(mapper, never()).resetFailedItemPointer(
+                any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -402,12 +432,21 @@ class IngestionTaskRepositoryImplTest {
 
     @Test
     void transition_shouldRejectPublicProjectionThatDoesNotMatchNextPhase() {
+        LocalDateTime now = LocalDateTime.now();
         IngestionClaimTransition inconsistent = IngestionClaimTransition.builder()
-                .expectedExecutionStage(IngestionExecutionStage.PARSE_WAIT)
+                .itemId("item-1")
+                .executionEpoch(1L)
+                .expectedExecutionStage(IngestionExecutionStage.PARSE_PERSIST)
+                .expectedClaimVersion(1L)
+                .leaseToken("lease-1")
                 .nextExecutionStage(IngestionExecutionStage.EMBED)
+                .nextStageRetryCount(0)
+                .nextStageStartedAt(now)
+                .nextActionAt(now)
                 .stage(IngestionStage.PARSE)
                 .status(IngestionTaskItemStatus.RUNNING)
                 .progress(55)
+                .parseAttempt(1)
                 .build();
 
         assertThatThrownBy(() ->
@@ -419,13 +458,22 @@ class IngestionTaskRepositoryImplTest {
 
     @Test
     void retainLeaseMustOnlyBeUsedForEmbedToIndexHandoff() {
+        LocalDateTime now = LocalDateTime.now();
         IngestionClaimTransition invalid = IngestionClaimTransition.builder()
+                .itemId("item-1")
+                .executionEpoch(1L)
                 .expectedExecutionStage(IngestionExecutionStage.INDEX)
+                .expectedClaimVersion(1L)
+                .leaseToken("lease-1")
                 .nextExecutionStage(IngestionExecutionStage.INDEX)
+                .nextStageRetryCount(0)
+                .nextStageStartedAt(now)
+                .nextActionAt(now)
                 .retainLease(true)
                 .stage(IngestionStage.INDEX)
                 .status(IngestionTaskItemStatus.RUNNING)
                 .progress(75)
+                .parseAttempt(1)
                 .build();
 
         assertThatThrownBy(() ->
@@ -433,6 +481,177 @@ class IngestionTaskRepositoryImplTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("EMBED directly to INDEX");
         verify(mapper, never()).transitionExecution(any());
+    }
+
+    @Test
+    void save_shouldRejectItemWithDifferentParentBeforeWriting() {
+        LocalDateTime now = LocalDateTime.now();
+        IngestionTaskItem item = baseItem(now)
+                .taskId("other-task")
+                .build();
+
+        assertThatThrownBy(() -> new IngestionTaskRepositoryImpl(mapper).save(task(
+                IngestionSourceType.UPLOAD, List.of(item), now)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("parent task");
+        verify(mapper, never()).insertTask(any());
+    }
+
+    @Test
+    void save_shouldRejectEitherHalfOfLeasePairBeforeWriting() {
+        LocalDateTime now = LocalDateTime.now();
+        List<IngestionTaskItem> invalidItems = List.of(
+                baseItem(now)
+                        .leaseToken("lease-without-expiry")
+                        .build(),
+                baseItem(now)
+                        .leaseUntil(now.plusMinutes(1))
+                        .build());
+
+        for (IngestionTaskItem item : invalidItems) {
+            assertThatThrownBy(() -> new IngestionTaskRepositoryImpl(mapper).save(task(
+                    IngestionSourceType.UPLOAD, List.of(item), now)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("both present or both absent");
+        }
+        verify(mapper, never()).insertTask(any());
+    }
+
+    @Test
+    void save_shouldRejectInvalidExecutionCountersBeforeWriting() {
+        LocalDateTime now = LocalDateTime.now();
+        List<IngestionTaskItem> invalidItems = List.of(
+                baseItem(now).parseAttempt(0).build(),
+                baseItem(now).executionEpoch(0L).build(),
+                baseItem(now).claimVersion(-1L).build(),
+                baseItem(now).stageRetryCount(-1).build());
+
+        for (IngestionTaskItem item : invalidItems) {
+            assertThatThrownBy(() -> new IngestionTaskRepositoryImpl(mapper).save(task(
+                    IngestionSourceType.UPLOAD, List.of(item), now)))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        verify(mapper, never()).insertTask(any());
+    }
+
+    @Test
+    void save_shouldRejectInvalidTaskCountsBeforeWriting() {
+        LocalDateTime now = LocalDateTime.now();
+        IngestionTask valid = task(
+                IngestionSourceType.UPLOAD, List.of(baseItem(now).build()), now);
+        List<IngestionTask> invalidTasks = List.of(
+                valid.toBuilder().totalCount(-1).build(),
+                valid.toBuilder().successCount(-1).build(),
+                valid.toBuilder().failureCount(-1).build(),
+                valid.toBuilder().runningCount(-1).build(),
+                valid.toBuilder().totalCount(1).successCount(2).build(),
+                valid.toBuilder().totalCount(2).build());
+
+        for (IngestionTask invalid : invalidTasks) {
+            assertThatThrownBy(() ->
+                    new IngestionTaskRepositoryImpl(mapper).save(invalid))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        verify(mapper, never()).insertTask(any());
+    }
+
+    @Test
+    void transition_shouldRejectTerminalStateWithoutFinishedAt() {
+        LocalDateTime now = LocalDateTime.now();
+        IngestionClaimTransition invalid = validTransition(now)
+                .expectedExecutionStage(IngestionExecutionStage.INDEX)
+                .nextExecutionStage(IngestionExecutionStage.COMPLETE)
+                .nextActionAt(null)
+                .stage(IngestionStage.ASKABLE)
+                .status(IngestionTaskItemStatus.SUCCESS)
+                .progress(100)
+                .finishedAt(null)
+                .build();
+
+        assertThatThrownBy(() ->
+                new IngestionTaskRepositoryImpl(mapper).transitionClaim(invalid))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("finishedAt");
+        verify(mapper, never()).transitionExecution(any());
+    }
+
+    @Test
+    void transition_shouldRejectNegativeRetryCount() {
+        LocalDateTime now = LocalDateTime.now();
+        IngestionClaimTransition invalid = validTransition(now)
+                .nextStageRetryCount(-1)
+                .build();
+
+        assertThatThrownBy(() ->
+                new IngestionTaskRepositoryImpl(mapper).transitionClaim(invalid))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nextStageRetryCount");
+        verify(mapper, never()).transitionExecution(any());
+    }
+
+    @Test
+    void updateClaimContext_shouldRejectNonParsePhaseBeforeWriting() {
+        IngestionClaimContext invalid = IngestionClaimContext.builder()
+                .itemId("item-1")
+                .executionEpoch(1L)
+                .expectedExecutionStage(IngestionExecutionStage.EMBED)
+                .claimVersion(1L)
+                .leaseToken("lease-1")
+                .parseAttempt(1)
+                .doclingRequestId("task-1:item-1:1")
+                .sourceRevision("v1:source")
+                .parseRequestSnapshot("{}")
+                .build();
+
+        assertThatThrownBy(() ->
+                new IngestionTaskRepositoryImpl(mapper).updateClaimContext(invalid))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("parse phase");
+        verify(mapper, never()).updateClaimContext(any());
+    }
+
+    @Test
+    void retry_shouldRejectBrokenCurrentExecutionPointerBeforePreparingRows() {
+        LocalDateTime now = LocalDateTime.now();
+        FailedItemRetryRecord failed = new FailedItemRetryRecord();
+        failed.setItemId("item-1");
+        failed.setTaskId("task-1");
+        failed.setKbId("kb-1");
+        failed.setCurrentExecutionId(41L);
+        failed.setExecutionEpoch(1L);
+        failed.setExecutionStatus(null);
+        failed.setParseAttemptNo(1);
+        when(mapper.selectFailedItemForRetryForUpdate(
+                "kb-1", "task-1", "item-1", 1)).thenReturn(Optional.of(failed));
+
+        boolean reset = new IngestionTaskRepositoryImpl(mapper).resetFailedItem(
+                "kb-1", "task-1", "item-1", 1, 2, "task-1:item-1:2", now);
+
+        assertThat(reset).isFalse();
+        verify(mapper, never()).insertParseAttempt(any());
+        verify(mapper, never()).insertExecution(any());
+    }
+
+    private IngestionClaimTransition.IngestionClaimTransitionBuilder validTransition(
+            LocalDateTime now) {
+        return IngestionClaimTransition.builder()
+                .itemId("item-1")
+                .taskId("task-1")
+                .kbId("kb-1")
+                .executionEpoch(1L)
+                .expectedExecutionStage(IngestionExecutionStage.PARSE_WAIT)
+                .expectedClaimVersion(1L)
+                .leaseToken("lease-1")
+                .nextExecutionStage(IngestionExecutionStage.PARSE_PERSIST)
+                .nextStageRetryCount(0)
+                .nextStageStartedAt(now)
+                .nextActionAt(now)
+                .stage(IngestionStage.PARSE)
+                .status(IngestionTaskItemStatus.RUNNING)
+                .progress(20)
+                .parseAttempt(1)
+                .updatedBy("user-1")
+                .updatedAt(now);
     }
 
     private void stubGeneratedIds(long parseAttemptId, long executionId) {
@@ -469,6 +688,10 @@ class IngestionTaskRepositoryImplTest {
                 .kbId("kb-1")
                 .assetId("asset-1")
                 .fileName("document.pdf")
+                .parseAttempt(1)
+                .executionEpoch(1L)
+                .claimVersion(0L)
+                .stageRetryCount(0)
                 .stage(IngestionStage.PARSE)
                 .status(IngestionTaskItemStatus.PENDING)
                 .progress(0)

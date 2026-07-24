@@ -31,7 +31,7 @@
 | ANCHR-104 | 关闭未消费且加密错误的内嵌图片上传链路 | 已完成 | P1 | S/M | app、docling | 101A |
 | ANCHR-105 | 重构 Docling attempt 与幂等协议 | 已完成 | P0 | M | app、docling | 104 |
 | ANCHR-106 | Ingestion 改为数据库驱动的可恢复状态机 | 已完成 | P0 | XL | app、docling、web | 103、105 |
-| ANCHR-106B | 收敛 Ingestion Item 执行模型与持久化边界 | 源码已实现；迁移基线已合并；待真实 MySQL 与部署验收 | P0 | L | app | 106 |
+| ANCHR-106B | 收敛 Ingestion Item 执行模型与持久化边界 | 源码与 V18 已收口；独立 MySQL 8.4 迁移验证通过；待业务库修复失败历史、停机迁移与部署验收 | P0 | L | app | 106 |
 | ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 待执行 | P0 | L | app | 106B |
 | ANCHR-108 | 搜索改为稳定结果快照分页 | 待执行 | P1 | L | app、web | 101B、101C、110 |
 | ANCHR-109 | 会话列表 keyset 分页与 Session 原子更新 | 已完成 | P1 | M | app、web | 可独立 |
@@ -841,7 +841,7 @@ Docling `images[]` 已完整保存在 parse artifact，供 110 消费；`DOCUMEN
 4. 部署并启动新 app scheduler；
 5. 验证 claim backlog、过期 lease、stage retry、Parse artifact 写入、EMBED→INDEX 租约交接和 Docling queue 指标后再恢复正常流量。
 
-当前合并后的迁移基线不再提供从旧 V10 schema 原地升级的发布路径；若需要保留旧库数据，必须另行制定并验证数据搬迁方案，不能直接对已有 Flyway history 执行这组已改写迁移。当前平台仍须遵守既有的“同一套 object storage 配置承载所有 Asset”约束；运行中的 storage endpoint/bucket 切换会让原文件和 checkpoint 一并不可读。
+106B 的 V18 只接收 normalized V15 schema，不提供从旧 V10/legacy-only 状态直接推断并回填 execution history 的路径；这类更老数据库若要保留数据，仍必须另行制定并验证数据搬迁方案。当前平台仍须遵守既有的“同一套 object storage 配置承载所有 Asset”约束；运行中的 storage endpoint/bucket 切换会让原文件和 checkpoint 一并不可读。
 
 ### 实施与验证记录
 
@@ -850,7 +850,7 @@ Docling `images[]` 已完整保存在 parse artifact，供 110 消费；`DOCUMEN
 - MySQL Testcontainers 测试已编写：DB-time lease、过期接管、stale token、显式 retry epoch reset、item/task summary 在 Asset 投影异常时回滚；本机无 Docker，相关用例会跳过，必须由有 Docker 或真实 MySQL 的 CI 执行。
 - OSS create-only、摘要和大小限制已由 adapter/artifact 单测覆盖；读取时 SHA-256 metadata 缺失、格式非法或不匹配均拒绝。artifact 编码改为流式 JSON → GZIP，并在原始 JSON 和压缩输出两层执行上限，避免先分配完整未压缩 JSON。真实 OSS 的条件写和权限仍需部署环境 smoke。
 - `DoclingClient` 的成功响应也改为有界流读取，`app.docling.max-response-bytes` 默认 256 MiB；错误响应只读取前 4 KiB，防止边车异常响应先完整进入 JVM 堆。
-- 最新本地回归：`anchr-app` 全量 408 项，0 failure、0 error、23 skipped；23 项均因当前环境无 Docker 而跳过的 Testcontainers 测试。`anchr-docling` 全量 20 项及 10 个 subtests 通过，改动文件 Ruff `--no-cache` 通过。`anchr-web` ingestion/background recovery 相关 23 项通过；前端无生产代码修改。
+- 106 实施轮当时的本地回归：`anchr-app` 全量 408 项，0 failure、0 error、23 skipped；23 项均因当前环境无 Docker 而跳过的 Testcontainers 测试。`anchr-docling` 全量 20 项及 10 个 subtests 通过，改动文件 Ruff `--no-cache` 通过。`anchr-web` ingestion/background recovery 相关 23 项通过；106B 的最新 app 结果单独记录在下节。
 - 本卡“已完成”表示源码实现和可执行的本地验证完成，不表示已提交、执行数据库初始化或发布；也不表示 ANCHR-107 已完成。
 
 ---
@@ -895,7 +895,7 @@ Docling `images[]` 已完整保存在 parse artifact，供 110 消费；`DOCUMEN
 
 ### 修复方案与实施结果
 
-#### 1. 收敛运行时职责，并把最终兼容结构压入建表基线
+#### 1. 收敛运行时职责，并用前向迁移落到最终物理结构
 
 新代码已经把 `ingestion_task_item` 的职责收敛为稳定 item、当前 execution 指针和公开兼容投影：
 
@@ -911,8 +911,11 @@ created_at / updated_at / finished_at
 
 - `file_name/file_hash/source_url` 是创建请求和历史展示的来源快照，不随 Asset 后续修改或软删而变化。
 - `dedupe_strategy` 的新 source of truth 已移到 `ingestion_task`；Application 在创建 task 前拒绝同一 task 内 strategy 不一致的数据。
-- 授权和作用域读取统一从 parent task 取得 `kb_id`；item 上的 `kb_id/dedupe_strategy` 兼容列暂时保留，但不再作为新读模型的 source of truth。
-- 所有原先通过 V8–V12 对既有表追加的列和索引均已直接并入 V1；状态枚举、计数范围、lease 配对等业务规则只由应用层校验，不在数据库建立 CHECK。`embedding_result_object_key` 已从建表基线、回填和测试中删除，运行时也不生成、读取或双写向量对象。
+- 授权和作用域读取统一从 parent task 取得 `kb_id`；V18 物理删除 item 上重复的 `kb_id/dedupe_strategy`，新写入和 retry 不再双读兼容列。
+- V18 删除 item 上的 parse/execution/lease/snapshot/artifact 兼容列、三个旧 claim/kb 索引和两个由单列主键覆盖的复合唯一索引；最终 `ingestion_task_item` 恰好保留上面的 17 列。
+- 状态值域、计数范围、terminal 时间、lease 配对、允许迁移图和 artifact producer/digest 等规则由 Repository/Application 在写入前校验；数据库不建立业务 CHECK。
+- item → current execution → parse attempt 的归属由创建、候选、claim、renew、transition、retry 和 INDEX 前锁定查询中的 ownership join/CAS 维护，不建立外键。V18 还会条件清理曾短暂落到开发库中的 ingestion CHECK/FK 残留。
+- `embedding_result_object_key` 既不被运行时生成、读取或双写，也会在真实存在该历史列时由 V18 条件删除；没有该列的 fresh schema 走同一迁移。
 
 #### 2. Parse attempt 与 execution 分开建模
 
@@ -942,7 +945,7 @@ created_at / updated_at / finished_at
 - `claim_version` 是 execution 全周期单调 `BIGINT/long` fence，跨 phase 不清零；`lease_token` 只表示当前 holder。候选和更新 SQL 都防止 `BIGINT` 溢出。
 - 显式 retry 在同一事务内创建新的 parse attempt 和 execution，再 CAS 切换 `current_execution_id`；CAS 失败抛异常并回滚，不能提交孤儿历史。
 - Ingestion normalized 表之间不建立外键；`current_execution_id` 只保留普通复合索引。item、parse attempt、execution 和 artifact 的归属关系由 Repository 的 join、锁、事务和 CAS 更新维护。
-- 合并后的迁移只支持空库初始化，不再在 SQL 中推断或回填旧 execution/parse attempt 历史；历史审计从 normalized model 的新写入开始。
+- V18 不推断或回填旧 execution/parse attempt；它只允许在 V13–V15 normalized 数据已经完整的库上收缩兼容列。迁移前的 ownership/retryable/active 对账是发布门禁，不得靠旧列兜底。
 
 #### 3. 制品使用 registry，并校验真实存储字节
 
@@ -959,7 +962,7 @@ created_at
 - 主键 `(execution_id, artifact_type)` 保证一个 execution 的同类 winner 唯一；应用层当前只允许 `PARSE_RESULT`，模型向量明确不属于持久化 artifact。
 - 新产物 `PRODUCED` 必须同时有 producer claim 和 SHA-256；这些规则由应用层在登记前校验。
 - SHA-256 针对 OSS 中实际保存的 gzip bytes；create-only replay 会读取并摘要已有对象，而不是摘要本次重新序列化的字节。
-- claimed worker 会加载完整的 Parse `IngestionArtifactReference`。读取 `PRODUCED` Parse artifact 时先校验 registry digest，再解压和校验业务 identity；合法 gzip 但被替换的对象或 producer 元数据漂移都会被拒绝。
+- claimed worker 会加载完整的 Parse `IngestionArtifactReference`。读取 `PRODUCED` Parse artifact 时先校验 provenance、producer claim 不晚于当前 claim、registry digest，再解压和校验业务 identity；合法 gzip 但被替换的对象、未来 claim 产物或 producer 元数据漂移都会被拒绝。
 - EMBED 生成的向量只存在于 worker 内存并在同一 lease 下直接交给 INDEX。若该 worker 丢失，INDEX recovery 读取 Parse artifact 并重新嵌入；registry 不登记 `EMBEDDING_RESULT`。
 - transition、parse-attempt、item 公开投影、artifact registry 和 task summary 在同一 MySQL 事务提交。106B 不改变 Docling ACK HTTP 协议和幂等规则，但拥有“artifact 的 MySQL 提交完成后才能 ACK”的本地事务时序；Parse artifact ACK 通过 `afterCommit` 执行，stale/冲突/回滚均不能提前 ACK。
 - stale worker 仍可能留下 immutable orphan OSS object，但不能登记或替换 winner；对象清理策略不在本卡扩成生命周期系统。
@@ -989,26 +992,41 @@ created_at
 #### 5. 查询按用例收窄
 
 - `IngestionItemViewRecord`：list/get/REST 只读公开字段，不 join execution/parse-attempt，也不读取 lease、snapshot、artifact 或 claim fence。
-- `ClaimCandidateRecord`：加锁扫描只读 item id/progress、current execution id/epoch/phase、claim version 和旧 lease token；大字段只出现在 WHERE 之外的 worker 查询。
+- `ClaimCandidateRecord`：加锁扫描只读 item id/progress、current execution id/epoch/phase、claim version 和旧 lease token，并要求 execution 引用同属 item 的 parse attempt；坏 ownership 不会反复进入调度。
 - `ClaimedExecutionRecord`：只为成功 claim 的 worker 装载实际使用的 source、TaskContext、公开 progress、execution fence、parse attempt 和 artifact reference；不再读取 file name/hash、公开 stage/status、error TEXT 或 terminal 展示时间。非 Parse phase 用 SQL `NULL` 分支避免物化 `request_snapshot`。
-- `FailedItemRetryRecord`：单项与批量 retry 只读 status、current execution/epoch/status、parse attempt 和 source revision。
+- `FailedItemRetryRecord`：单项与批量 retry 只读 status、current execution/epoch/status、parse attempt 和 source revision，并且必须命中同属 item 的 `FAILED execution + parse attempt`。`UNSUPPORTED_FILE_TYPE` 属于 Asset 创建前的不可恢复预检失败，没有 Asset/execution，普通 retry 必须返回 409，不能伪造 attempt/execution 后再必然失败为 `DOCUMENT_NOT_FOUND`；若未来要支持，需另建“重新提交文件并重新预检”的入口。
 - `IngestionTaskItemRecord` 不再同时承担 public、claim、retry 和 worker 映射。现有 `IngestionTaskItem` Java 类只保留为 application compatibility carrier，不再对应一张物理宽表；进一步把 application carrier 拆成富聚合属于 ANCHR-204，不能在本卡顺手重写整个 Processor。
 
 ### 迁移与发布
 
-当前分支尚未形成可保留的生产迁移历史，因此把原 V4–V6、V8–V12 的全部 `ALTER TABLE` 直接压入 V1/V3 建表语句，并删除这些增量迁移；原 V17 循环外键和 V16 数据判定/回填 SQL 直接删除。迁移目录不再包含 `ALTER TABLE`；V13–V15 只负责创建 normalized 表。
+当前开发库已经有成功的 V1/V2/V3/V7/V13–V15 Flyway history，106B 不再改写这些已执行文件，而是新增前向迁移 `V18__contract_ingestion_item_storage.sql`。V16/V17 曾在开发历史中出现后被撤销，V18 刻意不复用这两个版本号。
 
-这次压平会改变 V1、V3、V7 的 Flyway checksum，并删除旧版本文件，因此它不是已有数据库的原地升级包。适用路径只有：
+V18 只做物理收敛，不做数据推断或业务回填：
 
-1. 停止 app；
-2. 删除并重新创建尚无保留价值的开发数据库，或创建全新数据库；
-3. 让 Flyway 从空库执行合并后的 V1/V2/V3/V7/V13–V15；
-4. 在真实 MySQL 8.4 验证 V13–V15 建表、唯一键和索引；
-5. 启动只使用 normalized model 的 app，验证 backlog、lease takeover、retry、artifact 和 task summary。
+1. 条件删除 `ingestion_task_item`、`ingestion_item_parse_attempt`、`ingestion_item_execution` 上遗留的 CHECK 和外键；
+2. 删除 item 的 16 个重复/内部兼容列及旧 claim/kb 索引；
+3. 删除 parse-attempt/execution 上由单列主键覆盖的 `(id,item_id)` 复合唯一索引；
+4. 若真实存在 `embedding_result_object_key` 历史列则条件删除，不存在则跳过；
+5. 保留 V13–V15 normalized rows、current execution 指针、公开 item 投影和 artifact history。
 
-禁止把这组已改写迁移直接指向保留旧 `flyway_schema_history` 的数据库，也禁止用 `flyway repair` 掩盖 checksum/缺失 migration。若数据库已有必须保留的数据，应先停止发布，另行制定数据导出、全新 schema 初始化、数据转换导入和 reconciliation 方案；本次基线合并本身不冒充数据迁移。
+适用路径分两类：
 
-任何 V13–V15 失败都必须保持 app 停止，核对 `flyway_schema_history` 与 `information_schema` 后重建空库重新验证。
+- fresh database：按 V1/V2/V3/V7/V13–V15/V18 顺序初始化，最终直接得到 17 列 item；
+- 已到 V15 的数据库：只有在 active/retryable item 都有同属 normalized execution/parse attempt、current pointer 和 artifact 无 orphan，且旧 worker 已停止时，才允许原地执行 V18。
+
+当前本机开发库的只读预检结果是：16 个 item、17 个 parse attempt、17 个 execution、0 个 artifact；active item 无缺失 execution，current/parse/artifact ownership 无 orphan；item 旧 request/job/source/snapshot/parse/embedding 指针均未承载事实。旧 item phase/epoch/attempt 与 normalized 表已出现漂移，反而证明这些兼容列不能继续作为 source of truth。
+
+本机服务在资源变更自动重启时曾尝试旧版 V18，并留下 `success=0` 的 Flyway 记录；第一条 ALTER 被数据库中残留的 CHECK/FK 原子拒绝，业务表列、索引和数据均未改变。修正版 V18 已在独立 MySQL 8.4 临时库中同时验证“无历史 embedding/约束”和“有历史 embedding + CHECK/FK”两条 V15→V18 路径。业务库仍不得自动重试：必须先停 app，核对失败记录与表结构，再对这条已确认根因的 V18 做明确 repair/重跑；禁止用 repair 掩盖其他 checksum 或缺失 migration。
+
+发布顺序：
+
+1. 停止所有旧 app/worker 和开发热重载，备份并重复执行 normalized 数据对账；
+2. 确认失败 V18 没有留下部分 DDL，再只处理该失败记录；
+3. 用修正版 V18 完成迁移，核对 17 列、目标索引、无 ingestion CHECK/FK 及 normalized 行数；
+4. 启动只使用 normalized model 的 app，验证 backlog、lease takeover、retry、artifact、task summary 和公开 DTO；
+5. 完成 `EXPLAIN ANALYZE`、锁等待和部署观察后，才能解除 107 的生产门禁。
+
+V18 不是旧/新 worker 可混跑的 expand-contract 迁移；MySQL DDL 也不能视为整份脚本可事务回滚。未停旧实例、未通过对账或失败历史未处理时均禁止执行。
 
 ### 边界
 
@@ -1024,25 +1042,28 @@ created_at
 
 ### 验收
 
-- 创建、查询、前端按 taskId 轮询、失败展示、SKIP、单项/批量 retry、REPARSE/REEMBED 的现有 REST JSON 可观察行为有 characterization tests；Ingestion 不存在 SSE 协议，任何批准的公开投影修正应单独列明。
+- 创建/幂等恢复、clientRequestId 查询、单项/批量 retry、REPARSE/REEMBED 均已有 REST characterization；其中四个变更入口的 POST 路径、ADMIN/USER 权限、路径参数透传与返回 DTO 合同已锁定。Ingestion 不存在 SSE 协议，任何批准的公开投影修正应单独列明。
 - app 在 `PARSE_WAIT/EMBED/INDEX` 重启恢复、多实例 lease 接管、stale worker fencing 和 Docling ACK 恢复行为与 106 一致。
 - normalized model 上线后的显式 retry 创建新 execution，旧 execution 不再被 claim，新产生的 parse attempt/Parse artifact 历史可审计。
 - list/get 不读取 lease、snapshot、artifact 内部字段；claim candidate 不读取来源 TEXT、错误 TEXT、公开 dedupe 字段。
 - Parse phase 之外不物化 `parse_request_snapshot`；REST DTO 永不装载该 JSON。
 - artifact registry 的唯一键和应用层 fence 能阻止 stale worker 登记 winner artifact；新 execution 只能登记带完整 digest/producer 的 `PRODUCED` artifact。
+- fresh schema 与带 normalized 数据、artifact、历史 embedding 列和残留 CHECK/FK 的 V15 schema 都能迁移到相同 V18 契约；迁移后 item 恰好 17 列、三张 ingestion 表无 CHECK/FK、current pointer 和 normalized history 不变。
 - 在真实 MySQL 上对 claim、task list、failed retry 执行 `EXPLAIN ANALYZE` 并记录扫描行、锁等待和延迟；没有这些证据不得声称性能改善。
-- 评估并清理冗余索引：V1 中的 `(task_id, status, next_action_at, lease_until, id)` 可能覆盖 `idx_task_item_task(task_id)`，但只能在真实执行计划和索引使用证据支持后删除。
+- V18 已删除旧 item claim/kb 索引并保留 `PRIMARY/current_execution/task/asset` 四组索引；是否需要新增 task-scoped covering index 只能由真实执行计划决定。
 - 即使前端无生产代码修改，部署验收仍必须重跑并通过现有 ingestion/background recovery 轮询测试。
 
 ### 实施与验证记录
 
-- `anchr-app` 的源码实现已落地：V1/V3 建表基线合并、V13–V15 normalized 表、parse attempt/execution/Parse artifact 拆分、current pointer、窄读模型、公开投影 Policy、显式 execution intent、显式 retry 新 execution、Parse artifact digest/provenance/fence 和事务内登记均已接入。Embedding 向量不再持久化，正常路径同 lease 内存交接给 INDEX，恢复路径从 Parse artifact 重算。
-- 合并迁移基线并移除 Ingestion 数据库业务约束后，本地 JDK 21 `test-compile` 和 `clean test` 全量回归通过：408 项，0 failure、0 error、23 skipped；23 项均为当前机器无 Docker 而跳过的 Testcontainers 测试。
-- 已编写但本机未实际执行的 MySQL 证据包括：lease/fence/retry、PRODUCED artifact 成功登记/复用/stale 拒绝/冲突回滚。它们必须在有 Docker 的 CI 或真实 MySQL 8.4 上通过后才算数据库验收。
-- `git diff --check`、Mapper `xmllint`、主代码编译和非 Testcontainers 定向测试通过。补充的 Spring Bean 构造器契约测试会拒绝生产 Bean 暴露测试专用备用构造路径。Mockito 在受限沙箱内不能自附加，允许 JVM agent 附加后同一组测试通过；这不是源码失败。
-- 尚未执行真实 MySQL `EXPLAIN ANALYZE`、索引取舍、空库迁移演练、部署后 backlog/锁等待观察或真实 OSS smoke，因此不声称已验证性能改善或可上线。
-- `anchr-web` 与 `anchr-docling` 没有 106B 生产代码改动；本轮也没有重跑前端 ingestion/background recovery 测试。REST DTO 字段集合由 app 合同测试保护，但跨仓前端回归仍是部署前验收项。
-- 本卡当前处于“源码实现、迁移基线合并及本机可执行回归完成，真实 MySQL/部署验收待完成”的状态，尚未达到文末“完成定义”；也不表示已 stage、commit、执行数据库迁移或部署。
+- `anchr-app` 源码已收口：V13–V15 normalized model、V18 物理收缩、17 列 item、窄读模型、公开投影 Policy、显式 execution intent/retry、全链路 ownership join、应用层计数/lease/transition 校验，以及 Parse artifact digest/provenance/producer fence 均已接入。Embedding 向量仍只在同 lease 内存交给 INDEX，恢复时从 Parse artifact 重算。
+- 当前业务库已做只读数据对账，normalized 行和 ownership 满足 V18 前置条件；但热重载曾留下失败的 V18 history。失败耗时 325 ms，第一条 ALTER 未生效，列、索引和数据仍为迁移前状态；根因是库中仍有源码已经删除的 ingestion CHECK/FK。修正版已覆盖该真实 schema 差异，但本轮没有 repair 或迁移业务库。
+- 使用项目同一组 Flyway migration 和 MySQL 8.4，本机创建了两个隔离临时库并真实执行 V15→V18：一条为 fresh/no-legacy 分支，另一条带代表性数据、current pointer、历史 embedding 列和残留 CHECK/FK。两条都迁移成功，17 列/目标索引/无 CHECK-FK/normalized 数据保留断言通过，临时库已清理。
+- 同样的两条迁移路径已固化为 Testcontainers 回归：fresh 契约在 `IngestionExecutionStateMysqlIntegrationTest`，带数据/制品/残留约束升级在 `IngestionItemStorageMigrationMysqlIntegrationTest`。本机没有 `/var/run/docker.sock`，所以 14 个 ingestion MySQL 用例只确认编译和被 Surefire 发现，不能冒充容器实跑通过。
+- JDK 21 全量回归：431 项，0 failure、0 error、27 skipped；27 项全部是当前机器无 Docker 而跳过的 6 个 Testcontainers 类。当前运行环境禁止 Mockito 自附加 agent，因此最终命令显式使用项目解析出的 Byte Buddy 1.17.8 `-javaagent`。Repository/Mapper/Artifact 的新增门禁测试包含 task/item 数值、lease 双向配对、非法 transition、不可恢复 preflight retry 拒绝、cross-item/current-claim ownership、legacy/future artifact 拒绝。
+- `git diff --check`、Mapper `xmllint`、主/测试代码编译和非 Testcontainers 定向测试通过。未挂显式 agent 的沙箱测试会因 Mockito attach 权限失败，不是业务断言失败；最终全量命令已在允许本地测试端口的环境中通过。
+- 尚未执行业务库 repair/V18、真实 workload `EXPLAIN ANALYZE`、部署后 backlog/锁等待观察、真实 OSS smoke，因此不声称性能已改善或可上线。
+- `anchr-web` 与 `anchr-docling` 没有 106B 生产代码改动；本轮没有重跑前端 ingestion/background recovery 测试。App 的 create/recovery、retry/reparse/reembed REST 合同测试均已补齐。
+- 本卡当前处于“源码与迁移实现完成、独立 MySQL 迁移验证完成；业务库失败历史处理、停机迁移和部署验收待完成”的状态；不表示已 stage、commit、repair、迁移业务库或发布。
 
 ---
 
@@ -1760,7 +1781,7 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 - ANCHR-106B：拆分任务项、current execution、artifact registry 和公开查询投影。
 
-必须先用 106 的回归测试锁定状态机行为，再迁移物理边界；旧、新 worker 不得混跑。106B 的 normalized schema/API 源码稳定后可以开始 107 的源码开发和隔离测试，但 107 不得进入生产发布或接管真实 `INDEX` 流量，直到 106B 在真实 MySQL 上完成合并基线与 V13–V15、lease/retry/artifact 验收和部署稳定观察。该 Wave 不增加 Asset generation，也不改变前端任务协议。
+必须先用 106 的回归测试锁定状态机行为，再迁移物理边界；旧、新 worker 不得混跑。106B 的 normalized schema/API 源码稳定后可以开始 107 的源码开发和隔离测试，但 107 不得进入生产发布或接管真实 `INDEX` 流量，直到 106B 在业务 MySQL 上处理失败 history、完成 V18 停机迁移，并通过 lease/retry/artifact、公开投影和部署稳定观察。该 Wave 不增加 Asset generation，也不改变前端任务协议。
 
 ### Wave 5：Asset Segment 写入一致性
 
@@ -1853,6 +1874,6 @@ Wave 0
 8. 不修改与任务无关的现有工作区变更。
 9. ANCHR-101B 必须验证 Ingestion/Rebuild 投影一致、单 `embedding` mapping、共享空间 contract 和既有相关性基线；不得隐式增加第二向量字段或承担 110 的业务召回配额。
 10. ANCHR-101C 必须验证 profile fingerprint、同维不同模型、切换期间增量写入、短写屏障、alias 切换和回滚。
-11. ANCHR-106B 必须在真实 MySQL 上验证合并后的 V1/V3/V7 与 V13–V15、窄查询、旧 execution 不可领取、公开投影兼容和部署稳定性；必须明确记录已改写基线只支持空库初始化，不得改变 106 的 retry/lease/stale-worker 业务结果。
+11. ANCHR-106B 必须在真实 MySQL 上验证 fresh→V18 与 normalized V15→V18 两条路径、17 列 item、无 ingestion CHECK/FK、窄查询、坏 ownership/旧 execution 不可领取、公开投影兼容和部署稳定性；不得改变 106 的 retry/lease/stale-worker 业务结果。
 12. ANCHR-107 必须验证 generation 激活门禁、确定性 ID、部分 bulk、变化重放和清理失败，不承担 101C 的 physical index 验收。
 13. ANCHR-110 必须验证图片 bbox 来自 Picture Item provenance、私有对象签名访问、存量 reparse、对象生命周期、同字段分路召回、父文档聚合和 Preview；不得以 `chunks[].bboxes` 猜测图片位置或增加第二 dense 字段。

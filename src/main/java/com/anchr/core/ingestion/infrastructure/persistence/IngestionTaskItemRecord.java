@@ -13,12 +13,6 @@ public class IngestionTaskItemRecord {
     private String id;
     private String taskId;
     private Long currentExecutionId;
-    /**
-     * Compatibility copy for the non-null item column.
-     *
-     * <p>New read paths obtain the knowledge-base scope from the parent task.</p>
-     */
-    private String kbId;
     private String assetId;
     private String fileName;
     private String fileHash;
@@ -26,12 +20,6 @@ public class IngestionTaskItemRecord {
     private String stage;
     private String status;
     private Integer progress;
-    /**
-     * Compatibility copy retained for the item projection.
-     *
-     * <p>The parent task is the source of truth in the split model.</p>
-     */
-    private String dedupeStrategy;
     private String dedupeResult;
     private String duplicateAssetId;
     private String errorCode;

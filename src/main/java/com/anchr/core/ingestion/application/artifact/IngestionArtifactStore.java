@@ -36,7 +36,6 @@ public class IngestionArtifactStore {
     private static final String GZIP_CONTENT_ENCODING = "gzip";
     private static final String PARSE_REGISTRY_TYPE = "PARSE_RESULT";
     private static final String PRODUCED_PROVENANCE = "PRODUCED";
-    private static final String LEGACY_PROVENANCE = "LEGACY_BACKFILL";
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
 
     private final IngestionObjectStoragePort objectStoragePort;
@@ -118,7 +117,12 @@ public class IngestionArtifactStore {
         String objectKey = resolveObjectKey(
                 item.getParseResultObjectKey(), reference, "parseResultObjectKey");
         byte[] compressed = readCompressed(objectKey);
-        validateRegistryReference(reference, PARSE_REGISTRY_TYPE, objectKey, compressed);
+        validateRegistryReference(
+                reference,
+                PARSE_REGISTRY_TYPE,
+                objectKey,
+                compressed,
+                item.getClaimVersion());
         IngestionParseArtifact artifact = readParseArtifact(objectKey, compressed);
         validateParseIdentity(item, objectKey, artifact);
         return artifact.result();
@@ -217,7 +221,8 @@ public class IngestionArtifactStore {
             IngestionArtifactReference reference,
             String expectedType,
             String objectKey,
-            byte[] compressed) {
+            byte[] compressed,
+            long currentClaimVersion) {
         if (!expectedType.equals(reference.getArtifactType())
                 || reference.getArtifactVersion() != ARTIFACT_VERSION
                 || !objectKey.equals(reference.getObjectKey())) {
@@ -229,17 +234,11 @@ public class IngestionArtifactStore {
         if (PRODUCED_PROVENANCE.equals(provenance)) {
             if (reference.getProducerClaimVersion() == null
                     || reference.getProducerClaimVersion() < 1
+                    || reference.getProducerClaimVersion() > currentClaimVersion
                     || expectedSha256 == null
                     || !SHA256.matcher(expectedSha256).matches()) {
                 throw corrupt(
                         "Produced artifact registry metadata is incomplete.", null);
-            }
-        } else if (LEGACY_PROVENANCE.equals(provenance)) {
-            if (reference.getProducerClaimVersion() != null
-                    || (expectedSha256 != null
-                    && !SHA256.matcher(expectedSha256).matches())) {
-                throw corrupt(
-                        "Legacy artifact registry metadata is invalid.", null);
             }
         } else {
             throw corrupt("Artifact registry provenance is unsupported.", null);

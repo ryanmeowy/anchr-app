@@ -539,6 +539,32 @@ class IngestionApplicationServiceImplTest {
     }
 
     @Test
+    void retryItem_preflightFailureWithoutAssetShouldBeRejectedBeforeScheduling() {
+        IngestionTaskItem preflightFailure = IngestionTaskItem.builder()
+                .id("item-unsupported")
+                .taskId("task-1")
+                .kbId("kb-1")
+                .fileName("unsupported.exe")
+                .status(IngestionTaskItemStatus.FAILED)
+                .errorCode("UNSUPPORTED_FILE_TYPE")
+                .build();
+        savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
+                .status(IngestionTaskStatus.FAILED)
+                .items(List.of(preflightFailure))
+                .build());
+        when(ingestionTaskRepository.findRetryItem(
+                "kb-1", "task-1", "item-unsupported")).thenReturn(Optional.empty());
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.retryItem("kb-1", "task-1", "item-unsupported"));
+
+        assertThat(error.getError()).isEqualTo(ApiError.INGEST_RETRY_ONLY_FAILED);
+        verify(ingestionTaskRepository, never()).resetFailedItem(
+                any(), any(), any(), anyInt(), anyInt(), any(), any());
+        verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
+    }
+
+    @Test
     void retryFailed_shouldAdvanceEveryIdentityIncludingLegacyNullRequestId() {
         IngestionTaskItem legacyItem = failedItem("item-legacy", 1, null);
         IngestionTaskItem currentItem = failedItem("item-current", 4, "task-1:item-current:4");

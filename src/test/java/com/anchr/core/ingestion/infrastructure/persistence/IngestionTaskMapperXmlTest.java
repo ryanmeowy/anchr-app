@@ -13,6 +13,7 @@ import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,11 +72,32 @@ class IngestionTaskMapperXmlTest {
                 .contains("ie.id as execution_id")
                 .contains("ie.phase")
                 .contains("ie.claim_version")
+                .contains("inner join ingestion_item_parse_attempt ipa")
+                .contains("ipa.id = ie.parse_attempt_id")
+                .contains("ipa.item_id = ie.item_id")
                 .contains("for update skip locked")
                 .doesNotContain("source_url")
                 .doesNotContain("error_message")
                 .doesNotContain("request_snapshot")
                 .doesNotContain("object_key");
+    }
+
+    @Test
+    void claimCandidateLists_shouldRequireParseAttemptOwnership() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String allTasks = sql(
+                configuration, "listClaimableItemIds", Map.of("limit", 10));
+        String oneTask = sql(configuration, "listClaimableItemIdsByTask", Map.of(
+                "taskId", "task-1",
+                "limit", 10));
+
+        for (String sql : List.of(allTasks, oneTask)) {
+            assertThat(sql)
+                    .contains("inner join ingestion_item_parse_attempt ipa")
+                    .contains("ipa.id = ie.parse_attempt_id")
+                    .contains("ipa.item_id = ie.item_id");
+        }
     }
 
     @Test
@@ -126,6 +148,9 @@ class IngestionTaskMapperXmlTest {
                 .doesNotContain("ie.execution_kind")
                 .doesNotContain("ie.execution_status,")
                 .doesNotContain("ipa.status as parse_attempt_status");
+        assertThat(sql)
+                .contains("inner join ingestion_item_parse_attempt ipa")
+                .contains("ipa.item_id = iti.id");
     }
 
     @Test
@@ -184,6 +209,9 @@ class IngestionTaskMapperXmlTest {
         String executionSql = sql(configuration, "transitionExecution", transition);
         assertThat(executionSql)
                 .contains("iti.current_execution_id = ie.id")
+                .contains("inner join ingestion_item_parse_attempt ipa")
+                .contains("ipa.id = ie.parse_attempt_id")
+                .contains("ipa.item_id = ie.item_id")
                 .contains("ie.phase = ?")
                 .contains("ie.claim_version = ?")
                 .contains("ie.execution_status = 'ACTIVE'")
@@ -193,6 +221,8 @@ class IngestionTaskMapperXmlTest {
         String projectionSql = sql(configuration, "projectTransitionToItem", transition);
         assertThat(projectionSql)
                 .contains("ie.id = iti.current_execution_id")
+                .contains("inner join ingestion_item_parse_attempt ipa")
+                .contains("ipa.id = ie.parse_attempt_id")
                 .contains("ie.execution_epoch = ?")
                 .contains("ie.claim_version = ?")
                 .contains("ie.execution_status = case")
@@ -213,7 +243,15 @@ class IngestionTaskMapperXmlTest {
                 .contains("ie.execution_status")
                 .contains("ipa.attempt_no")
                 .contains("iti.status = 'FAILED'")
-                .contains("for update");
+                .contains("ie.execution_status = 'FAILED'")
+                .contains("inner join ingestion_item_execution ie")
+                .contains("inner join ingestion_item_parse_attempt ipa")
+                .doesNotContain("UNSUPPORTED_FILE_TYPE")
+                .doesNotContain("coalesce(")
+                .contains("for update")
+                .doesNotContain("iti.execution_epoch")
+                .doesNotContain("iti.parse_attempt")
+                .doesNotContain("iti.source_revision");
 
         String pointerSql = sql(configuration, "resetFailedItemPointer", Map.of(
                 "kbId", "kb-1",
@@ -224,6 +262,12 @@ class IngestionTaskMapperXmlTest {
                 "projection", IngestionPublicProjectionPolicy.explicitRetry(),
                 "updatedAt", LocalDateTime.now()));
         assertThat(pointerSql)
+                .contains("inner join ingestion_item_execution next_ie")
+                .contains("next_ie.item_id = iti.id")
+                .contains("next_ie.execution_status = 'ACTIVE'")
+                .contains("inner join ingestion_item_parse_attempt next_ipa")
+                .contains("next_ipa.id = next_ie.parse_attempt_id")
+                .contains("next_ipa.item_id = iti.id")
                 .contains("iti.current_execution_id = ?")
                 .contains("iti.stage = ?")
                 .contains("iti.status = ?")
@@ -234,6 +278,68 @@ class IngestionTaskMapperXmlTest {
 
         assertThat(configuration.hasStatement(NAMESPACE + "insertParseAttempt")).isTrue();
         assertThat(configuration.hasStatement(NAMESPACE + "insertExecution")).isTrue();
+    }
+
+    @Test
+    void retryReads_shouldRequireNormalizedExecutionOwnership() throws Exception {
+        Configuration configuration = loadConfiguration();
+        Map<String, Object> parameter = Map.of(
+                "kbId", "kb-1",
+                "taskId", "task-1",
+                "itemId", "item-1",
+                "expectedParseAttempt", 1);
+
+        for (String statement : new String[]{
+                "findRetryItem", "listFailedItems", "selectFailedItemForRetryForUpdate"}) {
+            String sql = sql(configuration, statement, parameter);
+            assertThat(sql)
+                    .doesNotContain("iti.execution_epoch")
+                    .doesNotContain("iti.parse_attempt")
+                    .doesNotContain("iti.source_revision")
+                    .doesNotContain("coalesce(")
+                    .doesNotContain("UNSUPPORTED_FILE_TYPE")
+                    .contains("inner join ingestion_item_execution ie")
+                    .contains("inner join ingestion_item_parse_attempt ipa")
+                    .contains("ie.execution_status = 'FAILED'")
+                    .contains("ipa.attempt_no");
+        }
+    }
+
+    @Test
+    void currentPointerWrites_shouldRequireExecutionOwnership() throws Exception {
+        Configuration configuration = loadConfiguration();
+
+        String initialPointerSql = sql(configuration, "pointItemToExecution", Map.of(
+                "itemId", "item-1",
+                "executionId", 42L,
+                "updatedAt", LocalDateTime.now()));
+        assertThat(initialPointerSql)
+                .contains("inner join ingestion_item_execution ie")
+                .contains("ie.id = ?")
+                .contains("ie.item_id = iti.id")
+                .contains("inner join ingestion_item_parse_attempt ipa")
+                .contains("ipa.id = ie.parse_attempt_id")
+                .contains("ipa.item_id = iti.id");
+    }
+
+    @Test
+    void heldClaimFences_shouldRequireParseAttemptOwnership() throws Exception {
+        Configuration configuration = loadConfiguration();
+        Map<String, Object> claim = Map.of(
+                "itemId", "item-1",
+                "executionEpoch", 1L,
+                "expectedExecutionStage", IngestionExecutionStage.EMBED,
+                "claimVersion", 2L,
+                "leaseToken", "lease-1",
+                "leaseSeconds", 60L);
+
+        for (String statement : List.of("renewClaim", "findCurrentClaimForUpdate")) {
+            String sql = sql(configuration, statement, claim);
+            assertThat(sql)
+                    .contains("inner join ingestion_item_parse_attempt ipa")
+                    .contains("ipa.id = ie.parse_attempt_id")
+                    .contains("ipa.item_id = ie.item_id");
+        }
     }
 
     private void assertPublicItemProjectionIsNarrow(String sql) {

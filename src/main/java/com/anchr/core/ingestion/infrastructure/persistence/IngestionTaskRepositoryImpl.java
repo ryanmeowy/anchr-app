@@ -44,7 +44,6 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     private static final String SCHEDULER_USER = "ingestion-scheduler";
     private static final String PARSE_ARTIFACT = "PARSE_RESULT";
     private static final String PRODUCED_ARTIFACT = "PRODUCED";
-    private static final String LEGACY_ARTIFACT = "LEGACY_BACKFILL";
     private static final int ARTIFACT_VERSION = 1;
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
     private static final Set<IngestionExecutionStage> PARSE_PHASES = Set.of(
@@ -57,6 +56,7 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void save(IngestionTask task) {
+        validateTaskForSave(task);
         IngestionExecutionKind initialExecutionKind = Objects.requireNonNull(
                 task.getInitialExecutionKind(), "initialExecutionKind");
         DedupeStrategy taskDedupeStrategy = resolveTaskDedupeStrategy(task);
@@ -192,6 +192,8 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                               IngestionExecutionStage expectedExecutionStage,
                               long claimVersion, String leaseToken, long leaseSeconds) {
         requirePositiveLease(leaseSeconds);
+        validateClaimIdentity(
+                itemId, executionEpoch, expectedExecutionStage, claimVersion, leaseToken);
         return mapper.renewClaim(
                 itemId, executionEpoch, expectedExecutionStage,
                 claimVersion, leaseToken, leaseSeconds) == 1;
@@ -199,6 +201,7 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
 
     @Override
     public boolean updateClaimContext(IngestionClaimContext context) {
+        validateClaimContext(context);
         return mapper.updateClaimContext(context) == 1;
     }
 
@@ -241,6 +244,46 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     private void validatePublicProjection(IngestionClaimTransition transition) {
+        Objects.requireNonNull(transition, "transition");
+        validateClaimIdentity(
+                transition.getItemId(),
+                transition.getExecutionEpoch(),
+                transition.getExpectedExecutionStage(),
+                transition.getExpectedClaimVersion(),
+                transition.getLeaseToken());
+        Objects.requireNonNull(transition.getNextExecutionStage(), "nextExecutionStage");
+        if (transition.getExpectedExecutionStage().isTerminal()) {
+            throw new IllegalArgumentException(
+                    "A terminal ingestion execution cannot transition.");
+        }
+        if (transition.getNextStageRetryCount() < 0) {
+            throw new IllegalArgumentException(
+                    "nextStageRetryCount must not be negative.");
+        }
+        if (transition.getParseAttempt() < 1) {
+            throw new IllegalArgumentException("parseAttempt must be positive.");
+        }
+        boolean terminal = transition.getNextExecutionStage().isTerminal();
+        if (terminal != (transition.getFinishedAt() != null)) {
+            throw new IllegalArgumentException(
+                    "finishedAt must be present only for a terminal ingestion transition.");
+        }
+        if (terminal && transition.getNextActionAt() != null) {
+            throw new IllegalArgumentException(
+                    "A terminal ingestion transition cannot remain scheduled.");
+        }
+        if (!terminal && transition.getNextStageStartedAt() == null) {
+            throw new IllegalArgumentException(
+                    "An active ingestion transition requires nextStageStartedAt.");
+        }
+        if (!isAllowedTransition(
+                transition.getExpectedExecutionStage(),
+                transition.getNextExecutionStage())) {
+            throw new IllegalArgumentException(
+                    "Illegal ingestion execution transition: "
+                            + transition.getExpectedExecutionStage() + " -> "
+                            + transition.getNextExecutionStage());
+        }
         if (transition.isRetainLease()
                 && (transition.getExpectedExecutionStage() != IngestionExecutionStage.EMBED
                 || transition.getNextExecutionStage() != IngestionExecutionStage.INDEX)) {
@@ -277,12 +320,22 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                                    String itemId, int expectedParseAttempt,
                                    int nextParseAttempt, String nextDoclingRequestId,
                                    LocalDateTime updatedAt) {
+        requireText(kbId, "kbId");
+        requireText(taskId, "taskId");
+        requireText(itemId, "itemId");
+        if (expectedParseAttempt < 1) {
+            throw new IllegalArgumentException("expectedParseAttempt must be positive.");
+        }
+        if (nextParseAttempt != Math.addExact(expectedParseAttempt, 1)) {
+            throw new IllegalArgumentException(
+                    "nextParseAttempt must immediately follow expectedParseAttempt.");
+        }
+        requireText(nextDoclingRequestId, "nextDoclingRequestId");
+        Objects.requireNonNull(updatedAt, "updatedAt");
         FailedItemRetryRecord failed = mapper.selectFailedItemForRetryForUpdate(
                         kbId, taskId, itemId, expectedParseAttempt)
                 .orElse(null);
-        if (failed == null
-                || (failed.getExecutionStatus() != null
-                && !"FAILED".equals(failed.getExecutionStatus()))) {
+        if (!isRetryableState(failed)) {
             return false;
         }
 
@@ -296,8 +349,7 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         parseAttempt.setUpdatedAt(updatedAt);
         mapper.insertParseAttempt(parseAttempt);
 
-        long currentEpoch = failed.getExecutionEpoch() == null ? 1L : failed.getExecutionEpoch();
-        long nextEpoch = Math.addExact(currentEpoch, 1L);
+        long nextEpoch = Math.addExact(failed.getExecutionEpoch(), 1L);
         IngestionExecutionRecord execution = new IngestionExecutionRecord();
         execution.setItemId(itemId);
         execution.setParseAttemptId(parseAttempt.getId());
@@ -354,7 +406,6 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         IngestionTaskItemRecord record = new IngestionTaskItemRecord();
         record.setId(item.getId());
         record.setTaskId(item.getTaskId());
-        record.setKbId(item.getKbId());
         record.setAssetId(item.getAssetId());
         record.setFileName(item.getFileName());
         record.setFileHash(item.getFileHash());
@@ -362,8 +413,6 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         record.setStage(item.getStage().name());
         record.setStatus(item.getStatus().name());
         record.setProgress(item.getProgress());
-        record.setDedupeStrategy(
-                item.getDedupeStrategy() == null ? null : item.getDedupeStrategy().name());
         record.setDedupeResult(
                 item.getDedupeResult() == null ? null : item.getDedupeResult().name());
         record.setDuplicateAssetId(item.getDuplicateAssetId());
@@ -379,7 +428,7 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
             IngestionTaskItem item, IngestionExecutionStage phase) {
         IngestionParseAttemptRecord record = new IngestionParseAttemptRecord();
         record.setItemId(item.getId());
-        record.setAttemptNo(Math.max(1, item.getParseAttempt()));
+        record.setAttemptNo(item.getParseAttempt());
         record.setRequestId(item.getDoclingRequestId());
         record.setJobId(item.getDoclingJobId());
         record.setSourceRevision(item.getSourceRevision());
@@ -402,12 +451,12 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         IngestionExecutionRecord record = new IngestionExecutionRecord();
         record.setItemId(item.getId());
         record.setParseAttemptId(parseAttemptId);
-        record.setExecutionEpoch(Math.max(1L, item.getExecutionEpoch()));
+        record.setExecutionEpoch(item.getExecutionEpoch());
         record.setExecutionKind(executionKind);
         record.setPhase(phase.name());
         record.setExecutionStatus("ACTIVE");
-        record.setClaimVersion(Math.max(0L, item.getClaimVersion()));
-        record.setPhaseRetryCount(Math.max(0, item.getStageRetryCount()));
+        record.setClaimVersion(item.getClaimVersion());
+        record.setPhaseRetryCount(item.getStageRetryCount());
         record.setPhaseStartedAt(item.getStageStartedAt());
         record.setNextActionAt(resolveNextActionAt(item));
         record.setLeaseToken(item.getLeaseToken());
@@ -589,9 +638,15 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                             .orElseThrow(() -> new IllegalStateException(
                                     "An ingestion transition referenced an unregistered artifact."));
             if (!Objects.equals(objectKey, registered.getObjectKey())
-                    || !Objects.equals(ARTIFACT_VERSION, registered.getArtifactVersion())) {
+                    || !Objects.equals(ARTIFACT_VERSION, registered.getArtifactVersion())
+                    || !Objects.equals(PRODUCED_ARTIFACT, registered.getProvenance())
+                    || registered.getProducerClaimVersion() == null
+                    || registered.getProducerClaimVersion() < 1
+                    || registered.getProducerClaimVersion() > producerClaimVersion
+                    || !hasText(registered.getContentSha256())
+                    || !SHA256.matcher(registered.getContentSha256()).matches()) {
                 throw new IllegalStateException(
-                        "An ingestion transition referenced different artifact metadata.");
+                        "An ingestion transition referenced invalid artifact metadata.");
             }
             return;
         }
@@ -629,10 +684,6 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 || !Objects.equals(proposed.getObjectKey(), stored.getObjectKey())) {
             return false;
         }
-        if (LEGACY_ARTIFACT.equals(stored.getProvenance())) {
-            return stored.getContentSha256() == null
-                    || Objects.equals(proposed.getContentSha256(), stored.getContentSha256());
-        }
         return Objects.equals(PRODUCED_ARTIFACT, stored.getProvenance())
                 && Objects.equals(
                 proposed.getProducerClaimVersion(), stored.getProducerClaimVersion())
@@ -652,6 +703,113 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                     "All ingestion items in one task must use the same dedupe strategy.");
         }
         return strategies.isEmpty() ? null : strategies.get(0);
+    }
+
+    private boolean isRetryableState(FailedItemRetryRecord failed) {
+        return failed != null
+                && failed.getCurrentExecutionId() != null
+                && "FAILED".equals(failed.getExecutionStatus())
+                && failed.getExecutionEpoch() != null
+                && failed.getExecutionEpoch() >= 1
+                && failed.getParseAttemptNo() != null
+                && failed.getParseAttemptNo() >= 1;
+    }
+
+    private void validateTaskForSave(IngestionTask task) {
+        Objects.requireNonNull(task, "task");
+        requireText(task.getId(), "task.id");
+        requireText(task.getKbId(), "task.kbId");
+        Objects.requireNonNull(task.getSourceType(), "task.sourceType");
+        Objects.requireNonNull(task.getStatus(), "task.status");
+        Objects.requireNonNull(task.getInitialExecutionKind(), "task.initialExecutionKind");
+        if (task.getTotalCount() < 0
+                || task.getSuccessCount() < 0
+                || task.getFailureCount() < 0
+                || task.getRunningCount() < 0) {
+            throw new IllegalArgumentException(
+                    "Ingestion task counts must not be negative.");
+        }
+        long classifiedCount = (long) task.getSuccessCount()
+                + task.getFailureCount()
+                + task.getRunningCount();
+        if (classifiedCount > task.getTotalCount()) {
+            throw new IllegalArgumentException(
+                    "Ingestion task classified counts exceed totalCount.");
+        }
+        if (task.getItems() == null) {
+            return;
+        }
+        if (task.getTotalCount() != task.getItems().size()) {
+            throw new IllegalArgumentException(
+                    "Ingestion task totalCount does not match its item count.");
+        }
+        for (IngestionTaskItem item : task.getItems()) {
+            Objects.requireNonNull(item, "task.items cannot contain null");
+            requireText(item.getId(), "item.id");
+            if (!task.getId().equals(item.getTaskId())) {
+                throw new IllegalArgumentException(
+                        "Ingestion item does not belong to its parent task.");
+            }
+            if (!task.getKbId().equals(item.getKbId())) {
+                throw new IllegalArgumentException(
+                        "Ingestion item does not belong to its parent knowledge base.");
+            }
+            new IngestionPublicProjection(
+                    Objects.requireNonNull(item.getStage(), "item.stage"),
+                    Objects.requireNonNull(item.getStatus(), "item.status"),
+                    item.getProgress());
+            boolean terminal = item.getStatus() == IngestionTaskItemStatus.SUCCESS
+                    || item.getStatus() == IngestionTaskItemStatus.FAILED
+                    || item.getStatus() == IngestionTaskItemStatus.SKIPPED;
+            if (terminal != (item.getFinishedAt() != null)) {
+                throw new IllegalArgumentException(
+                        "item.finishedAt must be present only for a terminal item.");
+            }
+            if (!requiresExecution(item)) {
+                continue;
+            }
+            if (item.getParseAttempt() < 1) {
+                throw new IllegalArgumentException("item.parseAttempt must be positive.");
+            }
+            if (item.getExecutionEpoch() < 1) {
+                throw new IllegalArgumentException("item.executionEpoch must be positive.");
+            }
+            if (item.getClaimVersion() < 0) {
+                throw new IllegalArgumentException(
+                        "item.claimVersion must not be negative.");
+            }
+            if (item.getStageRetryCount() < 0) {
+                throw new IllegalArgumentException(
+                        "item.stageRetryCount must not be negative.");
+            }
+            if ((item.getLeaseToken() == null) != (item.getLeaseUntil() == null)) {
+                throw new IllegalArgumentException(
+                        "item lease token and expiry must be both present or both absent.");
+            }
+        }
+    }
+
+    private boolean isAllowedTransition(
+            IngestionExecutionStage current,
+            IngestionExecutionStage next) {
+        if (next == IngestionExecutionStage.FAILED) {
+            return !current.isTerminal();
+        }
+        if (current == next) {
+            return !current.isTerminal();
+        }
+        return switch (current) {
+            case PARSE_SUBMIT -> next == IngestionExecutionStage.PARSE_WAIT
+                    || next == IngestionExecutionStage.PARSE_PERSIST;
+            case PARSE_WAIT -> next == IngestionExecutionStage.PARSE_SUBMIT
+                    || next == IngestionExecutionStage.PARSE_PERSIST;
+            case PARSE_PERSIST -> next == IngestionExecutionStage.PARSE_SUBMIT
+                    || next == IngestionExecutionStage.PARSE_WAIT
+                    || next == IngestionExecutionStage.EMBED;
+            case EMBED -> next == IngestionExecutionStage.INDEX;
+            case INDEX -> next == IngestionExecutionStage.COMPLETE;
+            case COMPLETE, FAILED -> false;
+        };
     }
 
     private boolean requiresExecution(IngestionTaskItem item) {
@@ -730,6 +888,50 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         if (leaseSeconds <= 0) {
             throw new IllegalArgumentException("leaseSeconds must be positive");
         }
+    }
+
+    private void validateClaimContext(IngestionClaimContext context) {
+        Objects.requireNonNull(context, "context");
+        validateClaimIdentity(
+                context.getItemId(),
+                context.getExecutionEpoch(),
+                context.getExpectedExecutionStage(),
+                context.getClaimVersion(),
+                context.getLeaseToken());
+        if (!PARSE_PHASES.contains(context.getExpectedExecutionStage())) {
+            throw new IllegalArgumentException(
+                    "Parse context can only be updated during a parse phase.");
+        }
+        if (context.getParseAttempt() < 1) {
+            throw new IllegalArgumentException("parseAttempt must be positive.");
+        }
+        requireText(context.getDoclingRequestId(), "doclingRequestId");
+        requireText(context.getSourceRevision(), "sourceRevision");
+        requireText(context.getParseRequestSnapshot(), "parseRequestSnapshot");
+    }
+
+    private void validateClaimIdentity(
+            String itemId,
+            long executionEpoch,
+            IngestionExecutionStage expectedExecutionStage,
+            long claimVersion,
+            String leaseToken) {
+        requireText(itemId, "itemId");
+        if (executionEpoch < 1) {
+            throw new IllegalArgumentException("executionEpoch must be positive.");
+        }
+        Objects.requireNonNull(expectedExecutionStage, "expectedExecutionStage");
+        if (claimVersion < 1) {
+            throw new IllegalArgumentException("claimVersion must be positive.");
+        }
+        requireText(leaseToken, "leaseToken");
+    }
+
+    private String requireText(String value, String name) {
+        if (!hasText(value)) {
+            throw new IllegalArgumentException(name + " must not be blank.");
+        }
+        return value;
     }
 
     private boolean hasText(String value) {

@@ -6,9 +6,8 @@ import lombok.Value;
 /**
  * Immutable registry metadata for an ingestion checkpoint.
  *
- * <p>{@code LEGACY_BACKFILL} references may not have a digest because the
- * original compressed bytes predate the registry. Every newly
- * {@code PRODUCED} reference must carry a SHA-256 digest.</p>
+ * <p>Every {@code PRODUCED} reference carries the producer claim and a
+ * SHA-256 digest for the exact stored bytes.</p>
  */
 @Value
 @Builder

@@ -137,7 +137,7 @@ class IngestionArtifactStoreTest {
     }
 
     @Test
-    void parseResult_shouldAllowLegacyRegistryReferenceWithoutDigest() {
+    void parseResult_shouldRejectLegacyRegistryReferenceWithoutDigest() {
         IngestionTaskItem item = item();
         String key = store.writeParseArtifact(
                 item, "job-1", parseResponse("request-1", "hello")).objectKey();
@@ -151,8 +151,30 @@ class IngestionArtifactStoreTest {
                         .build())
                 .build();
 
-        assertThat(store.readParseResult(legacy))
-                .isEqualTo(parseResponse("request-1", "hello"));
+        assertThatThrownBy(() -> store.readParseResult(legacy))
+                .isInstanceOfSatisfying(IngestionArtifactException.class,
+                        exception -> assertThat(exception.getReason())
+                                .isEqualTo(Reason.CORRUPT));
+    }
+
+    @Test
+    void parseResult_shouldRejectArtifactProducedByFutureClaim() {
+        IngestionTaskItem item = item();
+        IngestionStoredArtifact stored = store.writeParseArtifact(
+                item, "job-1", parseResponse("request-1", "hello"));
+        IngestionTaskItem futureArtifact = item.toBuilder()
+                .parseResultObjectKey(stored.objectKey())
+                .parseResultArtifact(reference(
+                        "PARSE_RESULT",
+                        stored,
+                        "PRODUCED",
+                        item.getClaimVersion() + 1))
+                .build();
+
+        assertThatThrownBy(() -> store.readParseResult(futureArtifact))
+                .isInstanceOfSatisfying(IngestionArtifactException.class,
+                        exception -> assertThat(exception.getReason())
+                                .isEqualTo(Reason.CORRUPT));
     }
 
     @Test
