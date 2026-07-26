@@ -71,6 +71,23 @@ class EmbeddingProjectionPolicyTest {
         assertThat(projection.source()).isEqualTo("markdown content");
     }
 
+    @Test
+    void documentImageShouldUseSameFieldWithProfileSpecificInput() {
+        EmbeddingProjection text = select(
+                Profile.TEXT, "PDF", SegmentType.DOCUMENT_IMAGE,
+                "caption\nalt\ncontext", "ocr", null).orElseThrow();
+        assertThat(text.inputType()).isEqualTo(EmbeddingProjection.InputType.TEXT);
+        assertThat(text.source()).isEqualTo("ocr\ncaption\nalt\ncontext");
+        assertThat(text.sourceKind()).isEqualTo(SourceKind.DOCUMENT_IMAGE_TEXT);
+
+        EmbeddingProjection multi = select(
+                Profile.MULTI, "PDF", SegmentType.DOCUMENT_IMAGE,
+                "caption", "ocr", "embedded/block.png").orElseThrow();
+        assertThat(multi.inputType()).isEqualTo(EmbeddingProjection.InputType.IMAGE);
+        assertThat(multi.source()).isEqualTo("embedded/block.png");
+        assertThat(multi.sourceKind()).isEqualTo(SourceKind.DOCUMENT_IMAGE_OBJECT);
+    }
+
     private Optional<EmbeddingProjection> select(
             Profile profile,
             String assetType,

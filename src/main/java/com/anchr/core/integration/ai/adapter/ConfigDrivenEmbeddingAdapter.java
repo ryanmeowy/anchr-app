@@ -1,14 +1,12 @@
 package com.anchr.core.integration.ai.adapter;
 
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
-import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort.ServingEmbeddingSession;
 import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.EmbeddingClient;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort;
-import com.anchr.core.search.domain.repository.EmbeddingDeploymentRepository;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -25,7 +23,6 @@ import org.springframework.util.StringUtils;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -45,27 +42,14 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
     private final Map<String, ClientCacheManager.ResolvedClient> profileClients =
             new ConcurrentHashMap<>();
     private CapabilityConfigRepository capabilityConfigRepository;
-    private EmbeddingDeploymentRepository embeddingDeploymentRepository;
 
     @Autowired(required = false)
     void setCapabilityConfigRepository(CapabilityConfigRepository repository) {
         this.capabilityConfigRepository = repository;
     }
 
-    @Autowired(required = false)
-    void setEmbeddingDeploymentRepository(EmbeddingDeploymentRepository repository) {
-        this.embeddingDeploymentRepository = repository;
-    }
-
     public List<Float> embed(String source, String sourceType) {
-        if (embeddingDeploymentRepository == null
-                && capabilityConfigRepository == null) {
-            return embed(resolveActiveClient(), source, sourceType);
-        }
-        EmbeddingProfile serving = servingProfile().orElse(null);
-        return serving == null
-                ? embed(resolveActiveClient(), source, sourceType)
-                : openSession(serving).embed(source, sourceType);
+        return embed(resolveActiveClient(), source, sourceType);
     }
 
     @Override
@@ -74,36 +58,21 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
             throw new IllegalArgumentException("Embedding profile is required");
         }
         ClientCacheManager.ResolvedClient resolved = profileClients.computeIfAbsent(
-                profile.fingerprint(), ignored -> resolveExactClient(profile));
+                profile.fingerprint(), ignored -> resolveProfileClient(profile));
         return (source, sourceType) -> embed(resolved, source, sourceType);
     }
 
-    private ClientCacheManager.ResolvedClient resolveExactClient(EmbeddingProfile profile) {
-        if (capabilityConfigRepository == null) {
+    private ClientCacheManager.ResolvedClient resolveProfileClient(EmbeddingProfile profile) {
+        if (capabilityConfigRepository == null || profile.configId() == null) {
             ClientCacheManager.ResolvedClient active = resolveActiveClient();
             requireMatchingProfile(active.config(), profile);
             return active;
         }
-        CapabilityConfig config = profile.configId() == null
-                ? findByFingerprint(profile)
-                : capabilityConfigRepository.findById(profile.configId()).orElse(null);
-        if (config == null) {
-            throw new IllegalStateException(
-                    "Embedding config is unavailable for profile " + profile.fingerprint());
-        }
+        CapabilityConfig config = capabilityConfigRepository.findById(profile.configId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Embedding config is unavailable: " + profile.configId()));
         requireMatchingProfile(config, profile);
         return new ClientCacheManager.ResolvedClient(clientFactory.build(config), config);
-    }
-
-    private CapabilityConfig findByFingerprint(EmbeddingProfile profile) {
-        return java.util.stream.Stream.concat(
-                        capabilityConfigRepository.findAllByCapability("EMBEDDING").stream(),
-                        capabilityConfigRepository.findAllByCapability("MULTI_EMBEDDING").stream())
-                .filter(config -> CapabilityEmbeddingProfileProvider.createProfile(config)
-                        .map(candidate -> candidate.fingerprint().equals(profile.fingerprint()))
-                        .orElse(false))
-                .findFirst()
-                .orElse(null);
     }
 
     private void requireMatchingProfile(CapabilityConfig config, EmbeddingProfile expected) {
@@ -112,24 +81,8 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
                         "Embedding configuration has no valid profile"));
         if (!actual.fingerprint().equals(expected.fingerprint())) {
             throw new IllegalStateException(
-                    "Embedding configuration fingerprint does not match physical index metadata");
+                    "Embedding configuration changed before rebuild started");
         }
-    }
-
-    private Optional<EmbeddingProfile> servingProfile() {
-        if (embeddingDeploymentRepository != null) {
-            Optional<EmbeddingProfile> deployed = embeddingDeploymentRepository.find()
-                    .map(deployment -> deployment.servingProfile());
-            if (deployed.isPresent()) {
-                return deployed;
-            }
-        }
-        if (configResolver == null) {
-            return CapabilityEmbeddingProfileProvider.createProfile(
-                    resolveActiveClient().config());
-        }
-        return configResolver.activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
-                .flatMap(CapabilityEmbeddingProfileProvider::createProfile);
     }
 
     private ClientCacheManager.ResolvedClient resolveActiveClient() {
@@ -198,20 +151,9 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
 
     @Override
     public boolean isMulti() {
-        EmbeddingProfile profile = servingProfile()
+        CapabilityConfig config = configResolver.activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
                 .orElseThrow(() -> new IllegalStateException("Embedding is not configured"));
-        return "MULTI_EMBEDDING".equals(profile.capability());
-    }
-
-    @Override
-    public ServingEmbeddingSession openServingSession() {
-        EmbeddingProfile profile = servingProfile()
-                .orElseThrow(() -> new IllegalStateException("Embedding is not configured"));
-        EmbeddingSession session = openSession(profile);
-        return new ServingEmbeddingSession(
-                profile,
-                "MULTI_EMBEDDING".equals(profile.capability()),
-                session::embed);
+        return "MULTI_EMBEDDING".equals(config.getCapability());
     }
 
     private ClientCacheManager.ResolvedClient resolve() {

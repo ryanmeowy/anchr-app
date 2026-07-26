@@ -1,9 +1,6 @@
 package com.anchr.core.search.application;
 
-import com.anchr.core.search.infrastructure.persistence.IndexWriteLeaseCoordinator;
 import org.junit.jupiter.api.Test;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -12,70 +9,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 
 class SegmentIndexWriteBarrierTest {
-
-    @Test
-    void transactionBoundLeaseShouldReleaseOnlyAfterTransactionCompletion() {
-        SegmentIndexWriteBarrier barrier = new SegmentIndexWriteBarrier();
-        IndexWriteLeaseCoordinator coordinator = mock(IndexWriteLeaseCoordinator.class);
-        barrier.setDistributedCoordinator(coordinator);
-        org.mockito.Mockito.when(coordinator.acquire()).thenReturn("lease-tx");
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            barrier.bindDistributedLeaseToCurrentTransaction();
-            var synchronizations = TransactionSynchronizationManager.getSynchronizations();
-
-            verify(coordinator, never()).release("lease-tx");
-            synchronizations.forEach(sync -> sync.beforeCommit(false));
-            verify(coordinator).assertActive("lease-tx");
-            synchronizations.forEach(sync -> sync.afterCompletion(
-                    TransactionSynchronization.STATUS_COMMITTED));
-            verify(coordinator).release("lease-tx");
-        } finally {
-            TransactionSynchronizationManager.clearSynchronization();
-        }
-    }
-
-    @Test
-    void distributedLeaseShouldRemainActiveUntilWriteCompletes() {
-        SegmentIndexWriteBarrier barrier = new SegmentIndexWriteBarrier();
-        IndexWriteLeaseCoordinator coordinator = mock(IndexWriteLeaseCoordinator.class);
-        barrier.setDistributedCoordinator(coordinator);
-        org.mockito.Mockito.when(coordinator.acquire()).thenReturn("lease-1");
-
-        barrier.withWritePermit(() -> { });
-
-        var order = inOrder(coordinator);
-        order.verify(coordinator).acquire();
-        order.verify(coordinator).assertActive("lease-1");
-        order.verify(coordinator).release("lease-1");
-    }
-
-    @Test
-    void expiredDistributedLeaseShouldFailWriteAndStillRelease() {
-        SegmentIndexWriteBarrier barrier = new SegmentIndexWriteBarrier();
-        IndexWriteLeaseCoordinator coordinator = mock(IndexWriteLeaseCoordinator.class);
-        barrier.setDistributedCoordinator(coordinator);
-        org.mockito.Mockito.when(coordinator.acquire()).thenReturn("lease-2");
-        doThrow(new IllegalStateException("expired"))
-                .when(coordinator).assertActive("lease-2");
-
-        assertThrows(IllegalStateException.class,
-                () -> barrier.withWritePermit(() -> { }));
-
-        var order = inOrder(coordinator);
-        order.verify(coordinator).acquire();
-        order.verify(coordinator).assertActive("lease-2");
-        order.verify(coordinator).release("lease-2");
-    }
 
     @Test
     void exclusiveRebuildPermitShouldWaitForAcceptedWrite() throws Exception {

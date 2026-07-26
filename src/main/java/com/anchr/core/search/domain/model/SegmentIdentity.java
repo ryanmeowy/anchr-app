@@ -37,6 +37,15 @@ public final class SegmentIdentity {
         return hash(assetId, indexGeneration, "asset-projection\nIMAGE_VISUAL");
     }
 
+    public static String documentImage(
+            String assetId, long indexGeneration, String blockId) {
+        if (!hasText(blockId)) {
+            throw new IllegalArgumentException("blockId cannot be blank.");
+        }
+        return hash(assetId, indexGeneration,
+                "document-image\n" + blockId.trim());
+    }
+
     private static String hash(
             String assetId,
             long indexGeneration,

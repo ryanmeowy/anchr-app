@@ -11,12 +11,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PreviewAccessCache {
 
     private static final long CACHE_SAFETY_WINDOW_MILLIS = 30_000L;
-    private static final String CACHE_KEY_PREFIX = "preview:asset:";
+    private static final String CACHE_KEY_PREFIX = "preview:object:";
 
     private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
 
-    public Optional<PreviewAccess> find(String assetId, String accessTokenHash) {
-        String key = buildKey(assetId, accessTokenHash);
+    public Optional<PreviewAccess> find(String objectIdentity, String accessTokenHash) {
+        if (!StringUtils.hasText(objectIdentity)) return Optional.empty();
+        String key = buildKey(objectIdentity, accessTokenHash);
         CacheEntry entry = cache.get(key);
         if (entry == null) {
             return Optional.empty();
@@ -29,7 +30,7 @@ public class PreviewAccessCache {
         return Optional.of(entry.access());
     }
 
-    public void save(String assetId, String accessTokenHash, PreviewAccess access) {
+    public void save(String objectIdentity, String accessTokenHash, PreviewAccess access) {
         if (access == null
                 || !StringUtils.hasText(access.url())
                 || access.expiresAt() == null
@@ -40,21 +41,21 @@ public class PreviewAccessCache {
         if (cacheUntil <= System.currentTimeMillis()) {
             return;
         }
-        cache.put(buildKey(assetId, accessTokenHash), new CacheEntry(access, cacheUntil));
+        cache.put(buildKey(objectIdentity, accessTokenHash), new CacheEntry(access, cacheUntil));
     }
 
-    public void evict(String assetId, String accessTokenHash) {
-        if (!StringUtils.hasText(assetId) || !StringUtils.hasText(accessTokenHash)) {
+    public void evict(String objectIdentity, String accessTokenHash) {
+        if (!StringUtils.hasText(objectIdentity) || !StringUtils.hasText(accessTokenHash)) {
             return;
         }
-        cache.remove(buildKey(assetId, accessTokenHash));
+        cache.remove(buildKey(objectIdentity, accessTokenHash));
     }
 
-    private String buildKey(String assetId, String accessTokenHash) {
-        if (!StringUtils.hasText(assetId) || !StringUtils.hasText(accessTokenHash)) {
-            throw new IllegalArgumentException("assetId and accessTokenHash cannot be blank.");
+    private String buildKey(String objectIdentity, String accessTokenHash) {
+        if (!StringUtils.hasText(objectIdentity) || !StringUtils.hasText(accessTokenHash)) {
+            throw new IllegalArgumentException("objectIdentity and accessTokenHash cannot be blank.");
         }
-        return CACHE_KEY_PREFIX + assetId.trim() + ":token:" + accessTokenHash.trim();
+        return CACHE_KEY_PREFIX + objectIdentity.trim() + ":token:" + accessTokenHash.trim();
     }
 
     public record PreviewAccess(String url, Long expiresAt) {

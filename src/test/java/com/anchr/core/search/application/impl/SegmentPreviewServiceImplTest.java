@@ -6,10 +6,12 @@ import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.kb.application.ActivityQueryService;
 import com.anchr.core.kb.application.KnowledgeBaseService;
+import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
@@ -173,6 +175,45 @@ class SegmentPreviewServiceImplTest {
         assertThat(firstResult.getPreviewUrl()).isEqualTo("https://preview");
         assertThat(secondResult.getPreviewUrl()).isEqualTo("https://preview");
         verify(objectStoragePort).buildPreviewUrl("documents/shared.pdf");
+    }
+
+    @Test
+    void documentImageShouldUseAssetForDocumentPreviewAndSourceRefForImagePreview() {
+        Segment segment = Segment.builder()
+                .segmentId("seg-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .assetType("PDF")
+                .segmentType(SegmentType.DOCUMENT_IMAGE)
+                .title("Architecture")
+                .contentText("architecture diagram")
+                .sourceRef("embedded/architecture.png")
+                .build();
+        Asset asset = Asset.builder()
+                .id("asset-1")
+                .kbId("kb-1")
+                .fileName("design.pdf")
+                .objectKey("documents/design.pdf")
+                .previewObjectKey("previews/design.pdf")
+                .build();
+        long expiresAt = System.currentTimeMillis() + 120_000L;
+        when(segmentRepository.findBySegmentId("seg-1"))
+                .thenReturn(Optional.of(segment));
+        when(knowledgeBaseService.getDocument("kb-1", "asset-1"))
+                .thenReturn(asset);
+        when(objectStoragePort.buildPreviewUrl("previews/design.pdf"))
+                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
+                        "https://preview/document", expiresAt));
+        when(objectStoragePort.buildPreviewUrl("embedded/architecture.png"))
+                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
+                        "https://preview/image", expiresAt));
+
+        var result = service.getSegmentPreview("seg-1", new PreviewRequestDTO());
+
+        assertThat(result.getFileName()).isEqualTo("design.pdf");
+        assertThat(result.getPreviewUrl()).isEqualTo("https://preview/document");
+        assertThat(result.getImagePreviewUrl()).isEqualTo("https://preview/image");
+        assertThat(result.getSourceRef()).isEqualTo("embedded/architecture.png");
     }
 
     private Segment segment(String content, String ocr, String title) {

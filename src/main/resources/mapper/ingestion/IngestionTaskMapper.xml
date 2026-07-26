@@ -697,6 +697,22 @@
           and artifact_type = #{artifactType}
     </select>
 
+    <select id="listArtifactsByAssetGeneration"
+            resultMap="IngestionArtifactRecordMap">
+        select ia.execution_id, ia.artifact_type, ia.artifact_version, ia.provenance,
+               ia.producer_claim_version, ia.object_key, ia.content_sha256, ia.created_at
+        from ingestion_task_item iti
+        inner join ingestion_item_execution ie on ie.item_id = iti.id
+        inner join ingestion_item_artifact ia
+            on ia.execution_id = ie.id
+           and ia.artifact_type = #{artifactType}
+        where iti.asset_id = #{assetId}
+        <if test="targetIndexGeneration != null">
+            and iti.target_index_generation = #{targetIndexGeneration}
+        </if>
+        order by ia.created_at asc, ia.execution_id asc
+    </select>
+
     <select id="findCurrentClaimForUpdate" resultType="java.lang.Long">
         select ie.id
         from ingestion_task_item iti

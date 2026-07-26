@@ -1,9 +1,10 @@
 package com.anchr.core.ingestion.domain.repository;
 
-import com.anchr.core.ingestion.domain.model.IngestionTask;
+import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
 import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
 import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
+import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 
@@ -43,6 +44,10 @@ public interface IngestionTaskRepository {
     long findMaxTargetIndexGeneration(String assetId);
 
     Optional<Long> findTargetIndexGeneration(String itemId, String assetId);
+
+    /** Parse artifacts produced for an asset, optionally limited to one generation. */
+    List<IngestionArtifactReference> listParseArtifacts(
+            String assetId, Long targetIndexGeneration);
 
     boolean assignTargetIndexGeneration(String itemId, String assetId,
                                         long targetIndexGeneration,

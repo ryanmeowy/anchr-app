@@ -148,6 +148,31 @@ class DoclingChunkMapperTest {
                 .doesNotHaveDuplicates();
     }
 
+    @Test
+    void documentImagesShouldDeduplicateByBlockAndUseImageObjectAsSource() {
+        ParseResponse.Image first = new ParseResponse.Image(
+                1, "pictures/0", "embedded/picture-0.png", "UPLOADED", 2,
+                List.of(), 640, 480, "image/png", "abc", "alt", "caption",
+                "context", "ocr", null);
+        ParseResponse.Image duplicate = new ParseResponse.Image(
+                1, "pictures/0", "embedded/duplicate.png", "UPLOADED", 2,
+                List.of(), 640, 480, "image/png", "def", null, null,
+                null, null, null);
+        ParseResponse response = new ParseResponse(
+                "request-1", "docling", "chunks", "", "pdf",
+                List.of(), List.of(), List.of(first, duplicate), List.of());
+
+        List<Chunk> images = mapper.toDocumentImageChunks(asset(), response, 9L);
+
+        assertThat(images).singleElement().satisfies(image -> {
+            assertThat(image.getSegmentType()).isEqualTo(
+                    com.anchr.core.search.domain.model.SegmentType.DOCUMENT_IMAGE);
+            assertThat(image.getSourceRef()).isEqualTo("embedded/picture-0.png");
+            assertThat(image.getChunkText()).isEqualTo("caption\nalt\ncontext");
+            assertThat(image.getOcrText()).isEqualTo("ocr");
+        });
+    }
+
     private ParseResponse response(String fileType, String textPlain) {
         return response(fileType, chunk("chunk/0", textPlain, 1));
     }

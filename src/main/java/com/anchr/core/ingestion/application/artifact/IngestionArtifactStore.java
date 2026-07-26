@@ -17,8 +17,11 @@ import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
@@ -79,6 +82,8 @@ public class IngestionArtifactStore {
             throw identityMismatch("Parse response request id does not match the claimed item.");
         }
 
+        validateEmbeddedImages(result);
+        ParseResponse durableResult = withoutDiagnosticImageUrls(result);
         String objectKey = parseObjectKey(item, jobId);
         IngestionParseArtifact artifact = new IngestionParseArtifact(
                 PARSE_ARTIFACT_TYPE,
@@ -92,7 +97,7 @@ public class IngestionArtifactStore {
                 item.getDoclingRequestId(),
                 item.getSourceRevision(),
                 Instant.now(),
-                result);
+                durableResult);
 
         byte[] compressed = encode(artifact);
         if (putIfAbsent(objectKey, compressed)) {
@@ -102,10 +107,54 @@ public class IngestionArtifactStore {
         byte[] existingCompressed = readCompressed(objectKey);
         IngestionParseArtifact existing = readParseArtifact(objectKey, existingCompressed);
         validateParseIdentity(item, objectKey, existing);
-        if (!Objects.equals(existing.result(), result)) {
+        if (!Objects.equals(existing.result(), durableResult)) {
             throw immutableConflict("Existing parse artifact has different content.");
         }
         return storedArtifact(objectKey, existingCompressed);
+    }
+
+    private void validateEmbeddedImages(ParseResponse result) {
+        if (result == null || result.images() == null || result.images().isEmpty()) {
+            return;
+        }
+        Set<String> blockIds = new HashSet<>();
+        for (ParseResponse.Image image : result.images()) {
+            if (image == null || image.artifactVersion() == null
+                    || image.artifactVersion() != ARTIFACT_VERSION
+                    || image.blockId() == null || image.blockId().isBlank()
+                    || !Set.of("UPLOADED", "SKIPPED", "FAILED")
+                            .contains(image.uploadStatus())
+                    || !blockIds.add(image.blockId().trim())
+                    || (image.contentHash() != null
+                            && !SHA256.matcher(image.contentHash()).matches())) {
+                throw corrupt("Parse result contains an invalid embedded-image artifact.", null);
+            }
+            if ("UPLOADED".equalsIgnoreCase(image.uploadStatus())
+                    && (image.imageObjectKey() == null
+                            || image.imageObjectKey().isBlank()
+                            || image.contentHash() == null
+                            || !SHA256.matcher(image.contentHash()).matches()
+                            || image.mimeType() == null
+                            || image.mimeType().isBlank())) {
+                throw corrupt("Uploaded embedded image has incomplete object identity.", null);
+            }
+        }
+    }
+
+    private ParseResponse withoutDiagnosticImageUrls(ParseResponse result) {
+        if (result == null || result.images() == null) return result;
+        List<ParseResponse.Image> images = result.images().stream()
+                .map(image -> image == null ? null : new ParseResponse.Image(
+                        image.artifactVersion(), image.blockId(), image.imageObjectKey(),
+                        image.uploadStatus(), image.pageNo(), image.bboxes(),
+                        image.imageWidth(), image.imageHeight(), image.mimeType(),
+                        image.contentHash(), image.alt(), image.caption(),
+                        image.contextText(), image.ocrText(), null))
+                .toList();
+        return new ParseResponse(
+                result.requestId(), result.parser(), result.format(), result.text(),
+                result.fileType(), result.pages(), result.chunks(), images,
+                result.warnings());
     }
 
     /**
@@ -126,6 +175,44 @@ public class IngestionArtifactStore {
         IngestionParseArtifact artifact = readParseArtifact(objectKey, compressed);
         validateParseIdentity(item, objectKey, artifact);
         return artifact.result();
+    }
+
+    /**
+     * Resolves uploaded embedded-image objects from an existing parse artifact.
+     * Cleanup deliberately reuses the normal parse artifact instead of keeping a
+     * second image-specific lifecycle registry.
+     */
+    public List<String> readEmbeddedImageObjectKeys(
+            IngestionArtifactReference reference, String expectedAssetId) {
+        if (reference == null) {
+            return List.of();
+        }
+        String objectKey = requireText(reference.getObjectKey(), "parseArtifact.objectKey");
+        byte[] compressed = readCompressed(objectKey);
+        validateRegistryReference(
+                reference,
+                PARSE_REGISTRY_TYPE,
+                objectKey,
+                compressed,
+                Long.MAX_VALUE);
+        IngestionParseArtifact artifact = readParseArtifact(objectKey, compressed);
+        if (!Objects.equals(expectedAssetId, artifact.assetId())
+                || !Objects.equals(objectKey, parseObjectKey(artifact))) {
+            throw identityMismatch(
+                    "Parse artifact identity does not match the asset cleanup request.");
+        }
+        if (artifact.result().images() == null) {
+            return List.of();
+        }
+        return artifact.result().images().stream()
+                .filter(Objects::nonNull)
+                .filter(image -> Objects.equals(ARTIFACT_VERSION, image.artifactVersion()))
+                .filter(image -> "UPLOADED".equalsIgnoreCase(image.uploadStatus()))
+                .map(ParseResponse.Image::imageObjectKey)
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
     }
 
     private byte[] encode(Object artifact) {

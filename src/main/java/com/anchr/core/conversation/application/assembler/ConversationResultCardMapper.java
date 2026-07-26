@@ -142,6 +142,10 @@ public class ConversationResultCardMapper {
     }
 
     private String resolveFileName(ConversationRetrievalCandidate candidate) {
+        if ("DOCUMENT_IMAGE".equalsIgnoreCase(candidate.getSegmentType())
+                && StringUtils.hasText(candidate.getTitle())) {
+            return candidate.getTitle().trim();
+        }
         if (!StringUtils.hasText(candidate.getSourceRef())) {
             return null;
         }

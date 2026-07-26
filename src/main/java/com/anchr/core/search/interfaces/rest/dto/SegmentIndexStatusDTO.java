@@ -22,15 +22,6 @@ public class SegmentIndexStatusDTO {
     private Integer expectedDim;     // from active capability config
     private String expectedModel;    // from active capability config
     private String expectedProfileFingerprint;
-    private String deploymentStatus;
-    private String physicalIndex;
-    private String servingProfileFingerprint;
-    private String desiredProfileFingerprint;
-    private String targetProfileFingerprint;
-    private String servingCapability;
-    private String desiredCapability;
-    private String targetCapability;
-    private ImpactReport impactReport;
     private PendingRebuild pendingRebuild;
     private RebuildProgress rebuildProgress;
     private String lastError;
@@ -53,20 +44,6 @@ public class SegmentIndexStatusDTO {
     public static class RebuildProgress {
         private long migrated;   // 已迁移文档数
         private long total;      // 旧索引文档总数
-        private String phase;    // PREPARING | BACKFILLING | VALIDATING | CUTTING_OVER | COMPLETED | FAILED
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ImpactReport {
-        private long imageAssets;
-        private long ocrAvailableAssets;
-        private long ocrEmptyAssets;
-        private long textVectorFailures;
-        private long expectedVisualSemanticLossAssets;
-        private boolean confirmationRequired;
-        private boolean confirmed;
+        private String phase;    // PREPARING | MIGRATING | SWITCHING_ALIAS | COMPLETED | FAILED
     }
 }

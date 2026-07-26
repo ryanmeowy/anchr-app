@@ -14,7 +14,6 @@ import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
-import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,8 +59,7 @@ class IngestionIndexFinalizerTest {
                 ingestionTaskRepository,
                 segmentRepository,
                 segmentBulkWriter,
-                assetIndexChangeRecorder,
-                new SegmentIndexWriteBarrier());
+                assetIndexChangeRecorder);
     }
 
     @Test

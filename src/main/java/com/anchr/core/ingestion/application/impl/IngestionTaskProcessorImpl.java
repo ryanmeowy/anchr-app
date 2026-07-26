@@ -17,7 +17,6 @@ import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
 import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
-import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort.ServingEmbeddingSession;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
@@ -52,11 +51,9 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -83,7 +80,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private static final int ERROR_MESSAGE_MAX_LENGTH = 1000;
     private static final Duration DEFAULT_PARSE_POLL_INTERVAL = Duration.ofSeconds(2);
     private static final Duration DEFAULT_PARSE_STAGE_TIMEOUT = Duration.ofMinutes(45);
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final Set<String> locallyDispatchedItems = ConcurrentHashMap.newKeySet();
     private final Object embeddingPaceLock = new Object();
@@ -217,9 +213,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 case EMBED -> {
                     PreparedIndex prepared = processEmbed(item);
                     failureContext = prepared.item();
-                    processIndex(
-                            prepared.item(), prepared.asset(), prepared.segments(),
-                            prepared.profileFingerprint());
+                    processIndex(prepared.item(), prepared.asset(), prepared.segments());
                 }
                 case INDEX -> processIndex(item);
                 case COMPLETE, FAILED -> log.debug(
@@ -369,8 +363,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private PreparedIndex processEmbed(IngestionTaskItem item) {
         Asset asset = findAsset(item);
-        PreparedSegments preparedSegments = prepareSegments(item, asset);
-        List<Segment> segments = preparedSegments.segments();
+        List<Segment> segments = prepareSegments(item, asset);
         LocalDateTime now = LocalDateTime.now();
         IngestionClaimTransition transition = runningTransition(
                         item,
@@ -400,11 +393,10 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 .errorMessage(null)
                 .finishedAt(null)
                 .build();
-        return new PreparedIndex(
-                indexClaim, asset, segments, preparedSegments.profileFingerprint());
+        return new PreparedIndex(indexClaim, asset, segments);
     }
 
-    private PreparedSegments prepareSegments(IngestionTaskItem item, Asset asset) {
+    private List<Segment> prepareSegments(IngestionTaskItem item, Asset asset) {
         ParseResponse parsed = artifactStore.readParseResult(item);
         boolean parsedContentIsEmpty =
                 parsed.chunks() == null || parsed.chunks().isEmpty();
@@ -422,48 +414,36 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         if (chunks == null) {
             chunks = List.of();
         }
+        List<Chunk> embeddedImages = doclingChunkMapper.toDocumentImageChunks(
+                asset, parsed, targetIndexGeneration);
+        if (!embeddedImages.isEmpty()) {
+            List<Chunk> allChunks = new ArrayList<>(chunks.size() + embeddedImages.size());
+            allChunks.addAll(chunks);
+            allChunks.addAll(embeddedImages);
+            chunks = List.copyOf(allChunks);
+        }
 
-        ServingEmbeddingSession embeddingSession = embeddingPort.openServingSession();
-        boolean multi = embeddingSession == null
-                ? embeddingPort.isMulti() : embeddingSession.multi();
-        Profile profile = Profile.fromMulti(multi);
+        Profile profile = Profile.fromMulti(embeddingPort.isMulti());
         List<Segment> segments = buildSegments(
                 item, asset, chunks, targetIndexGeneration, profile);
         String imageInput = EmbeddingProjectionPolicy.requiresImageVisual(
                 profile, asset.getFileType())
                 ? resolveImageEmbeddingUrl(asset, item)
                 : null;
-        segments = applyEmbeddings(
-                item, asset, segments, profile, imageInput, embeddingSession);
+        segments = applyEmbeddings(item, asset, segments, profile, imageInput);
         assertCurrentClaim(item);
-        String profileFingerprint = embeddingSession == null
-                || embeddingSession.profile() == null
-                ? null : embeddingSession.profile().fingerprint();
-        return new PreparedSegments(segments, profileFingerprint);
+        return segments;
     }
 
     private void processIndex(IngestionTaskItem item) {
         Asset asset = findAsset(item);
-        PreparedSegments prepared = prepareSegments(item, asset);
-        processIndex(
-                item, asset, prepared.segments(), prepared.profileFingerprint());
+        List<Segment> segments = prepareSegments(item, asset);
+        processIndex(item, asset, segments);
     }
 
     private void processIndex(
             IngestionTaskItem item, Asset asset, List<Segment> segments) {
-        processIndex(item, asset, segments, null);
-    }
-
-    private void processIndex(
-            IngestionTaskItem item,
-            Asset asset,
-            List<Segment> segments,
-            String profileFingerprint
-    ) {
-        boolean indexed = profileFingerprint == null
-                ? ingestionIndexFinalizer.finalizeIndex(item, asset, segments)
-                : ingestionIndexFinalizer.finalizeIndex(
-                        item, asset, segments, profileFingerprint);
+        boolean indexed = ingestionIndexFinalizer.finalizeIndex(item, asset, segments);
         if (!indexed) {
             return;
         }
@@ -546,10 +526,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 item.getDoclingRequestId(),
                 item.getSourceRevision(),
                 sourceUrl,
-                buildEncryptedOssCredentials(snapshot));
+                buildEncryptedOssCredentials(item.getDoclingRequestId(), snapshot));
     }
 
     private Map<String, String> buildEncryptedOssCredentials(
+            String requestId,
             IngestionParseRequestSnapshot snapshot) {
         if (snapshot.ossTarget() == null) {
             return null;
@@ -568,15 +549,20 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             String secretKey = aesUtil.decrypt(config.getSecretKeyEnc());
             Map<String, Object> token = storageTokenIssuer.issueToken(
                     config, accessKey, secretKey);
-            String ciphertext = aesUtil.encrypt(objectMapper.writeValueAsString(token));
-            // This legacy CBC payload remains behind the disabled ANCHR-104 feature gate.
-            // ANCHR-110 owns replacing it with an authenticated envelope before re-enabling
-            // embedded-image upload.
-            byte[] iv = new byte[16];
-            SECURE_RANDOM.nextBytes(iv);
+            String aad = String.join("\n",
+                    requestId,
+                    snapshot.ossTarget().bucket(),
+                    snapshot.ossTarget().basePath(),
+                    snapshot.ossTarget().endpoint());
+            AesUtil.AeadEnvelope envelope = aesUtil.encryptAead(
+                    objectMapper.writeValueAsString(token), aad);
             return Map.of(
-                    "iv", Base64.getEncoder().encodeToString(iv),
-                    "ciphertext", ciphertext);
+                    "version", "1",
+                    "keyId", "app-security-v1",
+                    "nonce", envelope.nonce(),
+                    "ciphertext", envelope.ciphertext(),
+                    "tag", envelope.tag(),
+                    "expiration", Objects.toString(token.get("expiration"), ""));
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -640,12 +626,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             return;
         }
         if (exception instanceof BusinessException businessFailure) {
-            if (businessFailure.getError() == ApiError.SEARCH_BACKEND_UNAVAILABLE) {
-                retryOrFail(item, asset, businessFailure.getError(),
-                        businessFailure.getMessage(), effectiveStageMaxRetries(), null);
-            } else {
-                failClaim(item, asset, businessFailure.getError(), businessFailure.getMessage());
-            }
+            failClaim(item, asset, businessFailure.getError(), businessFailure.getMessage());
             return;
         }
         if (exception instanceof EmbeddingCallException embeddingFailure) {
@@ -892,14 +873,19 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     .assetId(asset.getId())
                     .indexGeneration(targetIndexGeneration)
                     .assetType(asset.getFileType())
-                    .segmentType(isImage(asset)
-                            ? SegmentType.IMAGE_OCR_BLOCK : SegmentType.TEXT_CHUNK)
+                    .segmentType(chunk.getSegmentType() != null
+                            ? chunk.getSegmentType()
+                            : isImage(asset)
+                                    ? SegmentType.IMAGE_OCR_BLOCK
+                                    : SegmentType.TEXT_CHUNK)
                     .title(chunk.getTitle())
                     .contentText(chunk.getChunkText())
                     .ocrText(chunk.getOcrText())
                     .pageNo(chunk.getPageNo())
                     .chunkOrder(chunk.getChunkOrder())
                     .sourceRef(chunk.getSourceRef())
+                    .imageWidth(chunk.getImageWidth())
+                    .imageHeight(chunk.getImageHeight())
                     .createdAt(createdAt)
                     .bbox(chunk.getBboxInfos())
                     .build());
@@ -938,14 +924,18 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             Asset asset,
             List<Segment> segments,
             Profile profile,
-            String imageInput,
-            ServingEmbeddingSession embeddingSession
+            String imageInput
     ) {
         List<Segment> embedded = new ArrayList<>(segments.size());
         for (Segment segment : segments) {
-            String projectionImageSource =
-                    segment.getSegmentType() == SegmentType.IMAGE_VISUAL
-                            ? imageInput : null;
+            String projectionImageSource = switch (segment.getSegmentType()) {
+                case IMAGE_VISUAL -> imageInput;
+                case DOCUMENT_IMAGE -> StringUtils.hasText(segment.getSourceRef())
+                        ? objectStoragePort.buildImageEmbeddingUrl(
+                                segment.getSourceRef())
+                        : null;
+                default -> null;
+            };
             Optional<EmbeddingProjection> projection =
                     EmbeddingProjectionPolicy.select(
                             profile,
@@ -962,8 +952,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             List<Float> embedding = embed(
                     item,
                     selected.source(),
-                    selected.inputType().requestValue(),
-                    embeddingSession);
+                    selected.inputType().requestValue());
             if (embedding == null || embedding.isEmpty()) {
                 throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
             }
@@ -991,19 +980,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         return resolveSourceUrl(asset, item);
     }
 
-    private List<Float> embed(
-            IngestionTaskItem item,
-            String input,
-            String inputType,
-            ServingEmbeddingSession embeddingSession
-    ) {
+    private List<Float> embed(IngestionTaskItem item, String input, String inputType) {
         assertCurrentClaim(item);
         reserveEmbeddingCallSlot();
         assertCurrentClaim(item);
         try {
-            return embeddingSession == null
-                    ? embeddingPort.embed(input, inputType)
-                    : embeddingSession.embed(input, inputType);
+            return embeddingPort.embed(input, inputType);
         } catch (StaleClaimException | WorkerInterruptedException e) {
             throw e;
         } catch (BusinessException e) {
@@ -1174,14 +1156,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private record PreparedIndex(
-            IngestionTaskItem item,
-            Asset asset,
-            List<Segment> segments,
-            String profileFingerprint) {
-    }
-
-    private record PreparedSegments(
-            List<Segment> segments,
-            String profileFingerprint) {
+            IngestionTaskItem item, Asset asset, List<Segment> segments) {
     }
 }

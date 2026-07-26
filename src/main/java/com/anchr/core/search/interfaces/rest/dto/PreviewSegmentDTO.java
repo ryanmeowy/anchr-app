@@ -21,6 +21,8 @@ public class PreviewSegmentDTO implements Serializable {
     private String previewType;
     private String previewUrl;
     private Long expiresAt;
+    private String imagePreviewUrl;
+    private Long imagePreviewExpiresAt;
     private String sourceRef;
     private String thumbnail;
     private String title;

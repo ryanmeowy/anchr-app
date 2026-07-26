@@ -6,11 +6,13 @@ import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.kb.application.ActivityQueryService;
 import com.anchr.core.kb.application.KnowledgeBaseService;
+import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
 import com.anchr.core.search.application.SegmentPreviewService;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
@@ -60,25 +62,38 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        previewAccessCache.evict(segment.getAssetId(), accessTokenHash);
+        Asset parentAsset = resolveParentAsset(segment);
+        previewAccessCache.evict(
+                cacheIdentity(segment.getAssetId(), previewSourceRef(segment, parentAsset)),
+                accessTokenHash);
+        previewAccessCache.evict(
+                cacheIdentity(segment.getAssetId(), segment.getSourceRef()),
+                accessTokenHash);
         return getSegmentPreview(segmentId, request);
     }
 
     private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash, PreviewRequestDTO request) {
-        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessTokenHash);
+        KnowledgeBase knowledgeBase = knowledgeBaseService.get(segment.getKbId());
+        Asset parentAsset = resolveParentAsset(segment);
+        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(
+                segment, parentAsset, accessTokenHash);
+        PreviewAccessCache.PreviewAccess imagePreviewAccess = buildImagePreviewAccess(
+                segment, accessTokenHash);
         PreviewInfo previewInfo = fetchCitationInfo(request);
 
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
                 .kbId(segment.getKbId())
-                .kbName(Optional.of(knowledgeBaseService.get(segment.getKbId())).map(KnowledgeBase::getName).orElse(null))
+                .kbName(Optional.ofNullable(knowledgeBase).map(KnowledgeBase::getName).orElse(null))
                 .assetType(segment.getAssetType())
                 .segmentType(toCode(segment.getSegmentType()))
-                .fileName(resolveFileName(segment))
+                .fileName(resolveFileName(segment, parentAsset))
                 .previewType(segment.getAssetType())
                 .previewUrl(previewAccess.url())
                 .expiresAt(previewAccess.expiresAt())
+                .imagePreviewUrl(imagePreviewAccess.url())
+                .imagePreviewExpiresAt(imagePreviewAccess.expiresAt())
                 .sourceRef(segment.getSourceRef())
                 .thumbnail(segment.getThumbnail())
                 .title(segment.getTitle())
@@ -176,8 +191,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
-    private PreviewAccessCache.PreviewAccess buildPreviewAccess(Segment segment, String accessTokenHash) {
-        String sourceRef = segment.getSourceRef();
+    private PreviewAccessCache.PreviewAccess buildPreviewAccess(
+            Segment segment, Asset parentAsset, String accessTokenHash) {
+        String sourceRef = previewSourceRef(segment, parentAsset);
         if (!StringUtils.hasText(sourceRef)) {
             return new PreviewAccessCache.PreviewAccess(null, null);
         }
@@ -187,7 +203,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         }
         String assetId = segment.getAssetId();
         if (StringUtils.hasText(assetId)) {
-            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(assetId, accessTokenHash);
+            String identity = cacheIdentity(assetId, normalizedSourceRef);
+            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(identity, accessTokenHash);
             if (cached.isPresent()) {
                 return cached.get();
             }
@@ -205,9 +222,61 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 signedObjectUrl.expiresAt()
         );
         if (StringUtils.hasText(assetId)) {
-            previewAccessCache.save(assetId, accessTokenHash, previewAccess);
+            previewAccessCache.save(cacheIdentity(assetId, normalizedSourceRef), accessTokenHash, previewAccess);
         }
         return previewAccess;
+    }
+
+    private PreviewAccessCache.PreviewAccess buildImagePreviewAccess(
+            Segment segment, String accessTokenHash) {
+        if (segment.getSegmentType() != SegmentType.DOCUMENT_IMAGE
+                || !StringUtils.hasText(segment.getSourceRef())) {
+            return new PreviewAccessCache.PreviewAccess(null, null);
+        }
+        String sourceRef = segment.getSourceRef().trim();
+        if (isDirectUrl(sourceRef)) {
+            return new PreviewAccessCache.PreviewAccess(sourceRef, null);
+        }
+        String identity = cacheIdentity(segment.getAssetId(), sourceRef);
+        Optional<PreviewAccessCache.PreviewAccess> cached =
+                previewAccessCache.find(identity, accessTokenHash);
+        if (cached.isPresent()) return cached.get();
+        String objectKey = resolveObjectKey(sourceRef);
+        SearchObjectStoragePort.SignedObjectUrl signed = signPreviewUrl(objectKey);
+        if (signed == null || !StringUtils.hasText(signed.url())) {
+            throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);
+        }
+        PreviewAccessCache.PreviewAccess access =
+                new PreviewAccessCache.PreviewAccess(signed.url(), signed.expiresAt());
+        previewAccessCache.save(identity, accessTokenHash, access);
+        return access;
+    }
+
+    private Asset resolveParentAsset(Segment segment) {
+        if (segment == null || segment.getSegmentType() != SegmentType.DOCUMENT_IMAGE) {
+            return null;
+        }
+        return knowledgeBaseService.getDocument(segment.getKbId(), segment.getAssetId());
+    }
+
+    private String previewSourceRef(Segment segment, Asset parentAsset) {
+        if (parentAsset == null) {
+            return segment == null ? null : segment.getSourceRef();
+        }
+        if (StringUtils.hasText(parentAsset.getPreviewObjectKey())) {
+            return parentAsset.getPreviewObjectKey().trim();
+        }
+        if (StringUtils.hasText(parentAsset.getObjectKey())) {
+            return parentAsset.getObjectKey().trim();
+        }
+        return parentAsset.getSourceUrl();
+    }
+
+    private String cacheIdentity(String assetId, String objectIdentity) {
+        if (!StringUtils.hasText(assetId) || !StringUtils.hasText(objectIdentity)) {
+            return null;
+        }
+        return assetId.trim() + ":object:" + objectIdentity.trim();
     }
 
     private String currentAccessTokenHash() {
@@ -250,7 +319,10 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return segment.getTitle();
     }
 
-    private String resolveFileName(Segment segment) {
+    private String resolveFileName(Segment segment, Asset parentAsset) {
+        if (parentAsset != null && StringUtils.hasText(parentAsset.getFileName())) {
+            return parentAsset.getFileName().trim();
+        }
         if (StringUtils.hasText(segment.getSourceRef())) {
             String sourceRef = segment.getSourceRef().trim();
             int queryIndex = sourceRef.indexOf('?');

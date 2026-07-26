@@ -3,18 +3,16 @@ package com.anchr.core.integration.ai.adapter;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.EmbeddingClient;
+import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
-import com.anchr.core.integration.ai.client.CapabilityClientFactory;
-import com.anchr.core.search.domain.model.EmbeddingProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class ConfigDrivenEmbeddingAdapterTest {
 
@@ -59,30 +57,88 @@ class ConfigDrivenEmbeddingAdapterTest {
     }
 
     @Test
-    void targetSessionShouldResolveItsExactConfigInsteadOfTheActiveClient() {
+    void rebuildSessionShouldUseTargetConfigBeforeItBecomesActive() {
         CapabilityConfig target = CapabilityConfig.builder()
-                .id(9L)
+                .id(2L)
                 .capability("EMBEDDING")
-                .baseUrl("https://target.example.test")
-                .modelName("text-target")
-                .extraConfig("{\"dimensions\":2}")
+                .baseUrl("https://embedding.example.test")
+                .modelName("new-model")
+                .extraConfig("{\"dimensions\":1024}")
                 .enabled(false)
                 .build();
-        EmbeddingProfile targetProfile = CapabilityEmbeddingProfileProvider.createProfile(target)
+        EmbeddingProfile targetProfile = CapabilityEmbeddingProfileProvider
+                .createProfile(target)
                 .orElseThrow();
         RecordingEmbeddingClient targetClient = new RecordingEmbeddingClient();
-        CapabilityConfigRepository repository = mock(CapabilityConfigRepository.class);
-        CapabilityClientFactory factory = mock(CapabilityClientFactory.class);
-        when(repository.findById(9L)).thenReturn(java.util.Optional.of(target));
-        when(factory.build(target)).thenReturn(targetClient);
+        com.anchr.core.integration.ai.client.CapabilityClientFactory clientFactory =
+                new com.anchr.core.integration.ai.client.CapabilityClientFactory(null) {
+                    @Override
+                    public Object build(CapabilityConfig config) {
+                        return targetClient;
+                    }
+                };
+        RecordingConfigRepository repository = new RecordingConfigRepository(target);
         ConfigDrivenEmbeddingAdapter adapter = new ConfigDrivenEmbeddingAdapter(
-                new ClientCacheManager(), factory, mock(CapabilityResolver.class));
+                new ClientCacheManager(), clientFactory, null);
         adapter.setCapabilityConfigRepository(repository);
 
-        adapter.openSession(targetProfile).embed("target text", "text");
+        adapter.openSession(targetProfile).embed("document text", "text");
 
-        assertThat(targetClient.contexts).hasSize(1);
-        assertThat(targetClient.contexts.getFirst().modelName()).isEqualTo("text-target");
+        assertThat(repository.requestedId).isEqualTo(2L);
+        assertThat(targetClient.contexts)
+                .extracting(EmbeddingClient.EmbedContext::modelName)
+                .containsExactly("new-model");
+    }
+
+    private static final class RecordingConfigRepository
+            implements CapabilityConfigRepository {
+        private final CapabilityConfig target;
+        private Long requestedId;
+
+        private RecordingConfigRepository(CapabilityConfig target) {
+            this.target = target;
+        }
+
+        @Override
+        public Optional<CapabilityConfig> findById(Long id) {
+            requestedId = id;
+            return target.getId().equals(id) ? Optional.of(target) : Optional.empty();
+        }
+
+        @Override
+        public List<CapabilityConfig> findByCapability(String capability) {
+            return List.of();
+        }
+
+        @Override
+        public List<CapabilityConfig> findAllByCapability(String capability) {
+            return List.of();
+        }
+
+        @Override
+        public CapabilityConfig insert(CapabilityConfig config) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CapabilityConfig update(CapabilityConfig config) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void select(String capability, Long id) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void disableAll(String capability) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void del(String capability, Long id) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private static final class RecordingEmbeddingClient implements EmbeddingClient {

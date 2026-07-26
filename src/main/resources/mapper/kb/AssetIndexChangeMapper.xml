@@ -35,8 +35,4 @@
         order by revision asc
         limit #{limit}
     </select>
-
-    <select id="currentRevision" resultType="long">
-        select coalesce(max(revision), 0) from asset_index_change
-    </select>
 </mapper>

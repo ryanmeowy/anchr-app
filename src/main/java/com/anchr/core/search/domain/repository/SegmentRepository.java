@@ -22,6 +22,9 @@ public interface SegmentRepository {
 
     List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter);
 
+    List<SegmentHit> vectorSearch(
+            List<Float> queryVector, int topK, float similarity, SearchFilter filter);
+
     Optional<Segment> findBySegmentId(String segmentId);
 
     List<Segment> listByAssetId(String kbId,

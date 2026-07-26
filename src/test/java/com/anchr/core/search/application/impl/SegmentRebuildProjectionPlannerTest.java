@@ -199,6 +199,31 @@ class SegmentRebuildProjectionPlannerTest {
     }
 
     @Test
+    void documentImageShouldUseSourceRefAsItsImageInput() {
+        SegmentDocument source = new SegmentDocument();
+        source.setSegmentId("document-image-1");
+        source.setKbId("kb-1");
+        source.setAssetId("asset-pdf");
+        source.setIndexGeneration(2L);
+        source.setAssetType("PDF");
+        source.setSegmentType(SegmentType.DOCUMENT_IMAGE.name());
+        source.setContentText("architecture diagram");
+        source.setSourceRef("embedded/architecture.png");
+
+        var planned = new SegmentRebuildProjectionPlanner("MULTI_EMBEDDING")
+                .plan(source.getSegmentId(), source);
+
+        assertThat(planned).singleElement().satisfies(item -> {
+            assertThat(item.projection().inputType())
+                    .isEqualTo(EmbeddingProjection.InputType.IMAGE);
+            assertThat(item.projection().source())
+                    .isEqualTo("embedded/architecture.png");
+            assertThat(item.document().getSourceRef())
+                    .isEqualTo("embedded/architecture.png");
+        });
+    }
+
+    @Test
     void textTargetShouldDropVisualAndEmbedOnlyNonBlankOcr() {
         SegmentRebuildProjectionPlanner planner =
                 new SegmentRebuildProjectionPlanner("EMBEDDING");

@@ -53,6 +53,34 @@ class IngestionArtifactStoreTest {
     }
 
     @Test
+    void cleanup_shouldResolveUploadedImageKeysFromTheExistingParseArtifact() {
+        IngestionTaskItem item = item();
+        ParseResponse base = parseResponse("request-1", "hello");
+        ParseResponse response = new ParseResponse(
+                base.requestId(), base.parser(), base.format(), base.text(),
+                base.fileType(), base.pages(), base.chunks(),
+                List.of(
+                        new ParseResponse.Image(
+                                1, "picture-1", "embedded/picture-1.png", "UPLOADED",
+                                1, List.of(), 640, 480, "image/png", "a".repeat(64),
+                                null, "caption", null, null, "https://temporary.example/image"),
+                        new ParseResponse.Image(
+                                1, "picture-2", null, "SKIPPED",
+                                2, List.of(), null, null, null, null,
+                                null, null, null, null, null)),
+                base.warnings());
+
+        IngestionStoredArtifact stored = store.writeParseArtifact(item, "job-1", response);
+        IngestionArtifactReference reference = reference(
+                "PARSE_RESULT", stored, "PRODUCED", item.getClaimVersion());
+
+        assertThat(store.readEmbeddedImageObjectKeys(reference, "asset-1"))
+                .containsExactly("embedded/picture-1.png");
+        assertThat(store.readParseResult(registeredParse(item, stored))
+                .images().getFirst().url()).isNull();
+    }
+
+    @Test
     void parseResult_shouldAcceptIdenticalCreateOnlyReplayButRejectDifferentContent() {
         IngestionTaskItem item = item();
         ParseResponse response = parseResponse("request-1", "hello");

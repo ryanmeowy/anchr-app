@@ -28,6 +28,8 @@ public record EmbeddingProjection(
     public enum SourceKind {
         CONTENT_TEXT,
         OCR_TEXT,
-        ORIGINAL_IMAGE
+        ORIGINAL_IMAGE,
+        DOCUMENT_IMAGE_TEXT,
+        DOCUMENT_IMAGE_OBJECT
     }
 }

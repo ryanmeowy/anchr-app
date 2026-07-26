@@ -113,6 +113,11 @@ public interface IngestionTaskMapper {
             @Param("executionId") Long executionId,
             @Param("artifactType") String artifactType);
 
+    List<IngestionArtifactRecord> listArtifactsByAssetGeneration(
+            @Param("assetId") String assetId,
+            @Param("targetIndexGeneration") Long targetIndexGeneration,
+            @Param("artifactType") String artifactType);
+
     Optional<Long> findCurrentClaimForUpdate(
             @Param("itemId") String itemId,
             @Param("executionEpoch") long executionEpoch,

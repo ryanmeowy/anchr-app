@@ -34,7 +34,23 @@ public record ParseResponse(
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Image(String url, Integer pageNo, String alt, String blockId) {}
+    public record Image(
+            Integer artifactVersion,
+            String blockId,
+            String imageObjectKey,
+            String uploadStatus,
+            Integer pageNo,
+            List<BboxInfo> bboxes,
+            Integer imageWidth,
+            Integer imageHeight,
+            String mimeType,
+            String contentHash,
+            String alt,
+            String caption,
+            String contextText,
+            String ocrText,
+            String url
+    ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Warning(String code, String message, String blockId) {}

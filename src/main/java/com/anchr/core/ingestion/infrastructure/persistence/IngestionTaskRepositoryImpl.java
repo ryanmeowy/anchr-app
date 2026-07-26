@@ -202,6 +202,26 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     @Override
+    public List<IngestionArtifactReference> listParseArtifacts(
+            String assetId, Long targetIndexGeneration) {
+        requireText(assetId, "assetId");
+        if (targetIndexGeneration != null && targetIndexGeneration < 0L) {
+            return List.of();
+        }
+        return mapper.listArtifactsByAssetGeneration(
+                        assetId.trim(), targetIndexGeneration, PARSE_ARTIFACT)
+                .stream()
+                .map(record -> artifactReference(
+                        PARSE_ARTIFACT,
+                        record.getObjectKey(),
+                        record.getArtifactVersion(),
+                        record.getProvenance(),
+                        record.getProducerClaimVersion(),
+                        record.getContentSha256()))
+                .toList();
+    }
+
+    @Override
     public boolean assignTargetIndexGeneration(String itemId, String assetId,
                                                long targetIndexGeneration,
                                                LocalDateTime updatedAt) {

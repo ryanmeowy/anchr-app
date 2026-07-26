@@ -32,6 +32,10 @@ final class SegmentRebuildProjectionPlanner {
         }
         boolean image = "IMAGE".equalsIgnoreCase(source.getAssetType());
         SegmentType sourceType = sourceType(source, image);
+        if (sourceType == SegmentType.DOCUMENT_IMAGE) {
+            source.setSegmentType(SegmentType.DOCUMENT_IMAGE.name());
+            return List.of(planDocument(documentId, source));
+        }
         if (!image) {
             if (sourceType == SegmentType.IMAGE_VISUAL) {
                 return List.of();
@@ -83,7 +87,8 @@ final class SegmentRebuildProjectionPlanner {
                         segmentType,
                         document.getContentText(),
                         document.getOcrText(),
-                        null)
+                        segmentType == SegmentType.DOCUMENT_IMAGE
+                                ? document.getSourceRef() : null)
                 .orElse(null);
         document.setEmbedding(null);
         return new PlannedDocument(documentId, document, projection);

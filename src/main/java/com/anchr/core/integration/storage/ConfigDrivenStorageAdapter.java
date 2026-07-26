@@ -181,6 +181,18 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
         }
     }
 
+    @Override
+    public void deleteObject(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) return;
+        StorageConfig config = loadConfig();
+        OSS client = buildClient(config);
+        try {
+            client.deleteObject(config.getBucket(), objectKey.trim());
+        } finally {
+            client.shutdown();
+        }
+    }
+
     // ── internal ─────────────────────────────────────────────────────────
 
     private OSS buildClient(StorageConfig config) {

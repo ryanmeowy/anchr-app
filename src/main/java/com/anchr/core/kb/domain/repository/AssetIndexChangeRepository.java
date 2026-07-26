@@ -12,6 +12,4 @@ public interface AssetIndexChangeRepository {
     void save(AssetIndexChange change);
 
     List<AssetIndexChange> listAfterRevision(long exclusiveRevision, int limit);
-
-    long currentRevision();
 }

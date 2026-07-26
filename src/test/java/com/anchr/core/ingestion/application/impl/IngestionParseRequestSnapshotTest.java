@@ -16,7 +16,7 @@ class IngestionParseRequestSnapshotTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void snapshotExcludesSignedUrlAndCredentialsButRebuildsV2Request() throws Exception {
+    void snapshotExcludesSignedUrlAndCredentialsButRebuildsV3Request() throws Exception {
         IngestionParseRequestSnapshot snapshot = IngestionParseRequestSnapshot.capture(
                 asset(), true, storageConfig());
 
@@ -33,7 +33,7 @@ class IngestionParseRequestSnapshotTest {
                 .doesNotContain("signed.example.test")
                 .doesNotContain("cipher-2")
                 .doesNotContain("iv-2");
-        assertThat(request.contractVersion()).isEqualTo(2);
+        assertThat(request.contractVersion()).isEqualTo(3);
         assertThat(request.options().includeEmbeddedImages()).isTrue();
         assertThat(request.oss().endpoint()).isEqualTo("oss.example.test");
         assertThat(request.oss().basePath()).isEqualTo("embedded/");

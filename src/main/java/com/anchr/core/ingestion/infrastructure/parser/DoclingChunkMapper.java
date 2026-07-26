@@ -12,6 +12,8 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -45,6 +47,56 @@ public class DoclingChunkMapper {
                 .mapToObj(index -> convert2Chunk(
                         chunks.get(index), index, asset, isImg, targetIndexGeneration))
                 .toList();
+    }
+
+    /** Maps uploaded embedded-image artifacts to independent retrieval units. */
+    public List<Chunk> toDocumentImageChunks(
+            Asset asset, ParseResponse response, long targetIndexGeneration) {
+        Objects.requireNonNull(asset, "asset");
+        Objects.requireNonNull(response, "response");
+        if (CollectionUtils.isEmpty(response.images())) {
+            return List.of();
+        }
+        LinkedHashMap<String, ParseResponse.Image> unique = new LinkedHashMap<>();
+        for (ParseResponse.Image image : response.images()) {
+            if (image == null || !"UPLOADED".equalsIgnoreCase(image.uploadStatus())) {
+                continue;
+            }
+            if (!Objects.equals(1, image.artifactVersion())
+                    || !StringUtils.hasText(image.blockId())
+                    || !StringUtils.hasText(image.imageObjectKey())) {
+                log.warn("Ignoring invalid embedded image artifact for asset {}", asset.getId());
+                continue;
+            }
+            unique.putIfAbsent(image.blockId().trim(), image);
+        }
+        List<Chunk> chunks = new ArrayList<>(unique.size());
+        int order = 0;
+        for (ParseResponse.Image image : unique.values()) {
+            List<BboxInfo> bboxes = Optional.ofNullable(image.bboxes())
+                    .orElse(List.of()).stream()
+                    .filter(Objects::nonNull)
+                    .map(BboxInfo::convert2BboxInfo)
+                    .toList();
+            chunks.add(Chunk.builder()
+                    .segmentId(SegmentIdentity.documentImage(
+                            asset.getId(), targetIndexGeneration, image.blockId()))
+                    .kbId(asset.getKbId())
+                    .assetId(asset.getId())
+                    .title(StringUtils.hasText(asset.getTitle())
+                            ? asset.getTitle() : asset.getFileName())
+                    .pageNo(image.pageNo())
+                    .chunkOrder(order++)
+                    .chunkText(joinText(image.caption(), image.alt(), image.contextText()))
+                    .ocrText(trimToNull(image.ocrText()))
+                    .sourceRef(image.imageObjectKey().trim())
+                    .bboxInfos(bboxes)
+                    .segmentType(com.anchr.core.search.domain.model.SegmentType.DOCUMENT_IMAGE)
+                    .imageWidth(image.imageWidth())
+                    .imageHeight(image.imageHeight())
+                    .build());
+        }
+        return List.copyOf(chunks);
     }
 
     private Chunk convert2Chunk(
@@ -107,6 +159,17 @@ public class DoclingChunkMapper {
             log.warn("Failed to parse chunk id: {}", chunkId, e);
             return fallbackChunkOrder;
         }
+    }
+
+    private String joinText(String... values) {
+        return java.util.Arrays.stream(values)
+                .map(this::trimToNull)
+                .filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.joining("\n"));
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
 }

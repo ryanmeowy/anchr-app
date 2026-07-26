@@ -5,6 +5,10 @@ import com.anchr.core.kb.domain.model.DocumentIndexGenerationDeletePayload;
 import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
+import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
+import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
+import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
+import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,6 +39,9 @@ public class OutboxEventProcessor {
     private final OutboxEventRepository outboxEventRepository;
     private final SegmentRepository segmentRepository;
     private final ObjectMapper objectMapper;
+    private final IngestionTaskRepository ingestionTaskRepository;
+    private final IngestionArtifactStore artifactStore;
+    private final IngestionObjectStoragePort objectStoragePort;
 
     @Value("${app.outbox.batch-size:20}")
     private int batchSize;
@@ -67,11 +75,14 @@ public class OutboxEventProcessor {
             switch (event.getEventType()) {
                 case DELETE_ASSET -> {
                     DocumentIndexDeletePayload payload = readDeletePayload(event);
+                    cleanupEmbeddedImageObjects(payload.assetId(), null);
                     segmentRepository.deleteByAssetId(payload.assetId());
                 }
                 case DELETE_ASSET_GENERATION -> {
                     DocumentIndexGenerationDeletePayload payload =
                             readGenerationDeletePayload(event);
+                    cleanupEmbeddedImageObjects(
+                            payload.assetId(), payload.indexGeneration());
                     segmentRepository.deleteByAssetGeneration(
                             payload.assetId(), payload.indexGeneration());
                 }
@@ -92,6 +103,19 @@ public class OutboxEventProcessor {
             failPermanently(event, e.getMessage());
         } catch (Exception e) {
             retryOrFail(event, e);
+        }
+    }
+
+    private void cleanupEmbeddedImageObjects(String assetId, Long indexGeneration) {
+        LinkedHashSet<String> objectKeys = new LinkedHashSet<>();
+        List<IngestionArtifactReference> parseArtifacts =
+                ingestionTaskRepository.listParseArtifacts(assetId, indexGeneration);
+        for (IngestionArtifactReference artifact : parseArtifacts) {
+            objectKeys.addAll(
+                    artifactStore.readEmbeddedImageObjectKeys(artifact, assetId));
+        }
+        for (String objectKey : objectKeys) {
+            objectStoragePort.deleteObject(objectKey);
         }
     }
 

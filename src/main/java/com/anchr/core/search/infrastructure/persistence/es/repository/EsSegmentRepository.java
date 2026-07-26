@@ -19,7 +19,6 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
-import com.anchr.core.search.application.IndexRuntimeContext;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentHit;
@@ -30,7 +29,6 @@ import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Repository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -51,21 +49,6 @@ public class EsSegmentRepository implements SegmentRepository {
     private final SegmentIndexConfig kbSegmentConfig;
     private final SegmentIndexManager segmentIndexManager;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
-    private IndexRuntimeContext runtimeContext;
-
-    @Autowired(required = false)
-    void setRuntimeContext(IndexRuntimeContext runtimeContext) {
-        this.runtimeContext = runtimeContext;
-    }
-
-    private String readIndex() {
-        return runtimeContext == null
-                ? kbSegmentConfig.getReadTargetName()
-                : runtimeContext.current()
-                        .map(snapshot -> snapshot.physicalIndex())
-                        .orElseGet(kbSegmentConfig::getReadTargetName);
-    }
-
     private void assertIndexReadable() {
         SegmentIndexStatusDTO status = segmentIndexManager.status();
         if (!status.isReadable()) {
@@ -115,12 +98,19 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter) {
+        return vectorSearch(queryVector, topK, 0.75f, filter);
+    }
+
+    @Override
+    public List<SegmentHit> vectorSearch(
+            List<Float> queryVector, int topK, float similarity, SearchFilter filter) {
         assertIndexReadable();
         if (CollectionUtils.isEmpty(queryVector) || topK <= 0) {
             return List.of();
         }
         try {
-            SearchRequest request = buildVectorSearchRequest(queryVector, topK, filter);
+            SearchRequest request = buildVectorSearchRequest(
+                    queryVector, topK, similarity, filter);
             SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
             return convertHits(response);
         } catch (Exception e) {
@@ -155,7 +145,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     GetRequest buildFindBySegmentIdRequest(String segmentId) {
         return GetRequest.of(g -> g
-                .index(readIndex())
+                .index(kbSegmentConfig.getReadTargetName())
                 .id(segmentId.trim())
                 .sourceExcludes("embedding"));
     }
@@ -200,7 +190,7 @@ public class EsSegmentRepository implements SegmentRepository {
             int limit
     ) {
         SearchRequest.Builder builder = new SearchRequest.Builder()
-                .index(readIndex())
+                .index(kbSegmentConfig.getReadTargetName())
                 .size(Math.min(limit, 100))
                 .query(q -> q.bool(b -> b
                         .filter(f -> f.term(t -> t
@@ -313,7 +303,7 @@ public class EsSegmentRepository implements SegmentRepository {
     private SearchRequest buildTextSearchRequest1(String query, List<String> keywords, int limit, SearchFilter filter) {
         boolean hasKeywords = keywords != null && keywords.stream().anyMatch(StringUtils::hasText);
         return SearchRequest.of(s -> s
-                .index(readIndex())
+                .index(kbSegmentConfig.getReadTargetName())
                 .size(limit)
                 .query(q -> q.bool(b -> {
                     applyFilters(b, filter);
@@ -376,7 +366,7 @@ public class EsSegmentRepository implements SegmentRepository {
                 : effectiveKeywords;
 
         return SearchRequest.of(s -> s
-                .index(readIndex())
+                .index(kbSegmentConfig.getReadTargetName())
                 .size(limit)
                 .query(q -> q.bool(b -> {
                     applyFilters(b, filter);
@@ -407,9 +397,18 @@ public class EsSegmentRepository implements SegmentRepository {
             int topK,
             SearchFilter filter
     ) {
+        return buildVectorSearchRequest(queryVector, topK, 0.75f, filter);
+    }
+
+    SearchRequest buildVectorSearchRequest(
+            List<Float> queryVector,
+            int topK,
+            float similarity,
+            SearchFilter filter
+    ) {
         int numCandidates = Math.max(EmbeddingConstant.DEFAULT_NUM_CANDIDATES, topK * EmbeddingConstant.NUM_CANDIDATES_FACTOR);
         return SearchRequest.of(s -> s
-                .index(readIndex())
+                .index(kbSegmentConfig.getReadTargetName())
                 .size(topK)
                 .source(src -> src.filter(f -> f.excludes("embedding")))
                 .knn(k -> {
@@ -417,7 +416,7 @@ public class EsSegmentRepository implements SegmentRepository {
                             .queryVector(queryVector)
                             .k(topK)
                             .numCandidates(numCandidates)
-                            .similarity(0.75f);
+                            .similarity(similarity);
                     applyKnnFilters(k, filter);
                     return k;
                 })

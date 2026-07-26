@@ -8,8 +8,6 @@ import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.KbScopeResolver;
 import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.search.application.IndexRuntimeContext;
-import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.SearchFilter;
@@ -17,6 +15,7 @@ import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.port.SearchRerankPort;
+import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.port.SearchRerankPort.RerankItem;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
@@ -30,7 +29,6 @@ import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -63,16 +61,11 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private final AppSearchProperties appSearchProperties;
     private final MeterRegistry meterRegistry;
     private final ActivityEventService activityEventService;
-    private IndexRuntimeContext indexRuntimeContext;
-    private SegmentIndexManager segmentIndexManager;
+    private SearchObjectStoragePort objectStoragePort;
 
-    @Autowired(required = false)
-    void setIndexRuntime(
-            IndexRuntimeContext indexRuntimeContext,
-            SegmentIndexManager segmentIndexManager
-    ) {
-        this.indexRuntimeContext = indexRuntimeContext;
-        this.segmentIndexManager = segmentIndexManager;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setObjectStoragePort(SearchObjectStoragePort objectStoragePort) {
+        this.objectStoragePort = objectStoragePort;
     }
 
     @Override
@@ -112,16 +105,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private SearchResult searchInternal(SearchQueryDTO query, int offset, List<String> keywords) {
-        if (indexRuntimeContext == null || segmentIndexManager == null
-                || indexRuntimeContext.current().isPresent()) {
-            return doSearchInternal(query, offset, keywords);
-        }
-        return indexRuntimeContext.withSnapshot(
-                segmentIndexManager.runtimeSnapshot(),
-                () -> doSearchInternal(query, offset, keywords));
-    }
-
-    private SearchResult doSearchInternal(SearchQueryDTO query, int offset, List<String> keywords) {
         long startMs = System.currentTimeMillis();
         if (query == null || !StringUtils.hasText(query.getQuery())) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
@@ -139,19 +122,31 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         List<Float> queryVector = kbQueryEmbeddingService.embedQuery(rawQuery);
         List<String> effectiveKeywords = keywords != null && !keywords.isEmpty() ? keywords : List.of();
         List<SegmentHit> textHits = kbSegmentRepository.textSearch(rawQuery, effectiveKeywords, recallTopK, filter);
-        List<SegmentHit> vectorHits = kbSegmentRepository.vectorSearch(queryVector, recallTopK, filter);
+        AppSearchProperties.VectorRoutes routes = appSearchProperties.getVectorRoutes();
+        List<SegmentHit> textVectorHits = kbSegmentRepository.vectorSearch(
+                queryVector,
+                Math.min(recallTopK, Math.max(1, routes.getTextTopK())),
+                routes.getTextSimilarity(),
+                routeFilter(filter, false));
+        List<SegmentHit> imageVectorHits = kbSegmentRepository.vectorSearch(
+                queryVector,
+                Math.min(recallTopK, Math.max(1, routes.getDocumentImageTopK())),
+                routes.getDocumentImageSimilarity(),
+                routeFilter(filter, true));
         int textHitCount = textHits.size();
-        int vectorHitCount = vectorHits.size();
-        log.info("kb search recall completed, keyword={}, recallTopK={}, textHits={}, vectorHits={}",
-                rawQuery, recallTopK, textHitCount, vectorHitCount);
+        int vectorHitCount = textVectorHits.size() + imageVectorHits.size();
+        log.info("kb search recall completed, keyword={}, recallTopK={}, textHits={}, textVectorHits={}, documentImageVectorHits={}",
+                rawQuery, recallTopK, textHitCount, textVectorHits.size(), imageVectorHits.size());
 
         List<SegmentRerankCandidate> candidates = fuseCandidates(
                 textHits,
-                vectorHits,
+                textVectorHits,
+                imageVectorHits,
                 appSearchProperties.getRrf().getRankConstant()
         );
         int recalledCandidateCount = candidates.size();
         candidates = filterActiveIndexGeneration(candidates);
+        candidates = diversifyByAssetAndSegmentType(candidates);
         int fusedCount = candidates.size();
         if (recalledCandidateCount != fusedCount) {
             log.info("kb search generation gate filtered candidates, recalled={}, visible={}",
@@ -256,11 +251,13 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private List<SegmentRerankCandidate> fuseCandidates(List<SegmentHit> textHits,
-                                                        List<SegmentHit> vectorHits,
+                                                        List<SegmentHit> textVectorHits,
+                                                        List<SegmentHit> imageVectorHits,
                                                         int rankConstant) {
         Map<String, Accumulator> grouped = new LinkedHashMap<>();
         ingest(textHits, false, Math.max(1, rankConstant), grouped);
-        ingest(vectorHits, true, Math.max(1, rankConstant), grouped);
+        ingest(textVectorHits, true, Math.max(1, rankConstant), grouped);
+        ingest(imageVectorHits, true, Math.max(1, rankConstant), grouped);
 
         return grouped.values().stream()
                 .sorted(Comparator.comparingDouble(Accumulator::getRrfScore).reversed()
@@ -387,7 +384,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             hitSources.add("TITLE");
         }
         if (contentHit) {
-            hitSources.add("CONTENT");
+            hitSources.add(segment.getSegmentType() == SegmentType.DOCUMENT_IMAGE
+                    ? "CAPTION" : "CONTENT");
         }
         if (ocrHit) {
             hitSources.add("OCR");
@@ -408,11 +406,13 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .imageWidth(segment.getImageWidth())
                 .imageHeight(segment.getImageHeight())
                 .build();
+        SearchObjectStoragePort.SignedObjectUrl imagePreview =
+                signImagePreview(segment);
         return SearchResultDTO.builder()
                 .segmentType(toCode(segment.getSegmentType()))
                 .title(segment.getTitle())
                 .content(content)
-                .resultType(toCode(segment.getSegmentType()))
+                .resultType(resultType(segment.getSegmentType()))
                 .assetType(segment.getAssetType())
                 .snippet(snippet)
                 .pageNo(segment.getPageNo())
@@ -421,6 +421,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .kbId(segment.getKbId())
                 .assetId(segment.getAssetId())
                 .sourceRef(segment.getSourceRef())
+                .imagePreviewUrl(imagePreview == null ? null : imagePreview.url())
+                .imagePreviewExpiresAt(imagePreview == null ? null : imagePreview.expiresAt())
                 .anchor(anchor)
                 .explain(buildExplain(segment, hitSources, candidate.vectorHit(), titleHit, contentHit, ocrHit, tagHit))
                 .build();
@@ -453,6 +455,9 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             if (!StringUtils.hasText(aggregated.getOcrSummary()) && StringUtils.hasText(item.getOcrSummary())) {
                 aggregated.setOcrSummary(item.getOcrSummary());
             }
+            if (!Objects.equals(aggregated.getResultType(), item.getResultType())) {
+                aggregated.setResultType("MIXED");
+            }
         }
         return aggregatedByAsset.values().stream().limit(limit).toList();
     }
@@ -477,6 +482,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .kbId(primary.getKbId())
                 .assetId(primary.getAssetId())
                 .sourceRef(primary.getSourceRef())
+                .imagePreviewUrl(primary.getImagePreviewUrl())
+                .imagePreviewExpiresAt(primary.getImagePreviewExpiresAt())
                 .totalHits(1)
                 .topChunks(topChunks)
                 .build();
@@ -495,6 +502,8 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .pageNo(segmentItem.getPageNo())
                 .anchor(segmentItem.getAnchor())
                 .sourceRef(segmentItem.getSourceRef())
+                .imagePreviewUrl(segmentItem.getImagePreviewUrl())
+                .imagePreviewExpiresAt(segmentItem.getImagePreviewExpiresAt())
                 .thumbnail(segmentItem.getThumbnail())
                 .ocrSummary(segmentItem.getOcrSummary())
                 .build();
@@ -606,11 +615,13 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private boolean isImageSegment(Segment segment) {
         return segment != null
                 && segment.getSegmentType() != null
-                && segment.getSegmentType().name().startsWith("IMAGE_");
+                && (segment.getSegmentType().name().startsWith("IMAGE_")
+                        || segment.getSegmentType() == SegmentType.DOCUMENT_IMAGE);
     }
 
     private boolean isImageCaptionSegment(Segment segment) {
-        return segment != null && segment.getSegmentType() == SegmentType.IMAGE_OCR_BLOCK;
+        return segment != null && (segment.getSegmentType() == SegmentType.IMAGE_OCR_BLOCK
+                || segment.getSegmentType() == SegmentType.DOCUMENT_IMAGE);
     }
 
     private boolean hasTagHit(Segment segment, String keyword, Map<String, String> highlights) {
@@ -631,6 +642,71 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return StringUtils.hasText(text)
                 && StringUtils.hasText(keyword)
                 && text.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT));
+    }
+
+    private String resultType(SegmentType segmentType) {
+        if (segmentType == null) return null;
+        return segmentType == SegmentType.IMAGE_VISUAL
+                || segmentType == SegmentType.IMAGE_OCR_BLOCK
+                || segmentType == SegmentType.DOCUMENT_IMAGE
+                ? "IMAGE" : "TEXT";
+    }
+
+    private SearchObjectStoragePort.SignedObjectUrl signImagePreview(Segment segment) {
+        if (objectStoragePort == null || segment == null
+                || segment.getSegmentType() != SegmentType.DOCUMENT_IMAGE
+                || !StringUtils.hasText(segment.getSourceRef())) {
+            return null;
+        }
+        try {
+            return objectStoragePort.buildPreviewUrl(
+                    segment.getSourceRef().trim());
+        } catch (RuntimeException exception) {
+            log.warn("embedded image preview signing failed, segmentId={}: {}",
+                    segment.getSegmentId(), exception.getMessage());
+            return null;
+        }
+    }
+
+    private SearchFilter routeFilter(SearchFilter filter, boolean documentImages) {
+        List<String> desired = documentImages
+                ? List.of(SegmentType.DOCUMENT_IMAGE.name())
+                : java.util.Arrays.stream(SegmentType.values())
+                        .filter(type -> type != SegmentType.DOCUMENT_IMAGE)
+                        .map(Enum::name)
+                        .toList();
+        List<String> requested = filter.getHitTypes();
+        List<String> hitTypes = requested == null || requested.isEmpty()
+                ? desired
+                : desired.stream().filter(requested::contains).toList();
+        if (hitTypes.isEmpty()) {
+            hitTypes = List.of("__NO_MATCH__");
+        }
+        return SearchFilter.builder()
+                .kbIds(filter.getKbIds())
+                .assetIds(filter.getAssetIds())
+                .assetTypes(filter.getAssetTypes())
+                .hitTypes(hitTypes)
+                .createdFrom(filter.getCreatedFrom())
+                .createdTo(filter.getCreatedTo())
+                .build();
+    }
+
+    private List<SegmentRerankCandidate> diversifyByAssetAndSegmentType(
+            List<SegmentRerankCandidate> candidates) {
+        Map<String, Integer> counts = new HashMap<>();
+        List<SegmentRerankCandidate> diversified = new ArrayList<>();
+        for (SegmentRerankCandidate candidate : candidates) {
+            Segment segment = candidate == null ? null : candidate.segment();
+            if (segment == null) continue;
+            String key = Objects.toString(segment.getAssetId(), "") + "\n"
+                    + Objects.toString(segment.getSegmentType(), "");
+            int count = counts.getOrDefault(key, 0);
+            if (count >= 3) continue;
+            counts.put(key, count + 1);
+            diversified.add(candidate);
+        }
+        return List.copyOf(diversified);
     }
 
     private RerankOutcome applyRerank(String keyword,

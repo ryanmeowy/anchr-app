@@ -22,6 +22,7 @@ public class ConversationCitationMapper {
     private static final String SEGMENT_IMAGE_OCR = "IMAGE_OCR_BLOCK";
     private static final String SEGMENT_IMAGE_CAPTION = "IMAGE_CAPTION";
     private static final String SEGMENT_TEXT = "TEXT_CHUNK";
+    private static final String SEGMENT_DOCUMENT_IMAGE = "DOCUMENT_IMAGE";
 
     public List<ConversationCitation> mapFromSearchResults(List<ConversationRetrievalCandidate> results) {
         if (results == null || results.isEmpty()) {
@@ -33,7 +34,7 @@ public class ConversationCitationMapper {
                 continue;
             }
             ConversationCitation citation = new ConversationCitation();
-            citation.setFileName(resolveFileName(result.getSourceRef()));
+            citation.setFileName(resolveFileName(result));
             citation.setKbId(result.getKbId());
             citation.setPageNo(result.getPageNo());
             citation.setChunkOrder(result.getAnchor() == null ? null : result.getAnchor().getChunkOrder());
@@ -89,7 +90,12 @@ public class ConversationCitationMapper {
         return segmentType;
     }
 
-    private String resolveFileName(String sourceRef) {
+    private String resolveFileName(ConversationRetrievalCandidate result) {
+        if (SEGMENT_DOCUMENT_IMAGE.equals(safeUpper(result.getSegmentType()))
+                && StringUtils.hasText(result.getTitle())) {
+            return result.getTitle().trim();
+        }
+        String sourceRef = result.getSourceRef();
         if (!StringUtils.hasText(sourceRef)) {
             return null;
         }

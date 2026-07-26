@@ -6,6 +6,7 @@ import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchRerankPort;
+import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -83,6 +84,31 @@ class UnifiedSearchTopChunkMappingTest {
         assertThat(topChunk.getAnchor().getChunkOrder()).isEqualTo(12);
         assertThat(topChunk.getExplain().getHitSources())
                 .containsExactly("OCR");
+    }
+
+    @Test
+    void documentImagePreviewShouldBeSignedFromSourceRef() {
+        SearchObjectStoragePort objectStoragePort = mock(SearchObjectStoragePort.class);
+        when(objectStoragePort.buildPreviewUrl("embedded/diagram.png"))
+                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
+                        "https://preview/diagram", 123L));
+        UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
+                null, null, null, null, null, null, null, null);
+        service.setObjectStoragePort(objectStoragePort);
+        Segment segment = Segment.builder()
+                .segmentId("document-image-1")
+                .segmentType(SegmentType.DOCUMENT_IMAGE)
+                .sourceRef("embedded/diagram.png")
+                .contentText("diagram")
+                .build();
+        SegmentRerankCandidate candidate = new SegmentRerankCandidate(
+                "document-image-1", segment, Map.of(), 0.9D, 0.9D, 1, true);
+
+        SearchResultDTO result = ReflectionTestUtils.invokeMethod(
+                service, "toResult", candidate, "diagram");
+
+        assertThat(result.getImagePreviewUrl()).isEqualTo("https://preview/diagram");
+        verify(objectStoragePort).buildPreviewUrl("embedded/diagram.png");
     }
 
     @Test

@@ -25,7 +25,8 @@ public record IngestionParseRequestSnapshot(
 ) {
 
     static final int CURRENT_VERSION = 1;
-    static final int DOCLING_CONTRACT_VERSION = 2;
+    static final int LEGACY_DOCLING_CONTRACT_VERSION = 2;
+    static final int EMBEDDED_IMAGE_CONTRACT_VERSION = 3;
 
     static IngestionParseRequestSnapshot capture(Asset asset,
                                                  boolean includeEmbeddedImages,
@@ -42,7 +43,9 @@ public record IngestionParseRequestSnapshot(
         }
         return new IngestionParseRequestSnapshot(
                 CURRENT_VERSION,
-                DOCLING_CONTRACT_VERSION,
+                includeEmbeddedImages
+                        ? EMBEDDED_IMAGE_CONTRACT_VERSION
+                        : LEGACY_DOCLING_CONTRACT_VERSION,
                 asset.getFileName(),
                 ParseRequest.Options.chunkModel(includeEmbeddedImages),
                 target);
@@ -52,7 +55,8 @@ public record IngestionParseRequestSnapshot(
         if (artifactVersion != CURRENT_VERSION) {
             throw new IllegalStateException("Unsupported ingestion parse request snapshot version.");
         }
-        if (contractVersion != DOCLING_CONTRACT_VERSION) {
+        if (contractVersion != LEGACY_DOCLING_CONTRACT_VERSION
+                && contractVersion != EMBEDDED_IMAGE_CONTRACT_VERSION) {
             throw new IllegalStateException("Unsupported Docling contract version in parse request snapshot.");
         }
         requireText(fileName, "Docling file name");
@@ -60,6 +64,10 @@ public record IngestionParseRequestSnapshot(
             throw new IllegalStateException("Docling parse options are missing from the request snapshot.");
         }
         if (ossTarget != null) {
+            if (contractVersion != EMBEDDED_IMAGE_CONTRACT_VERSION) {
+                throw new IllegalStateException(
+                        "Embedded-image output requires Docling contract version 3.");
+            }
             ossTarget.validated();
         }
         return this;

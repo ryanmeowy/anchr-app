@@ -18,7 +18,6 @@ import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
-import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,21 +39,11 @@ public class IngestionIndexFinalizer {
     private final SegmentRepository segmentRepository;
     private final SegmentBulkWriter segmentBulkWriter;
     private final AssetIndexChangeRecorder assetIndexChangeRecorder;
-    private final SegmentIndexWriteBarrier indexWriteBarrier;
 
     @Transactional(rollbackFor = Exception.class)
     public boolean finalizeIndex(IngestionTaskItem item,
                                  Asset sourceAsset,
                                  List<Segment> segments) {
-        return finalizeIndex(item, sourceAsset, segments, null);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public boolean finalizeIndex(IngestionTaskItem item,
-                                 Asset sourceAsset,
-                                 List<Segment> segments,
-                                 String expectedProfileFingerprint) {
-        indexWriteBarrier.bindDistributedLeaseToCurrentTransaction();
         LocalDateTime now = LocalDateTime.now();
         if (!ingestionTaskRepository.isClaimCurrentForUpdate(
                 item.getId(),
@@ -88,11 +77,7 @@ public class IngestionIndexFinalizer {
         validateSegments(segments, lockedAsset, targetGeneration);
         segmentRepository.deleteByAssetGeneration(
                 lockedAsset.getId(), targetGeneration);
-        if (StringUtils.hasText(expectedProfileFingerprint)) {
-            segmentBulkWriter.write(segments, expectedProfileFingerprint);
-        } else {
-            segmentBulkWriter.write(segments);
-        }
+        segmentBulkWriter.write(segments);
         String updatedBy = StringUtils.hasText(item.getTaskCreatedBy())
                 ? item.getTaskCreatedBy() : "system";
         int readableSegmentCount = countReadableSegments(segments);

@@ -39,6 +39,8 @@ public class SearchResultDTO implements Serializable {
     private String kbId;
     private String assetId;
     private String sourceRef;
+    private String imagePreviewUrl;
+    private Long imagePreviewExpiresAt;
 
     @Data
     @Builder
@@ -64,6 +66,8 @@ public class SearchResultDTO implements Serializable {
         private Integer pageNo;
         private Anchor anchor;
         private String sourceRef;
+        private String imagePreviewUrl;
+        private Long imagePreviewExpiresAt;
         private String thumbnail;
         private String ocrSummary;
     }

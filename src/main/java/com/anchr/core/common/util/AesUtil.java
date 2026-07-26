@@ -6,9 +6,11 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.security.SecureRandom;
 
 /**
  * Utility class for AES encryption and decryption.
@@ -22,6 +24,7 @@ public class AesUtil {
     private static final String ALGORITHM = "AES/CBC/PKCS5Padding";
     private final String keyBase64;
     private final String ivBase64;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     public AesUtil(@Value("${app.security.encrypt-key}") String keyBase64,
                    @Value("${app.security.encrypt-iv}") String ivBase64) {
@@ -87,4 +90,30 @@ public class AesUtil {
             throw new EncryptionException("Decryption failed", e);
         }
     }
+
+    /** Encrypts a short-lived cross-service secret with authenticated context binding. */
+    public AeadEnvelope encryptAead(String content, String aad) {
+        if (content == null || aad == null) {
+            throw new EncryptionException("AEAD content and AAD must not be null");
+        }
+        try {
+            byte[] nonce = new byte[12];
+            SECURE_RANDOM.nextBytes(nonce);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec(), new GCMParameterSpec(128, nonce));
+            cipher.updateAAD(aad.getBytes(StandardCharsets.UTF_8));
+            byte[] sealed = cipher.doFinal(content.getBytes(StandardCharsets.UTF_8));
+            int tagOffset = sealed.length - 16;
+            return new AeadEnvelope(
+                    Base64.getEncoder().encodeToString(nonce),
+                    Base64.getEncoder().encodeToString(
+                            java.util.Arrays.copyOfRange(sealed, 0, tagOffset)),
+                    Base64.getEncoder().encodeToString(
+                            java.util.Arrays.copyOfRange(sealed, tagOffset, sealed.length)));
+        } catch (Exception e) {
+            throw new EncryptionException("AEAD encryption failed", e);
+        }
+    }
+
+    public record AeadEnvelope(String nonce, String ciphertext, String tag) {}
 }

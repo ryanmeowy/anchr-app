@@ -5,6 +5,7 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
 import com.anchr.core.search.infrastructure.persistence.es.repository.EsSegmentRepository;
@@ -67,6 +68,11 @@ class SegmentIndexAvailabilityTest {
 
         @Override
         public String prepareRebuild() {
+            return null;
+        }
+
+        @Override
+        public String requestRebuild(EmbeddingProfile targetProfile) {
             return null;
         }
     }

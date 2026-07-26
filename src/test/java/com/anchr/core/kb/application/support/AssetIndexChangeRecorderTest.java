@@ -73,7 +73,7 @@ class AssetIndexChangeRecorderTest {
         assertThat(change.getOccurredAt()).isEqualTo(occurredAt);
         assertThat(change.getCreatedBy()).isEqualTo("user-a");
 
-        OutboxEvent outbox = outboxCaptor.getValue();
+        OutboxEvent outbox = outboxCaptor.getAllValues().getFirst();
         assertThat(outbox.getEventType())
                 .isEqualTo(OutboxEventType.DELETE_ASSET_GENERATION);
         assertThat(outbox.getAggregateType()).isEqualTo("ASSET");
@@ -128,9 +128,9 @@ class AssetIndexChangeRecorderTest {
         assertThat(changeCaptor.getValue().getOperation())
                 .isEqualTo(AssetIndexChangeOperation.ASSET_DELETED);
         assertThat(changeCaptor.getValue().getIndexGeneration()).isEqualTo(7L);
-        assertThat(outboxCaptor.getValue().getEventType())
+        assertThat(outboxCaptor.getAllValues().getFirst().getEventType())
                 .isEqualTo(OutboxEventType.DELETE_ASSET);
-        assertThat(objectMapper.readTree(outboxCaptor.getValue().getPayload()))
+        assertThat(objectMapper.readTree(outboxCaptor.getAllValues().getFirst().getPayload()))
                 .isEqualTo(objectMapper.readTree("""
                         {
                           "kbId": "kb-1",

@@ -42,6 +42,32 @@ class IngestionTaskRepositoryImplTest {
     private IngestionTaskMapper mapper;
 
     @Test
+    void listParseArtifacts_shouldReuseExistingRegistryForGenerationCleanup() {
+        IngestionArtifactRecord record = new IngestionArtifactRecord();
+        record.setExecutionId(12L);
+        record.setArtifactType("PARSE_RESULT");
+        record.setArtifactVersion(1);
+        record.setProvenance("PRODUCED");
+        record.setProducerClaimVersion(3L);
+        record.setObjectKey("ingestion/parse-result.json.gz");
+        record.setContentSha256("a".repeat(64));
+        when(mapper.listArtifactsByAssetGeneration(
+                "asset-1", 4L, "PARSE_RESULT"))
+                .thenReturn(List.of(record));
+
+        List<IngestionArtifactReference> artifacts =
+                new IngestionTaskRepositoryImpl(mapper)
+                        .listParseArtifacts("asset-1", 4L);
+
+        assertThat(artifacts).singleElement().satisfies(reference -> {
+            assertThat(reference.getArtifactType()).isEqualTo("PARSE_RESULT");
+            assertThat(reference.getObjectKey())
+                    .isEqualTo("ingestion/parse-result.json.gz");
+            assertThat(reference.getContentSha256()).isEqualTo("a".repeat(64));
+        });
+    }
+
+    @Test
     void freshReembed_shouldPersistParseAttemptAndExecutionWithoutInventingArtifact() {
         LocalDateTime now = LocalDateTime.now();
         IngestionTaskItem item = baseItem(now)

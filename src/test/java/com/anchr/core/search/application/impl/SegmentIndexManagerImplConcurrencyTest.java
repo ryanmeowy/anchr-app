@@ -19,11 +19,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -218,77 +216,46 @@ class SegmentIndexManagerImplConcurrencyTest {
     }
 
     @Test
-    void prepareRebuildShouldClearPendingTaskWhenActiveProfileMatchesActualIndex() {
-        AtomicReference<EmbeddingProfile> activeProfile =
-                new AtomicReference<>(TEXT_EMBEDDING_V3);
-        SegmentIndexManagerImpl manager = newManager(
-                Runnable::run,
-                () -> Optional.of(activeProfile.get()));
+    void requestedRebuildShouldKeepTargetSeparateFromActiveProfile() {
+        SegmentIndexManagerImpl manager = newManager(Runnable::run,
+                () -> Optional.of(TEXT_EMBEDDING_V3));
         manager.markReadyFromStatus(SegmentIndexStatusDTO.builder()
                 .indexExists(true)
                 .readable(true)
                 .writable(true)
-                .actualDim(TEXT_EMBEDDING_V4.dimension())
-                .actualModel(TEXT_EMBEDDING_V4.modelName())
-                .actualProfileFingerprint(TEXT_EMBEDDING_V4.fingerprint())
+                .actualDim(TEXT_EMBEDDING_V3.dimension())
+                .actualModel(TEXT_EMBEDDING_V3.modelName())
+                .actualProfileFingerprint(TEXT_EMBEDDING_V3.fingerprint())
                 .build());
 
-        String oldTaskId = manager.prepareRebuild();
-        assertEquals(oldTaskId, manager.status().getPendingRebuild().getTaskId());
+        String taskId = manager.requestRebuild(TEXT_EMBEDDING_V4);
+        SegmentIndexStatusDTO status = manager.status();
 
-        activeProfile.set(TEXT_EMBEDDING_V4);
-
-        assertNull(manager.prepareRebuild());
-        assertNull(manager.status().getPendingRebuild());
+        assertEquals(taskId, manager.prepareRebuild());
+        assertEquals(TEXT_EMBEDDING_V4.fingerprint(), status.getExpectedProfileFingerprint());
+        assertEquals(TEXT_EMBEDDING_V4.dimension(),
+                status.getPendingRebuild().getExpectedDim());
     }
 
     @Test
-    void statusShouldClearPendingTaskWhenActiveProfileMatchesActualIndex() {
-        AtomicReference<EmbeddingProfile> activeProfile =
-                new AtomicReference<>(TEXT_EMBEDDING_V3);
-        SegmentIndexManagerImpl manager = newManager(
-                Runnable::run,
-                () -> Optional.of(activeProfile.get()));
-        manager.markReadyFromStatus(SegmentIndexStatusDTO.builder()
-                .indexExists(true)
-                .readable(true)
-                .writable(true)
-                .actualDim(TEXT_EMBEDDING_V4.dimension())
-                .actualModel(TEXT_EMBEDDING_V4.modelName())
-                .actualProfileFingerprint(TEXT_EMBEDDING_V4.fingerprint())
-                .build());
-
-        String oldTaskId = manager.prepareRebuild();
-        assertEquals(oldTaskId, manager.status().getPendingRebuild().getTaskId());
-
-        activeProfile.set(TEXT_EMBEDDING_V4);
-
-        assertNull(manager.status().getPendingRebuild());
-    }
-
-    @Test
-    void confirmRebuildShouldRejectAndClearStalePendingTask() {
+    void confirmRebuildShouldAcceptRequestedTargetWhileActiveProfileIsStillOld() {
         ConcurrentLinkedQueue<Runnable> queuedTasks = new ConcurrentLinkedQueue<>();
-        AtomicReference<EmbeddingProfile> activeProfile =
-                new AtomicReference<>(TEXT_EMBEDDING_V3);
-        SegmentIndexManagerImpl manager = newManager(
-                queuedTasks::add,
-                () -> Optional.of(activeProfile.get()));
+        SegmentIndexManagerImpl manager = newManager(queuedTasks::add,
+                () -> Optional.of(TEXT_EMBEDDING_V3));
         manager.markReadyFromStatus(SegmentIndexStatusDTO.builder()
                 .indexExists(true)
                 .readable(true)
                 .writable(true)
-                .actualDim(TEXT_EMBEDDING_V4.dimension())
-                .actualModel(TEXT_EMBEDDING_V4.modelName())
-                .actualProfileFingerprint(TEXT_EMBEDDING_V4.fingerprint())
+                .actualDim(TEXT_EMBEDDING_V3.dimension())
+                .actualModel(TEXT_EMBEDDING_V3.modelName())
+                .actualProfileFingerprint(TEXT_EMBEDDING_V3.fingerprint())
                 .build());
-        String oldTaskId = manager.prepareRebuild();
 
-        activeProfile.set(TEXT_EMBEDDING_V4);
+        String taskId = manager.requestRebuild(TEXT_EMBEDDING_V4);
 
-        assertFalse(manager.confirmRebuild(oldTaskId));
-        assertEquals(0, queuedTasks.size());
-        assertNull(manager.status().getPendingRebuild());
+        assertTrue(manager.confirmRebuild(taskId));
+        assertEquals(1, queuedTasks.size());
+        assertEquals(SegmentIndexStatus.REBUILDING, manager.status().getStatus());
     }
 
     private SegmentIndexManagerImpl newManager(Executor executor) {

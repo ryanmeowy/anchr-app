@@ -139,7 +139,7 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
                         .citationIndex(groups.size() + 1)
                         .assetId(source.result().getAssetId())
                         .kbId(source.result().getKbId())
-                        .fileName(resolveFileName(source.sourceRef()))
+                        .fileName(resolveFileName(source))
                         .chunks(new ArrayList<>())
                         .build();
                 groups.put(assetKey, group);
@@ -213,7 +213,12 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
                 .build();
     }
 
-    private String resolveFileName(String sourceRef) {
+    private String resolveFileName(CitationSource source) {
+        if (SegmentType.DOCUMENT_IMAGE.name().equals(source.segmentType())
+                && StringUtils.hasText(source.title())) {
+            return source.title().trim();
+        }
+        String sourceRef = source.sourceRef();
         if (!StringUtils.hasText(sourceRef)) {
             return null;
         }

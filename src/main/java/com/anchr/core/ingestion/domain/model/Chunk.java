@@ -1,6 +1,7 @@
 package com.anchr.core.ingestion.domain.model;
 
 import com.anchr.core.common.model.BboxInfo;
+import com.anchr.core.search.domain.model.SegmentType;
 import lombok.Builder;
 import lombok.Data;
 
@@ -22,4 +23,7 @@ public class Chunk {
     private Integer chunkOrder;
     private String sourceRef;
     private List<BboxInfo> bboxInfos;
+    private SegmentType segmentType;
+    private Integer imageWidth;
+    private Integer imageHeight;
 }

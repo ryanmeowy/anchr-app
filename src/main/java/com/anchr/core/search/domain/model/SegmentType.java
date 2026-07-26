@@ -6,7 +6,8 @@ package com.anchr.core.search.domain.model;
 public enum SegmentType {
     TEXT_CHUNK,
     IMAGE_OCR_BLOCK,
-    IMAGE_VISUAL;
+    IMAGE_VISUAL,
+    DOCUMENT_IMAGE;
 
     public static boolean isImageVisual(String value) {
         return value != null

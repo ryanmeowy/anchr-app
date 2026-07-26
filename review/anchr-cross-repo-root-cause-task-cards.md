@@ -25,7 +25,7 @@
 |---|---|---|---:|---:|---|---|
 | ANCHR-101A | 修复当前单向量结构下图片分块未写入向量 | 已完成 | P0 | S | app | 无 |
 | ANCHR-101B | 固化单 embedding 的 Profile 投影与检索契约 | 源码与目标测试已完成；待真实 ES 隔离索引验证与部署验收 | P1 | M | app | 101A、107 |
-| ANCHR-101C | 建立 Embedding Profile 部署与物理索引安全切换 | 源码与本地回归已完成；待真实 MySQL/ES 多实例故障演练、迁移与部署验收 | P1 | L | app、web | 101B、107 |
+| ANCHR-101C | 延后 Embedding 配置启用并安全重建物理索引 | app/web 单实例实现已恢复；待真实 ES 验收 | P1 | M | app、web | 101B |
 | ANCHR-102 | 建立正确的 HTTP 错误与上传清理契约 | 已完成 | P0 | M | app、web | 无 |
 | ANCHR-103 | Ingestion 创建请求幂等与前端恢复 | 已完成 | P0 | M | app、web | 102 |
 | ANCHR-104 | 关闭未消费且加密错误的内嵌图片上传链路 | 已完成 | P1 | S/M | app、docling | 101A |
@@ -35,7 +35,7 @@
 | ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 源码与本地回归已完成；待 V19 迁移、真实 ES 故障演练与部署验收 | P0 | L | app | 106B |
 | ANCHR-108 | 搜索改为稳定结果快照分页 | 待执行 | P1 | L | app、web | 101B、101C、110 |
 | ANCHR-109 | 会话列表 keyset 分页与 Session 原子更新 | 已完成 | P1 | M | app、web | 可独立 |
-| ANCHR-110 | 文档内嵌图片制品化、独立 Segment 与跨模态检索 | 待执行 | P1 | XL | app、docling、web | 104–106B、107、101B、101C |
+| ANCHR-110 | 文档内嵌图片制品化、独立 Segment 与跨模态检索 | 主体源码与本地回归已完成；待真实 OSS/ES、存量 reparse、部署验收及上传前置失败清理策略 | P1 | XL | app、docling、web | 104–106B、107、101B、101C |
 | ANCHR-201 | 建立架构适应度测试与依赖边界 | 待执行 | P1 | M | app | 101A–101C、102–110 稳定后 |
 | ANCHR-202 | REST DTO 与 SSE 传输协议退出 Application | 待执行 | P1 | XL | app | 201 |
 | ANCHR-203 | 用模块 Port 取代跨模块 Infrastructure 依赖 | 待执行 | P1 | L | app | 201、101B/101C、105–110 |
@@ -59,7 +59,7 @@
 |---|---|---|---|
 | 101A | 当前单向量结构下 IMAGE 的分支前置条件、输入选择和向量回写 | 现有 Asset/Chunk/embedding 接口 | OCR+图片双 dense 写入、检索重构、模型切换 |
 | 101B | 单 `embedding` 的 Profile 投影 Policy、图片视觉投影单元、同一模型配置和来源契约 | 现有 BM25/RRF/Rerank；101A 的单载体线上修复；107 的确定性 ID | desired/serving profile、物理索引迁移、第二向量字段、文档内嵌图片制品/召回配额、分页快照、Asset generation |
-| 101C | desired/serving/target profile、physical index version、重建、alias 切换、回滚 | 101B 的单向量投影 Policy；107 的变更序列/幂等写入 | 投影输入规则、第二路 KNN、Asset generation、搜索 cursor/snapshot |
+| 101C | 内存待重建目标、目标模型 Session、全程 JVM 写屏障、alias 切换后启用模型 | 101B 的单向量投影 Policy | 持久化部署状态、分布式租约、增量追平、第二路 KNN、Asset generation、搜索 cursor/snapshot |
 | 102 | HTTP status/error metadata 与 OSS 清理许可契约 | 各业务卡提供的 errorCode 语义 | 创建幂等、任务恢复和业务重试策略 |
 | 103 | `clientRequestId/requestHash` 和创建响应丢失恢复 | 102 的错误元数据 | Docling attempt、任务执行调度、ES 幂等 |
 | 104 | 关闭未消费的 embedded-image STS 上传协议 | 现有独立图片 OCR | Docling job 幂等、OCR/图片向量语义、未来 AEAD 实现 |
@@ -69,7 +69,7 @@
 | 107 | Asset `indexGeneration`、确定性 segmentId、MySQL/ES 可见性和清理事件 | 106B 的 execution/artifact 边界与 106 的 INDEX stage；现有 outbox 能力 | physical index version、embedding profile、检索融合、Outbox 搬包 |
 | 108 | Search Snapshot、cursor、分页稳定性和模型调用一次性 | 101B 输出的已排序结果；101C 的物理索引/profile 标识 | 召回路由、RRF 权重、alias 切换、embedding profile 激活 |
 | 109 | Session 列表 keyset cursor、title CAS、updatedAt 单调更新 | 现有消息/Agent 数据 | 消息历史分页、Agent Activity、Conversation DTO 分层 |
-| 110 | `EmbeddedImageArtifact` 契约、`DOCUMENT_IMAGE` Segment、图片对象生命周期、同字段分路召回、父文档聚合和图片命中预览 | 104 的默认关闭门禁；105/106 的 Parse artifact；106B 的 artifact registry；107 的 generation/ID/事件；101B 的单向量 Policy；101C 的 profile 部署 | 第二向量字段、模型部署状态机、Search Snapshot、通用 Docling attempt、通用 Outbox 搬包 |
+| 110 | `EmbeddedImageArtifact` 契约、`DOCUMENT_IMAGE` Segment、图片对象随 Asset generation 清理、同字段分路召回、父文档聚合和图片命中预览 | 104 的默认关闭门禁；105/106 的 Parse artifact；106B 的 artifact registry；107 的 generation/ID/事件；101B 的单向量 Policy；101C 的 profile 部署 | 图片专用生命周期、第二向量字段、模型部署状态机、Search Snapshot、通用 Docling attempt、通用 Outbox 搬包 |
 | 201 | ArchUnit/依赖图/违规基线 | 所有已稳定代码 | 移类、加 Port、修改业务行为 |
 | 202 | REST DTO 与 SSE 适配边界 | 201 的规则 | 领域聚合、跨模块 Port 全面治理、按用例拆大类 |
 | 203 | 剩余跨模块 Infrastructure 依赖的 Port/Adapter 迁移 | 101B–110 已确定的能力契约 | 重定义业务协议、改变状态机、拆分大 Service |
@@ -80,17 +80,16 @@
 ### 依赖交付契约
 
 - 101B 向 101C 交付：按 profile 选择 `TEXT/IMAGE` 输入的单向量 Projection Policy 和唯一向量字段契约；101C 不复制输入选择规则。
-- 107 向 101C 交付：可按 revision/generation 重放的新增、更新、删除变化；101C 只消费变化完成物理索引追平。
 - 101B 向 108 交付：一次检索产生的稳定有序候选；108 不重新定义召回和融合。
 - 101B 向 110 交付：按 profile 对 `TEXT/IMAGE` 输入生成同一 `embedding` 字段的 Projection Policy；110 只增加内嵌图片制品和同字段召回分路，不复制投影算法、不增加第二向量字段。
 - 104/105/106 向 110 交付：默认关闭的旧上传门禁、稳定 Parse attempt 和持久化 Parse artifact；110 以版本化图片制品契约重新启用支线，不恢复旧 CBC/裸 URL 协议。
 - 107 向 110 交付：Asset generation、确定性 segmentId、激活门禁和旧 generation 清理事件；110 不建立第二套图片 generation。
-- 101C 向 110 交付：serving/target profile 与安全 physical index 部署能力；110 的 mapping/存量回填通过该能力发布，不直接切 alias。
+- 101C 向 110 交付：目标 profile 的安全重建能力；110 的 mapping/存量回填复用该流程，不直接切 alias。
 - 110 向 108 交付：包含 `DOCUMENT_IMAGE` 分路召回、父资产聚合和稳定预览语义的最终有序结果；108 只为该结果建立分页快照。
 - 105 向 106 交付：幂等的 `submit/get/ack` 和 parse attempt 标识；106 只决定何时调用。
 - 106 向 106B 交付：已经验收的阶段、重试、lease、fence、Docling 恢复和公开 DTO 行为；106B 只重排持久化边界与读模型，不重新定义这些行为。
 - 106B 向 107 交付：收敛后的 current execution、通用 artifact registry 和进入 `INDEX` phase 的 fenced context；107 只增加 generation、确定性 ID 与索引激活一致性。
-- 106B 向 110 交付：artifact registry 的表结构、登记 API 和事务语义；当前应用层只允许 `PARSE_RESULT`，不持久化模型向量。110 引入图片 artifact type 时扩展应用层 artifact 类型与校验，不向数据库增加业务类型 CHECK，也不得再向 `ingestion_task_item` 增加图片制品指针列。
+- 106B 向 110 交付：artifact registry 的表结构、登记 API 和事务语义；110 把版本化 `EmbeddedImageArtifact` 保存在既有 `PARSE_RESULT.images[]`，不新增 artifact type、业务表或 `ingestion_task_item` 图片制品指针列。
 - 102 向 103/105/106 交付：通用 HTTP 错误信封；各业务卡只定义自己的 errorCode、retryable 和 accepted 语义。
 - 201 只建立守门规则；202–205 分别消除自己拥有的违规；206 最后在不改变行为的前提下拆分类。
 
@@ -102,7 +101,7 @@
 | `Segment` / `SegmentDocument` / mapping / bulk writer | 107、101B、101C、110 | 107 → 101B → 101C → 110 | Asset generation/确定性 ID → 单向量投影契约 → 物理索引部署 → 内嵌图片 schema/回填 |
 | `UnifiedSearchServiceImpl` / ES repository | 107、101B、110、108、206 | 107 → 101B → 110 → 108 → 206 | active generation 过滤 → 同一模型与单向量字段 → 图片分路召回/父资产聚合 → 结果快照 → 机械拆分 |
 | Search/Conversation result DTO 与 Preview | 110、202、206 | 110 → 202 → 206 | 图片命中与父文档预览语义 → DTO 边界迁移 → 机械拆分 |
-| Capability settings / `SegmentIndexManagerImpl` | 101C、203、206 | 101C → 203 → 206 | profile 部署状态机 → 依赖倒置 → 机械拆分 |
+| Capability settings / `SegmentIndexManagerImpl` | 101C、203、206 | 101C → 203 → 206 | 延后启用与单实例重建 → 依赖倒置 → 机械拆分 |
 | `ConversationServiceImpl` / Session repository | 109、202、204、206 | 109 → 202 → 204 → 206 | keyset/CAS 结果 → DTO 边界 → 领域方法 → 机械拆分 |
 | Outbox publisher/processor | 107、205、206 | 107 → 205 → 206 | 事件产生语义 → 模块迁移 → 机械拆分 |
 
@@ -256,176 +255,81 @@ EmbeddingProjection {
 
 ---
 
-## ANCHR-101C：建立 Embedding Profile 部署与物理索引安全切换
+## ANCHR-101C：延后 Embedding 配置启用并安全重建物理索引
 
-**目标：** 将模型配置与物理索引作为一个部署单元，保证任何线上请求使用的 query/write 模型、索引 mapping 和 Retrieval Plan 属于同一个 profile，并支持无数据遗漏的重建、切换和回滚。
+**目标：** 管理员选择不同向量空间的 Embedding 配置时，先用目标配置重建索引，重建成功后再把该配置设为 active，避免“新查询模型 + 旧索引向量”混用。
 
-### 当前根因与边界
+### 当前根因与范围
 
-当前设置页和后端先启用新模型，再准备/确认重建；重建完成前 read alias 仍指向旧索引。后端状态虽保留 `readable=true`，query embedding 已使用新模型，形成“新查询向量 + 旧索引向量”的空间错配。重建全程持有 JVM 独占写锁，且失败时不会把 active 模型恢复为旧 profile。
+旧流程在重建前就执行 `capability_config.select` 并刷新共享 client，导致 read alias 仍指向旧索引时，查询和新写入已经开始使用新模型。
 
-当前真实时序：
+本项目当前按单实例运行。本卡只做以下事情：
 
-| 阶段 | active client | read alias | 后端 readable/writable | 前端 |
-|---|---|---|---|---|
-| 切换前 | 旧模型 | 旧索引 | true / true | 可用 |
-| select 成功、confirm rebuild 前 | 新模型 | 旧索引 | true / 仍可能 true | pending/profile mismatch Gate 拦截 |
-| REBUILDING | 新模型 | 旧索引，直到最终切换 | true / false | Gate 拦截 |
-| alias 切换成功 | 新模型 | 新索引 | true / true | 恢复 |
-| 重建失败 | 新模型，不自动回滚 | 旧索引 | 恢复 alias topology 状态 | failure Gate 拦截 |
+1. 不提前启用目标 Embedding 配置。
+2. 在 JVM 内存保存一个待重建目标和任务进度。
+3. 重建期间用现有 `ReentrantReadWriteLock` 的写锁阻止所有索引写入。
+4. 重建使用目标配置创建独立 `EmbeddingSession`。
+5. 新索引完成校验并切换 alias 后，才启用目标配置并刷新本地 client。
 
-因此当前“readable”只代表旧 ES alias 物理可读，不代表向量语义一致；直接 API/后台调用仍可能用新 query vector 查询旧向量。select 到 claim rebuild 之间还存在新模型向旧索引写入的窗口。前端停服只是遮挡风险，不是后端一致性保证。
-
-本卡拥有 `desired/serving/targetProfile`、physical index version、profile metadata、迁移追平、alias 切换和回滚。单 `embedding` 的输入投影规则归 101B；Asset generation、确定性 segmentId 和 change log 归 107；分页 snapshot 归 108。
+明确不做：数据库部署状态表、physical index 生命周期表、数据库/Redis 写租约、分布式锁、在线增量追平、watermark、影响报告、独立回滚 API、跨进程崩溃恢复。以后确定改为多实例时，再单独评估分布式锁，不在本卡预埋。
 
 源码：
 
-- [`anchr-web/src/features/settings/settings-premium-page.tsx`](../../anchr-web/src/features/settings/settings-premium-page.tsx)
 - [`CapabilityConfigServiceImpl.java`](../src/main/java/com/anchr/core/settings/application/impl/CapabilityConfigServiceImpl.java)
-- [`EmbeddingProfile.java`](../src/main/java/com/anchr/core/search/domain/model/EmbeddingProfile.java)
 - [`ConfigDrivenEmbeddingAdapter.java`](../src/main/java/com/anchr/core/integration/ai/adapter/ConfigDrivenEmbeddingAdapter.java)
 - [`SegmentIndexManagerImpl.java`](../src/main/java/com/anchr/core/search/application/impl/SegmentIndexManagerImpl.java)
 - [`SegmentIndexWriteBarrier.java`](../src/main/java/com/anchr/core/search/application/SegmentIndexWriteBarrier.java)
 
-### 一、模型配置必须与索引作为一个部署单元
+### 执行时序
 
-配置状态拆为：
+| 阶段 | active model | read/write alias | 索引写入 |
+|---|---|---|---|
+| 选择前 | 旧模型 | 旧索引 | 可写 |
+| 选择目标配置 | 仍是旧模型 | 旧索引 | 可写，等待管理员确认重建 |
+| 重建中 | 仍是旧模型 | 旧索引 | JVM 写锁全程阻止写入 |
+| alias 切换成功 | 随后切为新模型 | 新索引 | 激活完成后恢复写入 |
+| 重建失败 | 旧模型 | 旧索引 | 释放锁后恢复写入 |
 
-```text
-desiredProfile：管理员选择、准备部署的目标模型
-servingProfile：当前 read/write alias 对应、线上实际服务的模型
-targetProfile：当前重建任务使用的不可变模型快照
-```
+具体流程：
 
-模型切换期间不能立即覆盖 `servingProfile`：
+1. 设置页选择 Embedding/Multi Embedding 配置。
+2. 如果 profile fingerprint 与 active 配置不同，后端只调用 `requestRebuild(targetProfile)`，不执行 `repository.select`，也不刷新 active client。
+3. 管理员确认后，重建任务取得 JVM 独占写锁；普通索引写入使用读锁，因此会等待重建完成。
+4. 重建按 `targetProfile.configId` 读取目标配置，即使该配置尚未 enabled，也可创建只供重建使用的 Session。
+5. 创建新物理索引、scroll 旧索引并按 ANCHR-101B 的 Projection Policy 重新生成向量，校验文档数、维度和 fingerprint。
+6. 原子切换 read/write alias，再启用目标配置并失效本实例的 embedding client 缓存。
+7. 如果配置启用失败，立即把 alias 切回旧索引并按失败流程清理新索引。
 
-```text
-desiredProfile = 新模型
-servingProfile = 旧索引模型
-targetProfile  = 新索引模型
-```
+待重建目标和进度只在内存中。实例重启后任务丢失，旧 active 配置不变；管理员重新发起即可。这里接受 alias 切换与数据库配置启用之间无法跨系统事务覆盖的极小崩溃窗口，不为此增加持久化状态机。
 
-在新索引验证并切换 alias 前：
-
-- 查询仍使用 `servingProfile` 生成 query vector；
-- 线上写入仍按旧索引 profile 生成向量；
-- 重建任务通过显式 `targetProfile` 打开独立 `EmbeddingSession`；
-- 管理员“选择模型”只创建待部署版本，不立即刷新线上共享 embedding client。
-
-运行时请求必须拿到一个一致快照：
+ES mapping `_meta` 只保留重建与运行校验需要的：
 
 ```text
-IndexRuntimeSnapshot {
-  physicalIndex,
-  profileFingerprint,
-  capability,
-  embeddingSession,
-  retrievalPlan
-}
-```
-
-不能分别读取 alias、配置缓存和 capability 后自行拼接，否则并发切换时仍可能出现“新 query 模型 + 旧索引”。ES alias 指向物理索引的 metadata 是服务 profile 的最终权威；数据库记录部署状态，但不能单独决定查询使用哪个向量空间。
-
-每个 physical index version 的 metadata 至少记录：
-
-```text
+profileVersion
 profileFingerprint
-capability
-modelName
-vectorSchemaVersion
-dimension
+embeddingCapability
+embeddingModel
+embeddingDimension
 ```
-
-### 二、多模态模型切换为纯文本模型
-
-状态机：
-
-```text
-ACTIVE_MULTI
-  → PREPARING_TEXT
-  → BACKFILLING_TEXT
-  → VALIDATING
-  → CUTTING_OVER
-  → ACTIVE_TEXT
-```
-
-目标纯文本索引逐 segment 调用 ANCHR-101B 交付的向量投影规则；本卡只负责传入不可变 `targetProfile`、持久化输出和统计覆盖率，不复制向量选择算法。该规则在本场景下产生：
-
-1. 普通文本使用 `contentText/chunkText → embedding`。
-2. 图片仅在 `ocrText` 非空时生成 embedding；无 OCR 图片记录为无文本向量覆盖，不生成零向量，也不复制旧视觉向量。
-3. 不复制旧多模态图片向量；它属于旧 profile 的共享空间，必须由目标文本模型重新生成 OCR 文本向量。
-4. 重建前后都保持 BM25 + 单 `embedding` KNN；变化的是图片 `embedding` 的输入来源，不是 KNN route 数量。
-
-能力差异必须显式呈现：纯文本模型无法理解没有 OCR 的纯视觉图片。切换前生成影响报告：
-
-```text
-图片总数
-OCR 有效且 embedding 成功数
-OCR 为空数
-文本向量失败数
-预计失去视觉语义召回的资产数
-```
-
-部署前优先调用既有 Ingestion/OCR 能力修复缺失 OCR；仍无文字的图片标记为 `TEXT_VECTOR_UNAVAILABLE`。本卡只负责影响报告和切换门禁，不修改 Docling/OCR 算法或另建 OCR 重试流程；若现有能力不足，应独立立项。不得生成零向量或复制旧 profile 的视觉向量。若产品要求“不损失图片视觉搜索”，则不允许切换为纯文本模型；这是模型能力约束，不是代码兜底可以消除的问题。
-
-### 三、无长时间写阻塞的重建与增量追平
-
-复用当前“新物理索引 + scroll 迁移 + alias 原子切换 + 旧索引回滚”的机制，但将全程独占写锁改为：
-
-1. 记录重建开始的 revision/watermark。
-2. 不阻塞线上写入，后台迁移存量 segment 并按 `targetProfile` 重新生成向量。
-3. 消费 ANCHR-107 交付的 Asset generation/change log；本卡不得自行定义第二套 segment 事件或 generation 字段。
-4. 存量迁移完成后，应用 watermark 之后的增量变化。
-5. 仅在最终追平阶段获取短暂写锁。
-6. 应用最后一批增量并校验源/目标有效文档集合、generation 和向量覆盖率。
-7. 原子切换 read/write alias，再释放短锁。
-8. 保留旧物理索引作为回滚快照；观察期后显式清理。
-
-如果第一阶段不实现增量日志，只能继续使用当前全程写屏障，但必须明确这是有 Ingestion 停写窗口的运维方案，不能声称无业务影响。
-
-### 四、切换、失败与回滚
-
-ES alias 与数据库不能进入同一个事务，因此切换顺序为：
-
-1. 校验目标索引 mapping metadata、文档数、generation、向量维度和覆盖率。
-2. 原子切换 read/write alias。
-3. 各实例根据 alias/profile version 失效缓存并打开目标 `EmbeddingSession`。
-4. 将数据库 deployment 状态标为 `ACTIVE`。
-5. 搜索与 Ingestion 都从同一个 `IndexRuntimeSnapshot` 获取索引和 profile。
-
-重建失败时旧 alias 和 `servingProfile` 保持不变；目标索引进入失败状态并保留诊断或安全清理。切换后出现质量或运行故障时，将 alias 切回旧物理索引，运行时根据旧 metadata 恢复旧模型和旧 Retrieval Plan。
-
-纯文本再切回多模态时执行反向重建：文本 segment 以文本输入重建 `embedding`，图片 segment 以原图输入重建同一个 `embedding`。只有物理索引的完整 profile fingerprint 与目标完全相同且覆盖了期间全部变更时才允许直接复用旧索引，否则必须增量补齐或全量重建。
-
-### 发布拆分
-
-1. ANCHR-101B 先交付单向量 Projection Policy 和唯一向量字段契约。
-2. ANCHR-107 交付可重放的 Asset generation/change log。
-3. 本卡实现 desired/serving/target profile 分离、target session 和 physical index metadata。
-4. 完成存量迁移、增量追平、短写屏障和影子质量验证。
-5. 最后原子切换 alias；前端只展示部署状态和能力降级确认，不拥有切换状态机。
 
 ### 验收
 
-- 多模态 → 纯文本重建期间，线上查询始终使用旧多模态 profile，不出现向量空间混用。
-- 新旧模型维度不同会被部署前校验阻断，不会在用户查询时才暴露 KNN 错误。
-- 新旧模型维度相同但 fingerprint 不同也必须重建，并通过测试证明不会静默混用。
-- OCR 为空图片的影响数量可见，切换必须经过明确确认或门禁。
-- 重建期间持续新增、更新和删除资产，切换后目标索引无漏写、重复或已删除资产复活。
-- alias 切换后的 query、write 和 Retrieval Plan 使用同一个 profile snapshot。
-- 重建失败不影响旧索引服务；alias 回滚后旧多模态搜索恢复。
+- 选择不同 fingerprint 的配置后，`capability_config.enabled` 和 query embedding client 仍保持旧模型。
+- 重建使用目标配置的精确 Session，不依赖目标配置提前 enabled。
+- 同维度但 fingerprint 不同也必须重建。
+- 重建持有 JVM 写锁的整个期间，Ingestion bulk、删除等索引写操作不可执行；查询仍可读旧 alias。
+- alias 切换完成后才启用新配置；重建失败不改变旧 active 配置和旧 alias。
+- 源码中不存在 `embedding_profile_deployment`、`physical_index_profile`、`embedding_index_write_lease` 及对应 Repository/Mapper/状态机。
 
 ### 实施与验证记录（2026-07-26）
 
-- 新增 V20 控制面：`embedding_profile_deployment` 持久化 desired/serving/target profile、不可变 target 快照、部署状态、owner/lease、revision watermark、跨实例迁移进度和能力影响报告；`physical_index_profile` 记录 physical index 的 fingerprint、capability、model、schema version、dimension、最大追平 revision 和回滚生命周期；`embedding_index_write_lease` 为最终切换提供跨实例短写屏障。
-- 设置页选择 Embedding/Multi Embedding 时只更新 desired profile，不再修改当前 enabled/serving client。desired、serving、target 以及仍由 ACTIVE/BUILDING/ROLLBACK 物理索引引用的配置禁止原地修改和删除；alias 切换成功后才更新兼容的 `capability_config.enabled` 视图并失效本地旧 client。
-- ES mapping `_meta` 现在记录 configId、profile fingerprint、capability、model、vector schema version 和 dimension。搜索请求通过 `IndexRuntimeSnapshot` 将 physical index、profile、immutable embedding session 和 Retrieval Plan 绑定到同一请求；文本召回与 KNN 均固定读取该 physical index，不再分别读取 alias 与 active client。
-- Ingestion 在 EMBED 阶段打开 serving session，并把 profile fingerprint 传给最终 bulk write。写入在跨实例 permit 内重新读取 alias 权威快照；若切换已发生，旧 profile 生成的向量被拒绝并回到可恢复重算流程，不能写入新向量空间。外层 write lease 一直持有到 generation 激活与 107 change-log 所在数据库事务完成，避免 ES bulk 已返回但 revision 尚未提交时被最终追平漏掉。
-- 在线 rebuild 在开始时记录 107 的 `asset_index_change.revision`，不持有长写锁迁移存量数据；随后按 revision 幂等重放 generation activate/delete，最终进入 `CUTTING_OVER` 后拒绝新写 permit、等待所有实例的短 lease 排空、应用最后一批变化、验证 mapping/fingerprint/dimension，再原子切换 read/write alias。写 lease 由后台心跳续期，批写返回后还会再次校验 lease 未过期，避免超长 ES 写被切换过程误判为已排空。
-- 多模态切纯文本前扫描图片投影，使用不可变 target session 预检每个有效 OCR 的文本向量及维度，并持久化图片资产、预检成功、预检失败、空 OCR 和全部原图视觉语义损失数量；Web 确认框明确展示能力降级。重建期及失败后，只要旧 serving runtime 仍一致且可读写，Web 不再因 desired/serving 暂时不同或失败告警卸载业务页面，仅短切换阶段遵循后端 writable gate。
-- alias 已切但数据库激活未完成时，运行时以 alias metadata 为权威恢复 target session 并完成 deployment CAS；alias 尚未切且 cutover lease 过期时恢复旧 serving 并标记失败。切换过程异常会自动切回旧 alias；另提供 `/api/v1/index/rollback`。旧 active 索引转为 ROLLBACK 时会把水位推进到最终 cutover revision，且其配置继续受不可变保护；仅当 fingerprint/schema 完整且 `maxAppliedRevision` 等于当前 change-log revision 时允许直接回滚，否则强制增量追平或全量重建。
-- 验证：Java 全仓 530 个测试，0 failure、0 error，28 个依赖 Docker/Testcontainers 的测试因本机 Docker 不可用而跳过；101C 新增的 desired 不提前激活、旧物理索引配置/最终水位保护、请求快照、target exact session、过期 profile/lease 拒写、事务提交前 lease 保持、已接纳写在切换竞态中完成和 mapping metadata 契约测试已通过，V20 schema 断言已加入被跳过的 MySQL 集成套件。`anchr-web` 生产构建与 TypeScript 检查通过，MyBatis XML 通过 `xmllint`。
-- 尚未在真实 MySQL 8.4 执行 V20，也未在真实 Elasticsearch/多实例环境执行持续增删改、进程崩溃、partial bulk、alias 切换/回滚和质量观察。因此当前状态是“源码与本地回归已完成”，不得标记为已部署或已完成生产验收。
+- 已删除 V20 三张控制表及对应 migration、Repository、Mapper、deployment/lease/runtime snapshot/rollback API 代码。
+- `SegmentIndexWriteBarrier` 已恢复为单实例 `ReentrantReadWriteLock`：普通索引写使用读锁，完整 rebuild 使用写锁。
+- 设置页选择不同 profile 时只登记内存待重建目标；`ConfigDrivenEmbeddingAdapter` 可按目标 `configId` 打开尚未启用配置的 Session。
+- alias 切换后由 `ServingEmbeddingConfigActivator` 执行现有 `capability_config.select/disableAll` 并刷新本地缓存；激活异常会切回旧 alias。
+- Web 已删除 deployment/impact/rollback 字段与在线迁移文案，明确显示“重建期间索引写入不可用”，待重建目标不会被误判成已经 active 的 profile mismatch。
+- Java 主源码编译通过；新增定向测试覆盖“不提前启用”和“未 enabled 的目标配置可供重建”。使用项目既定 Byte Buddy javaagent 完成全仓回归：517 项测试，0 failure、0 error，27 项因本机无 Docker 跳过；真实 Elasticsearch alias/停写窗口尚未验收。
+- `anchr-web` 生产构建和 TypeScript 检查通过。
 
 ---
 
@@ -1148,7 +1052,7 @@ indexGeneration
 occurredAt
 ```
 
-该变化记录首先服务于一致性对账，同时作为 ANCHR-101C physical index rebuild 的增量输入。ANCHR-101C 只记录消费 watermark，不得另建第二套 Asset 变更日志。
+该变化记录服务于 Asset/ES 一致性对账和 generation 事件重放。ANCHR-101C 当前采用全程停写重建，不消费该日志，也不记录 watermark。
 
 ### 边界
 
@@ -1161,7 +1065,7 @@ occurredAt
 - ES 写完后 app 崩溃可幂等恢复。
 - overwrite 删除失败进入 outbox。
 - 删除与 ingestion 并发不会复活资产。
-- generation 激活/删除变化可从任意 watermark 幂等重放，供 101C 增量追平。
+- generation 激活/删除变化可按 revision 幂等重放，供一致性对账和后续明确立项的消费者使用。
 
 ### 实施与验证记录
 
@@ -1286,6 +1190,8 @@ keyset 不是严格快照：已经返回的记录因 updatedAt 单调不会向�
 
 ## ANCHR-110：文档内嵌图片制品化、独立 Segment 与跨模态检索
 
+**状态：** 主体源码与本地回归已完成；真实 OSS/Elasticsearch、存量 PDF/Markdown reparse、101C physical index 发布、部署验收及“Docling 已上传但 app 尚未登记 Parse artifact”失败窗口的清理策略待完成。功能开关继续保持默认关闭；本任务不新增业务表迁移。
+
 **目标：** 将 PDF/Markdown 中的内嵌图片从“Docling 上传后无人消费的临时 URL”升级为父文档下可追踪、可清理、可重建、可检索的 `DOCUMENT_IMAGE` Segment。第一阶段必须支持“文本查询通过图片视觉语义命中父 PDF/MD”，继续使用唯一 `embedding` 字段，并保证点击结果仍打开父文档对应页而不是孤立 PNG。
 
 ### 当前流程与根因
@@ -1303,7 +1209,7 @@ url / pageNo / blockId / alt
 3. 图片 bbox 必须从对应 Picture Item 自身的 provenance 提取，并在 Docling 边界内通过 `blockId` 与图片一一绑定。PDF 等有页面坐标的输入必须返回准确 bbox；Markdown 外链图片通常没有页面坐标，`pageNo/bboxes` 允许为空，禁止伪造坐标。
 4. Docling 返回的是普通 virtual-hosted URL；后端其他 OSS 读取使用临时签名 URL。私有 bucket 下，裸 URL 不能作为稳定 AI 输入、预览地址或持久化身份。
 5. `DoclingChunkMapper` 只读取 `response.chunks()`，完全丢弃 `images[]/warnings[]`；同时 `textPlain` 会删除 Markdown 图片占位以及 alt，图片不会进入当前 BM25、embedding、citation 或 preview。
-6. 当前图片对象 key 包含 Parse requestId；重新解析会产生新对象，但 Asset/Segment 没有图片 manifest，删除、overwrite 和 reparse 都无法可靠回收旧对象。
+6. 当前图片对象 key 包含 Parse requestId；重新解析会产生新对象，因此必须以既有 `PARSE_RESULT.images[]` 作为删除、overwrite 和 reparse 的对象清单，不能依赖 ES Segment 反查。
 7. 当前 physical index rebuild 以 `assetType == IMAGE` 决定是否使用图片输入。文档内图片的 `assetType` 必须仍是 `PDF/MARKDOWN`，因此若只新增 Segment，重建会错误地按文本重算或因无文本失败。
 8. 当前统一搜索对所有 Segment 使用一个全局 vector topK，文本 Segment 数量远多于图片；图片可能在召回窗口被文本挤出。Rerank 只读取文本字段，父资产聚合又发生在 Rerank 之后，大量同文档图片还会提前占满候选窗口。
 
@@ -1357,7 +1263,7 @@ EmbeddedImageArtifact {
 6. Markdown 外链/相对路径/data URI 分别定义下载、allowlist、大小限制和失败语义。没有页面布局的 Markdown 图片允许 `pageNo/bboxes=null`，不能让缺失坐标导致整份文档解析失败。
 7. AEAD 凭据协议消费 104 的安全要求：version/keyId/nonce/tag/expiration 和绑定 requestId、bucket、basePath、endpoint 的 AAD；Docling 只允许写入配置白名单中的 bucket/prefix。
 
-`EmbeddedImageArtifact` 进入 registry 前，ANCHR-110 必须确定其 artifact type，并扩展应用层类型、写入校验、读取校验和合同测试；数据库不维护 artifact 业务类型 CHECK。
+`EmbeddedImageArtifact` 作为现有 `PARSE_RESULT` artifact 中 `ParseResponse.images[]` 的一部分持久化、校验和恢复；不再复制第二份图片 manifest artifact，也不增加图片专用业务表。
 
 ### 二、投影为父文档下的独立 Segment
 
@@ -1367,9 +1273,7 @@ EmbeddedImageArtifact {
 segmentType      = DOCUMENT_IMAGE
 assetId          = 父 PDF/Markdown assetId
 assetType        = 父资产类型 PDF/MARKDOWN
-sourceRef        = 父文档 objectKey
-imageObjectKey   = artifact.imageObjectKey
-imageBlockId     = artifact.blockId
+sourceRef        = artifact.imageObjectKey
 pageNo/bbox      = artifact 的页面锚点
 imageWidth/Height
 contentText      = caption + alt + 章节标题 + 受限长度的相邻正文
@@ -1378,7 +1282,7 @@ embedding        = 101B Projection Policy 的输出
 indexGeneration  = 107 当前目标 generation
 ```
 
-`sourceRef` 必须保留父文档 objectKey，因为现有文件名、citation 和 Preview 都以它定位父资产；`imageObjectKey` 使用独立字段。不得把 PNG URL/object key 填入 `sourceRef`，也不得把 URL 拼进 `contentText`。
+`sourceRef` 统一表示支撑当前 Segment 的对象：普通文本 Segment 指向原文档，`DOCUMENT_IMAGE` 指向内嵌图片对象。父文档通过既有 `assetId -> Asset.objectKey/previewObjectKey` 定位，不在每条图片 Segment 中重复保存父对象 key，也不新增 `imageObjectKey`、`imageBlockId` 或 `parentSourceRef`。`blockId` 只参与确定性 Segment ID 计算，不进入 ES mapping；不得把签名 URL 拼进 `sourceRef` 或 `contentText`。
 
 确定性 ID 消费 ANCHR-107：
 
@@ -1388,7 +1292,7 @@ segmentId = hash(assetId + indexGeneration + DOCUMENT_IMAGE + blockId)
 
 若上游无法提供稳定 blockId，只允许使用规范化图片内容 hash 加页面/文档顺序作为明确 fallback，并记录来源指标；禁止重新使用随机 `IdGen`。同一图片在多个 chunk 中被引用只能产生一个 Segment。
 
-图片对象 manifest 必须进入可恢复 artifact/generation 生命周期。新 generation 激活后通过现有可靠事件清理旧 generation 的图片对象；Asset 删除/overwrite 同样清理。清理失败进入重试和对账，不能吞异常。不得只依赖 ES `_source` 作为对象删除清单，因为索引失败、回滚或物理索引清理都会使其不完整。
+图片对象 key 直接保存在现有 `PARSE_RESULT` artifact 的 `images[]` 中，并通过 execution → ingestion item 的既有关系归属 `assetId + targetIndexGeneration`。新 generation 激活时由已有 `DELETE_ASSET_GENERATION` 事件同时删除旧 generation 的图片对象和 Segment；Asset 删除复用已有 `DELETE_ASSET` 事件。清理失败沿用同一个 outbox 事件重试，不新增图片状态表、专用事件或第二套 generation 生命周期，也不只依赖 ES `_source` 作为对象删除清单。
 
 ### 三、单 embedding 的模型投影与切换
 
@@ -1396,10 +1300,10 @@ segmentId = hash(assetId + indexGeneration + DOCUMENT_IMAGE + blockId)
 
 | Serving/Target Profile | `DOCUMENT_IMAGE` 向量输入 | 文本字段用途 |
 |---|---|---|
-| 多模态 | `imageObjectKey` 经 app 生成短期 AI 签名 URL，再以 `sourceType=IMAGE` 生成视觉向量 | `caption/alt/contextText/ocrText` 只参与 BM25、Rerank 和引用说明，不再写第二个 OCR dense vector |
+| 多模态 | `sourceRef` 中的图片对象 key 经 app 生成短期 AI 签名 URL，再以 `sourceType=IMAGE` 生成视觉向量 | `caption/alt/contextText/ocrText` 只参与 BM25、Rerank 和引用说明，不再写第二个 OCR dense vector |
 | 纯文本 | 按固定顺序合并非空 `ocrText/caption/alt/contextText`，以 `sourceType=TEXT` 生成文本向量 | 同一文本同时用于 BM25/Rerank；全部为空时允许 Segment 无 dense vector |
 
-Ingestion 和 rebuild 都必须按 `segmentType == DOCUMENT_IMAGE` 选择图片制品，而不是按父 `assetType`。多模态切到纯文本时重新生成文本向量，不复制旧视觉向量；切回多模态时从 `imageObjectKey` 重新签名并生成图片向量。图片对象在旧物理索引回滚观察期内不得提前删除。
+Ingestion 和 rebuild 都必须按 `segmentType == DOCUMENT_IMAGE` 选择 `sourceRef` 指向的图片制品，而不是按父 `assetType`。多模态切到纯文本时重新生成文本向量，不复制旧视觉向量；切回多模态时从 `sourceRef` 重新签名并生成图片向量。图片对象在旧物理索引回滚观察期内不得提前删除。
 
 仅执行 ES scroll/re-embedding 无法创造当前不存在的 `DOCUMENT_IMAGE` Segment。存量 PDF/Markdown 必须按 sourceRevision 重新 Parse，生成图片 artifact 和新的 Asset generation，再由 101C 的 physical index 部署能力完成 mapping 发布、影子校验和 alias 切换。
 
@@ -1433,7 +1337,7 @@ Rerank 规则：
 1. 有 `caption/alt/contextText/ocrText` 的图片使用文本代理参与现有 Reranker。
 2. 文本代理全空的纯视觉命中不得因空 Rerank document 被默认打成 0；保留规范化的 vector/RRF 分数，或进入明确的 modality-aware fusion 分支。
 3. Rerank 前按 `assetId + segmentType` 做候选上限和多样化，避免一份多图 PDF 占满窗口；最终仍按父 `assetId` 聚合。
-4. 聚合结果主记录保持父 PDF/MD 的 `assetType/sourceRef`。图片命中作为 `topChunks` 中的 `DOCUMENT_IMAGE`，携带 segmentId、pageNo、bbox、imagePreview 能力和 `hitSource=VECTOR|CAPTION|OCR`。
+4. 聚合结果主记录保持父 PDF/MD 的 `assetType`，父文件名与 Preview 从 `assetId` 对应的 Asset 获取。图片命中作为 `topChunks` 中的 `DOCUMENT_IMAGE`，携带 segmentId、pageNo、bbox、图片 `sourceRef`、imagePreview 能力和 `hitSource=VECTOR|CAPTION|OCR`。
 5. `resultType` 与 `segmentType` 分开建模；前端现有 `TEXT|IMAGE|MIXED` 结果类型不能接收后端直接返回的 `DOCUMENT_IMAGE` 枚举值。
 
 纯文本 serving profile 下，`DOCUMENT_IMAGE` 只能通过 OCR/caption/alt/context 的 BM25/文本向量召回；UI 和能力接口不得宣称存在视觉语义检索。
@@ -1443,12 +1347,12 @@ Rerank 规则：
 点击 `DOCUMENT_IMAGE` 命中必须执行：
 
 ```text
-父 sourceRef → 父 PDF/MD previewUrl
-             → 定位 pageNo
-             → 有 bbox 时高亮图片区域
+assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
+                                      → 定位 pageNo
+                                      → 有 bbox 时高亮图片区域
 ```
 
-后端可以另返回由 `imageObjectKey` 临时签名的 `imagePreviewUrl/expiresAt`，供结果缩略图或侧栏查看，但它不能替代父文档 previewUrl。Preview URL cache key 必须包含对象身份，不能继续只按父 `assetId` 缓存后误把父文档 URL 与图片 URL 混用。
+后端可以另返回由图片 Segment 的 `sourceRef` 临时签名的 `imagePreviewUrl/expiresAt`，供结果缩略图或侧栏查看，但它不能替代父文档 previewUrl。Preview URL cache key 必须包含对象身份，不能继续只按父 `assetId` 缓存后误把父文档 URL 与图片 URL 混用。
 
 前端增加 `DOCUMENT_IMAGE` hit type、筛选标签、命中来源和缩略图展示；缺 bbox 时仍可打开父文档/Markdown，只是不做区域高亮。Conversation/Search Answer 当前只把文本 snippet 交给回答模型，因此第一阶段 citation 使用 caption/OCR/context 作为证据。让回答模型直接查看图片并解释图表属于独立的多模态 Answer 任务，不在本卡暗中开启。
 
@@ -1459,30 +1363,41 @@ Rerank 规则：
 ### 发布与迁移
 
 1. Docling 先支持旧/新图片契约双读写和 AEAD，但 app feature flag 仍关闭。
-2. app 持久化 `EmbeddedImageArtifact` manifest，新增 Segment/mapping 字段和确定性投影；搜索仍不暴露新 hit type。
+2. app 在现有 `PARSE_RESULT` artifact 中持久化 `EmbeddedImageArtifact`，新增 `DOCUMENT_IMAGE` Segment 类型并复用 `sourceRef` 和唯一 `embedding` 字段；搜索仍不暴露新 hit type。
 3. 通过 101C 创建目标 physical index，并对存量 PDF/Markdown 执行可恢复 reparse/backfill；禁止只 scroll 旧 ES。
-4. 影子验证图片数量、bbox 覆盖率、对象 manifest、向量维度、父资产聚合和相关性，再切 alias。
+4. 影子验证图片数量、bbox 覆盖率、Parse artifact 中的对象 key、向量维度、父资产聚合和相关性，再切 alias。
 5. 后端开启图片召回 route，web 最后开放筛选、缩略图和 Preview；旧客户端忽略新增可选字段仍可使用。
-6. 观察期后通过 107/可靠事件清理旧 generation 图片对象；保留可审计的失败与重试统计。
+6. 通过 107 已有 Asset/generation 可靠事件同步清理 Segment 和图片对象；保留既有 outbox 失败与重试统计。
 
 ### 边界
 
-本卡唯一拥有内嵌图片 artifact/schema、`DOCUMENT_IMAGE` Segment、图片对象 manifest/清理触发、同一向量字段上的图片召回预算、Rerank 多模态公平性、父文档聚合和图片命中 Preview。扩展 artifact registry 的应用层图片类型校验也属于 110，106B 不预先定义图片 artifact 内容。它不新增第二 dense 字段，不重定义 101B Projection Policy，不重建 101C profile 状态机，不复制 107 generation/outbox 语义，不修改 108 Search Snapshot，也不实现多模态回答生成或通用 DDD 搬包。
+本卡唯一拥有 `PARSE_RESULT.images[]` 的内嵌图片 schema、`DOCUMENT_IMAGE` Segment、既有 Asset/generation 清理事件中的图片对象删除、同一向量字段上的图片召回预算、Rerank 多模态公平性、父文档聚合和图片命中 Preview。它不新增图片专用生命周期表、状态或 outbox 事件，不新增第二 dense 字段，不重定义 101B Projection Policy，不重建 101C profile 状态机，不复制 107 generation/outbox 语义，不修改 108 Search Snapshot，也不实现多模态回答生成或通用 DDD 搬包。
 
 ### 验收
 
 - PDF 中一个图片跨多个/混合 chunk 时只产生一个 `DOCUMENT_IMAGE`；bbox 精确来自该 Picture Item，不包含同 chunk 正文/其他图片 bbox。
 - PDF 图片存在 provenance 时，Docling JSON → Java DTO → Ingestion 域对象 → ES Segment 的 pageNo、bbox、coordOrigin、宽高逐字段一致。
 - Markdown 外链图片无 bbox 时解析、索引和检索成功；Preview 明确降级而不是伪造坐标或整份文档失败。
-- 私有 bucket 不依赖裸 URL；embedding 和 preview 都由 app 根据 `imageObjectKey` 生成有期限、用途受限的签名输入。
+- 私有 bucket 不依赖裸 URL；embedding 和图片 preview 都由 app 根据图片 Segment 的 `sourceRef` 生成有期限、用途受限的签名输入。
 - 同 parse attempt 重试、app 重启、部分 ES bulk 和 generation 重跑不产生重复 Segment/OSS 对象。
-- reparse、overwrite、Asset 删除和失败回滚后不存在永久孤儿图片；清理失败可重试、可对账。
+- 已登记 `PARSE_RESULT` 的 reparse、overwrite 和 Asset 删除复用原有 generation/Asset 事件清理图片，失败沿用同一 outbox 重试；Docling 上传成功但 app 尚未登记 artifact 的前置失败窗口必须另行完成清理策略后才能关闭本验收项。
 - 多模态 profile 下文本 query 能通过 `DOCUMENT_IMAGE` 命中父 PDF/MD；ES mapping 仍只有一个 `embedding` 字段。
 - 纯文本 profile 下只使用 OCR/caption/alt/context 文本向量；全部为空时不写零向量、不复用旧视觉向量。
 - 多模态 ↔ 纯文本切换后 Ingestion 与 rebuild 对同一 fixture 选择相同输入，父 `assetType=PDF/MARKDOWN` 不会导致图片按文本误投影。
 - 一份多图文档不会独占召回/Rerank 窗口；聚合后结果数、顺序和 `topChunks` 可解释。
 - 点击图片命中打开父文档对应页；有 bbox 时高亮图片区域，图片缩略图过期后可单独刷新，不改变父引用文件名。
 - 既有 PDF/Markdown 文本 chunk、独立 IMAGE OCR/视觉检索、Search/Ask citation 和无图片文档行为不回退。
+
+### 实施与验证记录
+
+- `anchr-docling` 已提供 v3 `EmbeddedImageArtifact` Pydantic 契约，包含稳定 `imageObjectKey`、上传状态、Picture Item 全 provenance bbox、宽高、mime、内容 hash 与文本代理；Markdown 图片允许无 page/bbox。图片上传 key 继续绑定稳定 requestId，响应 URL 仅用于返回 Markdown，app 写制品前会剥离诊断 URL。
+- App→Docling 临时凭据改为 AES-256-GCM envelope，包含 `version/keyId/nonce/ciphertext/tag/expiration`，AAD 固定绑定 `requestId/bucket/basePath/endpoint`；v2 fingerprint 继续兼容旧请求，启用内嵌图的新请求使用 contract v3。
+- App 已消费 `images[]` 并去重生成 `DOCUMENT_IMAGE`，ID 固定为 `assetId + indexGeneration + DOCUMENT_IMAGE + blockId` 的 SHA-256；`sourceRef` 直接保存图片对象 key，`blockId` 生成 ID 后不再持久化，父文档通过 `assetId -> Asset` 定位。TEXT profile 使用 `ocr + caption + alt + context`，MULTI profile 从 `sourceRef` 临时签名图片输入；rebuild 同样按 Segment type 投影。
+- 图片列表只保存在既有 immutable `PARSE_RESULT` artifact，不复制第二份图片清单。`DELETE_ASSET_GENERATION` / `DELETE_ASSET` 通过 execution 与 ingestion item 的已有关系读取相应 Parse artifact，在同一事件中先幂等删除图片对象、再删除 ES Segment；任一步失败都由原事件重试。未新增图片表、状态或专用 outbox 事件。
+- 检索已拆为 BM25、普通同字段 vector route、`DOCUMENT_IMAGE` 同字段 vector route，分别配置 topK/similarity，RRF 后按 `assetId + segmentType` 限流再 Rerank、父资产聚合；`resultType` 保持 `TEXT/IMAGE/MIXED`，`topChunks` 保留 `DOCUMENT_IMAGE`、page/bbox、命中来源和短期图片缩略 URL。
+- Preview 保持父 PDF/Markdown `previewUrl` 与 page/bbox 定位，另签发 `imagePreviewUrl/imagePreviewExpiresAt`；Preview cache key 已包含对象身份。Web 已增加文档图片筛选、标签、缩略图和预览侧栏，回答链路仍只消费文本代理，没有暗中开启多模态 Answer。
+- 本地验证：`anchr-docling` 25 tests + 10 subtests 全通过，改动文件 Ruff 全通过；生命周期与 Segment 字段收缩后 `anchr-app` 全量 540 tests 为 0 failure/0 error，28 个无 Docker 的 Testcontainers 用例按既有条件跳过；`anchr-web` 生产构建通过。三仓 `git diff --check` 通过。
+- 尚未执行真实私有 OSS 上传/签名/删除 smoke、真实 Elasticsearch mapping/KNN/相关性与多实例故障演练，也未批量 reparse 存量文档或执行 101C alias 发布；Docling 上传成功但 app 登记 Parse artifact 前永久失败的对象回收策略仍待确定。因此当前状态不表示已 stage、commit、开启 feature flag 或发布。
 
 ---
 
@@ -1823,7 +1738,7 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 - ANCHR-107：Asset indexGeneration、确定性 segmentId、可见性和可重放变化。
 
-该 Wave 只接管 `INDEX` stage；完成后为 101C 提供增量追平输入，不创建 physical index version。107 的生产发布必须显式记录所依赖的 106B 数据库验收证据，不能用 107 自身测试替代该门禁。
+该 Wave 只接管 `INDEX` stage并提供一致性对账能力，不创建 physical index version。107 的生产发布必须显式记录所依赖的 106B 数据库验收证据，不能用 107 自身测试替代该门禁。
 
 ### Wave 6：单向量 Profile 投影契约
 
@@ -1833,13 +1748,13 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 ### Wave 7：Embedding Profile 部署
 
-- ANCHR-101C：desired/serving/target profile、physical index rebuild、增量追平、短写屏障、alias 切换和回滚。
+- ANCHR-101C：内存目标 profile、全程 JVM 写屏障、physical index rebuild、alias 切换后启用配置。
 
 只有 101B Projection Policy/唯一向量字段契约和 107 change log 都稳定后才能执行生产重建。
 
 ### Wave 8：文档内嵌图片检索
 
-- ANCHR-110：图片 artifact/bbox、`DOCUMENT_IMAGE`、图片对象生命周期、同字段召回分路、父文档聚合和 Preview。
+- ANCHR-110：图片 artifact/bbox、`DOCUMENT_IMAGE`、图片对象随 Asset generation 清理、同字段召回分路、父文档聚合和 Preview。
 
 先完成 Docling/app 契约和存量 reparse 影子验证，再开放后端召回与前端 hit type。110 不新增第二向量字段，不绕开 101C 直接切换物理索引。
 
@@ -1879,7 +1794,7 @@ Wave 0
 | IMAGE + 文本模型 OCR embedding（101A） | 分支输入、单元、ES 集成 | 图片/OCR 搜索回归 | OCR fixture |
 | IMAGE + 多模态模型视觉 embedding（101A） | 每 Asset 一次调用、单载体回写、无重复 KNN 候选、失败传播 | 图片视觉搜索回归 | 原图输入与多 chunk 契约 |
 | 单 embedding Profile 投影（101B） | Ingestion/Rebuild 使用同一规则、文本和图片请求共用同一个 `modelName/dimensions`、唯一向量字段、BM25/RRF 基线不变 | 文本/OCR/图片结果回归 | 不涉及 |
-| 多模态 → 纯文本切换（101C） | serving/target profile、增量追平、alias、回滚 | 切换期间搜索/上传连续性 | 不涉及 |
+| 多模态 → 纯文本切换（101C） | active/target profile、全程停写重建、alias、延后启用 | 重建期间查询可用、索引写入明确不可用 | 不涉及 |
 | 同维度不同模型切换 | fingerprint 门禁、禁止跨空间查询 | 相关性回归 | 不涉及 |
 | 无 OCR 图片切换影响 | 覆盖率报告、TEXT_VECTOR_UNAVAILABLE | 降级确认展示（如产品提供） | OCR 重试 fixture |
 | 上传响应丢失 | 幂等创建、恢复查询 | placeholder 恢复、OSS 保留 | 不涉及 |
@@ -1890,8 +1805,8 @@ Wave 0
 | PDF 内嵌图片 artifact/bbox（110） | DTO/域对象/Segment 逐字段一致、稳定 ID、manifest | 不涉及 | Picture Item provenance、bbox 坐标系、上传幂等 |
 | Markdown 外链图片无布局坐标（110） | nullable page/bbox、索引成功、对象生命周期 | Preview 降级无伪高亮 | URL allowlist、大小限制、无 bbox contract |
 | 文本查询命中文档内图片（110） | 同字段分路 KNN、RRF、多样化、父 Asset 聚合 | DOCUMENT_IMAGE 筛选、缩略图、父文档 Preview | 图片 fixture 与共享空间 contract |
-| DOCUMENT_IMAGE 模型切换（110） | 按 segmentType 投影、存量 reparse、alias/回滚 | 能力降级说明 | imageObjectKey 可重放、OCR/caption fixture |
-| 内嵌图片删除/重解析（110） | generation manifest、清理事件、对账 | 无陈旧缩略图 | 同 attempt object key 幂等 |
+| DOCUMENT_IMAGE 模型切换（110） | 按 segmentType 投影、存量 reparse、alias/回滚 | 能力降级说明 | Parse artifact object key 可重放、OCR/caption fixture |
+| 内嵌图片删除/重解析（110） | PARSE_RESULT 图片清单、既有清理事件、对账 | 无陈旧缩略图 | 同 attempt object key 幂等 |
 | 搜索三页 | 调用次数、snapshot、cursor | append、410 | 不涉及 |
 | 500 个会话 | keyset、同时间戳 | 自动/手动加载 | 不涉及 |
 | 重命名与消息并发 | CAS、时间单调 | 标题不回退 | 不涉及 |
@@ -1909,7 +1824,7 @@ Wave 0
 7. 明确区分通过项、环境阻塞和仓库既有失败。
 8. 不修改与任务无关的现有工作区变更。
 9. ANCHR-101B 必须验证 Ingestion/Rebuild 对文本、OCR、原图使用相同的输入规则；多模态文本和图片请求使用同一个 `modelName/dimensions`；ES 只有一个 `embedding` 字段；既有 BM25/RRF/Rerank 顺序不变。不得增加第二向量字段或承担 110 的业务召回配额。
-10. ANCHR-101C 必须验证 profile fingerprint、同维不同模型、切换期间增量写入、短写屏障、alias 切换和回滚。
+10. ANCHR-101C 必须验证 profile fingerprint、同维不同模型、重建全程写阻塞、alias 切换后才启用目标配置以及失败时旧配置不变。
 11. ANCHR-106B 必须在真实 MySQL 上验证 fresh→V18 与 normalized V15→V18 两条路径、17 列 item、无 ingestion CHECK/FK、窄查询、坏 ownership/旧 execution 不可领取、公开投影兼容和部署稳定性；不得改变 106 的 retry/lease/stale-worker 业务结果。
 12. ANCHR-107 必须验证 generation 激活门禁、确定性 ID、部分 bulk、变化重放和清理失败，不承担 101C 的 physical index 验收。
 13. ANCHR-110 必须验证图片 bbox 来自 Picture Item provenance、私有对象签名访问、存量 reparse、对象生命周期、同字段分路召回、父文档聚合和 Preview；不得以 `chunks[].bboxes` 猜测图片位置或增加第二 dense 字段。

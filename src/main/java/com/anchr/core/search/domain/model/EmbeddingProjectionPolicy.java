@@ -38,6 +38,12 @@ public final class EmbeddingProjectionPolicy {
             case IMAGE_VISUAL -> profile == Profile.MULTI && isImage(assetType)
                     ? imageProjection(imageSource)
                     : Optional.empty();
+            case DOCUMENT_IMAGE -> profile == Profile.MULTI
+                    ? documentImageProjection(imageSource)
+                    : textProjection(
+                            joinText(ocrText, contentText),
+                            EmbeddingProjection.SourceKind.DOCUMENT_IMAGE_TEXT,
+                            SegmentType.DOCUMENT_IMAGE);
         };
     }
 
@@ -69,6 +75,23 @@ public final class EmbeddingProjectionPolicy {
                 source,
                 EmbeddingProjection.SourceKind.ORIGINAL_IMAGE,
                 SegmentType.IMAGE_VISUAL));
+    }
+
+    private static Optional<EmbeddingProjection> documentImageProjection(String source) {
+        if (!hasText(source)) {
+            return Optional.empty();
+        }
+        return Optional.of(new EmbeddingProjection(
+                EmbeddingProjection.InputType.IMAGE,
+                source,
+                EmbeddingProjection.SourceKind.DOCUMENT_IMAGE_OBJECT,
+                SegmentType.DOCUMENT_IMAGE));
+    }
+
+    private static String joinText(String first, String second) {
+        if (!hasText(first)) return hasText(second) ? second.trim() : null;
+        if (!hasText(second)) return first.trim();
+        return first.trim() + "\n" + second.trim();
     }
 
     private static boolean isImage(String assetType) {

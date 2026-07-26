@@ -50,4 +50,9 @@ public interface IngestionObjectStoragePort {
      */
     byte[] readArtifact(String objectKey, int maxBytes);
 
+    /** Idempotently remove one owned object. */
+    default void deleteObject(String objectKey) {
+        throw new UnsupportedOperationException("Object deletion is not configured.");
+    }
+
 }
