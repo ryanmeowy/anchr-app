@@ -1,5 +1,6 @@
 package com.anchr.core.kb.infrastructure.persistence;
 
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -62,5 +63,19 @@ class AssetRepositoryImplTest {
         verify(mapper).activateIndexGeneration(
                 "kb-1", "asset-1", 2L, 3L,
                 "SUCCESS", "SUCCESS", 4, 4, "user-a", now);
+    }
+
+    @Test
+    void listActive_shouldPassAvailabilityCodeToMapper() {
+        when(mapper.listActive(
+                "kb-1", "guide", "PDF", "FAILED", 24, 48))
+                .thenReturn(List.of());
+
+        assertThat(new AssetRepositoryImpl(mapper).listActive(
+                "kb-1", "guide", "PDF",
+                DocumentAvailabilityStatus.FAILED, 24, 48)).isEmpty();
+
+        verify(mapper).listActive(
+                "kb-1", "guide", "PDF", "FAILED", 24, 48);
     }
 }

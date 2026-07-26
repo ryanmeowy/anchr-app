@@ -1,6 +1,7 @@
 package com.anchr.core.kb.interfaces.rest.dto;
 
 import com.anchr.core.kb.domain.model.Asset;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import lombok.Builder;
 import lombok.Value;
 import org.springframework.util.StringUtils;
@@ -27,6 +28,7 @@ public class AssetDTO {
     boolean previewAvailable;
     String parseStatus;
     String indexStatus;
+    String availabilityStatus;
     int segmentCount;
     int indexedSegmentCount;
     String embeddingProfile;
@@ -50,6 +52,7 @@ public class AssetDTO {
                 .previewAvailable(isPreviewAvailable(document))
                 .parseStatus(document.getParseStatus().name())
                 .indexStatus(document.getIndexStatus().name())
+                .availabilityStatus(DocumentAvailabilityStatus.from(document).name())
                 .segmentCount(document.getSegmentCount())
                 .indexedSegmentCount(document.getIndexedSegmentCount())
                 .embeddingProfile(document.getEmbeddingProfile())

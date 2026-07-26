@@ -98,6 +98,7 @@
         <if test="fileType != null and fileType != ''">
           and file_type = #{fileType}
         </if>
+        <include refid="AvailabilityFilter"/>
         order by created_at desc, id desc
         limit #{limit} offset #{offset}
     </select>
@@ -114,6 +115,7 @@
         <if test="fileType != null and fileType != ''">
           and file_type = #{fileType}
         </if>
+        <include refid="AvailabilityFilter"/>
     </select>
 
     <select id="sumActiveSegments" resultType="long">
@@ -128,7 +130,26 @@
         <if test="fileType != null and fileType != ''">
           and file_type = #{fileType}
         </if>
+        <include refid="AvailabilityFilter"/>
     </select>
+
+    <sql id="AvailabilityFilter">
+        <if test="availabilityStatus == 'ANSWERABLE'">
+          and (coalesce(active_index_generation, 0) &gt; 0
+               or index_status = 'SUCCESS')
+        </if>
+        <if test="availabilityStatus == 'PROCESSING'">
+          and coalesce(active_index_generation, 0) = 0
+          and coalesce(parse_status, 'PENDING') != 'FAILED'
+          and coalesce(index_status, 'PENDING') != 'FAILED'
+          and (coalesce(parse_status, 'PENDING') in ('PENDING', 'RUNNING')
+               or coalesce(index_status, 'PENDING') in ('PENDING', 'RUNNING'))
+        </if>
+        <if test="availabilityStatus == 'FAILED'">
+          and coalesce(active_index_generation, 0) = 0
+          and (parse_status = 'FAILED' or index_status = 'FAILED')
+        </if>
+    </sql>
 
     <select id="healthStats" resultType="com.anchr.core.kb.infrastructure.persistence.AssetHealthStatsRecord">
         select

@@ -563,6 +563,90 @@ class IngestionTaskProcessorImplTest {
     }
 
     @Test
+    void embed_shouldCompleteNormallyWhenImageHasNoExtractedText() {
+        IngestionTaskItem item = claimed(IngestionExecutionStage.EMBED).toBuilder()
+                .parseResultObjectKey("parse-result.gz")
+                .sourceRevision("v1:revision")
+                .build();
+        Asset asset = imageAsset();
+        ParseResponse parsed = new ParseResponse(
+                "task-1:item-1:1",
+                "docling",
+                "chunks",
+                "",
+                "image",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of());
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(artifactStore.readParseResult(item)).thenReturn(parsed);
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of());
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(ingestionTaskRepository.renewClaim(
+                eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        when(transactionCoordinator.transitionAndUpdateAssetStatus(
+                any(), eq(asset), any(), any())).thenReturn(true);
+        when(ingestionIndexFinalizer.finalizeIndex(
+                any(IngestionTaskItem.class), eq(asset), eq(List.of())))
+                .thenReturn(true);
+
+        processor.processClaim(item);
+
+        verify(embeddingPort, never()).embed(any(), any());
+        verify(transactionCoordinator).transitionAndUpdateAssetStatus(
+                any(), eq(asset), eq("SUCCESS"), eq("RUNNING"));
+        verify(ingestionIndexFinalizer).finalizeIndex(
+                any(IngestionTaskItem.class), eq(asset), eq(List.of()));
+        verify(transactionCoordinator, never()).transitionFailed(
+                any(), eq(asset), any(), any(), anyInt(), anyInt());
+        verify(knowledgeBaseRepository).refreshDocumentStats("kb-1", "user-a", true);
+    }
+
+    @Test
+    void embed_shouldRejectEmptyContentForNonImageDocument() {
+        IngestionTaskItem item = claimed(IngestionExecutionStage.EMBED).toBuilder()
+                .parseResultObjectKey("parse-result.gz")
+                .sourceRevision("v1:revision")
+                .build();
+        Asset asset = pdfAsset("objects/image-only.pdf", null);
+        ParseResponse parsed = new ParseResponse(
+                "task-1:item-1:1",
+                "docling",
+                "chunks",
+                "",
+                "pdf",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of());
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(artifactStore.readParseResult(item)).thenReturn(parsed);
+        when(transactionCoordinator.transitionFailed(
+                any(), eq(asset), any(), any(), anyInt(), anyInt()))
+                .thenReturn(true);
+
+        processor.processClaim(item);
+
+        verifyNoInteractions(doclingChunkMapper);
+        verifyNoInteractions(embeddingPort);
+        verifyNoInteractions(ingestionIndexFinalizer);
+        ArgumentCaptor<IngestionClaimTransition> failure =
+                ArgumentCaptor.forClass(IngestionClaimTransition.class);
+        verify(transactionCoordinator).transitionFailed(
+                failure.capture(), eq(asset), eq("FAILED"), eq("FAILED"),
+                eq(0), eq(0));
+        assertThat(failure.getValue().getErrorCode())
+                .isEqualTo("TEXT_PARSE_FAILED");
+        assertThat(failure.getValue().getErrorMessage())
+                .isEqualTo("Docling returned empty chunks.");
+    }
+
+    @Test
     void embedImageWithTextModel_shouldUseOcrAndAllowBlankOcrChunks() {
         IngestionTaskItem item = claimed(IngestionExecutionStage.EMBED).toBuilder()
                 .parseResultObjectKey("parse-result.gz")
@@ -666,10 +750,11 @@ class IngestionTaskProcessorImplTest {
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
         when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
                 .thenReturn(List.of(first, second));
-        when(objectStoragePort.buildDownloadUrl("images/image.png"))
-                .thenReturn("https://signed.example.test/image.png");
+        when(objectStoragePort.buildImageEmbeddingUrl("images/image.png"))
+                .thenReturn("https://signed.example.test/compressed-image.jpg");
         when(embeddingPort.isMulti()).thenReturn(true);
-        when(embeddingPort.embed("https://signed.example.test/image.png", "image"))
+        when(embeddingPort.embed(
+                "https://signed.example.test/compressed-image.jpg", "image"))
                 .thenReturn(List.of(0.8f, 0.9f));
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
@@ -714,7 +799,8 @@ class IngestionTaskProcessorImplTest {
                     assertThat(segment.getSourceRef()).isEqualTo("images/image.png");
                 });
         verify(embeddingPort, times(1))
-                .embed("https://signed.example.test/image.png", "image");
+                .embed("https://signed.example.test/compressed-image.jpg", "image");
+        verify(objectStoragePort, never()).buildDownloadUrl("images/image.png");
     }
 
     @Test
@@ -731,11 +817,11 @@ class IngestionTaskProcessorImplTest {
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
         when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
                 .thenReturn(List.of(imageChunk("segment-1", null)));
-        when(objectStoragePort.buildDownloadUrl("images/image.png"))
-                .thenReturn("https://signed.example.test/image.png");
+        when(objectStoragePort.buildImageEmbeddingUrl("images/image.png"))
+                .thenReturn("https://signed.example.test/compressed-image.jpg");
         when(embeddingPort.isMulti()).thenReturn(true);
         when(embeddingPort.embed(
-                "https://signed.example.test/image.png", "image"))
+                "https://signed.example.test/compressed-image.jpg", "image"))
                 .thenReturn(List.of());
         when(ingestionTaskRepository.renewClaim(
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),

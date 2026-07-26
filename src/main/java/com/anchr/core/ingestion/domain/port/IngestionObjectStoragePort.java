@@ -14,6 +14,17 @@ public interface IngestionObjectStoragePort {
     String buildDownloadUrl(String objectKey);
 
     /**
+     * Build a temporary URL for a compressed derivative used only as image embedding input.
+     *
+     * <p>The stable source remains {@code objectKey}; implementations may apply provider-native
+     * image processing while signing this URL.</p>
+     *
+     * @param objectKey original image object key
+     * @return temporary accessible URL for the compressed image derivative
+     */
+    String buildImageEmbeddingUrl(String objectKey);
+
+    /**
      * Atomically persist an immutable ingestion artifact.
      *
      * <p>The implementation must use the storage provider's create-only/conditional

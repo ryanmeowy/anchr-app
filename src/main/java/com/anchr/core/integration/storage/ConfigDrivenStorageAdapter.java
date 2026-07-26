@@ -46,6 +46,8 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     private static final long LONG_VALIDITY_MS = 3_600_000L;
     private static final String OSS_FORBID_OVERWRITE = "x-oss-forbid-overwrite";
     private static final String ARTIFACT_SHA256_METADATA = "artifact-sha256";
+    private static final String EMBEDDING_IMAGE_PROCESS =
+            "image/resize,m_lfit,w_1536,h_1536,limit_1/quality,q_75/format,jpg";
 
     private final StorageConfigRepository configRepository;
     private final AesUtil aesUtil;
@@ -77,7 +79,7 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     @Override
     public String buildAiImageInput(String objectKey, AiInputValidity validity) {
         long duration = validity == AiInputValidity.SHORT ? SHORT_VALIDITY_MS : MEDIUM_VALIDITY_MS;
-        return buildPresignedUrl(objectKey, duration);
+        return buildProcessedImageUrl(objectKey, duration);
     }
 
     @Override
@@ -95,6 +97,11 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     @Override
     public String buildDownloadUrl(String objectKey) {
         return buildPresignedUrl(objectKey, LONG_VALIDITY_MS);
+    }
+
+    @Override
+    public String buildImageEmbeddingUrl(String objectKey) {
+        return buildProcessedImageUrl(objectKey, MEDIUM_VALIDITY_MS);
     }
 
     @Override
@@ -187,7 +194,19 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
         return buildSignedObjectUrl(objectKey, durationMs).url();
     }
 
+    private String buildProcessedImageUrl(String objectKey, long durationMs) {
+        return buildSignedObjectUrl(objectKey, durationMs, EMBEDDING_IMAGE_PROCESS).url();
+    }
+
     private SignedObjectUrl buildSignedObjectUrl(String objectKey, long durationMs) {
+        return buildSignedObjectUrl(objectKey, durationMs, null);
+    }
+
+    private SignedObjectUrl buildSignedObjectUrl(
+            String objectKey,
+            long durationMs,
+            String process
+    ) {
         StorageConfig config = loadConfig();
         OSS client = buildClient(config);
         try {
@@ -195,6 +214,9 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
             GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(
                     config.getBucket(), objectKey, HttpMethod.GET);
             request.setExpiration(new Date(expiresAt));
+            if (process != null && !process.isBlank()) {
+                request.setProcess(process);
+            }
             URL url = client.generatePresignedUrl(request);
             return new SignedObjectUrl(url.toString(), expiresAt);
         } catch (Exception e) {

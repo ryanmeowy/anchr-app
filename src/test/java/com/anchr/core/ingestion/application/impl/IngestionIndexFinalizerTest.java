@@ -193,6 +193,43 @@ class IngestionIndexFinalizerTest {
     }
 
     @Test
+    void finalizeIndex_shouldActivateAnEmptyGenerationForContentlessImage() {
+        IngestionTaskItem item = claimedIndexItem();
+        Asset source = asset("asset-1", 0L, null).toBuilder()
+                .fileType("image")
+                .build();
+        when(ingestionTaskRepository.isClaimCurrentForUpdate(
+                "item-1", 3L, IngestionExecutionStage.INDEX, 4, "lease-1"))
+                .thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(source));
+        when(assetRepository.activateIndexGeneration(
+                eq("kb-1"), eq("asset-1"), eq(0L), eq(1L),
+                any(), any(), eq(0), eq(0), eq("user-a"), any()))
+                .thenReturn(true);
+        when(ingestionTaskRepository.transitionClaim(any())).thenReturn(true);
+
+        boolean indexed = finalizer.finalizeIndex(item, source, List.of());
+
+        assertThat(indexed).isTrue();
+        verify(segmentRepository).deleteByAssetGeneration("asset-1", 1L);
+        verify(segmentBulkWriter).write(List.of());
+        verify(assetRepository).activateIndexGeneration(
+                eq("kb-1"), eq("asset-1"), eq(0L), eq(1L),
+                any(), any(), eq(0), eq(0), eq("user-a"), any());
+        verify(assetIndexChangeRecorder).generationActivated(
+                eq("kb-1"), eq("asset-1"), eq(1L), eq(0L),
+                eq("user-a"), any());
+        ArgumentCaptor<IngestionClaimTransition> transition =
+                ArgumentCaptor.forClass(IngestionClaimTransition.class);
+        verify(ingestionTaskRepository).transitionClaim(transition.capture());
+        assertThat(transition.getValue().getNextExecutionStage())
+                .isEqualTo(IngestionExecutionStage.COMPLETE);
+        assertThat(transition.getValue().getStatus())
+                .isEqualTo(IngestionTaskItemStatus.SUCCESS);
+    }
+
+    @Test
     void finalizeIndex_shouldRecordOverwrittenAssetDeletionInSameFlow() {
         IngestionTaskItem item = claimedIndexItem().toBuilder()
                 .dedupeResult(DedupeResult.OVERWRITTEN)

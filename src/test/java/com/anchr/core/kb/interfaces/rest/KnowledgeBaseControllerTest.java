@@ -3,6 +3,7 @@ package com.anchr.core.kb.interfaces.rest;
 import com.anchr.core.kb.application.AssetPreviewService;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.interfaces.rest.dto.AssetPreviewDTO;
@@ -43,23 +44,29 @@ class KnowledgeBaseControllerTest {
     @Test
     void listDocuments_shouldExposeVersionWithoutStorageKeys() throws Exception {
         Asset asset = asset();
-        when(knowledgeBaseService.listDocuments("kb-1", "RAG", "pdf", 1, 24))
+        when(knowledgeBaseService.listDocuments(
+                "kb-1", "RAG", "pdf",
+                DocumentAvailabilityStatus.ANSWERABLE, 1, 24))
                 .thenReturn(new KnowledgeBaseService.DocumentPagedResult(List.of(asset), 3, 87, 1, 24));
 
         mockMvc.perform(get("/api/v1/kbs/kb-1/documents")
                         .param("page", "1")
                         .param("size", "24")
                         .param("keyword", "RAG")
-                        .param("fileType", "pdf"))
+                        .param("fileType", "pdf")
+                        .param("availabilityStatus", "ANSWERABLE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].id").value("asset-1"))
                 .andExpect(jsonPath("$.data.items[0].versionNo").value(3))
+                .andExpect(jsonPath("$.data.items[0].availabilityStatus").value("ANSWERABLE"))
                 .andExpect(jsonPath("$.data.segmentTotal").value(87))
                 .andExpect(jsonPath("$.data.items[0].previewAvailable").value(true))
                 .andExpect(jsonPath("$.data.items[0].previewObjectKey").doesNotExist())
                 .andExpect(jsonPath("$.data.items[0].thumbnailKey").doesNotExist());
 
-        verify(knowledgeBaseService).listDocuments("kb-1", "RAG", "pdf", 1, 24);
+        verify(knowledgeBaseService).listDocuments(
+                "kb-1", "RAG", "pdf",
+                DocumentAvailabilityStatus.ANSWERABLE, 1, 24);
     }
 
     @Test

@@ -326,6 +326,11 @@ class IngestionArtifactStoreTest {
         }
 
         @Override
+        public String buildImageEmbeddingUrl(String objectKey) {
+            return buildDownloadUrl(objectKey);
+        }
+
+        @Override
         public boolean putArtifactIfAbsent(String objectKey, byte[] content,
                                            String contentType, String contentEncoding) {
             byte[] existing = objects.putIfAbsent(objectKey, Arrays.copyOf(content, content.length));

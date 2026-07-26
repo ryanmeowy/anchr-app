@@ -401,16 +401,21 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private List<Segment> prepareSegments(IngestionTaskItem item, Asset asset) {
         ParseResponse parsed = artifactStore.readParseResult(item);
-        if (parsed.chunks() == null || parsed.chunks().isEmpty()) {
+        boolean parsedContentIsEmpty =
+                parsed.chunks() == null || parsed.chunks().isEmpty();
+        if (parsedContentIsEmpty && !isImage(asset)) {
             throw new BusinessException(
                     ApiError.TEXT_PARSE_FAILED, "Docling returned empty chunks.");
         }
         long targetIndexGeneration = requireTargetIndexGeneration(item);
         List<Chunk> chunks = doclingChunkMapper.toTextChunks(
                 asset, parsed, targetIndexGeneration);
-        if (chunks == null || chunks.isEmpty()) {
+        if (!parsedContentIsEmpty && (chunks == null || chunks.isEmpty())) {
             throw new BusinessException(
                     ApiError.TEXT_PARSE_FAILED, "Docling returned no usable chunks.");
+        }
+        if (chunks == null) {
+            chunks = List.of();
         }
 
         Profile profile = Profile.fromMulti(embeddingPort.isMulti());
@@ -418,7 +423,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 item, asset, chunks, targetIndexGeneration, profile);
         String imageInput = EmbeddingProjectionPolicy.requiresImageVisual(
                 profile, asset.getFileType())
-                ? resolveSourceUrl(asset, item)
+                ? resolveImageEmbeddingUrl(asset, item)
                 : null;
         segments = applyEmbeddings(item, asset, segments, profile, imageInput);
         assertCurrentClaim(item);
@@ -945,6 +950,14 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
         return StringUtils.hasText(item.getSourceUrl())
                 ? item.getSourceUrl().trim() : null;
+    }
+
+    private String resolveImageEmbeddingUrl(Asset asset, IngestionTaskItem item) {
+        if (StringUtils.hasText(asset.getObjectKey())) {
+            return objectStoragePort.buildImageEmbeddingUrl(
+                    asset.getObjectKey().trim());
+        }
+        return resolveSourceUrl(asset, item);
     }
 
     private List<Float> embed(IngestionTaskItem item, String input, String inputType) {

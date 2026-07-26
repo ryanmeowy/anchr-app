@@ -2,6 +2,7 @@ package com.anchr.core.kb.domain.repository;
 
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
 
 import java.time.LocalDateTime;
@@ -30,11 +31,34 @@ public interface AssetRepository {
      */
     Map<String, Long> findActiveIndexGenerations(Collection<String> assetIds);
 
-    List<Asset> listActive(String kbId, String keyword, String fileType, int limit, int offset);
+    default List<Asset> listActive(
+            String kbId, String keyword, String fileType, int limit, int offset
+    ) {
+        return listActive(kbId, keyword, fileType, null, limit, offset);
+    }
 
-    long countActive(String kbId, String keyword, String fileType);
+    List<Asset> listActive(
+            String kbId,
+            String keyword,
+            String fileType,
+            DocumentAvailabilityStatus availabilityStatus,
+            int limit,
+            int offset
+    );
 
-    long sumActiveSegments(String kbId, String keyword, String fileType);
+    default long countActive(String kbId, String keyword, String fileType) {
+        return countActive(kbId, keyword, fileType, null);
+    }
+
+    long countActive(String kbId, String keyword, String fileType,
+                     DocumentAvailabilityStatus availabilityStatus);
+
+    default long sumActiveSegments(String kbId, String keyword, String fileType) {
+        return sumActiveSegments(kbId, keyword, fileType, null);
+    }
+
+    long sumActiveSegments(String kbId, String keyword, String fileType,
+                           DocumentAvailabilityStatus availabilityStatus);
 
     /**
      * Aggregated document/segment ingestion stats for a KB (counts by index_status

@@ -28,16 +28,19 @@ public interface AssetMapper {
     List<AssetRecord> listActive(@Param("kbId") String kbId,
                                  @Param("keyword") String keyword,
                                  @Param("fileType") String fileType,
+                                 @Param("availabilityStatus") String availabilityStatus,
                                  @Param("limit") int limit,
                                  @Param("offset") int offset);
 
     long countActive(@Param("kbId") String kbId,
                      @Param("keyword") String keyword,
-                     @Param("fileType") String fileType);
+                     @Param("fileType") String fileType,
+                     @Param("availabilityStatus") String availabilityStatus);
 
     long sumActiveSegments(@Param("kbId") String kbId,
                            @Param("keyword") String keyword,
-                           @Param("fileType") String fileType);
+                           @Param("fileType") String fileType,
+                           @Param("availabilityStatus") String availabilityStatus);
 
     AssetHealthStatsRecord healthStats(@Param("kbId") String kbId);
 

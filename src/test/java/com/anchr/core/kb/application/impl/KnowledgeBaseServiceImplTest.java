@@ -6,6 +6,7 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.support.AssetIndexChangeRecorder;
 import com.anchr.core.kb.domain.model.Asset;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
@@ -136,32 +137,40 @@ class KnowledgeBaseServiceImplTest {
 
     @Test
     void listDocuments_shouldNormalizeFiltersAndSupportLibraryPageSizes() {
-        when(assetRepository.listActive("kb-1", "RAG", "PDF", 24, 24))
+        when(assetRepository.listActive(
+                "kb-1", "RAG", "PDF",
+                DocumentAvailabilityStatus.ANSWERABLE, 24, 24))
                 .thenReturn(List.of());
-        when(assetRepository.countActive("kb-1", "RAG", "PDF"))
+        when(assetRepository.countActive(
+                "kb-1", "RAG", "PDF", DocumentAvailabilityStatus.ANSWERABLE))
                 .thenReturn(186L);
-        when(assetRepository.sumActiveSegments("kb-1", "RAG", "PDF"))
+        when(assetRepository.sumActiveSegments(
+                "kb-1", "RAG", "PDF", DocumentAvailabilityStatus.ANSWERABLE))
                 .thenReturn(4832L);
 
-        var result = service.listDocuments("kb-1", " RAG ", "pdf", 2, 24);
+        var result = service.listDocuments(
+                "kb-1", " RAG ", "pdf",
+                DocumentAvailabilityStatus.ANSWERABLE, 2, 24);
 
         assertThat(result.page()).isEqualTo(2);
         assertThat(result.size()).isEqualTo(24);
         assertThat(result.total()).isEqualTo(186L);
         assertThat(result.segmentTotal()).isEqualTo(4832L);
-        verify(assetRepository).listActive("kb-1", "RAG", "PDF", 24, 24);
+        verify(assetRepository).listActive(
+                "kb-1", "RAG", "PDF",
+                DocumentAvailabilityStatus.ANSWERABLE, 24, 24);
     }
 
     @Test
     void listDocuments_shouldUseFiftyAsDefaultSizeAndClampInvalidBounds() {
-        when(assetRepository.listActive("kb-1", null, null, 50, 0))
+        when(assetRepository.listActive("kb-1", null, null, null, 50, 0))
                 .thenReturn(List.of());
-        when(assetRepository.listActive("kb-1", null, null, 1, 0))
+        when(assetRepository.listActive("kb-1", null, null, null, 1, 0))
                 .thenReturn(List.of());
-        when(assetRepository.listActive("kb-1", null, null, 100, 0))
+        when(assetRepository.listActive("kb-1", null, null, null, 100, 0))
                 .thenReturn(List.of());
-        when(assetRepository.countActive("kb-1", null, null)).thenReturn(0L);
-        when(assetRepository.sumActiveSegments("kb-1", null, null)).thenReturn(0L);
+        when(assetRepository.countActive("kb-1", null, null, null)).thenReturn(0L);
+        when(assetRepository.sumActiveSegments("kb-1", null, null, null)).thenReturn(0L);
 
         var defaultResult = service.listDocuments("kb-1", null, null, null, null);
         var minimumResult = service.listDocuments("kb-1", null, null, 0, 0);

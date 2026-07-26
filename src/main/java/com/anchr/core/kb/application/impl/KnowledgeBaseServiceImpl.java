@@ -9,6 +9,7 @@ import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.application.support.AssetIndexChangeRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealth;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealthScore;
@@ -169,8 +170,14 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    public DocumentPagedResult listDocuments(String kbId, String keyword, String fileType,
-                                             Integer page, Integer size) {
+    public DocumentPagedResult listDocuments(
+            String kbId,
+            String keyword,
+            String fileType,
+            DocumentAvailabilityStatus availabilityStatus,
+            Integer page,
+            Integer size
+    ) {
         String id = requireId(kbId, "kbId");
         get(id);
         PageBounds bounds = normalizePage(page, size, DEFAULT_DOCUMENT_SIZE);
@@ -179,10 +186,13 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 ? fileType.trim().toUpperCase(Locale.ROOT)
                 : null;
         return new DocumentPagedResult(
-                assetRepository.listActive(id, normalizedKeyword, normalizedFileType,
-                        bounds.size(), bounds.offset()),
-                assetRepository.countActive(id, normalizedKeyword, normalizedFileType),
-                assetRepository.sumActiveSegments(id, normalizedKeyword, normalizedFileType),
+                assetRepository.listActive(
+                        id, normalizedKeyword, normalizedFileType,
+                        availabilityStatus, bounds.size(), bounds.offset()),
+                assetRepository.countActive(
+                        id, normalizedKeyword, normalizedFileType, availabilityStatus),
+                assetRepository.sumActiveSegments(
+                        id, normalizedKeyword, normalizedFileType, availabilityStatus),
                 bounds.page(),
                 bounds.size());
     }

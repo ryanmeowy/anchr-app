@@ -5,6 +5,7 @@ import com.anchr.core.common.model.Result;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.application.AssetPreviewService;
 import com.anchr.core.kb.domain.model.Asset;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.interfaces.rest.dto.AssetDTO;
@@ -114,9 +115,12 @@ public class KnowledgeBaseController {
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "50") Integer size,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) String fileType) {
+            @RequestParam(required = false) String fileType,
+            @RequestParam(required = false)
+            DocumentAvailabilityStatus availabilityStatus) {
         KnowledgeBaseService.DocumentPagedResult result =
-                knowledgeBaseService.listDocuments(kbId, keyword, fileType, page, size);
+                knowledgeBaseService.listDocuments(
+                        kbId, keyword, fileType, availabilityStatus, page, size);
         return Result.success(AssetListDTO.builder()
                 .items(result.items().stream().map(AssetDTO::from).toList())
                 .total(result.total())

@@ -3,12 +3,14 @@ package com.anchr.core.integration.storage;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSException;
+import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.OSSObject;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.aliyun.oss.model.PutObjectResult;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.AesUtil;
+import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -21,6 +23,7 @@ import org.mockito.MockedConstruction;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.ByteArrayInputStream;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
@@ -30,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -161,6 +165,47 @@ class ConfigDrivenStorageAdapterArtifactTest {
                 "ingestion/task/item/result.json.gz", 100))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("integrity");
+        verify(oss).shutdown();
+    }
+
+    @Test
+    void imageEmbeddingUrls_shouldIncludeOssCompressionBeforeSigning() throws Exception {
+        when(oss.generatePresignedUrl(any(GeneratePresignedUrlRequest.class)))
+                .thenReturn(new URL("https://signed.example.test/compressed.jpg"));
+
+        assertThat(adapter.buildImageEmbeddingUrl("images/source.png"))
+                .isEqualTo("https://signed.example.test/compressed.jpg");
+        assertThat(adapter.buildAiImageInput(
+                "images/source.png",
+                SearchObjectStoragePort.AiInputValidity.SHORT))
+                .isEqualTo("https://signed.example.test/compressed.jpg");
+
+        ArgumentCaptor<GeneratePresignedUrlRequest> requests =
+                ArgumentCaptor.forClass(GeneratePresignedUrlRequest.class);
+        verify(oss, times(2)).generatePresignedUrl(requests.capture());
+        assertThat(requests.getAllValues())
+                .allSatisfy(request -> {
+                    assertThat(request.getBucketName()).isEqualTo("bucket");
+                    assertThat(request.getKey()).isEqualTo("images/source.png");
+                    assertThat(request.getProcess()).isEqualTo(
+                            "image/resize,m_lfit,w_1536,h_1536,limit_1"
+                                    + "/quality,q_75/format,jpg");
+                });
+        verify(oss, times(2)).shutdown();
+    }
+
+    @Test
+    void downloadUrl_shouldKeepOriginalImageWithoutProcessing() throws Exception {
+        when(oss.generatePresignedUrl(any(GeneratePresignedUrlRequest.class)))
+                .thenReturn(new URL("https://signed.example.test/source.png"));
+
+        assertThat(adapter.buildDownloadUrl("images/source.png"))
+                .isEqualTo("https://signed.example.test/source.png");
+
+        ArgumentCaptor<GeneratePresignedUrlRequest> request =
+                ArgumentCaptor.forClass(GeneratePresignedUrlRequest.class);
+        verify(oss).generatePresignedUrl(request.capture());
+        assertThat(request.getValue().getProcess()).isNull();
         verify(oss).shutdown();
     }
 

@@ -2,6 +2,7 @@ package com.anchr.core.kb.infrastructure.persistence;
 
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
@@ -53,20 +54,33 @@ public class AssetRepositoryImpl implements AssetRepository {
     }
 
     @Override
-    public List<Asset> listActive(String kbId, String keyword, String fileType, int limit, int offset) {
-        return mapper.listActive(kbId, keyword, fileType, limit, offset).stream()
+    public List<Asset> listActive(
+            String kbId,
+            String keyword,
+            String fileType,
+            DocumentAvailabilityStatus availabilityStatus,
+            int limit,
+            int offset
+    ) {
+        return mapper.listActive(
+                        kbId, keyword, fileType, availabilityCode(availabilityStatus), limit, offset)
+                .stream()
                 .map(this::toDomain)
                 .toList();
     }
 
     @Override
-    public long countActive(String kbId, String keyword, String fileType) {
-        return mapper.countActive(kbId, keyword, fileType);
+    public long countActive(String kbId, String keyword, String fileType,
+                            DocumentAvailabilityStatus availabilityStatus) {
+        return mapper.countActive(
+                kbId, keyword, fileType, availabilityCode(availabilityStatus));
     }
 
     @Override
-    public long sumActiveSegments(String kbId, String keyword, String fileType) {
-        return mapper.sumActiveSegments(kbId, keyword, fileType);
+    public long sumActiveSegments(String kbId, String keyword, String fileType,
+                                  DocumentAvailabilityStatus availabilityStatus) {
+        return mapper.sumActiveSegments(
+                kbId, keyword, fileType, availabilityCode(availabilityStatus));
     }
 
     @Override
@@ -213,6 +227,10 @@ public class AssetRepositoryImpl implements AssetRepository {
 
     private DocumentIndexStatus indexStatus(String status) {
         return status == null ? DocumentIndexStatus.PENDING : DocumentIndexStatus.valueOf(status);
+    }
+
+    private String availabilityCode(DocumentAvailabilityStatus status) {
+        return status == null ? null : status.name();
     }
 
     private int defaultInt(Integer value) {

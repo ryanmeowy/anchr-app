@@ -74,7 +74,7 @@ public class IngestionIndexFinalizer {
                     now);
         }
 
-        validateSegments(segments, lockedAsset.getId(), targetGeneration);
+        validateSegments(segments, lockedAsset, targetGeneration);
         segmentRepository.deleteByAssetGeneration(
                 lockedAsset.getId(), targetGeneration);
         segmentBulkWriter.write(segments);
@@ -158,15 +158,21 @@ public class IngestionIndexFinalizer {
     }
 
     private void validateSegments(List<Segment> segments,
-                                  String assetId,
+                                  Asset asset,
                                   long targetGeneration) {
-        if (segments == null || segments.isEmpty()) {
+        if (segments == null) {
             throw new BusinessException(
-                    ApiError.INTERNAL_ERROR, "No segments are available for indexing.");
+                    ApiError.INTERNAL_ERROR, "Segments must not be null.");
+        }
+        if (segments.isEmpty()
+                && !"image".equalsIgnoreCase(asset.getFileType())) {
+            throw new BusinessException(
+                    ApiError.INTERNAL_ERROR,
+                    "No segments are available for indexing a non-image document.");
         }
         for (Segment segment : segments) {
             if (segment == null
-                    || !assetId.equals(segment.getAssetId())
+                    || !asset.getId().equals(segment.getAssetId())
                     || segment.getIndexGeneration() != targetGeneration) {
                 throw new BusinessException(
                         ApiError.INTERNAL_ERROR,
