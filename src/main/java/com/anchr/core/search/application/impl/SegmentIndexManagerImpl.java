@@ -5,6 +5,7 @@ import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.ClearScrollRequest;
+import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.ScrollRequest;
 import co.elastic.clients.elasticsearch.core.ScrollResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
@@ -19,7 +20,13 @@ import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
+import com.anchr.core.search.domain.model.EmbeddingDeployment;
+import com.anchr.core.search.domain.model.EmbeddingDeploymentStatus;
+import com.anchr.core.search.domain.model.EmbeddingImpactReport;
+import com.anchr.core.search.domain.model.IndexRuntimeSnapshot;
+import com.anchr.core.search.domain.model.PhysicalIndexProfile;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
+import com.anchr.core.search.domain.repository.EmbeddingDeploymentRepository;
 import com.anchr.core.search.domain.port.EmbeddingProfileProvider;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort.EmbeddingSession;
@@ -28,6 +35,11 @@ import com.anchr.core.search.infrastructure.persistence.es.SegmentIndexAliasMana
 import com.anchr.core.search.infrastructure.persistence.es.SegmentIndexAliasManager.AliasTopology;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
+import com.anchr.core.integration.ai.adapter.ServingEmbeddingConfigActivator;
+import com.anchr.core.kb.domain.repository.AssetIndexChangeRepository;
+import com.anchr.core.kb.domain.model.AssetIndexChange;
+import com.anchr.core.kb.domain.model.AssetIndexChangeOperation;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -44,10 +56,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -73,6 +88,9 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private static final String META_CAPABILITY = "embeddingCapability";
     private static final String META_MODEL = "embeddingModel";
     private static final String META_DIMENSION = "embeddingDimension";
+    private static final String META_CONFIG_ID = "embeddingConfigId";
+    private static final String META_VECTOR_SCHEMA_VERSION = "vectorSchemaVersion";
+    private static final int VECTOR_SCHEMA_VERSION = 1;
     private static final long ALIAS_TOPOLOGY_REFRESH_INTERVAL_MS = 15_000L;
     private static final String ALIAS_TOPOLOGY_ERROR_PREFIX = "Alias topology invalid: ";
 
@@ -86,6 +104,24 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private final Executor indexInitExecutor;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
     private final SegmentIndexAliasManager aliasManager;
+    private EmbeddingDeploymentRepository deploymentRepository;
+    private AssetIndexChangeRepository assetIndexChangeRepository;
+    private ServingEmbeddingConfigActivator servingConfigActivator;
+
+    @Autowired(required = false)
+    void setDeploymentRepository(EmbeddingDeploymentRepository deploymentRepository) {
+        this.deploymentRepository = deploymentRepository;
+    }
+
+    @Autowired(required = false)
+    void setAssetIndexChangeRepository(AssetIndexChangeRepository repository) {
+        this.assetIndexChangeRepository = repository;
+    }
+
+    @Autowired(required = false)
+    void setServingConfigActivator(ServingEmbeddingConfigActivator activator) {
+        this.servingConfigActivator = activator;
+    }
 
     // Instance-level lock; use a distributed lock for multi-instance deployments.
     private final ReentrantLock indexOpLock = new ReentrantLock();
@@ -177,6 +213,14 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     actualDim, actualModel, actualProfileFingerprint);
         }
 
+        private SegmentIndexState claimOnlineRebuild() {
+            return new SegmentIndexState(
+                    SegmentIndexStatus.REBUILDING, null, pendingRebuild,
+                    new RebuildProgressState(0, 0, "PREPARING"),
+                    indexExists, readIndex, readable, writable,
+                    actualDim, actualModel, actualProfileFingerprint);
+        }
+
         private SegmentIndexState createSucceeded(EmbeddingProfile profile) {
             return new SegmentIndexState(
                     SegmentIndexStatus.READY, null, null, null,
@@ -252,6 +296,11 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             );
         } else {
             markReadyFromStatus(s);
+            try {
+                runtimeSnapshot();
+            } catch (RuntimeException e) {
+                log.warn("Boot: failed to initialize serving runtime snapshot: {}", e.getMessage());
+            }
             log.info("Boot: index exists via alias [{}], actualDim={}, expectedDim={}",
                     kbSegmentConfig.getReadTargetName(), s.getActualDim(), s.getExpectedDim());
         }
@@ -287,8 +336,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     }
 
     private boolean tryScheduleCreate() {
-        EmbeddingProfile profile = embeddingProfileProvider.getActiveEmbeddingProfile()
-                .orElse(null);
+        EmbeddingProfile profile = desiredProfile();
         if (profile == null) {
             return false;
         }
@@ -319,7 +367,13 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private void executeCreate(EmbeddingProfile profile) {
         indexOpLock.lock();
         try {
-            doCreate(profile);
+            String physicalIndex = doCreate(profile);
+            if (servingConfigActivator != null) {
+                servingConfigActivator.activate(profile);
+            }
+            if (deploymentRepository != null) {
+                deploymentRepository.initializeServing(profile, physicalIndex);
+            }
             stateRef.updateAndGet(current ->
                     current.status() == SegmentIndexStatus.INITIALIZING
                             ? current.createSucceeded(profile)
@@ -343,7 +397,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                         : current);
     }
 
-    private void doCreate(EmbeddingProfile profile) throws Exception {
+    private String doCreate(EmbeddingProfile profile) throws Exception {
         String physicalIndexName = newPhysicalIndexName();
         log.info("Create: building index [{}] with dim={}",
                 physicalIndexName, profile.dimension());
@@ -357,6 +411,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     kbSegmentConfig.getWriteAlias());
             throw e;
         }
+        return physicalIndexName;
     }
 
     private String createPendingRebuildTask(String reason, EmbeddingProfile targetProfile) {
@@ -369,6 +424,21 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
 
         String taskId = UUID.randomUUID().toString();
+        if (deploymentRepository != null) {
+            EmbeddingDeployment deployment = deploymentRepository.find()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Embedding deployment control is not initialized"));
+            if (deployment.status() == EmbeddingDeploymentStatus.PREPARED
+                    && deployment.targetProfile() != null
+                    && deployment.targetProfile().fingerprint()
+                            .equals(targetProfile.fingerprint())) {
+                taskId = deployment.taskId();
+            } else if (!deploymentRepository.prepare(
+                    taskId, targetProfile, deployment.version())) {
+                throw new IllegalStateException(
+                        "Embedding deployment changed concurrently; reload status and retry");
+            }
+        }
         PendingRebuildState pending = new PendingRebuildState(
                 taskId,
                 targetProfile,
@@ -405,6 +475,9 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     @Override
     public boolean confirmRebuild(String taskId) {
+        if (deploymentRepository != null) {
+            return confirmPersistentRebuild(taskId);
+        }
         EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
                 .orElse(null);
         RebuildClaim claim = tryClaimRebuild(taskId, expectedProfile);
@@ -418,6 +491,44 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         } catch (RuntimeException e) {
             rollbackRebuildClaim(claim, e.getMessage());
             log.error("Failed to schedule rebuild, taskId={}: {}", taskId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    private boolean confirmPersistentRebuild(String taskId) {
+        EmbeddingDeployment deployment = deploymentRepository.find().orElse(null);
+        boolean expiredRecovery = deployment != null
+                && (deployment.status() == EmbeddingDeploymentStatus.BACKFILLING
+                    || deployment.status() == EmbeddingDeploymentStatus.VALIDATING)
+                && deployment.leaseUntil() != null
+                && deployment.leaseUntil().isBefore(LocalDateTime.now());
+        if (deployment == null
+                || (deployment.status() != EmbeddingDeploymentStatus.PREPARED
+                    && !expiredRecovery)
+                || !Objects.equals(taskId, deployment.taskId())
+                || deployment.targetProfile() == null) {
+            return false;
+        }
+        long startRevision = assetIndexChangeRepository == null
+                ? 0L : assetIndexChangeRepository.currentRevision();
+        String ownerToken = UUID.randomUUID().toString();
+        if (!deploymentRepository.claim(
+                taskId, ownerToken, LocalDateTime.now().plusMinutes(5),
+                startRevision, deployment.version())) {
+            return false;
+        }
+        stateRef.updateAndGet(SegmentIndexState::claimOnlineRebuild);
+        RebuildClaim claim = new RebuildClaim(
+                taskId, deployment.targetProfile(), ownerToken, startRevision, true,
+                deployment.targetPhysicalIndex());
+        try {
+            indexInitExecutor.execute(() -> executeRebuild(claim));
+            return true;
+        } catch (RuntimeException e) {
+            deploymentRepository.fail(taskId, ownerToken, e.getMessage());
+            rollbackRebuildClaim(claim, e.getMessage());
+            log.error("Failed to schedule persistent rebuild, taskId={}: {}",
+                    taskId, e.getMessage(), e);
             return false;
         }
     }
@@ -437,7 +548,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             }
             SegmentIndexState claimed = current.claimRebuild();
             if (stateRef.compareAndSet(current, claimed)) {
-                return new RebuildClaim(taskId, pending.targetProfile());
+                return new RebuildClaim(
+                        taskId, pending.targetProfile(), null, 0L, false, null);
             }
         }
     }
@@ -445,7 +557,12 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private void executeRebuild(RebuildClaim claim) {
         indexOpLock.lock();
         try {
-            indexWriteBarrier.withExclusiveRebuildPermit(() -> executeRebuildExclusively(claim));
+            if (claim.persistent()) {
+                executeOnlineRebuild(claim);
+            } else {
+                indexWriteBarrier.withExclusiveRebuildPermit(
+                        () -> executeRebuildExclusively(claim));
+            }
         } finally {
             indexOpLock.unlock();
         }
@@ -471,6 +588,263 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
     }
 
+    private void executeOnlineRebuild(RebuildClaim claim) {
+        String oldIndex = null;
+        String targetIndex = null;
+        IndexRuntimeSnapshot oldRuntime = null;
+        boolean aliasSwitched = false;
+        try {
+            oldRuntime = runtimeSnapshot();
+            oldIndex = oldRuntime.physicalIndex();
+            String abandonedTarget = claim.abandonedTargetIndex();
+            if (StringUtils.hasText(abandonedTarget)
+                    && !abandonedTarget.equals(oldIndex)) {
+                cleanupFailedTargetIndex(
+                        abandonedTarget,
+                        kbSegmentConfig.getReadAlias(), kbSegmentConfig.getWriteAlias());
+            }
+            EmbeddingSession targetSession = embeddingPort.openSession(claim.targetProfile());
+            String sourceIndex = oldIndex;
+            esClient.indices().refresh(r -> r.index(sourceIndex));
+            long totalDocs = esClient.count(c -> c.index(sourceIndex)).count();
+
+            targetIndex = newPhysicalIndexName();
+            createPhysicalIndex(targetIndex, claim.targetProfile());
+            if (!deploymentRepository.recordTarget(
+                    claim.taskId(), claim.ownerToken(), targetIndex, claim.startRevision())) {
+                throw new IllegalStateException("Embedding deployment ownership was lost");
+            }
+
+            migrateData(
+                    oldIndex, targetIndex, totalDocs,
+                    claim.targetProfile(), targetSession, false);
+            long appliedRevision = catchUpChanges(
+                    oldIndex, targetIndex, claim.startRevision(),
+                    claim.targetProfile(), targetSession, "BACKFILLING");
+            if (!deploymentRepository.recordProgress(
+                    claim.taskId(), claim.ownerToken(), appliedRevision, "VALIDATING")) {
+                throw new IllegalStateException("Embedding deployment validation ownership was lost");
+            }
+            persistDeploymentMigrationProgress("VALIDATING");
+            validateTargetProfile(targetIndex, claim.targetProfile());
+
+            stateRef.updateAndGet(current -> current.withRebuildProgress(
+                    current.rebuildProgress() == null
+                            ? new RebuildProgressState(0, 0, "CUTTING_OVER")
+                            : current.rebuildProgress().withPhase("CUTTING_OVER")));
+            persistDeploymentMigrationProgress("CUTTING_OVER");
+            if (!deploymentRepository.beginCutover(
+                    claim.taskId(), claim.ownerToken(), appliedRevision)) {
+                throw new IllegalStateException("Embedding deployment cutover ownership was lost");
+            }
+
+            String finalOldIndex = oldIndex;
+            String finalTargetIndex = targetIndex;
+            IndexRuntimeSnapshot finalOldRuntime = oldRuntime;
+            long[] finalRevision = {appliedRevision};
+            indexWriteBarrier.withExclusiveRebuildPermit(() -> {
+                indexWriteBarrier.awaitDistributedWritesDrained();
+                finalRevision[0] = catchUpChanges(
+                        finalOldIndex, finalTargetIndex, finalRevision[0],
+                        claim.targetProfile(), targetSession, "VALIDATING");
+                validateTargetProfile(finalTargetIndex, claim.targetProfile());
+                try {
+                    aliasManager.switchAliases(finalOldIndex, finalTargetIndex);
+                    if (servingConfigActivator != null) {
+                        servingConfigActivator.activate(claim.targetProfile());
+                    }
+                    if (!deploymentRepository.activate(
+                            claim.taskId(), claim.ownerToken(), claim.targetProfile(),
+                            finalTargetIndex, finalRevision[0])) {
+                        throw new IllegalStateException(
+                                "Alias switched but deployment activation CAS failed");
+                    }
+                } catch (Exception cutoverFailure) {
+                    rollbackAliasAfterFailedCutover(
+                            finalOldIndex, finalTargetIndex, finalOldRuntime, cutoverFailure);
+                    throw new IllegalStateException("Embedding cutover failed", cutoverFailure);
+                }
+            });
+            aliasSwitched = true;
+
+            stateRef.updateAndGet(current -> current.withRebuildProgress(
+                    current.rebuildProgress() == null
+                            ? new RebuildProgressState(0, 0, "COMPLETED")
+                            : current.rebuildProgress().withPhase("COMPLETED"))
+                    .rebuildSucceeded(claim.targetProfile()));
+            log.info("Online embedding rebuild completed, taskId={}, oldIndex={}, newIndex={}, revision={}",
+                    claim.taskId(), oldIndex, targetIndex, finalRevision[0]);
+        } catch (Exception e) {
+            AliasTopology topology = aliasManager.inspect();
+            boolean unresolvedCutover = targetIndex != null
+                    && topology.valid()
+                    && targetIndex.equals(topology.physicalIndex());
+            if (!aliasSwitched && !unresolvedCutover) {
+                deploymentRepository.fail(claim.taskId(), claim.ownerToken(), e.getMessage());
+            }
+            stateRef.updateAndGet(current -> current.rebuildFailed(
+                    e.getMessage(), topology.readable(), topology.writable()));
+            if (targetIndex != null && !aliasSwitched && !unresolvedCutover) {
+                cleanupFailedTargetIndex(
+                        targetIndex, kbSegmentConfig.getReadAlias(), kbSegmentConfig.getWriteAlias());
+            }
+            log.error("Online embedding rebuild failed, taskId={}: {}",
+                    claim.taskId(), e.getMessage(), e);
+        }
+    }
+
+    private void rollbackAliasAfterFailedCutover(
+            String oldIndex,
+            String targetIndex,
+            IndexRuntimeSnapshot oldRuntime,
+            Exception originalFailure
+    ) {
+        AliasTopology current = aliasManager.inspect();
+        if (current.valid() && targetIndex.equals(current.physicalIndex())) {
+            try {
+                aliasManager.switchAliases(targetIndex, oldIndex);
+                if (servingConfigActivator != null) {
+                    servingConfigActivator.activate(oldRuntime.profile());
+                }
+            } catch (Exception rollbackFailure) {
+                originalFailure.addSuppressed(rollbackFailure);
+                throw new IllegalStateException(
+                        "Alias cutover failed and automatic rollback also failed; writes remain fenced",
+                        originalFailure);
+            }
+        }
+    }
+
+    private long catchUpChanges(
+            String sourceIndex,
+            String targetIndex,
+            long exclusiveRevision,
+            EmbeddingProfile targetProfile,
+            EmbeddingSession targetSession,
+            String phase
+    ) {
+        if (assetIndexChangeRepository == null) {
+            throw new IllegalStateException(
+                    "Asset index change log is required for online embedding rebuild");
+        }
+        long watermark = exclusiveRevision;
+        while (true) {
+            List<AssetIndexChange> changes =
+                    assetIndexChangeRepository.listAfterRevision(watermark, 200);
+            if (changes.isEmpty()) {
+                return watermark;
+            }
+            for (AssetIndexChange change : changes) {
+                replayChange(
+                        sourceIndex, targetIndex, change,
+                        targetProfile, targetSession);
+                watermark = change.getRevision();
+            }
+            EmbeddingDeployment deployment = deploymentRepository.find()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Embedding deployment control disappeared during replay"));
+            if (deployment.status() != EmbeddingDeploymentStatus.CUTTING_OVER
+                    && !deploymentRepository.recordProgress(
+                            deployment.taskId(), deployment.ownerToken(), watermark, phase)) {
+                throw new IllegalStateException("Embedding deployment lost its replay ownership");
+            }
+            if (changes.size() < 200) {
+                return watermark;
+            }
+        }
+    }
+
+    private void replayChange(
+            String sourceIndex,
+            String targetIndex,
+            AssetIndexChange change,
+            EmbeddingProfile targetProfile,
+            EmbeddingSession targetSession
+    ) {
+        deleteTargetAsset(targetIndex, change.getAssetId());
+        if (change.getOperation() == AssetIndexChangeOperation.ASSET_DELETED) {
+            return;
+        }
+        migrateAssetGeneration(
+                sourceIndex, targetIndex, change.getAssetId(),
+                change.getIndexGeneration(), targetProfile, targetSession);
+    }
+
+    private void deleteTargetAsset(String targetIndex, String assetId) {
+        try {
+            esClient.deleteByQuery(DeleteByQueryRequest.of(d -> d
+                    .index(targetIndex)
+                    .refresh(true)
+                    .conflicts(co.elastic.clients.elasticsearch._types.Conflicts.Proceed)
+                    .query(q -> q.term(t -> t.field("assetId").value(assetId)))));
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Failed to replay asset deletion for " + assetId, e);
+        }
+    }
+
+    private void migrateAssetGeneration(
+            String sourceIndex,
+            String targetIndex,
+            String assetId,
+            long generation,
+            EmbeddingProfile targetProfile,
+            EmbeddingSession targetSession
+    ) {
+        SegmentRebuildProjectionPlanner planner =
+                new SegmentRebuildProjectionPlanner(targetProfile.capability());
+        String scrollId = null;
+        try {
+            SearchResponse<SegmentDocument> response = esClient.search(
+                    SearchRequest.of(s -> s.index(sourceIndex)
+                            .size(SCROLL_BATCH_SIZE)
+                            .query(q -> q.bool(b -> b
+                                    .filter(f -> f.term(t -> t
+                                            .field("assetId").value(assetId)))
+                                    .filter(f -> f.term(t -> t
+                                            .field("indexGeneration").value(generation)))))
+                            .sort(sort -> sort.field(field -> field
+                                    .field("segmentId").order(SortOrder.Asc)))
+                            .scroll(t -> t.time(SCROLL_KEEP_ALIVE_MINUTES + "m"))),
+                    SegmentDocument.class);
+            scrollId = response.scrollId();
+            List<Hit<SegmentDocument>> hits = response.hits().hits();
+            while (!hits.isEmpty()) {
+                writeMigrationBatch(targetIndex, prepareMigrationBatch(
+                        hits, targetProfile, targetSession, planner));
+                String currentScrollId = scrollId;
+                ScrollResponse<SegmentDocument> next = esClient.scroll(
+                        ScrollRequest.of(s -> s.scrollId(currentScrollId)
+                                .scroll(t -> t.time(SCROLL_KEEP_ALIVE_MINUTES + "m"))),
+                        SegmentDocument.class);
+                scrollId = next.scrollId();
+                hits = next.hits().hits();
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Failed to replay asset generation for " + assetId, e);
+        } finally {
+            clearScrollQuietly(scrollId);
+        }
+    }
+
+    private void validateTargetProfile(String targetIndex, EmbeddingProfile targetProfile) {
+        try {
+            esClient.indices().refresh(r -> r.index(targetIndex));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to refresh target index", e);
+        }
+        MappingProfile mapping = inspectMappingProfile(targetIndex);
+        if (!mapping.loaded()
+                || !Objects.equals(mapping.actualDim(), targetProfile.dimension())
+                || !Objects.equals(
+                        mapping.actualProfileFingerprint(), targetProfile.fingerprint())
+                || !Objects.equals(mapping.vectorSchemaVersion(), VECTOR_SCHEMA_VERSION)) {
+            throw new IllegalStateException(
+                    "Target physical index metadata does not match target embedding profile");
+        }
+    }
+
     private void rollbackRebuildClaim(RebuildClaim claim, String error) {
         AliasTopology topology = aliasManager.inspect();
         stateRef.updateAndGet(current ->
@@ -485,7 +859,14 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 && state.pendingRebuild().taskId().equals(claim.taskId());
     }
 
-    private record RebuildClaim(String taskId, EmbeddingProfile targetProfile) {
+    private record RebuildClaim(
+            String taskId,
+            EmbeddingProfile targetProfile,
+            String ownerToken,
+            long startRevision,
+            boolean persistent,
+            String abandonedTargetIndex
+    ) {
     }
 
     private record IndexInspection(
@@ -499,16 +880,19 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     private record MappingProfile(
             boolean loaded,
+            Long configId,
+            String capability,
+            Integer vectorSchemaVersion,
             Integer actualDim,
             String actualModel,
             String actualProfileFingerprint
     ) {
         private static MappingProfile notLoaded() {
-            return new MappingProfile(false, null, null, null);
+            return new MappingProfile(false, null, null, null, null, null, null);
         }
 
         private static MappingProfile empty() {
-            return new MappingProfile(true, null, null, null);
+            return new MappingProfile(true, null, null, null, null, null, null);
         }
     }
 
@@ -545,7 +929,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     newPhysicalIndex,
                     totalDocs,
                     targetProfile,
-                    embeddingSession);
+                    embeddingSession,
+                    true);
 
             // 5. alias 原子切换到新索引
             log.info("Rebuild: switching alias from [{}] to [{}]",
@@ -572,7 +957,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             String newIndex,
             long totalDocs,
             EmbeddingProfile targetProfile,
-            EmbeddingSession embeddingSession
+            EmbeddingSession embeddingSession,
+            boolean strictSourceSnapshotCount
     ) throws Exception {
         long processed = 0;
         long projected = 0;
@@ -580,6 +966,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 new SegmentRebuildProjectionPlanner(targetProfile.capability());
         stateRef.updateAndGet(current -> current.withRebuildProgress(
                 new RebuildProgressState(0, totalDocs, "MIGRATING")));
+        persistDeploymentMigrationProgress("BACKFILLING");
 
         String scrollId = null;
         try {
@@ -613,6 +1000,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 long processedCount = processed;
                 stateRef.updateAndGet(current -> current.withRebuildProgress(
                         new RebuildProgressState(processedCount, totalDocs, "MIGRATING")));
+                persistDeploymentMigrationProgress("BACKFILLING");
                 log.info("Rebuild: processed {}/{} source documents, projected {} target documents",
                         processed, totalDocs, projected);
 
@@ -630,11 +1018,18 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
         esClient.indices().refresh(r -> r.index(newIndex));
         long targetDocs = esClient.count(c -> c.index(newIndex)).count();
-        validateMigrationCounts(totalDocs, processed, projected, targetDocs);
+        if (strictSourceSnapshotCount) {
+            validateMigrationCounts(totalDocs, processed, projected, targetDocs);
+        } else if (projected != targetDocs) {
+            throw new IllegalStateException(
+                    "Online rebuild target count mismatch: projected=" + projected
+                            + ", target=" + targetDocs);
+        }
 
         long processedCount = processed;
         stateRef.updateAndGet(current -> current.withRebuildProgress(
                 new RebuildProgressState(processedCount, totalDocs, "SWITCHING_ALIAS")));
+        persistDeploymentMigrationProgress("VALIDATING");
         log.info("Rebuild: data migration validated, source={}, projected={}, target={}",
                 totalDocs, projected, targetDocs);
         return new MigrationResult(totalDocs, processed, targetDocs);
@@ -863,9 +1258,117 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     @Override
     public SegmentIndexStatusDTO status() {
-        EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
-                .orElse(null);
+        if (deploymentRepository != null) {
+            EmbeddingDeployment deployment = deploymentRepository.find().orElse(null);
+            if (deployment != null
+                    && deployment.status() == EmbeddingDeploymentStatus.CUTTING_OVER
+                    && deployment.leaseUntil() != null
+                    && deployment.leaseUntil().isBefore(LocalDateTime.now())) {
+                try {
+                    runtimeSnapshot();
+                } catch (RuntimeException e) {
+                    log.error("Failed to reconcile expired embedding cutover: {}",
+                            e.getMessage(), e);
+                }
+            }
+        }
+        EmbeddingProfile expectedProfile = desiredProfile();
         return status(expectedProfile);
+    }
+
+    private EmbeddingProfile desiredProfile() {
+        if (deploymentRepository != null) {
+            EmbeddingProfile desired = deploymentRepository.find()
+                    .map(EmbeddingDeployment::desiredProfile)
+                    .orElse(null);
+            if (desired != null) {
+                return desired;
+            }
+        }
+        return embeddingProfileProvider.getActiveEmbeddingProfile().orElse(null);
+    }
+
+    @Override
+    public IndexRuntimeSnapshot runtimeSnapshot() {
+        AliasTopology topology = aliasManager.requireValid();
+        MappingProfile mapping = inspectMappingProfile(topology.physicalIndex());
+        if (!mapping.loaded()
+                || !StringUtils.hasText(mapping.actualProfileFingerprint())
+                || !StringUtils.hasText(mapping.capability())
+                || !StringUtils.hasText(mapping.actualModel())
+                || mapping.actualDim() == null
+                || mapping.vectorSchemaVersion() == null) {
+            throw new IllegalStateException(
+                    "Serving physical index has incomplete embedding profile metadata");
+        }
+        EmbeddingProfile profile = new EmbeddingProfile(
+                mapping.configId(), mapping.capability(), mapping.actualModel(),
+                mapping.actualDim(), mapping.actualProfileFingerprint());
+        if (profile.configId() == null) {
+            String mappingFingerprint = profile.fingerprint();
+            EmbeddingProfile configured = embeddingProfileProvider.getActiveEmbeddingProfile()
+                    .filter(candidate -> candidate.fingerprint().equals(mappingFingerprint))
+                    .orElse(null);
+            if (configured != null) {
+                profile = configured;
+            }
+        }
+        EmbeddingSession session = embeddingPort.openSession(profile);
+        if (deploymentRepository != null) {
+            reconcileDeploymentWithAlias(profile, topology.physicalIndex());
+        }
+        return new IndexRuntimeSnapshot(
+                topology.physicalIndex(), profile, session,
+                new IndexRuntimeSnapshot.RetrievalPlan(
+                        mapping.vectorSchemaVersion(), "embedding", true, true));
+    }
+
+    private void reconcileDeploymentWithAlias(
+            EmbeddingProfile aliasProfile,
+            String physicalIndex
+    ) {
+        EmbeddingDeployment control = deploymentRepository.find().orElse(null);
+        if (control == null || control.servingProfile() == null) {
+            deploymentRepository.initializeServing(aliasProfile, physicalIndex);
+            return;
+        }
+        boolean servingMatches = Objects.equals(
+                control.servingProfile().fingerprint(), aliasProfile.fingerprint())
+                && Objects.equals(control.servingPhysicalIndex(), physicalIndex);
+        if (servingMatches) {
+            if (control.status() == EmbeddingDeploymentStatus.CUTTING_OVER
+                    && control.leaseUntil() != null
+                    && control.leaseUntil().isBefore(LocalDateTime.now())) {
+                deploymentRepository.fail(
+                        control.taskId(), control.ownerToken(),
+                        "Recovered expired cutover before alias switch");
+                log.warn("Recovered expired embedding cutover before alias switch, taskId={}",
+                        control.taskId());
+            }
+            return;
+        }
+        boolean cutoverTargetMatches =
+                control.status() == EmbeddingDeploymentStatus.CUTTING_OVER
+                && control.targetProfile() != null
+                && Objects.equals(
+                        control.targetProfile().fingerprint(), aliasProfile.fingerprint())
+                && Objects.equals(control.targetPhysicalIndex(), physicalIndex);
+        if (cutoverTargetMatches) {
+            if (servingConfigActivator != null) {
+                servingConfigActivator.activate(control.targetProfile());
+            }
+            if (!deploymentRepository.activate(
+                    control.taskId(), control.ownerToken(), control.targetProfile(),
+                    physicalIndex, control.appliedRevision())) {
+                throw new IllegalStateException(
+                        "Failed to recover deployment after completed alias cutover");
+            }
+            log.warn("Recovered embedding deployment after alias cutover, taskId={}, index={}",
+                    control.taskId(), physicalIndex);
+            return;
+        }
+        throw new IllegalStateException(
+                "Alias embedding profile does not match durable serving deployment");
     }
 
     private SegmentIndexStatusDTO status(EmbeddingProfile expectedProfile) {
@@ -1029,27 +1532,75 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
 
         Map<String, JsonData> metadata = record.mappings().meta();
+        Long configId = readMetadataLong(metadata, META_CONFIG_ID);
+        String capability = readMetadataString(metadata, META_CAPABILITY);
         String actualModel = readMetadataString(metadata, META_MODEL);
         String actualProfileFingerprint = readMetadataString(metadata, META_PROFILE_FINGERPRINT);
         Integer metadataVersion = readMetadataInteger(metadata, META_PROFILE_VERSION);
         Integer metadataDimension = readMetadataInteger(metadata, META_DIMENSION);
+        Integer vectorSchemaVersion = readMetadataInteger(metadata, META_VECTOR_SCHEMA_VERSION);
         if (!Objects.equals(metadataVersion, 1)
-                || !Objects.equals(metadataDimension, actualDim)) {
+                || !Objects.equals(metadataDimension, actualDim)
+                || !StringUtils.hasText(capability)) {
             log.warn("Index [{}] has invalid embedding profile metadata", indexName);
             actualProfileFingerprint = null;
         }
-        return new MappingProfile(true, actualDim, actualModel, actualProfileFingerprint);
+        if (vectorSchemaVersion == null && Objects.equals(metadataVersion, 1)) {
+            vectorSchemaVersion = VECTOR_SCHEMA_VERSION;
+        }
+        return new MappingProfile(
+                true, configId, capability, vectorSchemaVersion,
+                actualDim, actualModel, actualProfileFingerprint);
     }
 
     private SegmentIndexStatusDTO toStatusDto(
             SegmentIndexState state,
             EmbeddingProfile expectedProfile
     ) {
+        EmbeddingDeployment deployment = deploymentRepository == null
+                ? null : deploymentRepository.find().orElse(null);
+        boolean onlineRebuild = deployment != null && deployment.deploymentInProgress();
+        boolean cuttingOver = deployment != null
+                && deployment.status() == EmbeddingDeploymentStatus.CUTTING_OVER;
+        boolean runtimeMismatch = deployment != null
+                && deployment.servingProfile() != null
+                && StringUtils.hasText(state.actualProfileFingerprint())
+                && !Objects.equals(
+                        deployment.servingProfile().fingerprint(),
+                        state.actualProfileFingerprint());
+        boolean writable = state.writable();
+        if (onlineRebuild && !cuttingOver) {
+            writable = aliasManager.inspect().writable();
+        } else if (cuttingOver) {
+            writable = false;
+        }
+        if (runtimeMismatch) {
+            writable = false;
+        }
+        PendingRebuildState pending = state.pendingRebuild();
+        if (deployment != null
+                && deployment.taskId() != null
+                && deployment.targetProfile() != null
+                && pending == null) {
+            pending = new PendingRebuildState(
+                    deployment.taskId(), deployment.targetProfile(),
+                    "Embedding profile deployment",
+                    deployment.updatedAt() == null ? null
+                            : deployment.updatedAt().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        }
+        RebuildProgressState progress = state.rebuildProgress();
+        if (deployment != null && deployment.rebuildPhase() != null
+                && (onlineRebuild
+                    || deployment.status() == EmbeddingDeploymentStatus.FAILED)) {
+            progress = new RebuildProgressState(
+                    deployment.rebuildMigrated(), deployment.rebuildTotal(),
+                    deployment.rebuildPhase());
+        }
         return SegmentIndexStatusDTO.builder()
-                .status(state.status())
+                .status(onlineRebuild ? SegmentIndexStatus.REBUILDING : state.status())
                 .indexExists(Boolean.TRUE.equals(state.indexExists()))
-                .readable(state.readable())
-                .writable(state.writable())
+                .readable(state.readable() && !runtimeMismatch)
+                .writable(writable)
                 .actualDim(state.actualDim())
                 .actualModel(state.actualModel())
                 .actualProfileFingerprint(state.actualProfileFingerprint())
@@ -1057,9 +1608,35 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 .expectedModel(expectedProfile == null ? null : expectedProfile.modelName())
                 .expectedProfileFingerprint(
                         expectedProfile == null ? null : expectedProfile.fingerprint())
-                .pendingRebuild(toPendingRebuildDto(state.pendingRebuild()))
-                .rebuildProgress(toRebuildProgressDto(state.rebuildProgress()))
-                .lastError(state.lastError())
+                .deploymentStatus(deployment == null ? null : deployment.status().name())
+                .physicalIndex(deployment != null
+                        && StringUtils.hasText(deployment.servingPhysicalIndex())
+                        ? deployment.servingPhysicalIndex() : state.readIndex())
+                .servingProfileFingerprint(deployment == null
+                        || deployment.servingProfile() == null ? state.actualProfileFingerprint()
+                        : deployment.servingProfile().fingerprint())
+                .desiredProfileFingerprint(deployment == null
+                        || deployment.desiredProfile() == null ? null
+                        : deployment.desiredProfile().fingerprint())
+                .targetProfileFingerprint(deployment == null
+                        || deployment.targetProfile() == null ? null
+                        : deployment.targetProfile().fingerprint())
+                .servingCapability(deployment == null
+                        || deployment.servingProfile() == null ? null
+                        : deployment.servingProfile().capability())
+                .desiredCapability(deployment == null
+                        || deployment.desiredProfile() == null ? null
+                        : deployment.desiredProfile().capability())
+                .targetCapability(deployment == null
+                        || deployment.targetProfile() == null ? null
+                        : deployment.targetProfile().capability())
+                .impactReport(toImpactReportDto(
+                        deployment == null || !deployment.impactReportReady()
+                                ? null : deployment.impactReport()))
+                .pendingRebuild(toPendingRebuildDto(pending))
+                .rebuildProgress(toRebuildProgressDto(progress))
+                .lastError(deployment != null && deployment.lastError() != null
+                        ? deployment.lastError() : state.lastError())
                 .build();
     }
 
@@ -1077,12 +1654,55 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         return metadata.get(key).to(Integer.class);
     }
 
+    static Long readMetadataLong(Map<String, JsonData> metadata, String key) {
+        if (metadata == null || metadata.get(key) == null) {
+            return null;
+        }
+        return metadata.get(key).to(Long.class);
+    }
+
     private SegmentIndexStatusDTO.PendingRebuild toPendingRebuildDto(PendingRebuildState pending) {
         return pending == null ? null : pending.toDto();
     }
 
     private SegmentIndexStatusDTO.RebuildProgress toRebuildProgressDto(RebuildProgressState progress) {
         return progress == null ? null : progress.toDto();
+    }
+
+    private SegmentIndexStatusDTO.ImpactReport toImpactReportDto(
+            EmbeddingImpactReport report
+    ) {
+        if (report == null) {
+            return null;
+        }
+        return SegmentIndexStatusDTO.ImpactReport.builder()
+                .imageAssets(report.imageAssets())
+                .ocrAvailableAssets(report.ocrAvailableAssets())
+                .ocrEmptyAssets(report.ocrEmptyAssets())
+                .textVectorFailures(report.textVectorFailures())
+                .expectedVisualSemanticLossAssets(
+                        report.expectedVisualSemanticLossAssets())
+                .confirmationRequired(report.confirmationRequired())
+                .confirmed(report.confirmed())
+                .build();
+    }
+
+    private void persistDeploymentMigrationProgress(String phase) {
+        if (deploymentRepository == null) {
+            return;
+        }
+        EmbeddingDeployment deployment = deploymentRepository.find().orElse(null);
+        RebuildProgressState progress = stateRef.get().rebuildProgress();
+        if (deployment == null || deployment.ownerToken() == null || progress == null
+                || deployment.status() == EmbeddingDeploymentStatus.CUTTING_OVER) {
+            return;
+        }
+        if (!deploymentRepository.recordMigrationProgress(
+                deployment.taskId(), deployment.ownerToken(),
+                progress.migrated(), progress.total(), phase)) {
+            throw new IllegalStateException(
+                    "Embedding deployment lost its migration-progress ownership");
+        }
     }
 
     @Override
@@ -1128,29 +1748,152 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     }
 
     static Map<String, JsonData> toMappingMetadata(EmbeddingProfile profile) {
-        return Map.of(
-                META_PROFILE_VERSION, JsonData.of(1),
-                META_PROFILE_FINGERPRINT, JsonData.of(profile.fingerprint()),
-                META_CAPABILITY, JsonData.of(profile.capability()),
-                META_MODEL, JsonData.of(profile.modelName()),
-                META_DIMENSION, JsonData.of(profile.dimension()));
+        Map<String, JsonData> metadata = new LinkedHashMap<>();
+        metadata.put(META_PROFILE_VERSION, JsonData.of(1));
+        metadata.put(META_PROFILE_FINGERPRINT, JsonData.of(profile.fingerprint()));
+        metadata.put(META_CAPABILITY, JsonData.of(profile.capability()));
+        metadata.put(META_MODEL, JsonData.of(profile.modelName()));
+        metadata.put(META_DIMENSION, JsonData.of(profile.dimension()));
+        metadata.put(META_VECTOR_SCHEMA_VERSION, JsonData.of(VECTOR_SCHEMA_VERSION));
+        if (profile.configId() != null) {
+            metadata.put(META_CONFIG_ID, JsonData.of(profile.configId()));
+        }
+        return Map.copyOf(metadata);
+    }
+
+    @Override
+    public boolean rollback(String physicalIndex) {
+        if (deploymentRepository == null || assetIndexChangeRepository == null) {
+            throw new IllegalStateException("Persistent embedding deployment is unavailable");
+        }
+        String targetIndex = physicalIndex == null ? null : physicalIndex.trim();
+        AliasTopology topology = aliasManager.requireValid();
+        String currentIndex = topology.physicalIndex();
+        if (!StringUtils.hasText(targetIndex) || targetIndex.equals(currentIndex)) {
+            return false;
+        }
+        EmbeddingDeployment control = deploymentRepository.find()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Embedding deployment control is not initialized"));
+        if (control.status() != EmbeddingDeploymentStatus.ACTIVE) {
+            throw new IllegalStateException(
+                    "Rollback is allowed only while deployment status is ACTIVE");
+        }
+        long currentRevision = assetIndexChangeRepository.currentRevision();
+        PhysicalIndexProfile stored = deploymentRepository.findPhysicalProfile(targetIndex)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Rollback target is not a managed physical index"));
+        if (stored.maxAppliedRevision() != currentRevision) {
+            throw new IllegalStateException(
+                    "Rollback target is stale and must be incrementally caught up or rebuilt");
+        }
+        MappingProfile mapping = inspectMappingProfile(targetIndex);
+        if (!mapping.loaded()
+                || mapping.configId() == null
+                || !Objects.equals(mapping.actualProfileFingerprint(), stored.profileFingerprint())
+                || !Objects.equals(mapping.actualDim(), stored.dimension())
+                || !Objects.equals(mapping.vectorSchemaVersion(), stored.vectorSchemaVersion())) {
+            throw new IllegalStateException(
+                    "Rollback target metadata does not match its durable profile record");
+        }
+        EmbeddingProfile targetProfile = new EmbeddingProfile(
+                mapping.configId(), mapping.capability(), mapping.actualModel(),
+                mapping.actualDim(), mapping.actualProfileFingerprint());
+        // Fail before fencing writes if the historical model config or credentials disappeared.
+        embeddingPort.openSession(targetProfile);
+        IndexRuntimeSnapshot oldRuntime = runtimeSnapshot();
+
+        deploymentRepository.requestDesired(targetProfile);
+        EmbeddingDeployment desired = deploymentRepository.find().orElseThrow();
+        String taskId = UUID.randomUUID().toString();
+        if (!deploymentRepository.prepare(taskId, targetProfile, desired.version())) {
+            throw new IllegalStateException("Failed to prepare rollback deployment");
+        }
+        if (!deploymentRepository.recordImpact(taskId, EmbeddingImpactReport.none())) {
+            throw new IllegalStateException("Failed to prepare rollback impact gate");
+        }
+        EmbeddingDeployment prepared = deploymentRepository.find().orElseThrow();
+        String ownerToken = UUID.randomUUID().toString();
+        if (!deploymentRepository.claim(
+                taskId, ownerToken, LocalDateTime.now().plusMinutes(5),
+                currentRevision, prepared.version())
+                || !deploymentRepository.recordTarget(
+                        taskId, ownerToken, targetIndex, currentRevision)
+                || !deploymentRepository.recordProgress(
+                        taskId, ownerToken, currentRevision, "VALIDATING")
+                || !deploymentRepository.beginCutover(
+                        taskId, ownerToken, currentRevision)) {
+            deploymentRepository.fail(taskId, ownerToken, "Failed to acquire rollback ownership");
+            return false;
+        }
+
+        try {
+            indexWriteBarrier.withExclusiveRebuildPermit(() -> {
+                indexWriteBarrier.awaitDistributedWritesDrained();
+                if (assetIndexChangeRepository.currentRevision() != currentRevision) {
+                    throw new IllegalStateException(
+                            "Asset index changed while rollback was being fenced");
+                }
+                validateTargetProfile(targetIndex, targetProfile);
+                try {
+                    aliasManager.switchAliases(currentIndex, targetIndex);
+                    if (servingConfigActivator != null) {
+                        servingConfigActivator.activate(targetProfile);
+                    }
+                    if (!deploymentRepository.activate(
+                            taskId, ownerToken, targetProfile,
+                            targetIndex, currentRevision)) {
+                        throw new IllegalStateException("Rollback activation CAS failed");
+                    }
+                } catch (Exception e) {
+                    rollbackAliasAfterFailedCutover(
+                            currentIndex, targetIndex, oldRuntime, e);
+                    throw new IllegalStateException("Rollback cutover failed", e);
+                }
+            });
+            stateRef.updateAndGet(current -> current.rebuildSucceeded(targetProfile));
+            return true;
+        } catch (RuntimeException e) {
+            AliasTopology after = aliasManager.inspect();
+            if (!after.valid() || !targetIndex.equals(after.physicalIndex())) {
+                deploymentRepository.fail(taskId, ownerToken, e.getMessage());
+            }
+            throw e;
+        }
     }
 
     @Override
     public String prepareRebuild() {
-        EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
-                .orElse(null);
+        try {
+            runtimeSnapshot();
+        } catch (IllegalStateException e) {
+            log.warn("Prepare rebuild: serving runtime is unavailable: {}", e.getMessage());
+        }
+        EmbeddingProfile expectedProfile = desiredProfile();
         if (expectedProfile == null) {
             log.warn("Prepare rebuild: no active embedding profile");
             return null;
         }
-        try {
-            aliasManager.requireValid();
-        } catch (IllegalStateException e) {
-            throw new IllegalStateException("索引 alias 不合法，无法重建：" + e.getMessage(), e);
+        AliasTopology topology = aliasManager.inspect();
+        boolean aliasesAbsent = topology.querySucceeded()
+                && !topology.readAliasPresent()
+                && !topology.writeAliasPresent();
+        if (aliasesAbsent) {
+            tryScheduleCreate(expectedProfile);
+            return null;
+        }
+        if (!topology.valid()) {
+            throw new IllegalStateException(
+                    "索引 alias 不合法，无法重建：" + topology.error());
         }
         SegmentIndexStatusDTO s = status(expectedProfile);
-        if (!s.isIndexExists() || !s.isReadable() || !s.isWritable() || s.getActualDim() == null) {
+        if (!s.isIndexExists()) {
+            if (!tryScheduleCreate(expectedProfile)) {
+                log.warn("Prepare rebuild: initial index create was not scheduled");
+            }
+            return null;
+        }
+        if (!s.isReadable() || !s.isWritable() || s.getActualDim() == null) {
             log.warn("Prepare rebuild: index not ready, indexExists={}, actualDim={}, expectedDim={}",
                     s.isIndexExists(),
                     s.getActualDim(),
@@ -1168,7 +1911,102 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     s.getActualModel(), s.getExpectedModel());
         }
         String reason = buildRebuildReason(s);
-        return createPendingRebuildTask(reason, expectedProfile);
+        String taskId = createPendingRebuildTask(reason, expectedProfile);
+        if (deploymentRepository != null) {
+            IndexRuntimeSnapshot servingRuntime = runtimeSnapshot();
+            EmbeddingImpactReport impact = assessCapabilityImpact(
+                    servingRuntime, expectedProfile);
+            if (!deploymentRepository.recordImpact(taskId, impact)) {
+                throw new IllegalStateException(
+                        "Failed to persist embedding capability impact report");
+            }
+        }
+        return taskId;
+    }
+
+    private EmbeddingImpactReport assessCapabilityImpact(
+            IndexRuntimeSnapshot servingRuntime,
+            EmbeddingProfile targetProfile
+    ) {
+        boolean multiToText = "MULTI_EMBEDDING".equals(
+                servingRuntime.profile().capability())
+                && "EMBEDDING".equals(targetProfile.capability());
+        if (!multiToText) {
+            return EmbeddingImpactReport.none();
+        }
+        Set<String> imageAssets = new HashSet<>();
+        Set<String> ocrCandidateAssets = new HashSet<>();
+        Set<String> textVectorFailureAssets = new HashSet<>();
+        EmbeddingSession targetSession = embeddingPort.openSession(targetProfile);
+        String scrollId = null;
+        try {
+            SearchResponse<SegmentDocument> response = esClient.search(
+                    SearchRequest.of(s -> s
+                            .index(servingRuntime.physicalIndex())
+                            .size(SCROLL_BATCH_SIZE)
+                            .query(q -> q.bool(b -> b
+                                    .should(should -> should.term(t -> t
+                                            .field("segmentType")
+                                            .value("IMAGE_OCR_BLOCK")))
+                                    .should(should -> should.term(t -> t
+                                            .field("segmentType")
+                                            .value("IMAGE_VISUAL")))
+                                    .minimumShouldMatch("1")))
+                            .sort(sort -> sort.field(field -> field
+                                    .field("segmentId").order(SortOrder.Asc)))
+                            .source(source -> source.filter(filter -> filter
+                                    .includes("assetId", "ocrText", "segmentType")))
+                            .scroll(t -> t.time(SCROLL_KEEP_ALIVE_MINUTES + "m"))),
+                    SegmentDocument.class);
+            scrollId = response.scrollId();
+            List<Hit<SegmentDocument>> hits = response.hits().hits();
+            while (!hits.isEmpty()) {
+                for (Hit<SegmentDocument> hit : hits) {
+                    SegmentDocument document = hit.source();
+                    if (document == null || !StringUtils.hasText(document.getAssetId())) {
+                        continue;
+                    }
+                    String assetId = document.getAssetId().trim();
+                    imageAssets.add(assetId);
+                    if (StringUtils.hasText(document.getOcrText())) {
+                        ocrCandidateAssets.add(assetId);
+                        if (!textVectorFailureAssets.contains(assetId)) {
+                            try {
+                                List<Float> vector = targetSession.embed(
+                                        document.getOcrText().trim(), "text");
+                                validateEmbedding(
+                                        assetId, vector, targetProfile.dimension());
+                            } catch (RuntimeException e) {
+                                textVectorFailureAssets.add(assetId);
+                                log.warn("Target text embedding preflight failed for image asset {}: {}",
+                                        assetId, e.getMessage());
+                            }
+                        }
+                    }
+                }
+                String currentScrollId = scrollId;
+                ScrollResponse<SegmentDocument> next = esClient.scroll(
+                        ScrollRequest.of(s -> s.scrollId(currentScrollId)
+                                .scroll(t -> t.time(SCROLL_KEEP_ALIVE_MINUTES + "m"))),
+                        SegmentDocument.class);
+                scrollId = next.scrollId();
+                hits = next.hits().hits();
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Failed to build embedding capability impact report", e);
+        } finally {
+            clearScrollQuietly(scrollId);
+        }
+        long imageCount = imageAssets.size();
+        long textVectorFailures = textVectorFailureAssets.size();
+        long ocrSuccess = Math.max(
+                0L, ocrCandidateAssets.size() - textVectorFailures);
+        long ocrEmpty = Math.max(0L, imageCount - ocrCandidateAssets.size());
+        boolean confirmationRequired = imageCount > 0L || textVectorFailures > 0L;
+        return new EmbeddingImpactReport(
+                imageCount, ocrSuccess, ocrEmpty, textVectorFailures, imageCount,
+                confirmationRequired, !confirmationRequired);
     }
 
     private String buildRebuildReason(SegmentIndexStatusDTO s) {

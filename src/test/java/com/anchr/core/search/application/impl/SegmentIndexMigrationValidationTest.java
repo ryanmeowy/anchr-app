@@ -64,7 +64,9 @@ class SegmentIndexMigrationValidationTest {
                 "embeddingProfileFingerprint",
                 "embeddingCapability",
                 "embeddingModel",
-                "embeddingDimension"), metadata.keySet());
+                "embeddingDimension",
+                "embeddingConfigId",
+                "vectorSchemaVersion"), metadata.keySet());
         assertEquals("fingerprint-a", SegmentIndexManagerImpl.readMetadataString(
                 metadata, "embeddingProfileFingerprint"));
         assertEquals("EMBEDDING", SegmentIndexManagerImpl.readMetadataString(
@@ -75,6 +77,10 @@ class SegmentIndexMigrationValidationTest {
                 metadata, "embeddingDimension"));
         assertEquals(1, SegmentIndexManagerImpl.readMetadataInteger(
                 metadata, "embeddingProfileVersion"));
+        assertEquals(42L, SegmentIndexManagerImpl.readMetadataLong(
+                metadata, "embeddingConfigId"));
+        assertEquals(1, SegmentIndexManagerImpl.readMetadataInteger(
+                metadata, "vectorSchemaVersion"));
     }
 
     @Test

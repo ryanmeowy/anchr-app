@@ -37,7 +37,30 @@ public class SegmentBulkWriter {
             return;
         }
         validateSegments(segments);
-        indexWriteBarrier.withWritePermit(() -> doWrite(segments));
+        indexWriteBarrier.withWritePermit(
+                () -> doWrite(segments, kbSegmentConfig.getWriteTargetName(), true));
+    }
+
+    public void write(List<Segment> segments, String expectedProfileFingerprint) {
+        if (segments == null || segments.isEmpty()) {
+            return;
+        }
+        validateSegments(segments);
+        if (!StringUtils.hasText(expectedProfileFingerprint)) {
+            throw new IllegalArgumentException("Expected embedding profile fingerprint is required");
+        }
+        indexWriteBarrier.withWritePermit(() -> {
+            var snapshot = segmentIndexManager.runtimeSnapshot();
+            if (!expectedProfileFingerprint.equals(snapshot.profile().fingerprint())) {
+                throw new BusinessException(
+                        ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                        "Embedding profile changed before index write; item must be re-embedded");
+            }
+            // Acquiring the distributed lease is the authoritative acceptance
+            // point. A cutover that begins immediately afterwards must drain this
+            // write instead of rejecting it via the status projection.
+            doWrite(segments, snapshot.physicalIndex(), false);
+        });
     }
 
     private void validateSegments(List<Segment> segments) {
@@ -54,13 +77,14 @@ public class SegmentBulkWriter {
         }
     }
 
-    private void doWrite(List<Segment> segments) {
-        SegmentIndexStatusDTO status = segmentIndexManager.status();
-        if (!status.isWritable()) {
-            throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
-                    "Search index is not writable, current status: " + status.getStatus());
+    private void doWrite(List<Segment> segments, String indexName, boolean verifyStatus) {
+        if (verifyStatus) {
+            SegmentIndexStatusDTO status = segmentIndexManager.status();
+            if (!status.isWritable()) {
+                throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
+                        "Search index is not writable, current status: " + status.getStatus());
+            }
         }
-        String indexName = kbSegmentConfig.getWriteTargetName();
         try {
             var requestBuilder = new co.elastic.clients.elasticsearch.core.BulkRequest.Builder();
             requestBuilder.refresh(Refresh.WaitFor);

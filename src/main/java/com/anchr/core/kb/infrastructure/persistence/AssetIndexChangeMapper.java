@@ -16,4 +16,6 @@ public interface AssetIndexChangeMapper {
     List<AssetIndexChangeRecord> listAfterRevision(
             @Param("exclusiveRevision") long exclusiveRevision,
             @Param("limit") int limit);
+
+    long currentRevision();
 }

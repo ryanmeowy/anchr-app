@@ -44,6 +44,11 @@ public class AssetIndexChangeRepositoryImpl implements AssetIndexChangeRepositor
         return records.stream().map(this::toDomain).toList();
     }
 
+    @Override
+    public long currentRevision() {
+        return mapper.currentRevision();
+    }
+
     private void validateNewChange(AssetIndexChange change) {
         if (change == null) {
             throw new IllegalArgumentException("change must not be null.");

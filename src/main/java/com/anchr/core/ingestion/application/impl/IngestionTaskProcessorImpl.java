@@ -17,6 +17,7 @@ import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
 import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
+import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort.ServingEmbeddingSession;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
@@ -216,7 +217,9 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 case EMBED -> {
                     PreparedIndex prepared = processEmbed(item);
                     failureContext = prepared.item();
-                    processIndex(prepared.item(), prepared.asset(), prepared.segments());
+                    processIndex(
+                            prepared.item(), prepared.asset(), prepared.segments(),
+                            prepared.profileFingerprint());
                 }
                 case INDEX -> processIndex(item);
                 case COMPLETE, FAILED -> log.debug(
@@ -366,7 +369,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private PreparedIndex processEmbed(IngestionTaskItem item) {
         Asset asset = findAsset(item);
-        List<Segment> segments = prepareSegments(item, asset);
+        PreparedSegments preparedSegments = prepareSegments(item, asset);
+        List<Segment> segments = preparedSegments.segments();
         LocalDateTime now = LocalDateTime.now();
         IngestionClaimTransition transition = runningTransition(
                         item,
@@ -396,10 +400,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 .errorMessage(null)
                 .finishedAt(null)
                 .build();
-        return new PreparedIndex(indexClaim, asset, segments);
+        return new PreparedIndex(
+                indexClaim, asset, segments, preparedSegments.profileFingerprint());
     }
 
-    private List<Segment> prepareSegments(IngestionTaskItem item, Asset asset) {
+    private PreparedSegments prepareSegments(IngestionTaskItem item, Asset asset) {
         ParseResponse parsed = artifactStore.readParseResult(item);
         boolean parsedContentIsEmpty =
                 parsed.chunks() == null || parsed.chunks().isEmpty();
@@ -418,28 +423,47 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             chunks = List.of();
         }
 
-        Profile profile = Profile.fromMulti(embeddingPort.isMulti());
+        ServingEmbeddingSession embeddingSession = embeddingPort.openServingSession();
+        boolean multi = embeddingSession == null
+                ? embeddingPort.isMulti() : embeddingSession.multi();
+        Profile profile = Profile.fromMulti(multi);
         List<Segment> segments = buildSegments(
                 item, asset, chunks, targetIndexGeneration, profile);
         String imageInput = EmbeddingProjectionPolicy.requiresImageVisual(
                 profile, asset.getFileType())
                 ? resolveImageEmbeddingUrl(asset, item)
                 : null;
-        segments = applyEmbeddings(item, asset, segments, profile, imageInput);
+        segments = applyEmbeddings(
+                item, asset, segments, profile, imageInput, embeddingSession);
         assertCurrentClaim(item);
-        return segments;
+        String profileFingerprint = embeddingSession == null
+                || embeddingSession.profile() == null
+                ? null : embeddingSession.profile().fingerprint();
+        return new PreparedSegments(segments, profileFingerprint);
     }
 
     private void processIndex(IngestionTaskItem item) {
         Asset asset = findAsset(item);
-        List<Segment> segments = prepareSegments(item, asset);
-        processIndex(item, asset, segments);
+        PreparedSegments prepared = prepareSegments(item, asset);
+        processIndex(
+                item, asset, prepared.segments(), prepared.profileFingerprint());
     }
 
     private void processIndex(
             IngestionTaskItem item, Asset asset, List<Segment> segments) {
-        boolean indexed = ingestionIndexFinalizer.finalizeIndex(
-                item, asset, segments);
+        processIndex(item, asset, segments, null);
+    }
+
+    private void processIndex(
+            IngestionTaskItem item,
+            Asset asset,
+            List<Segment> segments,
+            String profileFingerprint
+    ) {
+        boolean indexed = profileFingerprint == null
+                ? ingestionIndexFinalizer.finalizeIndex(item, asset, segments)
+                : ingestionIndexFinalizer.finalizeIndex(
+                        item, asset, segments, profileFingerprint);
         if (!indexed) {
             return;
         }
@@ -616,7 +640,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             return;
         }
         if (exception instanceof BusinessException businessFailure) {
-            failClaim(item, asset, businessFailure.getError(), businessFailure.getMessage());
+            if (businessFailure.getError() == ApiError.SEARCH_BACKEND_UNAVAILABLE) {
+                retryOrFail(item, asset, businessFailure.getError(),
+                        businessFailure.getMessage(), effectiveStageMaxRetries(), null);
+            } else {
+                failClaim(item, asset, businessFailure.getError(), businessFailure.getMessage());
+            }
             return;
         }
         if (exception instanceof EmbeddingCallException embeddingFailure) {
@@ -909,7 +938,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             Asset asset,
             List<Segment> segments,
             Profile profile,
-            String imageInput
+            String imageInput,
+            ServingEmbeddingSession embeddingSession
     ) {
         List<Segment> embedded = new ArrayList<>(segments.size());
         for (Segment segment : segments) {
@@ -932,7 +962,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             List<Float> embedding = embed(
                     item,
                     selected.source(),
-                    selected.inputType().requestValue());
+                    selected.inputType().requestValue(),
+                    embeddingSession);
             if (embedding == null || embedding.isEmpty()) {
                 throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
             }
@@ -960,12 +991,19 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         return resolveSourceUrl(asset, item);
     }
 
-    private List<Float> embed(IngestionTaskItem item, String input, String inputType) {
+    private List<Float> embed(
+            IngestionTaskItem item,
+            String input,
+            String inputType,
+            ServingEmbeddingSession embeddingSession
+    ) {
         assertCurrentClaim(item);
         reserveEmbeddingCallSlot();
         assertCurrentClaim(item);
         try {
-            return embeddingPort.embed(input, inputType);
+            return embeddingSession == null
+                    ? embeddingPort.embed(input, inputType)
+                    : embeddingSession.embed(input, inputType);
         } catch (StaleClaimException | WorkerInterruptedException e) {
             throw e;
         } catch (BusinessException e) {
@@ -1136,6 +1174,14 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private record PreparedIndex(
-            IngestionTaskItem item, Asset asset, List<Segment> segments) {
+            IngestionTaskItem item,
+            Asset asset,
+            List<Segment> segments,
+            String profileFingerprint) {
+    }
+
+    private record PreparedSegments(
+            List<Segment> segments,
+            String profileFingerprint) {
     }
 }

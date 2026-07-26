@@ -36,7 +36,7 @@ public class CapabilityEmbeddingProfileProvider implements EmbeddingProfileProvi
                 .flatMap(CapabilityEmbeddingProfileProvider::createProfile);
     }
 
-    static Optional<EmbeddingProfile> createProfile(CapabilityConfig config) {
+    public static Optional<EmbeddingProfile> createProfile(CapabilityConfig config) {
         if (config == null || !StringUtils.hasText(config.getModelName())) {
             return Optional.empty();
         }

@@ -4,12 +4,17 @@ import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.EmbeddingClient;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
+import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
+import com.anchr.core.integration.ai.client.CapabilityClientFactory;
+import com.anchr.core.search.domain.model.EmbeddingProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ConfigDrivenEmbeddingAdapterTest {
 
@@ -51,6 +56,33 @@ class ConfigDrivenEmbeddingAdapterTest {
                         List.of(java.util.Map.of(
                                 "image",
                                 "https://example.test/original.png")));
+    }
+
+    @Test
+    void targetSessionShouldResolveItsExactConfigInsteadOfTheActiveClient() {
+        CapabilityConfig target = CapabilityConfig.builder()
+                .id(9L)
+                .capability("EMBEDDING")
+                .baseUrl("https://target.example.test")
+                .modelName("text-target")
+                .extraConfig("{\"dimensions\":2}")
+                .enabled(false)
+                .build();
+        EmbeddingProfile targetProfile = CapabilityEmbeddingProfileProvider.createProfile(target)
+                .orElseThrow();
+        RecordingEmbeddingClient targetClient = new RecordingEmbeddingClient();
+        CapabilityConfigRepository repository = mock(CapabilityConfigRepository.class);
+        CapabilityClientFactory factory = mock(CapabilityClientFactory.class);
+        when(repository.findById(9L)).thenReturn(java.util.Optional.of(target));
+        when(factory.build(target)).thenReturn(targetClient);
+        ConfigDrivenEmbeddingAdapter adapter = new ConfigDrivenEmbeddingAdapter(
+                new ClientCacheManager(), factory, mock(CapabilityResolver.class));
+        adapter.setCapabilityConfigRepository(repository);
+
+        adapter.openSession(targetProfile).embed("target text", "text");
+
+        assertThat(targetClient.contexts).hasSize(1);
+        assertThat(targetClient.contexts.getFirst().modelName()).isEqualTo("text-target");
     }
 
     private static final class RecordingEmbeddingClient implements EmbeddingClient {

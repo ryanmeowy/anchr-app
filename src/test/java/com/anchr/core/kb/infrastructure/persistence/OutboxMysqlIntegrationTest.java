@@ -60,6 +60,16 @@ class OutboxMysqlIntegrationTest {
                     connection,
                     "asset_index_change",
                     "idx_asset_index_change_kb_revision")).isTrue();
+            assertThat(columnExists(
+                    connection, "embedding_profile_deployment", "serving_fingerprint")).isTrue();
+            assertThat(columnExists(
+                    connection, "embedding_profile_deployment", "rebuild_phase")).isTrue();
+            assertThat(columnExists(
+                    connection, "physical_index_profile", "max_applied_revision")).isTrue();
+        assertThat(columnExists(
+                connection, "embedding_index_write_lease", "expires_at")).isTrue();
+        assertThat(columnExists(
+                connection, "physical_index_profile", "config_id")).isTrue();
         }
     }
 

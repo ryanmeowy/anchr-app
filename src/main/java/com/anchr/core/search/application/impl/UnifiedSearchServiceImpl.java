@@ -8,6 +8,8 @@ import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.KbScopeResolver;
 import com.anchr.core.search.application.UnifiedSearchService;
+import com.anchr.core.search.application.IndexRuntimeContext;
+import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.SearchFilter;
@@ -28,6 +30,7 @@ import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -60,6 +63,17 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private final AppSearchProperties appSearchProperties;
     private final MeterRegistry meterRegistry;
     private final ActivityEventService activityEventService;
+    private IndexRuntimeContext indexRuntimeContext;
+    private SegmentIndexManager segmentIndexManager;
+
+    @Autowired(required = false)
+    void setIndexRuntime(
+            IndexRuntimeContext indexRuntimeContext,
+            SegmentIndexManager segmentIndexManager
+    ) {
+        this.indexRuntimeContext = indexRuntimeContext;
+        this.segmentIndexManager = segmentIndexManager;
+    }
 
     @Override
     public List<SearchResultDTO> search(SearchQueryDTO query) {
@@ -98,6 +112,16 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private SearchResult searchInternal(SearchQueryDTO query, int offset, List<String> keywords) {
+        if (indexRuntimeContext == null || segmentIndexManager == null
+                || indexRuntimeContext.current().isPresent()) {
+            return doSearchInternal(query, offset, keywords);
+        }
+        return indexRuntimeContext.withSnapshot(
+                segmentIndexManager.runtimeSnapshot(),
+                () -> doSearchInternal(query, offset, keywords));
+    }
+
+    private SearchResult doSearchInternal(SearchQueryDTO query, int offset, List<String> keywords) {
         long startMs = System.currentTimeMillis();
         if (query == null || !StringUtils.hasText(query.getQuery())) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");

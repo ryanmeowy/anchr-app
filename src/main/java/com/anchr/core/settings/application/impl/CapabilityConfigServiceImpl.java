@@ -10,6 +10,9 @@ import com.anchr.core.integration.ai.client.GenerationClient;
 import com.anchr.core.integration.ai.client.MultiEmbeddingClient;
 import com.anchr.core.integration.ai.client.RerankClient;
 import com.anchr.core.integration.ai.client.TextEmbeddingClient;
+import com.anchr.core.integration.ai.adapter.CapabilityEmbeddingProfileProvider;
+import com.anchr.core.search.domain.model.EmbeddingProfile;
+import com.anchr.core.search.domain.repository.EmbeddingDeploymentRepository;
 import com.anchr.core.settings.application.CapabilityConfigService;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.model.EmbedParamEnum;
@@ -22,6 +25,7 @@ import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResul
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -44,6 +48,14 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     private final CapabilityClientFactory clientFactory;
     private final CapabilityResolver configResolver;
     private final ClientCacheManager clientCacheManager;
+    private EmbeddingDeploymentRepository embeddingDeploymentRepository;
+
+    @Autowired(required = false)
+    void setEmbeddingDeploymentRepository(
+            EmbeddingDeploymentRepository embeddingDeploymentRepository
+    ) {
+        this.embeddingDeploymentRepository = embeddingDeploymentRepository;
+    }
 
     @Override
     public List<CapabilityConfigDTO> get(String capability) {
@@ -101,6 +113,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         verifyEmbedModel(capability, request);
         CapabilityConfig existing = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Config not found: " + id));
+        assertEmbeddingConfigMutable(capability, id);
         String apiKeyEnc = existing.getApiKeyEnc();
         if (StringUtils.hasText(request.getApiKey())) {
             apiKeyEnc = aesUtil.encrypt(request.getApiKey());
@@ -186,6 +199,19 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
 
     @Override
     public void select(String capability, Long id) {
+        if (isEmbeddingCapability(capability) && embeddingDeploymentRepository != null) {
+            CapabilityConfig selected = repository.findById(id)
+                    .filter(config -> capability.equals(config.getCapability()))
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Embedding config not found: " + id));
+            EmbeddingProfile desired = CapabilityEmbeddingProfileProvider.createProfile(selected)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Embedding config does not define a valid immutable profile"));
+            // Selecting an embedding model requests a deployment. The currently enabled
+            // config remains the serving model until the physical-index alias is cut over.
+            embeddingDeploymentRepository.requestDesired(desired);
+            return;
+        }
         repository.select(capability, id);
         // embedding types are mutually exclusive
         if (ModelTypeEnum.EMBEDDING.name().equals(capability)) {
@@ -200,8 +226,25 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
 
     @Override
     public void del(String capability, Long id) {
+        assertEmbeddingConfigMutable(capability, id);
         repository.del(capability, id);
         refreshSlot(capability);
+    }
+
+    private void assertEmbeddingConfigMutable(String capability, Long id) {
+        if (!isEmbeddingCapability(capability) || embeddingDeploymentRepository == null) {
+            return;
+        }
+        boolean protectedConfig = embeddingDeploymentRepository.isConfigProtected(id);
+        if (protectedConfig) {
+            throw new IllegalStateException(
+                    "Desired, serving or target embedding config is immutable; create a new config instead");
+        }
+    }
+
+    private boolean isEmbeddingCapability(String capability) {
+        return ModelTypeEnum.EMBEDDING.name().equals(capability)
+                || ModelTypeEnum.MULTI_EMBEDDING.name().equals(capability);
     }
 
     /**

@@ -25,7 +25,7 @@
 |---|---|---|---:|---:|---|---|
 | ANCHR-101A | 修复当前单向量结构下图片分块未写入向量 | 已完成 | P0 | S | app | 无 |
 | ANCHR-101B | 固化单 embedding 的 Profile 投影与检索契约 | 源码与目标测试已完成；待真实 ES 隔离索引验证与部署验收 | P1 | M | app | 101A、107 |
-| ANCHR-101C | 建立 Embedding Profile 部署与物理索引安全切换 | 待执行 | P1 | L | app、web | 101B、107 |
+| ANCHR-101C | 建立 Embedding Profile 部署与物理索引安全切换 | 源码与本地回归已完成；待真实 MySQL/ES 多实例故障演练、迁移与部署验收 | P1 | L | app、web | 101B、107 |
 | ANCHR-102 | 建立正确的 HTTP 错误与上传清理契约 | 已完成 | P0 | M | app、web | 无 |
 | ANCHR-103 | Ingestion 创建请求幂等与前端恢复 | 已完成 | P0 | M | app、web | 102 |
 | ANCHR-104 | 关闭未消费且加密错误的内嵌图片上传链路 | 已完成 | P1 | S/M | app、docling | 101A |
@@ -414,6 +414,18 @@ ES alias 与数据库不能进入同一个事务，因此切换顺序为：
 - 重建期间持续新增、更新和删除资产，切换后目标索引无漏写、重复或已删除资产复活。
 - alias 切换后的 query、write 和 Retrieval Plan 使用同一个 profile snapshot。
 - 重建失败不影响旧索引服务；alias 回滚后旧多模态搜索恢复。
+
+### 实施与验证记录（2026-07-26）
+
+- 新增 V20 控制面：`embedding_profile_deployment` 持久化 desired/serving/target profile、不可变 target 快照、部署状态、owner/lease、revision watermark、跨实例迁移进度和能力影响报告；`physical_index_profile` 记录 physical index 的 fingerprint、capability、model、schema version、dimension、最大追平 revision 和回滚生命周期；`embedding_index_write_lease` 为最终切换提供跨实例短写屏障。
+- 设置页选择 Embedding/Multi Embedding 时只更新 desired profile，不再修改当前 enabled/serving client。desired、serving、target 以及仍由 ACTIVE/BUILDING/ROLLBACK 物理索引引用的配置禁止原地修改和删除；alias 切换成功后才更新兼容的 `capability_config.enabled` 视图并失效本地旧 client。
+- ES mapping `_meta` 现在记录 configId、profile fingerprint、capability、model、vector schema version 和 dimension。搜索请求通过 `IndexRuntimeSnapshot` 将 physical index、profile、immutable embedding session 和 Retrieval Plan 绑定到同一请求；文本召回与 KNN 均固定读取该 physical index，不再分别读取 alias 与 active client。
+- Ingestion 在 EMBED 阶段打开 serving session，并把 profile fingerprint 传给最终 bulk write。写入在跨实例 permit 内重新读取 alias 权威快照；若切换已发生，旧 profile 生成的向量被拒绝并回到可恢复重算流程，不能写入新向量空间。外层 write lease 一直持有到 generation 激活与 107 change-log 所在数据库事务完成，避免 ES bulk 已返回但 revision 尚未提交时被最终追平漏掉。
+- 在线 rebuild 在开始时记录 107 的 `asset_index_change.revision`，不持有长写锁迁移存量数据；随后按 revision 幂等重放 generation activate/delete，最终进入 `CUTTING_OVER` 后拒绝新写 permit、等待所有实例的短 lease 排空、应用最后一批变化、验证 mapping/fingerprint/dimension，再原子切换 read/write alias。写 lease 由后台心跳续期，批写返回后还会再次校验 lease 未过期，避免超长 ES 写被切换过程误判为已排空。
+- 多模态切纯文本前扫描图片投影，使用不可变 target session 预检每个有效 OCR 的文本向量及维度，并持久化图片资产、预检成功、预检失败、空 OCR 和全部原图视觉语义损失数量；Web 确认框明确展示能力降级。重建期及失败后，只要旧 serving runtime 仍一致且可读写，Web 不再因 desired/serving 暂时不同或失败告警卸载业务页面，仅短切换阶段遵循后端 writable gate。
+- alias 已切但数据库激活未完成时，运行时以 alias metadata 为权威恢复 target session 并完成 deployment CAS；alias 尚未切且 cutover lease 过期时恢复旧 serving 并标记失败。切换过程异常会自动切回旧 alias；另提供 `/api/v1/index/rollback`。旧 active 索引转为 ROLLBACK 时会把水位推进到最终 cutover revision，且其配置继续受不可变保护；仅当 fingerprint/schema 完整且 `maxAppliedRevision` 等于当前 change-log revision 时允许直接回滚，否则强制增量追平或全量重建。
+- 验证：Java 全仓 530 个测试，0 failure、0 error，28 个依赖 Docker/Testcontainers 的测试因本机 Docker 不可用而跳过；101C 新增的 desired 不提前激活、旧物理索引配置/最终水位保护、请求快照、target exact session、过期 profile/lease 拒写、事务提交前 lease 保持、已接纳写在切换竞态中完成和 mapping metadata 契约测试已通过，V20 schema 断言已加入被跳过的 MySQL 集成套件。`anchr-web` 生产构建与 TypeScript 检查通过，MyBatis XML 通过 `xmllint`。
+- 尚未在真实 MySQL 8.4 执行 V20，也未在真实 Elasticsearch/多实例环境执行持续增删改、进程崩溃、partial bulk、alias 切换/回滚和质量观察。因此当前状态是“源码与本地回归已完成”，不得标记为已部署或已完成生产验收。
 
 ---
 

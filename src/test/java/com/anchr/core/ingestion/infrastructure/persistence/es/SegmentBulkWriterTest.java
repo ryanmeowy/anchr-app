@@ -13,6 +13,8 @@ import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
+import com.anchr.core.search.domain.model.EmbeddingProfile;
+import com.anchr.core.search.domain.model.IndexRuntimeSnapshot;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +73,47 @@ class SegmentBulkWriterTest {
                 .hasMessage("segments[0].segmentId cannot be blank.");
 
         verifyNoInteractions(esClient);
+    }
+
+    @Test
+    void write_shouldRejectVectorsPreparedByAStaleServingProfile() {
+        EmbeddingProfile current =
+                new EmbeddingProfile(2L, "EMBEDDING", "new-model", 2, "new-fp");
+        when(segmentIndexManager.runtimeSnapshot()).thenReturn(
+                new IndexRuntimeSnapshot(
+                        "kb_segment_new", current,
+                        (source, type) -> List.of(0.1F, 0.2F),
+                        IndexRuntimeSnapshot.RetrievalPlan.singleEmbeddingV1()));
+
+        assertThatThrownBy(() -> writer.write(
+                List.of(segment("segment-1", 3L)), "old-fp"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("must be re-embedded");
+
+        verifyNoInteractions(esClient);
+    }
+
+    @Test
+    void acceptedProfileWriteShouldUseSnapshotEvenIfStatusTurnsNonWritable() throws Exception {
+        EmbeddingProfile current =
+                new EmbeddingProfile(2L, "EMBEDDING", "new-model", 2, "new-fp");
+        when(segmentIndexManager.runtimeSnapshot()).thenReturn(
+                new IndexRuntimeSnapshot(
+                        "kb_segment_new", current,
+                        (source, type) -> List.of(0.1F, 0.2F),
+                        IndexRuntimeSnapshot.RetrievalPlan.singleEmbeddingV1()));
+        when(esClient.bulk(any(BulkRequest.class))).thenReturn(
+                BulkResponse.of(response -> response
+                        .errors(false)
+                        .took(1)
+                        .items(successfulItem("segment-1"))));
+
+        writer.write(List.of(segment("segment-1", 3L)), "new-fp");
+
+        ArgumentCaptor<BulkRequest> request = ArgumentCaptor.forClass(BulkRequest.class);
+        verify(esClient).bulk(request.capture());
+        assertThat(request.getValue().operations().getFirst().index().index())
+                .isEqualTo("kb_segment_new");
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.interfaces.rest.dto.IndexRebuildConfirmRequest;
+import com.anchr.core.search.interfaces.rest.dto.IndexRollbackRequest;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -57,6 +58,20 @@ public class IndexController {
         try {
             String taskId = segmentIndexManager.prepareRebuild();
             return Result.success(taskId);
+        } catch (IllegalStateException e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    @RequireAuth()
+    @PostMapping("/rollback")
+    public Result<Boolean> rollback(@RequestBody IndexRollbackRequest request) {
+        if (request == null || request.getPhysicalIndex() == null
+                || request.getPhysicalIndex().isBlank()) {
+            return Result.error("physicalIndex is required");
+        }
+        try {
+            return Result.success(segmentIndexManager.rollback(request.getPhysicalIndex()));
         } catch (IllegalStateException e) {
             return Result.error(e.getMessage());
         }
