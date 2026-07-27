@@ -55,11 +55,7 @@ class OutboxMysqlIntegrationTest {
             assertThat(indexExists(connection, "outbox_event", "idx_outbox_poll")).isTrue();
             assertThat(indexExists(connection, "outbox_event", "idx_outbox_locked")).isTrue();
             assertThat(columnExists(connection, "asset", "active_index_generation")).isTrue();
-            assertThat(columnExists(connection, "asset_index_change", "revision")).isTrue();
-            assertThat(indexExists(
-                    connection,
-                    "asset_index_change",
-                    "idx_asset_index_change_kb_revision")).isTrue();
+            assertThat(columnExists(connection, "asset_index_change", "revision")).isFalse();
         }
     }
 

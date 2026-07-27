@@ -10,7 +10,7 @@ import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
-import com.anchr.core.kb.application.support.AssetIndexChangeRecorder;
+import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
@@ -38,7 +38,7 @@ public class IngestionIndexFinalizer {
     private final IngestionTaskRepository ingestionTaskRepository;
     private final SegmentRepository segmentRepository;
     private final SegmentBulkWriter segmentBulkWriter;
-    private final AssetIndexChangeRecorder assetIndexChangeRecorder;
+    private final AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
     private final IngestionArtifactCleanupRecorder artifactCleanupRecorder;
 
     @Transactional(rollbackFor = Exception.class)
@@ -91,10 +91,9 @@ public class IngestionIndexFinalizer {
             throw new IllegalStateException(
                     "Asset generation changed while holding its index finalization lock.");
         }
-        assetIndexChangeRecorder.generationActivated(
+        assetCleanupOutboxRecorder.generationRetired(
                 item.getKbId(),
                 lockedAsset.getId(),
-                targetGeneration,
                 previousGeneration,
                 updatedBy,
                 now);
@@ -214,10 +213,9 @@ public class IngestionIndexFinalizer {
             throw new IllegalStateException(
                     "Overwritten asset changed while holding its row lock.");
         }
-        assetIndexChangeRecorder.assetDeleted(
+        assetCleanupOutboxRecorder.assetDeleted(
                 item.getKbId(),
                 oldAssetId,
-                oldAsset.getActiveIndexGeneration(),
                 updatedBy,
                 now);
     }

@@ -179,44 +179,9 @@ public class IngestionArtifactStore {
     }
 
     /**
-     * Resolves uploaded embedded-image objects from an existing parse artifact.
-     * Cleanup deliberately reuses the normal parse artifact instead of keeping a
-     * second image-specific lifecycle registry.
+     * Resolves uploaded image keys from the existing Parse artifact. An already deleted
+     * artifact is an idempotent cleanup success and returns empty.
      */
-    public List<String> readEmbeddedImageObjectKeys(
-            IngestionArtifactReference reference, String expectedAssetId) {
-        if (reference == null) {
-            return List.of();
-        }
-        String objectKey = requireText(reference.getObjectKey(), "parseArtifact.objectKey");
-        byte[] compressed = readCompressed(objectKey);
-        validateRegistryReference(
-                reference,
-                PARSE_REGISTRY_TYPE,
-                objectKey,
-                compressed,
-                Long.MAX_VALUE);
-        IngestionParseArtifact artifact = readParseArtifact(objectKey, compressed);
-        if (!Objects.equals(expectedAssetId, artifact.assetId())
-                || !Objects.equals(objectKey, parseObjectKey(artifact))) {
-            throw identityMismatch(
-                    "Parse artifact identity does not match the asset cleanup request.");
-        }
-        if (artifact.result().images() == null) {
-            return List.of();
-        }
-        return artifact.result().images().stream()
-                .filter(Objects::nonNull)
-                .filter(image -> Objects.equals(ARTIFACT_VERSION, image.artifactVersion()))
-                .filter(image -> "UPLOADED".equalsIgnoreCase(image.uploadStatus()))
-                .map(ParseResponse.Image::imageObjectKey)
-                .filter(value -> value != null && !value.isBlank())
-                .map(String::trim)
-                .distinct()
-                .toList();
-    }
-
-    /** Cleanup variant that treats an already deleted Parse artifact as success. */
     public Optional<List<String>> readEmbeddedImageObjectKeysIfPresent(
             IngestionArtifactReference reference, String expectedAssetId) {
         if (reference == null) return Optional.of(List.of());

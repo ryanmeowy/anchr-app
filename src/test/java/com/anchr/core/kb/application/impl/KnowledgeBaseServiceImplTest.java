@@ -4,7 +4,7 @@ import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
-import com.anchr.core.kb.application.support.AssetIndexChangeRecorder;
+import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
@@ -25,7 +25,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -43,7 +42,7 @@ class KnowledgeBaseServiceImplTest {
     @Mock
     private ActivityEventRepository activityEventRepository;
     @Mock
-    private AssetIndexChangeRecorder assetIndexChangeRecorder;
+    private AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
     @Mock
     private IdGen idGen;
 
@@ -56,7 +55,7 @@ class KnowledgeBaseServiceImplTest {
                 knowledgeBaseRepository,
                 assetRepository,
                 activityEventRepository,
-                assetIndexChangeRecorder,
+                assetCleanupOutboxRecorder,
                 idGen);
         when(knowledgeBaseRepository.findActiveById("kb-1"))
                 .thenReturn(Optional.of(KnowledgeBase.builder()
@@ -71,7 +70,7 @@ class KnowledgeBaseServiceImplTest {
     }
 
     @Test
-    void deleteDocument_shouldLockSoftDeleteAndRecordActiveGeneration() {
+    void deleteDocument_shouldLockSoftDeleteAndQueueAssetCleanup() {
         when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset("asset-1", 7L)));
         when(assetRepository.markDeleted(eq("kb-1"), eq("asset-1"), eq("user-a"), any()))
@@ -79,12 +78,12 @@ class KnowledgeBaseServiceImplTest {
 
         service.deleteDocument("kb-1", "asset-1");
 
-        var ordered = inOrder(assetRepository, assetIndexChangeRecorder);
+        var ordered = inOrder(assetRepository, assetCleanupOutboxRecorder);
         ordered.verify(assetRepository).findByIdForUpdate("kb-1", "asset-1");
         ordered.verify(assetRepository).markDeleted(
                 eq("kb-1"), eq("asset-1"), eq("user-a"), any());
-        ordered.verify(assetIndexChangeRecorder).assetDeleted(
-                eq("kb-1"), eq("asset-1"), eq(7L), eq("user-a"), any());
+        ordered.verify(assetCleanupOutboxRecorder).assetDeleted(
+                eq("kb-1"), eq("asset-1"), eq("user-a"), any());
         verify(knowledgeBaseRepository).refreshDocumentStats("kb-1", "user-a", false);
         verify(activityEventRepository).deleteCitationOpenedByAssetId("user-a", "asset-1");
     }
@@ -98,14 +97,14 @@ class KnowledgeBaseServiceImplTest {
                 .isInstanceOf(BusinessException.class);
 
         verify(assetRepository, never()).markDeleted(any(), any(), any(), any());
-        verify(assetIndexChangeRecorder, never())
-                .assetDeleted(any(), any(), anyLong(), any(), any());
+        verify(assetCleanupOutboxRecorder, never())
+                .assetDeleted(any(), any(), any(), any());
         verify(activityEventRepository, never()).deleteCitationOpenedByAssetId(any(), any());
         verify(knowledgeBaseRepository, never()).refreshDocumentStats(any(), any(), eq(false));
     }
 
     @Test
-    void deleteDocument_shouldNotRecordChangeWhenLockedDeleteLosesRace() {
+    void deleteDocument_shouldNotQueueCleanupWhenLockedDeleteLosesRace() {
         when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset("asset-1", 5L)));
         when(assetRepository.markDeleted(eq("kb-1"), eq("asset-1"), eq("user-a"), any()))
@@ -114,21 +113,21 @@ class KnowledgeBaseServiceImplTest {
         assertThatThrownBy(() -> service.deleteDocument("kb-1", "asset-1"))
                 .isInstanceOf(BusinessException.class);
 
-        verify(assetIndexChangeRecorder, never())
-                .assetDeleted(any(), any(), anyLong(), any(), any());
+        verify(assetCleanupOutboxRecorder, never())
+                .assetDeleted(any(), any(), any(), any());
         verify(activityEventRepository, never()).deleteCitationOpenedByAssetId(any(), any());
         verify(knowledgeBaseRepository, never()).refreshDocumentStats(any(), any(), eq(false));
     }
 
     @Test
-    void deleteDocument_shouldPropagateRecorderFailureForTransactionRollback() {
+    void deleteDocument_shouldPropagateOutboxFailureForTransactionRollback() {
         when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset("asset-1", 5L)));
         when(assetRepository.markDeleted(eq("kb-1"), eq("asset-1"), eq("user-a"), any()))
                 .thenReturn(true);
         doThrow(new IllegalStateException("database unavailable"))
-                .when(assetIndexChangeRecorder)
-                .assetDeleted(eq("kb-1"), eq("asset-1"), eq(5L), eq("user-a"), any());
+                .when(assetCleanupOutboxRecorder)
+                .assetDeleted(eq("kb-1"), eq("asset-1"), eq("user-a"), any());
 
         assertThatThrownBy(() -> service.deleteDocument("kb-1", "asset-1"))
                 .isInstanceOf(IllegalStateException.class)

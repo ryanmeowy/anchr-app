@@ -6,7 +6,7 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
-import com.anchr.core.kb.application.support.AssetIndexChangeRecorder;
+import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
 import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
@@ -43,7 +43,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final AssetRepository assetRepository;
     private final ActivityEventRepository activityEventRepository;
-    private final AssetIndexChangeRecorder assetIndexChangeRecorder;
+    private final AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
     private final IdGen idGen;
 
     @Override
@@ -213,7 +213,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         RequestUserContext context = UserContextHolder.get();
         get(kbId);
         LocalDateTime now = LocalDateTime.now();
-        Asset asset = assetRepository.findByIdForUpdate(kbId, assetId)
+        assetRepository.findByIdForUpdate(kbId, assetId)
                 .filter(candidate -> candidate.getDeletedAt() == null)
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
         boolean deleted = assetRepository.markDeleted(
@@ -223,10 +223,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         }
         activityEventRepository.deleteCitationOpenedByAssetId(context.userId(), assetId);
         knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), false);
-        assetIndexChangeRecorder.assetDeleted(
+        assetCleanupOutboxRecorder.assetDeleted(
                 kbId,
                 assetId,
-                asset.getActiveIndexGeneration(),
                 context.userId(),
                 now);
     }

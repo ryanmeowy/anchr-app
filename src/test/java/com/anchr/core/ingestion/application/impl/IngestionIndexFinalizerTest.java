@@ -8,7 +8,7 @@ import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
-import com.anchr.core.kb.application.support.AssetIndexChangeRecorder;
+import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.domain.model.Segment;
@@ -48,7 +48,7 @@ class IngestionIndexFinalizerTest {
     @Mock
     private SegmentBulkWriter segmentBulkWriter;
     @Mock
-    private AssetIndexChangeRecorder assetIndexChangeRecorder;
+    private AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
     @Mock
     private IngestionArtifactCleanupRecorder artifactCleanupRecorder;
 
@@ -61,7 +61,7 @@ class IngestionIndexFinalizerTest {
                 ingestionTaskRepository,
                 segmentRepository,
                 segmentBulkWriter,
-                assetIndexChangeRecorder,
+                assetCleanupOutboxRecorder,
                 artifactCleanupRecorder);
     }
 
@@ -102,8 +102,8 @@ class IngestionIndexFinalizerTest {
         verify(assetRepository, never()).activateIndexGeneration(
                 any(), any(), anyLong(), anyLong(),
                 any(), any(), anyInt(), anyInt(), any(), any());
-        verify(assetIndexChangeRecorder, never()).generationActivated(
-                any(), any(), anyLong(), anyLong(), any(), any());
+        verify(assetCleanupOutboxRecorder, never()).generationRetired(
+                any(), any(), anyLong(), any(), any());
         ArgumentCaptor<IngestionClaimTransition> transition =
                 ArgumentCaptor.forClass(IngestionClaimTransition.class);
         verify(ingestionTaskRepository).transitionClaim(transition.capture());
@@ -174,7 +174,7 @@ class IngestionIndexFinalizerTest {
                 assetRepository,
                 segmentRepository,
                 segmentBulkWriter,
-                assetIndexChangeRecorder);
+                assetCleanupOutboxRecorder);
         order.verify(ingestionTaskRepository).isClaimCurrentForUpdate(
                 "item-1", 3L, IngestionExecutionStage.INDEX, 4, "lease-1");
         order.verify(assetRepository).findByIdForUpdate("kb-1", "asset-1");
@@ -183,9 +183,8 @@ class IngestionIndexFinalizerTest {
         order.verify(assetRepository).activateIndexGeneration(
                 eq("kb-1"), eq("asset-1"), eq(0L), eq(1L),
                 any(), any(), eq(2), eq(2), eq("user-a"), any());
-        order.verify(assetIndexChangeRecorder).generationActivated(
-                eq("kb-1"), eq("asset-1"), eq(1L), eq(0L),
-                eq("user-a"), any());
+        order.verify(assetCleanupOutboxRecorder).generationRetired(
+                eq("kb-1"), eq("asset-1"), eq(0L), eq("user-a"), any());
         order.verify(ingestionTaskRepository).transitionClaim(transition.capture());
         assertThat(transition.getValue().getNextExecutionStage())
                 .isEqualTo(IngestionExecutionStage.COMPLETE);
@@ -220,9 +219,8 @@ class IngestionIndexFinalizerTest {
         verify(assetRepository).activateIndexGeneration(
                 eq("kb-1"), eq("asset-1"), eq(0L), eq(1L),
                 any(), any(), eq(0), eq(0), eq("user-a"), any());
-        verify(assetIndexChangeRecorder).generationActivated(
-                eq("kb-1"), eq("asset-1"), eq(1L), eq(0L),
-                eq("user-a"), any());
+        verify(assetCleanupOutboxRecorder).generationRetired(
+                eq("kb-1"), eq("asset-1"), eq(0L), eq("user-a"), any());
         ArgumentCaptor<IngestionClaimTransition> transition =
                 ArgumentCaptor.forClass(IngestionClaimTransition.class);
         verify(ingestionTaskRepository).transitionClaim(transition.capture());
@@ -260,13 +258,12 @@ class IngestionIndexFinalizerTest {
         boolean indexed = finalizer.finalizeIndex(item, source, segments);
 
         assertThat(indexed).isTrue();
-        verify(assetIndexChangeRecorder).generationActivated(
-                eq("kb-1"), eq("asset-1"), eq(1L), eq(0L),
-                eq("user-a"), any());
+        verify(assetCleanupOutboxRecorder).generationRetired(
+                eq("kb-1"), eq("asset-1"), eq(0L), eq("user-a"), any());
         verify(assetRepository).markDeleted(
                 eq("kb-1"), eq("asset-old"), eq("user-a"), any());
-        verify(assetIndexChangeRecorder).assetDeleted(
-                eq("kb-1"), eq("asset-old"), eq(5L), eq("user-a"), any());
+        verify(assetCleanupOutboxRecorder).assetDeleted(
+                eq("kb-1"), eq("asset-old"), eq("user-a"), any());
         verify(segmentRepository, never()).deleteByAssetId("asset-old");
     }
 

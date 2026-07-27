@@ -1045,21 +1045,9 @@ ES _id = segmentId
 
 overwrite 必须在同一事务 soft delete 旧 asset 并写 `DELETE_ASSET` outbox，不再直接调用 ES 或吞异常。复用现有 outbox 的 claim、lease、backoff 和 `SKIP LOCKED`。
 
-同一事务还要发布可重放的索引变化记录：
-
-```text
-eventId / revision
-assetId
-operation = GENERATION_ACTIVATED | ASSET_DELETED
-indexGeneration
-occurredAt
-```
-
-该变化记录服务于 Asset/ES 一致性对账和 generation 事件重放。ANCHR-101C 当前采用全程停写重建，不消费该日志，也不记录 watermark。
-
 ### 边界
 
-本卡中的 `indexGeneration` 是单个 Asset 内容/segment 的逻辑版本，不是 ES 物理索引版本。本卡拥有目标 generation 清理重写、generation 激活门禁、MySQL/ES 可见性和变化事件；可以在所有召回路由之后统一过滤非 active generation，但不得改变路由分数或相对顺序。不创建/切换 read-write alias，不选择 embedding profile，不增加第二向量检索路由，也不搬迁 Outbox 模块。Outbox 的现有可靠投递机制在本卡只被消费，包结构治理归 205。
+本卡中的 `indexGeneration` 是单个 Asset 内容/segment 的逻辑版本，不是 ES 物理索引版本。本卡拥有目标 generation 清理重写、generation 激活门禁和 MySQL/ES 可见性；可以在所有召回路由之后统一过滤非 active generation，但不得改变路由分数或相对顺序。不创建/切换 read-write alias，不选择 embedding profile，不增加第二向量检索路由，也不搬迁 Outbox 模块。旧 generation 和 Asset 的外部清理由既有 Outbox 可靠投递机制负责。
 
 ### 验收
 
@@ -1068,17 +1056,17 @@ occurredAt
 - ES 写完后 app 崩溃可幂等恢复。
 - overwrite 删除失败进入 outbox。
 - 删除与 ingestion 并发不会复活资产。
-- generation 激活/删除变化可按 revision 幂等重放，供一致性对账和后续明确立项的消费者使用。
+- generation/Asset 清理事件失败后可按既有 Outbox 策略重试。
 
 ### 实施与验证记录
 
-- V19 增加 `asset.active_index_generation`、`ingestion_task_item.target_index_generation` 和只追加的 `asset_index_change`；没有新增业务 CHECK 或外键。旧 Asset/旧 ES 文档兼容为 generation 0。
+- V19 只增加 `asset.active_index_generation`、`ingestion_task_item.target_index_generation` 及查询索引；没有新增变化日志表、业务 CHECK 或外键。旧 Asset/旧 ES 文档兼容为 generation 0。
 - 新建 Asset 固定从 generation 1 开始；REPARSE/REEMBED 在 Asset 行锁内按 `max(active generation, 已分配 target generation) + 1` 分配，旧数据中 target 为空的 item 在首次 claim 时用相同规则补齐。target 只保存在稳定 item，不复制到 execution。
 - `DoclingChunkMapper` 使用既有 `IdGen` 为每个 Segment 生成普通 segmentId；`SegmentBulkWriter` 直接使用相同值作为 ES `_id` 写入，设置 `refresh=wait_for` 保证激活前新 generation 已可搜索，并拒绝空 ID、响应数量不一致和任一部分失败。
-- INDEX finalizer 先校验当前 claim 并锁定 Asset，再清理同一未激活 target generation 的重试残留、bulk 覆盖写、CAS 激活 generation，最后在同一 MySQL 事务写变化记录、旧 generation 清理 outbox 和 item COMPLETE。数据库提交失败时新 generation 留在 ES 但不满足 active gate；后续同 target 重试会先清掉残留。
+- INDEX finalizer 先校验当前 claim 并锁定 Asset，再清理同一未激活 target generation 的重试残留、bulk 覆盖写、CAS 激活 generation，最后在同一 MySQL 事务写旧 generation 清理 outbox 和 item COMPLETE。数据库提交失败时新 generation 留在 ES 但不满足 active gate；后续同 target 重试会先清掉残留。
 - 搜索在 RRF 合并后、Rerank 前一次批量读取候选 Asset 的 active generation，按原顺序 fail-closed 过滤；全文读取在分页开始时固定同一个 active generation。generation 0 查询同时兼容显式 `0` 和旧文档缺字段。
 - Segment Preview 与刷新入口也校验父 Asset 的 active generation；旧 generation、已删除 Asset 或不存在的 Segment 统一返回 `SEGMENT_NOT_FOUND`，不会通过旧 segmentId 绕过搜索可见性门禁。
-- 普通删除与 overwrite 都在 Asset 行锁事务内 soft delete，并同时追加 `ASSET_DELETED` 变化和 `DELETE_ASSET` outbox；旧 generation 使用 `DELETE_ASSET_GENERATION` 复用现有 claim、lease、backoff 和失败重试，不再直接删 ES 或吞异常。
+- 普通删除与 overwrite 都在 Asset 行锁事务内 soft delete，并同时追加 `DELETE_ASSET` outbox；旧 generation 使用 `DELETE_ASSET_GENERATION` 复用现有 claim、lease、backoff 和失败重试，不再直接删 ES 或吞异常。
 - JDK 21 全量回归共 463 项，0 failure、0 error、27 skipped；27 项均为当前机器无 Docker 而跳过的 Testcontainers 用例。`git diff --check`、三个变更 Mapper 的 `xmllint`、ES mapping JSON 校验、主代码编译和测试代码编译通过。
 - 尚未执行业务库 V19、真实 Elasticsearch partial-bulk/DB-rollback/crash 故障演练或部署观察，因此当前状态不表示已迁移、发布或接管生产 INDEX 流量。`anchr-web`、`anchr-docling` 不在本卡实现边界内，没有生产代码改动。
 
@@ -1350,7 +1338,7 @@ assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
 - `DELETE_ASSET_GENERATION` / `DELETE_ASSET` 先删除图片对象/目录和 ES Segment，再删除整个 Parse attempt 目录及对应 artifact registry 行。终态失败 transition 在同一 MySQL 事务写 `DELETE_INGESTION_ATTEMPT_ARTIFACTS`，只清理自己的 attempt 目录；未新增图片表或图片状态。
 - 检索已拆为 BM25、普通同字段 vector route、`DOCUMENT_IMAGE` 同字段 vector route，分别配置 topK/similarity，RRF 后按 `assetId + segmentType` 限流再 Rerank、父资产聚合；`resultType` 保持 `TEXT/IMAGE/MIXED`，`topChunks` 保留 `DOCUMENT_IMAGE`、page/bbox、命中来源和短期图片缩略 URL。
 - Preview 保持父 PDF/Markdown `previewUrl` 与 page/bbox 定位，另签发 `imagePreviewUrl/imagePreviewExpiresAt`；Preview cache key 已包含对象身份。Web 已增加文档图片筛选、标签、缩略图和预览侧栏，回答链路仍只消费文本代理，没有暗中开启多模态 Answer。
-- 本地验证：`anchr-docling` 27 tests + 10 subtests 全通过，改动文件 Ruff 全通过；`anchr-app` 全量 530 tests 为 0 failure/0 error，27 个环境型 Testcontainers 用例按既有条件跳过；`anchr-web` 74 项测试全通过且生产构建通过。三仓 `git diff --check` 通过。
+- 本地验证：`anchr-docling` 27 tests + 10 subtests 全通过，改动文件 Ruff 全通过；`anchr-app` 全量 534 tests 为 0 failure/0 error，27 个环境型 Testcontainers 用例按既有条件跳过；`anchr-web` 74 项测试全通过且生产构建通过。三仓 `git diff --check` 通过。
 - 尚未执行真实私有 OSS 上传/签名/按前缀删除 smoke、真实 Elasticsearch mapping/KNN/相关性与多实例故障演练，也未批量 reparse 存量文档或执行 101C alias 发布。因此当前状态不表示已 stage、commit、开启 feature flag 或发布。
 
 ---
@@ -1688,9 +1676,9 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 ### Wave 5：Asset Segment 写入一致性
 
-- ANCHR-107：Asset indexGeneration、目标 generation 清理重写、可见性和可重放变化。
+- ANCHR-107：Asset indexGeneration、目标 generation 清理重写、可见性和 Outbox 清理。
 
-该 Wave 只接管 `INDEX` stage并提供一致性对账能力，不创建 physical index version。107 的生产发布必须显式记录所依赖的 106B 数据库验收证据，不能用 107 自身测试替代该门禁。
+该 Wave 只接管 `INDEX` stage，不创建 physical index version。107 的生产发布必须显式记录所依赖的 106B 数据库验收证据，不能用 107 自身测试替代该门禁。
 
 ### Wave 6：单向量 Profile 投影契约
 
@@ -1771,5 +1759,5 @@ Wave 0
 9. ANCHR-101B 必须验证 Ingestion/Rebuild 对文本、OCR、原图使用相同的输入规则；多模态文本和图片请求使用同一个 `modelName/dimensions`；ES 只有一个 `embedding` 字段；既有 BM25/RRF/Rerank 顺序不变。不得增加第二向量字段或承担 110 的业务召回配额。
 10. ANCHR-101C 必须验证 profile fingerprint、同维不同模型、重建全程写阻塞、alias 切换后才启用目标配置以及失败时旧配置不变。
 11. ANCHR-106B 必须在真实 MySQL 上验证 fresh→V18 与 normalized V15→V18 两条路径、17 列 item、无 ingestion CHECK/FK、窄查询、坏 ownership/旧 execution 不可领取、公开投影兼容和部署稳定性；不得改变 106 的 retry/lease/stale-worker 业务结果。
-12. ANCHR-107 必须验证 generation 激活门禁、部分 bulk 后目标 generation 清理重写、变化重放和清理失败，不承担 101C 的 physical index 验收。
+12. ANCHR-107 必须验证 generation 激活门禁、部分 bulk 后目标 generation 清理重写、Outbox 清理失败与重试，不承担 101C 的 physical index 验收。
 13. ANCHR-110 必须验证图片 bbox 来自 Picture Item provenance、私有对象签名访问、存量 reparse、对象生命周期、同字段分路召回、父文档聚合和 Preview；不得以 `chunks[].bboxes` 猜测图片位置或增加第二 dense 字段。

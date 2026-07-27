@@ -16,6 +16,7 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -74,10 +75,23 @@ class IngestionArtifactStoreTest {
         IngestionArtifactReference reference = reference(
                 "PARSE_RESULT", stored, "PRODUCED", item.getClaimVersion());
 
-        assertThat(store.readEmbeddedImageObjectKeys(reference, "asset-1"))
-                .containsExactly("embedded/picture-1.png");
+        assertThat(store.readEmbeddedImageObjectKeysIfPresent(reference, "asset-1"))
+                .contains(List.of("embedded/picture-1.png"));
         assertThat(store.readParseResult(registeredParse(item, stored))
                 .images().getFirst().url()).isNull();
+    }
+
+    @Test
+    void cleanup_shouldTreatAnAlreadyDeletedParseArtifactAsSuccess() {
+        IngestionTaskItem item = item();
+        IngestionStoredArtifact stored = store.writeParseArtifact(
+                item, "job-1", parseResponse("request-1", "hello"));
+        IngestionArtifactReference reference = reference(
+                "PARSE_RESULT", stored, "PRODUCED", item.getClaimVersion());
+        storage.remove(stored.objectKey());
+
+        assertThat(store.readEmbeddedImageObjectKeysIfPresent(reference, "asset-1"))
+                .isEmpty();
     }
 
     @Test
@@ -381,6 +395,18 @@ class IngestionArtifactStoreTest {
             return Arrays.copyOf(content, content.length);
         }
 
+        @Override
+        public Optional<byte[]> readArtifactIfPresent(String objectKey, int maxBytes) {
+            byte[] content = objects.get(objectKey);
+            if (content == null) {
+                return Optional.empty();
+            }
+            if (content.length > maxBytes) {
+                throw new IllegalStateException("too large");
+            }
+            return Optional.of(Arrays.copyOf(content, content.length));
+        }
+
         String contentType(String objectKey) {
             return contentTypes.get(objectKey);
         }
@@ -396,6 +422,10 @@ class IngestionArtifactStoreTest {
 
         void replace(String objectKey, byte[] content) {
             objects.put(objectKey, Arrays.copyOf(content, content.length));
+        }
+
+        void remove(String objectKey) {
+            objects.remove(objectKey);
         }
     }
 }
