@@ -32,8 +32,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -50,8 +48,6 @@ import java.util.Objects;
 @Service
 @RequiredArgsConstructor
 public class UnifiedSearchServiceImpl implements UnifiedSearchService {
-
-    private static final int MAX_CURSOR_OFFSET = 10_000;
 
     private final SegmentRepository kbSegmentRepository;
     private final QueryEmbeddingService kbQueryEmbeddingService;
@@ -75,7 +71,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
 
     @Override
     public List<SearchResultDTO> search(SearchQueryDTO query, List<String> keywords) {
-        SearchResult result = searchInternal(query, 0, keywords);
+        SearchResult result = searchInternal(query, keywords);
         return result.items();
     }
 
@@ -86,36 +82,29 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         if (StringUtils.hasText(queryStr)) {
             query.setQuery(queryStr);
         }
-        SearchResult result = searchInternal(query, decodeCursorOffset(query == null ? null : query.getCursor()), keywords);
-        List<SearchResultDTO> pageItems = result.items();
-        int offset = result.offset();
-        String nextCursor = result.total() > offset + pageItems.size()
-                ? encodeCursorOffset(offset + pageItems.size())
-                : null;
+        SearchResult result = searchInternal(query, keywords);
         RetrievalInsightDTO insight = buildInsight(result);
         SearchPageDTO page = SearchPageDTO.builder()
-                .items(pageItems)
+                .items(result.items())
                 .total(result.total())
-                .nextCursor(nextCursor)
-                .facets(buildFacets(result.allItems()))
+                .facets(buildFacets(result.items()))
                 .insight(insight)
                 .build();
         recordSearchEvent(query, result.total());
         return page;
     }
 
-    private SearchResult searchInternal(SearchQueryDTO query, int offset, List<String> keywords) {
+    private SearchResult searchInternal(SearchQueryDTO query, List<String> keywords) {
         long startMs = System.currentTimeMillis();
         if (query == null || !StringUtils.hasText(query.getQuery())) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
         String rawQuery = query.getQuery().trim();
         int limit = resolveLimit(query.getLimit());
-        int pageEnd = Math.max(0, offset) + limit;
-        int recallTopK = resolveRecallTopK(pageEnd);
+        int recallTopK = resolveRecallTopK(limit);
         SearchFilter filter = buildFilter(query);
         if (filter.getKbIds().isEmpty()) {
-            return new SearchResult(List.of(), List.of(), 0, Math.max(0, offset), limit,
+            return new SearchResult(List.of(), 0,
                     0, 0, 0, 0, System.currentTimeMillis() - startMs);
         }
 
@@ -160,15 +149,14 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .map(candidate -> toResult(candidate, rawQuery))
                 .filter(Objects::nonNull)
                 .toList();
-        List<SearchResultDTO> allAggregated = aggregateByAsset(segmentResults, pageEnd);
-        List<SearchResultDTO> pageItems = page(allAggregated, offset, limit);
+        List<SearchResultDTO> allAggregated = aggregateByAsset(segmentResults, limit);
         long latencyMs = System.currentTimeMillis() - startMs;
-        return new SearchResult(pageItems, allAggregated, allAggregated.size(), Math.max(0, offset), limit,
+        return new SearchResult(allAggregated, allAggregated.size(),
                 textHitCount, vectorHitCount, fusedCount, rerankCount, latencyMs);
     }
 
     private RetrievalInsightDTO buildInsight(SearchResult result) {
-        List<SearchResultDTO> allItems = result.allItems();
+        List<SearchResultDTO> allItems = result.items();
 
         // Pipeline
         RetrievalInsightDTO.PipelineDTO pipeline = RetrievalInsightDTO.PipelineDTO.builder()
@@ -937,15 +925,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .toList();
     }
 
-    private List<SearchResultDTO> page(List<SearchResultDTO> items, int offset, int limit) {
-        if (items == null || items.isEmpty()) {
-            return List.of();
-        }
-        int start = Math.min(Math.max(0, offset), items.size());
-        int end = Math.min(items.size(), start + Math.max(1, limit));
-        return items.subList(start, end);
-    }
-
     private Map<String, List<SearchPageDTO.FacetItemDTO>> buildFacets(List<SearchResultDTO> items) {
         if (items == null || items.isEmpty()) {
             return Map.of("assetTypes", List.of(), "hitTypes", List.of());
@@ -971,23 +950,6 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                         .count(entry.getValue())
                         .build())
                 .toList();
-    }
-
-    private int decodeCursorOffset(String cursor) {
-        if (!StringUtils.hasText(cursor)) {
-            return 0;
-        }
-        try {
-            String decoded = new String(Base64.getUrlDecoder().decode(cursor.trim()), StandardCharsets.UTF_8);
-            return Math.min(MAX_CURSOR_OFFSET, Math.max(0, Integer.parseInt(decoded)));
-        } catch (Exception e) {
-            throw new BusinessException(ApiError.INVALID_REQUEST, "cursor is invalid.");
-        }
-    }
-
-    private String encodeCursorOffset(int offset) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(String.valueOf(Math.max(0, offset)).getBytes(StandardCharsets.UTF_8));
     }
 
     private String toCode(Enum<?> value) {
@@ -1022,10 +984,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     private record SearchResult(List<SearchResultDTO> items,
-                                List<SearchResultDTO> allItems,
                                 long total,
-                                int offset,
-                                int limit,
                                 int textHits,
                                 int vectorHits,
                                 int fusedCount,

@@ -33,10 +33,9 @@
 | ANCHR-106 | Ingestion 改为数据库驱动的可恢复状态机 | 已完成 | P0 | XL | app、docling、web | 103、105 |
 | ANCHR-106B | 收敛 Ingestion Item 执行模型与持久化边界 | 源码与 V18 已收口；独立 MySQL 8.4 迁移验证通过；待业务库修复失败历史、停机迁移与部署验收 | P0 | L | app | 106 |
 | ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 源码与本地回归已完成；待 V19 迁移、真实 ES 故障演练与部署验收 | P0 | L | app | 106B |
-| ANCHR-108 | 搜索改为稳定结果快照分页 | 待执行 | P1 | L | app、web | 101B、101C、110 |
 | ANCHR-109 | 会话列表 keyset 分页与 Session 原子更新 | 已完成 | P1 | M | app、web | 可独立 |
 | ANCHR-110 | 文档内嵌图片制品化、独立 Segment 与跨模态检索 | 主体源码与本地回归已完成；待真实 OSS/ES、存量 reparse、部署验收及上传前置失败清理策略 | P1 | XL | app、docling、web | 104–106B、107、101B、101C |
-| ANCHR-201 | 建立架构适应度测试与依赖边界 | 待执行 | P1 | M | app | 101A–101C、102–110 稳定后 |
+| ANCHR-201 | 建立架构适应度测试与依赖边界 | 待执行 | P1 | M | app | 101A–101C、102–107、109–110 稳定后 |
 | ANCHR-202 | REST DTO 与 SSE 传输协议退出 Application | 待执行 | P1 | XL | app | 201 |
 | ANCHR-203 | 用模块 Port 取代跨模块 Infrastructure 依赖 | 待执行 | P1 | L | app | 201、101B/101C、105–110 |
 | ANCHR-204 | 选择性富领域化与聚合边界收口 | 待执行 | P1 | L | app | 106B、107、109、202、203、205 |
@@ -58,8 +57,8 @@
 | 主责卡 | 唯一拥有 | 只消费 | 明确不负责 |
 |---|---|---|---|
 | 101A | 当前单向量结构下 IMAGE 的分支前置条件、输入选择和向量回写 | 现有 Asset/Chunk/embedding 接口 | OCR+图片双 dense 写入、检索重构、模型切换 |
-| 101B | 单 `embedding` 的 Profile 投影 Policy、图片视觉投影单元、同一模型配置和来源契约 | 现有 BM25/RRF/Rerank；101A 的单载体线上修复；107 的 generation 可见性 | desired/serving profile、物理索引迁移、第二向量字段、文档内嵌图片制品/召回配额、分页快照、Asset generation |
-| 101C | 内存待重建目标、目标模型 Session、全程 JVM 写屏障、alias 切换后启用模型 | 101B 的单向量投影 Policy | 持久化部署状态、分布式租约、增量追平、第二路 KNN、Asset generation、搜索 cursor/snapshot |
+| 101B | 单 `embedding` 的 Profile 投影 Policy、图片视觉投影单元、同一模型配置和来源契约 | 现有 BM25/RRF/Rerank；101A 的单载体线上修复；107 的 generation 可见性 | desired/serving profile、物理索引迁移、第二向量字段、文档内嵌图片制品/召回配额、Asset generation |
+| 101C | 内存待重建目标、目标模型 Session、全程 JVM 写屏障、alias 切换后启用模型 | 101B 的单向量投影 Policy | 持久化部署状态、分布式租约、增量追平、第二路 KNN、Asset generation |
 | 102 | HTTP status/error metadata 与 OSS 清理许可契约 | 各业务卡提供的 errorCode 语义 | 创建幂等、任务恢复和业务重试策略 |
 | 103 | `clientRequestId/requestHash` 和创建响应丢失恢复 | 102 的错误元数据 | Docling attempt、任务执行调度、ES 幂等 |
 | 104 | 关闭未消费的 embedded-image STS 上传协议 | 现有独立图片 OCR | Docling job 幂等、OCR/图片向量语义、未来 AEAD 实现 |
@@ -67,12 +66,11 @@
 | 106 | `executionEpoch/stageAttempt/lease/nextActionAt` 与可恢复阶段调度 | 105 的 submit/get/ack 和 parse attempt | 创建请求幂等、Docling 指纹、Asset generation、ES alias |
 | 106B | `ingestion_task_item`、current execution、artifact registry 的物理边界；内部 phase 与公开投影的唯一映射；按用例收窄查询模型；从 phase-local `stageAttempt` 到 execution-global `claimVersion` 的内部持久化表示；artifact 登记事务与 post-commit ACK 时序 | 106 已确定的 stage/retry/lease/attempt/artifact 语义和 stale-worker 拒绝结果 | 改变任务行为或 stale-worker 结果、Docling ACK HTTP 幂等协议、Asset generation、通用 DDD/Service 拆分 |
 | 107 | Asset `indexGeneration`、目标 generation 重写、MySQL/ES 可见性和清理事件 | 106B 的 execution/artifact 边界与 106 的 INDEX stage；现有 outbox 能力 | physical index version、embedding profile、检索融合、Outbox 搬包 |
-| 108 | Search Snapshot、cursor、分页稳定性和模型调用一次性 | 101B 输出的已排序结果；101C 的物理索引/profile 标识 | 召回路由、RRF 权重、alias 切换、embedding profile 激活 |
 | 109 | Session 列表 keyset cursor、title CAS、updatedAt 单调更新 | 现有消息/Agent 数据 | 消息历史分页、Agent Activity、Conversation DTO 分层 |
-| 110 | `EmbeddedImageArtifact` 契约、`DOCUMENT_IMAGE` Segment、图片对象随 Asset generation 清理、同字段分路召回、父文档聚合和图片命中预览 | 104 的默认关闭门禁；105/106 的 Parse artifact；106B 的 artifact registry；107 的 generation/ID/事件；101B 的单向量 Policy；101C 的 profile 部署 | 图片专用生命周期、第二向量字段、模型部署状态机、Search Snapshot、通用 Docling attempt、通用 Outbox 搬包 |
+| 110 | `EmbeddedImageArtifact` 契约、`DOCUMENT_IMAGE` Segment、图片对象随 Asset generation 清理、同字段分路召回、父文档聚合和图片命中预览 | 104 的默认关闭门禁；105/106 的 Parse artifact；106B 的 artifact registry；107 的 generation/ID/事件；101B 的单向量 Policy；101C 的 profile 部署 | 图片专用生命周期、第二向量字段、模型部署状态机、通用 Docling attempt、通用 Outbox 搬包 |
 | 201 | ArchUnit/依赖图/违规基线 | 所有已稳定代码 | 移类、加 Port、修改业务行为 |
 | 202 | REST DTO 与 SSE 适配边界 | 201 的规则 | 领域聚合、跨模块 Port 全面治理、按用例拆大类 |
-| 203 | 剩余跨模块 Infrastructure 依赖的 Port/Adapter 迁移 | 101B–110 已确定的能力契约 | 重定义业务协议、改变状态机、拆分大 Service |
+| 203 | 剩余跨模块 Infrastructure 依赖的 Port/Adapter 迁移 | 101B–107、109–110 已确定的能力契约 | 重定义业务协议、改变状态机、拆分大 Service |
 | 204 | 将 106/106B/107/109 已稳定规则收口为领域行为 | 正确性卡的状态、CAS、持久化边界和 generation 语义 | 新增状态/字段/API、改变调度和检索结果 |
 | 205 | Outbox 技术模型的模块归属 | 107 已使用的发布/消费语义 | 修改表语义、重试/backoff、事件业务触发条件 |
 | 206 | 稳定边界内的机械职责拆分 | 202–205 的最终边界 | 新业务规则、协议/mapping/schema 修改、相关性调参 |
@@ -80,12 +78,10 @@
 ### 依赖交付契约
 
 - 101B 向 101C 交付：按 profile 选择 `TEXT/IMAGE` 输入的单向量 Projection Policy 和唯一向量字段契约；101C 不复制输入选择规则。
-- 101B 向 108 交付：一次检索产生的稳定有序候选；108 不重新定义召回和融合。
 - 101B 向 110 交付：按 profile 对 `TEXT/IMAGE` 输入生成同一 `embedding` 字段的 Projection Policy；110 只增加内嵌图片制品和同字段召回分路，不复制投影算法、不增加第二向量字段。
 - 104/105/106 向 110 交付：默认关闭的旧上传门禁、稳定 Parse attempt 和持久化 Parse artifact；110 以版本化图片制品契约重新启用支线，不恢复旧 CBC/裸 URL 协议。
 - 107 向 110 交付：Asset generation、目标 generation 重写、激活门禁和旧 generation 清理事件；110 不建立第二套图片 generation。
 - 101C 向 110 交付：目标 profile 的安全重建能力；110 的 mapping/存量回填复用该流程，不直接切 alias。
-- 110 向 108 交付：包含 `DOCUMENT_IMAGE` 分路召回、父资产聚合和稳定预览语义的最终有序结果；108 只为该结果建立分页快照。
 - 105 向 106 交付：幂等的 `submit/get/ack` 和 parse attempt 标识；106 只决定何时调用。
 - 106 向 106B 交付：已经验收的阶段、重试、lease、fence、Docling 恢复和公开 DTO 行为；106B 只重排持久化边界与读模型，不重新定义这些行为。
 - 106B 向 107 交付：收敛后的 current execution、通用 artifact registry 和进入 `INDEX` phase 的 fenced context；107 只增加 generation、目标 generation 重写与索引激活一致性。
@@ -99,7 +95,7 @@
 |---|---|---|---|
 | Ingestion create/processor / 后续 stage handler | 101A、103、104、105、106、106B、107、101B、101C、110 | 101A → 104 → 105；102 → 103；两路汇合 → 106 → 106B → 107 → 101B → 101C → 110 | 图片分支/向量回写；创建幂等；关闭 STS 支线；Parse 协议；可恢复状态机；normalized execution/artifact 边界；Asset generation/目标重写；单向量 Policy；profile 部署；内嵌图片投影 |
 | `Segment` / `SegmentDocument` / mapping / bulk writer | 107、101B、101C、110 | 107 → 101B → 101C → 110 | Asset generation/目标重写 → 单向量投影契约 → 物理索引部署 → 内嵌图片 schema/回填 |
-| `UnifiedSearchServiceImpl` / ES repository | 107、101B、110、108、206 | 107 → 101B → 110 → 108 → 206 | active generation 过滤 → 同一模型与单向量字段 → 图片分路召回/父资产聚合 → 结果快照 → 机械拆分 |
+| `UnifiedSearchServiceImpl` / ES repository | 107、101B、110、206 | 107 → 101B → 110 → 206 | active generation 过滤 → 同一模型与单向量字段 → 图片分路召回/父资产聚合 → 机械拆分 |
 | Search/Conversation result DTO 与 Preview | 110、202、206 | 110 → 202 → 206 | 图片命中与父文档预览语义 → DTO 边界迁移 → 机械拆分 |
 | Capability settings / `SegmentIndexManagerImpl` | 101C、203、206 | 101C → 203 → 206 | 延后启用与单实例重建 → 依赖倒置 → 机械拆分 |
 | `ConversationServiceImpl` / Session repository | 109、202、204、206 | 109 → 202 → 204 → 206 | keyset/CAS 结果 → DTO 边界 → 领域方法 → 机械拆分 |
@@ -228,7 +224,9 @@ EmbeddingProjection {
 
 ### 边界
 
-本卡负责单向量投影规则、`IMAGE_VISUAL` 投影单元、Ingestion/Rebuild 共用 Policy、唯一向量字段和输入来源契约；不改变模型启用时序、profile 部署状态、physical index rebuild/alias、Asset generation、Search Snapshot 或 RRF 参数。`IMAGE_VISUAL` 的可见性和清理消费 107，不在本卡重新定义 generation。ANCHR-110 只能消费本卡 Policy 为文档内嵌图片生成向量，并可在同一字段上增加按 `segmentType` 过滤的召回通道；不得复制或改写投影规则。
+本卡负责单向量投影规则、`IMAGE_VISUAL` 投影单元、Ingestion/Rebuild 共用 Policy、唯一向量字段和输入来源契约；不改变模型启用时序、profile 部署状态、physical index rebuild/alias、Asset generation 或 RRF 参数。`IMAGE_VISUAL` 的可见性和清理消费 107，不在本卡重新定义 generation。ANCHR-110 只能消费本卡 Policy 为文档内嵌图片生成向量，并可在同一字段上增加按 `segmentType` 过滤的召回通道；不得复制或改写投影规则。
+
+搜索 REST 用例保持一次性 Top N，`limit` 范围为 1–10；请求不接收搜索 cursor，响应不返回 `nextCursor`，前端不提供搜索结果“加载更多”。若未来产品明确要求浏览 Top N 之外的结果，必须重新立项定义交互和成本边界，不能预建 Redis snapshot。
 
 101A 只修当前线上分支提前跳过和重复视觉向量的缺陷，使用首个有效 OCR chunk 作为兼容载体；101B 再把 Asset 级视觉信号从 OCR chunk 中拆成唯一 `IMAGE_VISUAL` 投影并收口成统一 Policy。101C 消费 Policy 对目标索引重新生成投影和 `embedding`，但不能复制其输入选择规则。
 
@@ -1082,58 +1080,6 @@ occurredAt
 
 ---
 
-## ANCHR-108：搜索改为稳定结果快照分页
-
-**目标：** 解决 nextCursor 不可用、重复模型调用和跨页排序漂移。
-
-### 根因
-
-`total` 来自被限制到 `pageEnd` 的聚合列表，第一页通常满足 `total == pageItems.size`，因此 nextCursor 为空。即使只修 cursor，前端加载更多仍携带 `withAnswer=true`，后端会重复 rewrite、检索、rerank、答案和追问生成；前端又丢弃新答案。
-
-源码：
-
-- [`UnifiedSearchServiceImpl.java`](../src/main/java/com/anchr/core/search/application/impl/UnifiedSearchServiceImpl.java)
-- [`SearchController.java`](../src/main/java/com/anchr/core/search/interfaces/rest/SearchController.java)
-- [`anchr-web/src/features/search/search-premium-page.tsx`](../../anchr-web/src/features/search/search-premium-page.tsx)
-
-### 修复方案
-
-不把 `withAnswer=false` 当作最终修复，建立 Redis Search Snapshot。首次请求只调用一次当时已经生效的搜索用例（其召回和融合由 101B/现有实现负责），然后保存输出：
-
-```text
-snapshotId
-owner
-requestFingerprint
-rewrittenQuery
-rankedResults
-answer
-suggestedQuestions
-facets
-physicalIndexVersion/profileFingerprint
-createdAt
-```
-
-TTL 建议 10 分钟。cursor 是 snapshotId + offset 的不透明引用；后端校验 owner、fingerprint、offset 和 TTL。后续分页只读取 snapshot，不再调用模型或重新排序。
-
-保留现有字段并增加 `hasMore`、`totalRelation=WINDOW`、`snapshotExpiresAt`。`total` 明确表示候选窗口数。facets 当前前端未展示，只在首次生成一次。
-
-前端 append 只合并 items，第一页的答案、追问和 rewrittenKeywords 保持不变。snapshot 过期返回 410，并提示重新搜索，不允许静默续接新排序。
-
-### 边界
-
-本卡从搜索用例接收已经排序、聚合的结果并冻结分页视图，只负责 cursor、TTL、owner/fingerprint 校验和“模型只调用一次”。它不得修改 BM25/KNN 路由、RRF/Rerank 权重或结果去重（101B），不得切换 alias/profile（101C）。如果分页期间发生索引切换，旧 snapshot 继续返回已保存结果；新查询创建带新 physicalIndexVersion/profileFingerprint 的 snapshot。
-
-### 验收
-
-- 有更多候选时第一页必有 nextCursor。
-- 加载三页只调用一次 rewrite、embedding、rerank、answer、follow-up。
-- 页间无重复和排序漂移。
-- 过期有明确 UI。
-- 切换查询或过滤器生成新 snapshot。
-- 在固定搜索用例输出的 characterization fixture 上，接入 snapshot 前后第一页内容和顺序完全一致。
-
----
-
 ## ANCHR-109：会话列表 keyset 分页与 Session 原子更新
 
 **目标：** 完整加载超过 200 个会话，防止消息并发和重命名互相覆盖。
@@ -1374,7 +1320,7 @@ assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
 
 ### 边界
 
-本卡唯一拥有 `PARSE_RESULT.images[]` 的内嵌图片 schema、`DOCUMENT_IMAGE` Segment、既有 Asset/generation 清理事件中的图片对象删除、同一向量字段上的图片召回预算、Rerank 多模态公平性、父文档聚合和图片命中 Preview。它不新增图片专用生命周期表、状态或 outbox 事件，不新增第二 dense 字段，不重定义 101B Projection Policy，不重建 101C profile 状态机，不复制 107 generation/outbox 语义，不修改 108 Search Snapshot，也不实现多模态回答生成或通用 DDD 搬包。
+本卡唯一拥有 `PARSE_RESULT.images[]` 的内嵌图片 schema、`DOCUMENT_IMAGE` Segment、既有 Asset/generation 清理事件中的图片对象删除、同一向量字段上的图片召回预算、Rerank 多模态公平性、父文档聚合和图片命中 Preview。它不新增图片专用生命周期表、状态或 outbox 事件，不新增第二 dense 字段，不重定义 101B Projection Policy，不重建 101C profile 状态机，不复制 107 generation/outbox 语义，也不实现多模态回答生成或通用 DDD 搬包。
 
 ### 验收
 
@@ -1406,7 +1352,7 @@ assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
 
 ## DDD 与架构治理任务
 
-以下任务不替代 ANCHR-101A–101C、102–110 的正确性修复。它们负责把已经稳定的业务规则收口到明确的模块和领域边界中，避免新复杂度继续堆积在少数 Application Service。项目继续保持模块化单体，不拆微服务，也不对 settings、Dashboard、Token 等简单 CRUD 强行套富领域模型。
+以下任务不替代 ANCHR-101A–101C、102–107、109–110 的正确性修复。它们负责把已经稳定的业务规则收口到明确的模块和领域边界中，避免新复杂度继续堆积在少数 Application Service。项目继续保持模块化单体，不拆微服务，也不对 settings、Dashboard、Token 等简单 CRUD 强行套富领域模型。
 
 ## ANCHR-201：建立架构适应度测试与依赖边界
 
@@ -1519,7 +1465,7 @@ Ingestion Application 同时依赖 KB Repository、Settings Repository、Docling
 
 ### 修复方案
 
-在消费能力的模块内为“仍然存在的跨模块 Infrastructure 依赖”定义窄 Port；101B–109 为正确性修复已经引入的最小 Port 直接视为输入，不得复制一套同义接口。候选能力包括：
+在消费能力的模块内为“仍然存在的跨模块 Infrastructure 依赖”定义窄 Port；101B–107、109–110 为正确性修复已经引入的最小 Port 直接视为输入，不得复制一套同义接口。候选能力包括：
 
 ```text
 DocumentParserPort
@@ -1528,7 +1474,6 @@ SegmentIndexPort
 StorageCredentialProvider
 EmbeddingPort
 ParseArtifactStore
-SearchSnapshotStore
 IndexTopologyPort
 ```
 
@@ -1539,11 +1484,10 @@ IndexTopologyPort
 3. `SearchObjectStoragePort.uploadFile(MultipartFile)` 改为接口层读取上传内容，再传业务无关的二进制输入对象。
 4. ANCHR-105/106 已确定的 Docling submit/get/ack 契约保持不变，本卡只消除调用方对具体 Client/DTO 的残余依赖。
 5. ANCHR-107 已确定的 generation 写入契约保持不变，本卡只替换 Application → ES writer 的直接依赖。
-6. ANCHR-108 已确定的 snapshot 行为保持不变，本卡只保证 store adapter 不泄漏 Redis DTO。
 
 ### 边界
 
-本卡的完成标准是依赖方向改变、业务行为不变。不得借 Port 迁移重新设计 Docling 指纹、Ingestion 状态机、index generation、Retrieval Plan 或 snapshot TTL/cursor；这些变更必须回到各自主责卡。
+本卡的完成标准是依赖方向改变、业务行为不变。不得借 Port 迁移重新设计 Docling 指纹、Ingestion 状态机、index generation 或 Retrieval Plan；这些变更必须回到各自主责卡。
 
 ### 验收
 
@@ -1656,7 +1600,7 @@ settings、Dashboard、Token、普通查询继续保持事务脚本/CRUD，不�
 
 在 ANCHR-202–205 完成后按稳定职责拆分：
 
-- Search：`HybridRecallUseCase`、`RrfFusionPolicy`、`RerankPolicy`、`SearchResultAggregator`、`SearchSnapshotService`、`SearchInsightFactory`；
+- Search：`HybridRecallUseCase`、`RrfFusionPolicy`、`RerankPolicy`、`SearchResultAggregator`、`SearchInsightFactory`；
 - Conversation：`SessionCommandService`、`ConversationHistoryQueryService`、`SendMessageUseCase`、`ConversationPersistenceCoordinator`、`ConversationTitlePolicy`；
 - Ingestion：`IngestionScheduler`、`ParseStageHandler`、`EmbeddingStageHandler`、`IndexStageHandler`、`IngestionFailurePolicy`；
 - Index management：alias topology、migration、validation、write barrier 分为独立用例/策略。
@@ -1761,13 +1705,7 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 先完成 Docling/app 契约和存量 reparse 影子验证，再开放后端召回与前端 hit type。110 不新增第二向量字段，不绕开 101C 直接切换物理索引。
 
-### Wave 9：搜索分页快照
-
-- ANCHR-108：Search Snapshot、cursor 和跨页稳定性。
-
-冻结 101B/101C/110 已稳定的搜索输出；不得重新调整召回或融合。分页期间索引切换只影响新 snapshot。
-
-### Wave 10–15：DDD 与架构治理，严格串行
+### Wave 9–14：DDD 与架构治理，严格串行
 
 ```text
 201 架构适应度规则
@@ -1778,16 +1716,16 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
  → 206 Application Service 机械拆分
 ```
 
-205 先于 204，使领域化后的 Asset/Ingestion 只产生业务事件，不重新引入 KB Outbox 技术模型。206 必须最后执行。不在 101A–101C、102–110 的正确性 PR 中顺手搬包或拆类。
+205 先于 204，使领域化后的 Asset/Ingestion 只产生业务事件，不重新引入 KB Outbox 技术模型。206 必须最后执行。不在 101A–101C、102–107、109–110 的正确性 PR 中顺手搬包或拆类。
 
 ### 总关键路径
 
 ```text
 Wave 0
 ├─ 101A → 104 → 105 ┐
-│                    ├→ 106 → 106B → 107 → 101B → 101C → 110 → 108 ┐
-├─ 102  → 103 ──────┘                                              ├→ 201 → 202 → 203 → 205 → 204 → 206
-└─ 109 ────────────────────────────────────────────────────────────┘
+│                    ├→ 106 → 106B → 107 → 101B → 101C → 110 ┐
+├─ 102  → 103 ──────┘                                        ├→ 201 → 202 → 203 → 205 → 204 → 206
+└─ 109 ──────────────────────────────────────────────────────┘
 ```
 
 ## 跨项目验证矩阵
@@ -1810,7 +1748,6 @@ Wave 0
 | 文本查询命中文档内图片（110） | 同字段分路 KNN、RRF、多样化、父 Asset 聚合 | DOCUMENT_IMAGE 筛选、缩略图、父文档 Preview | 图片 fixture 与共享空间 contract |
 | DOCUMENT_IMAGE 模型切换（110） | 按 segmentType 投影、存量 reparse、alias/回滚 | 能力降级说明 | Parse artifact object key 可重放、OCR/caption fixture |
 | 内嵌图片删除/重解析（110） | PARSE_RESULT 图片清单、既有清理事件、对账 | 无陈旧缩略图 | 同 attempt object key 幂等 |
-| 搜索三页 | 调用次数、snapshot、cursor | append、410 | 不涉及 |
 | 500 个会话 | keyset、同时间戳 | 自动/手动加载 | 不涉及 |
 | 重命名与消息并发 | CAS、时间单调 | 标题不回退 | 不涉及 |
 
