@@ -784,7 +784,10 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 any(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("asset projection failed"));
         IngestionStageTransactionCoordinator coordinator =
-                new IngestionStageTransactionCoordinator(repository, failingAssetRepository);
+                new IngestionStageTransactionCoordinator(
+                        repository,
+                        failingAssetRepository,
+                        mock(com.anchr.core.ingestion.application.impl.IngestionArtifactCleanupRecorder.class));
 
         assertThatThrownBy(() -> transaction.executeWithoutResult(ignored ->
                 coordinator.transitionAndUpdateAssetStatus(

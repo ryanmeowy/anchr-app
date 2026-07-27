@@ -47,6 +47,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
+        requireActiveSegment(segment);
         PreviewSegmentDTO preview = toPreview(segment, accessTokenHash, request);
         if (!StringUtils.hasText(request.getRecordId()) && request.getCitationInfo() != null) {
             recordCitationOpened(preview, request);
@@ -62,6 +63,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
+        requireActiveSegment(segment);
         Asset parentAsset = resolveParentAsset(segment);
         previewAccessCache.evict(
                 cacheIdentity(segment.getAssetId(), previewSourceRef(segment, parentAsset)),
@@ -70,6 +72,18 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 cacheIdentity(segment.getAssetId(), segment.getSourceRef()),
                 accessTokenHash);
         return getSegmentPreview(segmentId, request);
+    }
+
+    private void requireActiveSegment(Segment segment) {
+        Asset asset;
+        try {
+            asset = knowledgeBaseService.getDocument(segment.getKbId(), segment.getAssetId());
+        } catch (BusinessException ignored) {
+            throw new BusinessException(ApiError.SEGMENT_NOT_FOUND);
+        }
+        if (segment.getIndexGeneration() != asset.getActiveIndexGeneration()) {
+            throw new BusinessException(ApiError.SEGMENT_NOT_FOUND);
+        }
     }
 
     private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash, PreviewRequestDTO request) {

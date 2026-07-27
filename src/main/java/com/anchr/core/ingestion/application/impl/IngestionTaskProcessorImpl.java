@@ -399,19 +399,10 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private List<Segment> prepareSegments(IngestionTaskItem item, Asset asset) {
         ParseResponse parsed = artifactStore.readParseResult(item);
-        boolean parsedContentIsEmpty =
-                parsed.chunks() == null || parsed.chunks().isEmpty();
-        if (parsedContentIsEmpty && !isImage(asset)) {
-            throw new BusinessException(
-                    ApiError.TEXT_PARSE_FAILED, "Docling returned empty chunks.");
-        }
+        boolean parsedContentIsEmpty = parsed.chunks() == null || parsed.chunks().isEmpty();
         long targetIndexGeneration = requireTargetIndexGeneration(item);
         List<Chunk> chunks = doclingChunkMapper.toTextChunks(
                 asset, parsed, targetIndexGeneration);
-        if (!parsedContentIsEmpty && (chunks == null || chunks.isEmpty())) {
-            throw new BusinessException(
-                    ApiError.TEXT_PARSE_FAILED, "Docling returned no usable chunks.");
-        }
         if (chunks == null) {
             chunks = List.of();
         }
@@ -422,6 +413,13 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             allChunks.addAll(chunks);
             allChunks.addAll(embeddedImages);
             chunks = List.copyOf(allChunks);
+        }
+        if (chunks.isEmpty() && !isImage(asset)) {
+            throw new BusinessException(
+                    ApiError.TEXT_PARSE_FAILED,
+                    parsedContentIsEmpty
+                            ? "Docling returned no usable text or embedded images."
+                            : "Docling returned no usable chunks.");
         }
 
         Profile profile = Profile.fromMulti(embeddingPort.isMulti());
@@ -477,7 +475,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             StorageConfig storageConfig = embeddedImageUploadEnabled
                     ? storageConfigRepository.find().orElse(null) : null;
             snapshotJson = encodeSnapshot(IngestionParseRequestSnapshot.capture(
-                    asset, embeddedImageUploadEnabled, storageConfig));
+                    asset, embeddedImageUploadEnabled, storageConfig,
+                    item.getTaskId(), item.getId(), parseAttempt));
         }
 
         IngestionTaskItem prepared = item.toBuilder()
@@ -527,11 +526,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 item.getDoclingRequestId(),
                 item.getSourceRevision(),
                 sourceUrl,
-                buildEncryptedOssCredentials(item.getDoclingRequestId(), snapshot));
+                buildEncryptedOssCredentials(item, snapshot));
     }
 
     private Map<String, String> buildEncryptedOssCredentials(
-            String requestId,
+            IngestionTaskItem item,
             IngestionParseRequestSnapshot snapshot) {
         if (snapshot.ossTarget() == null) {
             return null;
@@ -540,7 +539,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 .orElseThrow(() -> new BusinessException(
                         ApiError.INTERNAL_ERROR,
                         "The persisted Docling output target no longer has storage credentials."));
-        if (!snapshot.targets(config)) {
+        if (!snapshot.targets(
+                config, item.getTaskId(), item.getId(), item.getParseAttempt())) {
             throw new BusinessException(
                     ApiError.INTERNAL_ERROR,
                     "The storage output target changed during the current parse attempt.");
@@ -551,7 +551,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             Map<String, Object> token = storageTokenIssuer.issueToken(
                     config, accessKey, secretKey);
             String aad = String.join("\n",
-                    requestId,
+                    item.getDoclingRequestId(),
                     snapshot.ossTarget().bucket(),
                     snapshot.ossTarget().basePath(),
                     snapshot.ossTarget().endpoint());

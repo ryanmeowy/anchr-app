@@ -118,6 +118,16 @@ public interface IngestionTaskMapper {
             @Param("targetIndexGeneration") Long targetIndexGeneration,
             @Param("artifactType") String artifactType);
 
+    int deleteArtifactsByAssetGeneration(
+            @Param("assetId") String assetId,
+            @Param("targetIndexGeneration") Long targetIndexGeneration,
+            @Param("artifactType") String artifactType);
+
+    int deleteArtifactByItemExecution(
+            @Param("itemId") String itemId,
+            @Param("executionEpoch") long executionEpoch,
+            @Param("artifactType") String artifactType);
+
     Optional<Long> findCurrentClaimForUpdate(
             @Param("itemId") String itemId,
             @Param("executionEpoch") long executionEpoch,

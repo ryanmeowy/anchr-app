@@ -111,11 +111,15 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         verifyEmbedModel(capability, request);
         CapabilityConfig existing = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Config not found: " + id));
+        if (!capability.equals(existing.getCapability())) {
+            throw new IllegalArgumentException(
+                    "Config " + id + " does not belong to capability " + capability);
+        }
         String apiKeyEnc = existing.getApiKeyEnc();
         if (StringUtils.hasText(request.getApiKey())) {
             apiKeyEnc = aesUtil.encrypt(request.getApiKey());
         }
-        CapabilityConfig config = CapabilityConfig.builder()
+        CapabilityConfig proposed = CapabilityConfig.builder()
                 .id(id)
                 .capability(capability)
                 .baseUrl(request.getBaseUrl())
@@ -126,9 +130,38 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                 .updatedBy(UserContextHolder.get().userId())
                 .updatedAt(LocalDateTime.now())
                 .build();
-        CapabilityConfig updated = repository.update(config);
+        if (requiresEmbeddingDraft(existing, proposed)) {
+            CapabilityConfig draft = CapabilityConfig.builder()
+                    .id(idGen.nextId())
+                    .capability(proposed.getCapability())
+                    .baseUrl(proposed.getBaseUrl())
+                    .apiKeyEnc(proposed.getApiKeyEnc())
+                    .modelName(proposed.getModelName())
+                    .extraConfig(proposed.getExtraConfig())
+                    .enabled(false)
+                    .updatedBy(proposed.getUpdatedBy())
+                    .updatedAt(proposed.getUpdatedAt())
+                    .build();
+            CapabilityConfig saved = repository.insert(draft);
+            return CapabilityConfigDTO.from(saved, maskApiKey(saved.getApiKeyEnc()));
+        }
+        CapabilityConfig updated = repository.update(proposed);
         refreshSlot(capability);
         return CapabilityConfigDTO.from(updated, maskApiKey(updated.getApiKeyEnc()));
+    }
+
+    private boolean requiresEmbeddingDraft(CapabilityConfig existing,
+                                           CapabilityConfig proposed) {
+        if (!existing.isEnabled() || !isEmbeddingCapability(existing.getCapability())) {
+            return false;
+        }
+        Optional<EmbeddingProfile> current =
+                CapabilityEmbeddingProfileProvider.createProfile(existing);
+        Optional<EmbeddingProfile> next =
+                CapabilityEmbeddingProfileProvider.createProfile(proposed);
+        return current.isEmpty()
+                || next.isEmpty()
+                || !current.get().fingerprint().equals(next.get().fingerprint());
     }
 
     @Override

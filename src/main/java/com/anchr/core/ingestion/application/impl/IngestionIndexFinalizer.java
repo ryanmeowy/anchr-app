@@ -39,6 +39,7 @@ public class IngestionIndexFinalizer {
     private final SegmentRepository segmentRepository;
     private final SegmentBulkWriter segmentBulkWriter;
     private final AssetIndexChangeRecorder assetIndexChangeRecorder;
+    private final IngestionArtifactCleanupRecorder artifactCleanupRecorder;
 
     @Transactional(rollbackFor = Exception.class)
     public boolean finalizeIndex(IngestionTaskItem item,
@@ -144,6 +145,7 @@ public class IngestionIndexFinalizer {
             throw new IllegalStateException(
                     "Index claim changed while its item row was locked.");
         }
+        artifactCleanupRecorder.terminalFailure(failed);
         return false;
     }
 

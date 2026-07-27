@@ -5,7 +5,11 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSException;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
+import com.aliyun.oss.model.DeleteObjectsRequest;
+import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObject;
+import com.aliyun.oss.model.OSSObjectSummary;
+import com.aliyun.oss.model.ObjectListing;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.anchr.core.common.util.AesUtil;
@@ -29,9 +33,11 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Config-driven object storage adapter backed by storage_config.
@@ -147,6 +153,16 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
 
     @Override
     public byte[] readArtifact(String objectKey, int maxBytes) {
+        return readArtifactInternal(objectKey, maxBytes, false).orElseThrow();
+    }
+
+    @Override
+    public Optional<byte[]> readArtifactIfPresent(String objectKey, int maxBytes) {
+        return readArtifactInternal(objectKey, maxBytes, true);
+    }
+
+    private Optional<byte[]> readArtifactInternal(
+            String objectKey, int maxBytes, boolean missingAllowed) {
         if (objectKey == null || objectKey.isBlank()) {
             throw new IllegalArgumentException("Artifact object key must not be blank.");
         }
@@ -169,9 +185,16 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
                         "Ingestion artifact exceeds the configured compressed-size limit.");
             }
             verifyArtifactDigest(metadata, content);
-            return content;
+            return Optional.of(content);
         } catch (BusinessException e) {
             throw e;
+        } catch (OSSException e) {
+            if (missingAllowed && "NoSuchKey".equals(e.getErrorCode())) {
+                return Optional.empty();
+            }
+            log.error("Failed to read ingestion artifact {}: {}", objectKey, e.getMessage());
+            throw new BusinessException(
+                    ApiError.INTERNAL_ERROR, "Failed to read ingestion artifact.", e);
         } catch (IOException | RuntimeException e) {
             log.error("Failed to read ingestion artifact {}: {}", objectKey, e.getMessage());
             throw new BusinessException(
@@ -188,6 +211,38 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
         OSS client = buildClient(config);
         try {
             client.deleteObject(config.getBucket(), objectKey.trim());
+        } finally {
+            client.shutdown();
+        }
+    }
+
+    @Override
+    public void deleteObjectsByPrefix(String prefix) {
+        if (prefix == null || prefix.isBlank() || !prefix.endsWith("/")) {
+            throw new IllegalArgumentException(
+                    "Object deletion prefix must be a non-empty directory prefix.");
+        }
+        StorageConfig config = loadConfig();
+        OSS client = buildClient(config);
+        try {
+            String marker = null;
+            do {
+                ListObjectsRequest request = new ListObjectsRequest(config.getBucket());
+                request.setPrefix(prefix);
+                request.setMarker(marker);
+                request.setMaxKeys(1000);
+                ObjectListing listing = client.listObjects(request);
+                List<String> keys = listing.getObjectSummaries().stream()
+                        .map(OSSObjectSummary::getKey)
+                        .filter(key -> key != null && key.startsWith(prefix))
+                        .toList();
+                if (!keys.isEmpty()) {
+                    client.deleteObjects(new DeleteObjectsRequest(config.getBucket())
+                            .withKeys(keys)
+                            .withQuiet(true));
+                }
+                marker = listing.isTruncated() ? listing.getNextMarker() : null;
+            } while (marker != null);
         } finally {
             client.shutdown();
         }

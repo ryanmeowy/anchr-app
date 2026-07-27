@@ -34,7 +34,7 @@
 | ANCHR-106B | 收敛 Ingestion Item 执行模型与持久化边界 | 源码与 V18 已收口；独立 MySQL 8.4 迁移验证通过；待业务库修复失败历史、停机迁移与部署验收 | P0 | L | app | 106 |
 | ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 源码与本地回归已完成；待 V19 迁移、真实 ES 故障演练与部署验收 | P0 | L | app | 106B |
 | ANCHR-109 | 会话列表 keyset 分页与 Session 原子更新 | 已完成 | P1 | M | app、web | 可独立 |
-| ANCHR-110 | 文档内嵌图片制品化、独立 Segment 与跨模态检索 | 主体源码与本地回归已完成；待真实 OSS/ES、存量 reparse、部署验收及上传前置失败清理策略 | P1 | XL | app、docling、web | 104–106B、107、101B、101C |
+| ANCHR-110 | 文档内嵌图片制品化、独立 Segment 与跨模态检索 | 主体源码与本地回归已完成；失败 attempt 清理已接入既有 Outbox，待真实 OSS/ES、存量 reparse 与部署验收 | P1 | XL | app、docling、web | 104–106B、107、101B、101C |
 | ANCHR-201 | 建立架构适应度测试与依赖边界 | 待执行 | P1 | M | app | 101A–101C、102–107、109–110 稳定后 |
 | ANCHR-202 | REST DTO 与 SSE 传输协议退出 Application | 待执行 | P1 | XL | app | 201 |
 | ANCHR-203 | 用模块 Port 取代跨模块 Infrastructure 依赖 | 待执行 | P1 | L | app | 201、101B/101C、105–110 |
@@ -326,6 +326,7 @@ embeddingDimension
 - 设置页选择不同 profile 时只登记内存待重建目标；`ConfigDrivenEmbeddingAdapter` 可按目标 `configId` 打开尚未启用配置的 Session。
 - alias 切换后由 `ServingEmbeddingConfigActivator` 执行现有 `capability_config.select/disableAll` 并刷新本地缓存；激活异常会切回旧 alias。
 - Web 已删除 deployment/impact/rollback 字段与在线迁移文案，明确显示“重建期间索引写入不可用”，待重建目标不会被误判成已经 active 的 profile mismatch。
+- 启用中的 Embedding 配置若修改 `baseUrl/modelName/dimensions`，更新接口不再覆盖 active 行，而是返回一个新的禁用草稿；Web 使用返回的新 ID 走现有“选择目标配置 → pending rebuild → 确认重建”流程。只修改 API Key 时仍原地更新。
 - Java 主源码编译通过；新增定向测试覆盖“不提前启用”和“未 enabled 的目标配置可供重建”。使用项目既定 Byte Buddy javaagent 完成全仓回归：517 项测试，0 failure、0 error，27 项因本机无 Docker 跳过；真实 Elasticsearch alias/停写窗口尚未验收。
 - `anchr-web` 生产构建和 TypeScript 检查通过。
 
@@ -406,6 +407,8 @@ embeddingDimension
 - `INGEST_RETRY_ONLY_FAILED` 返回 409。
 - 参数校验错误可安全清理。
 - 网络超时、502、503、响应体损坏不得删除 OSS。
+
+Index 管理接口同样遵守该契约：空 `taskId` 返回 `INVALID_REQUEST/400`，retry/confirm/prepare 状态冲突返回 `INDEX_OPERATION_CONFLICT/409`，不再通过 `Result.error(String)` 产生 HTTP 200 或无稳定 errorCode 的响应。
 
 ---
 
@@ -1074,6 +1077,7 @@ occurredAt
 - `DoclingChunkMapper` 使用既有 `IdGen` 为每个 Segment 生成普通 segmentId；`SegmentBulkWriter` 直接使用相同值作为 ES `_id` 写入，设置 `refresh=wait_for` 保证激活前新 generation 已可搜索，并拒绝空 ID、响应数量不一致和任一部分失败。
 - INDEX finalizer 先校验当前 claim 并锁定 Asset，再清理同一未激活 target generation 的重试残留、bulk 覆盖写、CAS 激活 generation，最后在同一 MySQL 事务写变化记录、旧 generation 清理 outbox 和 item COMPLETE。数据库提交失败时新 generation 留在 ES 但不满足 active gate；后续同 target 重试会先清掉残留。
 - 搜索在 RRF 合并后、Rerank 前一次批量读取候选 Asset 的 active generation，按原顺序 fail-closed 过滤；全文读取在分页开始时固定同一个 active generation。generation 0 查询同时兼容显式 `0` 和旧文档缺字段。
+- Segment Preview 与刷新入口也校验父 Asset 的 active generation；旧 generation、已删除 Asset 或不存在的 Segment 统一返回 `SEGMENT_NOT_FOUND`，不会通过旧 segmentId 绕过搜索可见性门禁。
 - 普通删除与 overwrite 都在 Asset 行锁事务内 soft delete，并同时追加 `ASSET_DELETED` 变化和 `DELETE_ASSET` outbox；旧 generation 使用 `DELETE_ASSET_GENERATION` 复用现有 claim、lease、backoff 和失败重试，不再直接删 ES 或吞异常。
 - JDK 21 全量回归共 463 项，0 failure、0 error、27 skipped；27 项均为当前机器无 Docker 而跳过的 Testcontainers 用例。`git diff --check`、三个变更 Mapper 的 `xmllint`、ES mapping JSON 校验、主代码编译和测试代码编译通过。
 - 尚未执行业务库 V19、真实 Elasticsearch partial-bulk/DB-rollback/crash 故障演练或部署观察，因此当前状态不表示已迁移、发布或接管生产 INDEX 流量。`anchr-web`、`anchr-docling` 不在本卡实现边界内，没有生产代码改动。
@@ -1138,7 +1142,7 @@ keyset 不是严格快照：已经返回的记录因 updatedAt 单调不会向�
 
 ## ANCHR-110：文档内嵌图片制品化、独立 Segment 与跨模态检索
 
-**状态：** 主体源码与本地回归已完成；真实 OSS/Elasticsearch、存量 PDF/Markdown reparse、101C physical index 发布、部署验收及“Docling 已上传但 app 尚未登记 Parse artifact”失败窗口的清理策略待完成。功能开关继续保持默认关闭；本任务不新增业务表迁移。
+**状态：** 主体源码与本地回归已完成；“Docling 已上传但 app 尚未登记 Parse artifact”的终态失败窗口已通过 attempt 独占目录和既有 Outbox 补偿；真实 OSS/Elasticsearch、存量 PDF/Markdown reparse、101C physical index 发布及部署验收待完成。功能开关继续保持默认关闭；本任务不新增业务表迁移。
 
 **目标：** 将 PDF/Markdown 中的内嵌图片从“Docling 上传后无人消费的临时 URL”升级为父文档下可追踪、可清理、可重建、可检索的 `DOCUMENT_IMAGE` Segment。第一阶段必须支持“文本查询通过图片视觉语义命中父 PDF/MD”，继续使用唯一 `embedding` 字段，并保证点击结果仍打开父文档对应页而不是孤立 PNG。
 
@@ -1320,7 +1324,7 @@ assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
 
 ### 边界
 
-本卡唯一拥有 `PARSE_RESULT.images[]` 的内嵌图片 schema、`DOCUMENT_IMAGE` Segment、既有 Asset/generation 清理事件中的图片对象删除、同一向量字段上的图片召回预算、Rerank 多模态公平性、父文档聚合和图片命中 Preview。它不新增图片专用生命周期表、状态或 outbox 事件，不新增第二 dense 字段，不重定义 101B Projection Policy，不重建 101C profile 状态机，不复制 107 generation/outbox 语义，也不实现多模态回答生成或通用 DDD 搬包。
+本卡唯一拥有 `PARSE_RESULT.images[]` 的内嵌图片 schema、`DOCUMENT_IMAGE` Segment、既有 Asset/generation 清理事件中的图片对象删除、同一向量字段上的图片召回预算、Rerank 多模态公平性、父文档聚合和图片命中 Preview。它不新增图片专用生命周期表、状态或第二 dense 字段，不重定义 101B Projection Policy，不重建 101C profile 状态机，不复制 107 generation 语义，也不实现多模态回答生成或通用 DDD 搬包。唯一新增的 `DELETE_INGESTION_ATTEMPT_ARTIFACTS` 只是失败 attempt 的 OSS 补偿事件，复用现有 Outbox 表和重试器，不表示图片拥有独立生命周期。
 
 ### 验收
 
@@ -1329,7 +1333,7 @@ assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
 - Markdown 外链图片无 bbox 时解析、索引和检索成功；Preview 明确降级而不是伪造坐标或整份文档失败。
 - 私有 bucket 不依赖裸 URL；embedding 和图片 preview 都由 app 根据图片 Segment 的 `sourceRef` 生成有期限、用途受限的签名输入。
 - 同 parse attempt 重试、app 重启、部分 ES bulk 和 generation 重跑不产生重复 Segment/OSS 对象。
-- 已登记 `PARSE_RESULT` 的 reparse、overwrite 和 Asset 删除复用原有 generation/Asset 事件清理图片，失败沿用同一 outbox 重试；Docling 上传成功但 app 尚未登记 artifact 的前置失败窗口必须另行完成清理策略后才能关闭本验收项。
+- 已登记 `PARSE_RESULT` 的 reparse、overwrite 和 Asset 删除复用原有 generation/Asset 事件清理图片与 Parse artifact；终态失败 attempt 通过既有 Outbox 删除独占图片/Parse 目录，失败沿用同一重试器。
 - 多模态 profile 下文本 query 能通过 `DOCUMENT_IMAGE` 命中父 PDF/MD；ES mapping 仍只有一个 `embedding` 字段。
 - 纯文本 profile 下只使用 OCR/caption/alt/context 文本向量；全部为空时不写零向量、不复用旧视觉向量。
 - 多模态 ↔ 纯文本切换后 Ingestion 与 rebuild 对同一 fixture 选择相同输入，父 `assetType=PDF/MARKDOWN` 不会导致图片按文本误投影。
@@ -1342,11 +1346,12 @@ assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
 - `anchr-docling` 已提供 v3 `EmbeddedImageArtifact` Pydantic 契约，包含稳定 `imageObjectKey`、上传状态、Picture Item 全 provenance bbox、宽高、mime、内容 hash 与文本代理；Markdown 图片允许无 page/bbox。图片上传 key 继续绑定稳定 requestId，响应 URL 仅用于返回 Markdown，app 写制品前会剥离诊断 URL。
 - App→Docling 临时凭据改为 AES-256-GCM envelope，包含 `version/keyId/nonce/ciphertext/tag/expiration`，AAD 固定绑定 `requestId/bucket/basePath/endpoint`；v2 fingerprint 继续兼容旧请求，启用内嵌图的新请求使用 contract v3。
 - App 已消费 `images[]` 并去重生成 `DOCUMENT_IMAGE`，使用既有 `IdGen` 生成普通 ID；`sourceRef` 直接保存图片对象 key，`blockId` 只用于解析阶段去重且不持久化，父文档通过 `assetId -> Asset` 定位。TEXT profile 使用 `ocr + caption + alt + context`，MULTI profile 从 `sourceRef` 临时签名图片输入；rebuild 原样保留已有 `_id/segmentId/chunkOrder`。
-- 图片列表只保存在既有 immutable `PARSE_RESULT` artifact，不复制第二份图片清单。`DELETE_ASSET_GENERATION` / `DELETE_ASSET` 通过 execution 与 ingestion item 的已有关系读取相应 Parse artifact，在同一事件中先幂等删除图片对象、再删除 ES Segment；任一步失败都由原事件重试。未新增图片表、状态或专用 outbox 事件。
+- 图片列表只保存在既有 immutable `PARSE_RESULT` artifact，不复制第二份图片清单。新请求使用 attempt 独占图片目录和显式 key-layout 标记，旧请求继续兼容原 key；PDF/Markdown 即使没有文本 chunk，只要存在有效 `DOCUMENT_IMAGE` 也可继续索引。
+- `DELETE_ASSET_GENERATION` / `DELETE_ASSET` 先删除图片对象/目录和 ES Segment，再删除整个 Parse attempt 目录及对应 artifact registry 行。终态失败 transition 在同一 MySQL 事务写 `DELETE_INGESTION_ATTEMPT_ARTIFACTS`，只清理自己的 attempt 目录；未新增图片表或图片状态。
 - 检索已拆为 BM25、普通同字段 vector route、`DOCUMENT_IMAGE` 同字段 vector route，分别配置 topK/similarity，RRF 后按 `assetId + segmentType` 限流再 Rerank、父资产聚合；`resultType` 保持 `TEXT/IMAGE/MIXED`，`topChunks` 保留 `DOCUMENT_IMAGE`、page/bbox、命中来源和短期图片缩略 URL。
 - Preview 保持父 PDF/Markdown `previewUrl` 与 page/bbox 定位，另签发 `imagePreviewUrl/imagePreviewExpiresAt`；Preview cache key 已包含对象身份。Web 已增加文档图片筛选、标签、缩略图和预览侧栏，回答链路仍只消费文本代理，没有暗中开启多模态 Answer。
-- 本地验证：`anchr-docling` 25 tests + 10 subtests 全通过，改动文件 Ruff 全通过；生命周期与 Segment 字段收缩后 `anchr-app` 全量 540 tests 为 0 failure/0 error，28 个无 Docker 的 Testcontainers 用例按既有条件跳过；`anchr-web` 生产构建通过。三仓 `git diff --check` 通过。
-- 尚未执行真实私有 OSS 上传/签名/删除 smoke、真实 Elasticsearch mapping/KNN/相关性与多实例故障演练，也未批量 reparse 存量文档或执行 101C alias 发布；Docling 上传成功但 app 登记 Parse artifact 前永久失败的对象回收策略仍待确定。因此当前状态不表示已 stage、commit、开启 feature flag 或发布。
+- 本地验证：`anchr-docling` 27 tests + 10 subtests 全通过，改动文件 Ruff 全通过；`anchr-app` 全量 530 tests 为 0 failure/0 error，27 个环境型 Testcontainers 用例按既有条件跳过；`anchr-web` 74 项测试全通过且生产构建通过。三仓 `git diff --check` 通过。
+- 尚未执行真实私有 OSS 上传/签名/按前缀删除 smoke、真实 Elasticsearch mapping/KNN/相关性与多实例故障演练，也未批量 reparse 存量文档或执行 101C alias 发布。因此当前状态不表示已 stage、commit、开启 feature flag 或发布。
 
 ---
 

@@ -222,6 +222,22 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     @Override
+    public int deleteParseArtifacts(String assetId, Long targetIndexGeneration) {
+        requireText(assetId, "assetId");
+        if (targetIndexGeneration != null && targetIndexGeneration < 0L) return 0;
+        return mapper.deleteArtifactsByAssetGeneration(
+                assetId.trim(), targetIndexGeneration, PARSE_ARTIFACT);
+    }
+
+    @Override
+    public int deleteParseArtifact(String itemId, long executionEpoch) {
+        requireText(itemId, "itemId");
+        if (executionEpoch < 1L) return 0;
+        return mapper.deleteArtifactByItemExecution(
+                itemId.trim(), executionEpoch, PARSE_ARTIFACT);
+    }
+
+    @Override
     public boolean assignTargetIndexGeneration(String itemId, String assetId,
                                                long targetIndexGeneration,
                                                LocalDateTime updatedAt) {

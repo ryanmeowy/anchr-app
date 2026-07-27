@@ -27,6 +27,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +38,8 @@ class IngestionStageTransactionCoordinatorTest {
     private IngestionTaskRepository ingestionTaskRepository;
     @Mock
     private AssetRepository assetRepository;
+    @Mock
+    private IngestionArtifactCleanupRecorder artifactCleanupRecorder;
 
     @Test
     void transitionAndUpdateAssetStatus_shouldRollbackWhenAssetWriteThrows() {
@@ -103,11 +106,33 @@ class IngestionStageTransactionCoordinatorTest {
                 .findMaxTargetIndexGeneration("asset-1");
     }
 
+    @Test
+    void terminalFailureShouldRollbackWhenCleanupEventCannotBeRecorded() {
+        RecordingTransactionManager transactionManager = new RecordingTransactionManager();
+        IngestionStageTransactionCoordinator coordinator = transactionalCoordinator(
+                transactionManager);
+        IngestionClaimTransition failed = transition().toBuilder()
+                .nextExecutionStage(IngestionExecutionStage.FAILED)
+                .status(IngestionTaskItemStatus.FAILED)
+                .build();
+        when(ingestionTaskRepository.transitionClaim(failed)).thenReturn(true);
+        doThrow(new IllegalStateException("outbox write failed"))
+                .when(artifactCleanupRecorder).terminalFailure(failed);
+
+        assertThatThrownBy(() -> coordinator.transitionFailed(
+                failed, null, "FAILED", "FAILED", 0, 0))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("outbox write failed");
+
+        assertThat(transactionManager.commits).isZero();
+        assertThat(transactionManager.rollbacks).isEqualTo(1);
+    }
+
     private IngestionStageTransactionCoordinator transactionalCoordinator(
             PlatformTransactionManager transactionManager) {
         IngestionStageTransactionCoordinator target =
                 new IngestionStageTransactionCoordinator(
-                        ingestionTaskRepository, assetRepository);
+                        ingestionTaskRepository, assetRepository, artifactCleanupRecorder);
         TransactionInterceptor interceptor = new TransactionInterceptor(
                 transactionManager, new AnnotationTransactionAttributeSource());
         ProxyFactory proxyFactory = new ProxyFactory(target);

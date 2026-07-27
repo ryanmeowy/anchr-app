@@ -29,8 +29,10 @@ import java.util.Optional;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -62,7 +64,9 @@ class SegmentPreviewServiceImplTest {
                 activityEventService,
                 activityQueryService,
                 knowledgeBaseService);
-        when(knowledgeBaseService.get(anyString())).thenReturn(KnowledgeBase.builder().id("kb-1").name("KB").build());
+        lenient().when(knowledgeBaseService.get(anyString())).thenReturn(KnowledgeBase.builder().id("kb-1").name("KB").build());
+        lenient().when(knowledgeBaseService.getDocument(anyString(), anyString())).thenReturn(
+                Asset.builder().id("asset-1").kbId("kb-1").activeIndexGeneration(0L).build());
     }
 
     @AfterEach
@@ -214,6 +218,24 @@ class SegmentPreviewServiceImplTest {
         assertThat(result.getPreviewUrl()).isEqualTo("https://preview/document");
         assertThat(result.getImagePreviewUrl()).isEqualTo("https://preview/image");
         assertThat(result.getSourceRef()).isEqualTo("embedded/architecture.png");
+    }
+
+    @Test
+    void oldGenerationShouldNotBePreviewable() {
+        Segment segment = segment("Old content", null, "Old title").toBuilder()
+                .indexGeneration(3L)
+                .build();
+        when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(segment));
+        when(knowledgeBaseService.getDocument("kb-1", "asset-1")).thenReturn(
+                Asset.builder().id("asset-1").kbId("kb-1")
+                        .activeIndexGeneration(4L).build());
+
+        assertThatThrownBy(() -> service.getSegmentPreview("seg-1", new PreviewRequestDTO()))
+                .isInstanceOf(com.anchr.core.common.exception.BusinessException.class)
+                .extracting(error -> ((com.anchr.core.common.exception.BusinessException) error).getError())
+                .isEqualTo(com.anchr.core.common.exception.ApiError.SEGMENT_NOT_FOUND);
+
+        verifyNoInteractions(objectStoragePort, activityEventService);
     }
 
     private Segment segment(String content, String ocr, String title) {

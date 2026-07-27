@@ -635,7 +635,8 @@ class IngestionTaskProcessorImplTest {
 
         processor.processClaim(item);
 
-        verifyNoInteractions(doclingChunkMapper);
+        verify(doclingChunkMapper).toTextChunks(asset, parsed, 1L);
+        verify(doclingChunkMapper).toDocumentImageChunks(asset, parsed, 1L);
         verifyNoInteractions(embeddingPort);
         verifyNoInteractions(ingestionIndexFinalizer);
         ArgumentCaptor<IngestionClaimTransition> failure =
@@ -646,7 +647,56 @@ class IngestionTaskProcessorImplTest {
         assertThat(failure.getValue().getErrorCode())
                 .isEqualTo("TEXT_PARSE_FAILED");
         assertThat(failure.getValue().getErrorMessage())
-                .isEqualTo("Docling returned empty chunks.");
+                .isEqualTo("Docling returned no usable text or embedded images.");
+    }
+
+    @Test
+    void embed_shouldAcceptDocumentWithOnlyUploadedEmbeddedImage() {
+        IngestionTaskItem item = claimed(IngestionExecutionStage.EMBED).toBuilder()
+                .parseResultObjectKey("parse-result.gz")
+                .sourceRevision("v1:revision")
+                .build();
+        Asset asset = pdfAsset("objects/image-only.pdf", null);
+        ParseResponse parsed = new ParseResponse(
+                "task-1:item-1:1", "docling", "chunks", "", "pdf",
+                List.of(), List.of(), List.of(), List.of());
+        Chunk documentImage = Chunk.builder()
+                .segmentId("image-segment-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .segmentType(SegmentType.DOCUMENT_IMAGE)
+                .chunkOrder(0)
+                .sourceRef("embedded/diagram.png")
+                .build();
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(artifactStore.readParseResult(item)).thenReturn(parsed);
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L)).thenReturn(List.of());
+        when(doclingChunkMapper.toDocumentImageChunks(asset, parsed, 1L))
+                .thenReturn(List.of(documentImage));
+        when(embeddingPort.isMulti()).thenReturn(true);
+        when(objectStoragePort.buildImageEmbeddingUrl("embedded/diagram.png"))
+                .thenReturn("https://signed.example/diagram.png");
+        when(embeddingPort.embed("https://signed.example/diagram.png", "image"))
+                .thenReturn(List.of(0.4f, 0.6f));
+        when(ingestionTaskRepository.renewClaim(
+                eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        when(transactionCoordinator.transitionAndUpdateAssetStatus(
+                any(), eq(asset), any(), any())).thenReturn(true);
+        when(ingestionIndexFinalizer.finalizeIndex(
+                any(IngestionTaskItem.class), eq(asset), any())).thenReturn(true);
+
+        processor.processClaim(item);
+
+        List<Segment> segments = capturedSegments(asset);
+        assertThat(segments).singleElement().satisfies(segment -> {
+            assertThat(segment.getSegmentType()).isEqualTo(SegmentType.DOCUMENT_IMAGE);
+            assertThat(segment.getSourceRef()).isEqualTo("embedded/diagram.png");
+            assertThat(segment.getEmbedding()).containsExactly(0.4f, 0.6f);
+        });
+        verify(transactionCoordinator, never()).transitionFailed(
+                any(), any(), any(), any(), anyInt(), anyInt());
     }
 
     @Test
@@ -1176,7 +1226,8 @@ class IngestionTaskProcessorImplTest {
         try {
             return objectMapper.writeValueAsString(
                     IngestionParseRequestSnapshot.capture(
-                            pdfAsset("objects/document.pdf", null), false, null));
+                            pdfAsset("objects/document.pdf", null), false, null,
+                            "task-1", "item-1", 1));
         } catch (Exception e) {
             throw new AssertionError(e);
         }

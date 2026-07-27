@@ -18,7 +18,7 @@ class IngestionParseRequestSnapshotTest {
     @Test
     void snapshotExcludesSignedUrlAndCredentialsButRebuildsV3Request() throws Exception {
         IngestionParseRequestSnapshot snapshot = IngestionParseRequestSnapshot.capture(
-                asset(), true, storageConfig());
+                asset(), true, storageConfig(), "task-1", "item-1", 1);
 
         String json = objectMapper.writeValueAsString(snapshot);
         IngestionParseRequestSnapshot restored = objectMapper.readValue(
@@ -36,7 +36,9 @@ class IngestionParseRequestSnapshotTest {
         assertThat(request.contractVersion()).isEqualTo(3);
         assertThat(request.options().includeEmbeddedImages()).isTrue();
         assertThat(request.oss().endpoint()).isEqualTo("oss.example.test");
-        assertThat(request.oss().basePath()).isEqualTo("embedded/");
+        assertThat(request.oss().basePath())
+                .isEqualTo("embedded/ingestion/task-1/item-1/parse/1/images/");
+        assertThat(request.oss().objectKeyLayout()).isEqualTo("ATTEMPT_PREFIX_V1");
         assertThat(request.oss().encryptedCredentials())
                 .containsEntry("ciphertext", "cipher-2");
     }
@@ -44,7 +46,7 @@ class IngestionParseRequestSnapshotTest {
     @Test
     void disabledEmbeddedImagesDoNotCaptureStorageTargetOrRequireCredentials() {
         IngestionParseRequestSnapshot snapshot = IngestionParseRequestSnapshot.capture(
-                asset(), false, storageConfig());
+                asset(), false, storageConfig(), "task-1", "item-1", 1);
 
         ParseRequest request = snapshot.toRequest(
                 "task-1:item-1:1",
@@ -59,14 +61,14 @@ class IngestionParseRequestSnapshotTest {
     @Test
     void persistedOutputTargetRejectsChangedStorageConfiguration() {
         IngestionParseRequestSnapshot snapshot = IngestionParseRequestSnapshot.capture(
-                asset(), true, storageConfig());
+                asset(), true, storageConfig(), "task-1", "item-1", 1);
         StorageConfig changed = StorageConfig.builder()
                 .endpoint("oss.example.test")
                 .bucket("another-bucket")
                 .prefix("embedded/")
                 .build();
 
-        assertThat(snapshot.targets(changed)).isFalse();
+        assertThat(snapshot.targets(changed, "task-1", "item-1", 1)).isFalse();
         assertThatThrownBy(() -> snapshot.toRequest(
                 "task-1:item-1:1",
                 "v1:revision",

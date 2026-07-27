@@ -22,6 +22,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,6 +33,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -200,19 +202,24 @@ class OutboxEventProcessorTest {
         IngestionArtifactReference artifact = IngestionArtifactReference.builder()
                 .artifactType("PARSE_RESULT")
                 .artifactVersion(1)
-                .objectKey("ingestion/parse-result.json.gz")
+                .objectKey("ingestion/task-1/item-1/parse/1/jobs/job-1/parse-result.v1.json.gz")
                 .build();
         when(ingestionTaskRepository.listParseArtifacts("asset-1", 4L))
                 .thenReturn(List.of(artifact));
-        when(artifactStore.readEmbeddedImageObjectKeys(artifact, "asset-1"))
-                .thenReturn(List.of("embedded/a.png", "embedded/b.png"));
+        when(artifactStore.readEmbeddedImageObjectKeysIfPresent(artifact, "asset-1"))
+                .thenReturn(Optional.of(List.of(
+                        "embedded/ingestion/task-1/item-1/parse/1/images/a.png",
+                        "embedded/ingestion/task-1/item-1/parse/1/images/b.png")));
         when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any()))
                 .thenReturn(true);
 
         processor.process(event);
 
-        verify(objectStoragePort).deleteObject("embedded/a.png");
-        verify(objectStoragePort).deleteObject("embedded/b.png");
+        verify(objectStoragePort).deleteObjectsByPrefix(
+                "embedded/ingestion/task-1/item-1/parse/1/images/");
+        verify(objectStoragePort).deleteObjectsByPrefix(
+                "ingestion/task-1/item-1/parse/1/");
+        verify(ingestionTaskRepository).deleteParseArtifacts("asset-1", 4L);
         verify(segmentRepository).deleteByAssetGeneration("asset-1", 4L);
         verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
     }
@@ -226,14 +233,14 @@ class OutboxEventProcessorTest {
         IngestionArtifactReference artifact = IngestionArtifactReference.builder()
                 .artifactType("PARSE_RESULT")
                 .artifactVersion(1)
-                .objectKey("ingestion/parse-result.json.gz")
+                .objectKey("ingestion/task-1/item-1/parse/1/jobs/job-1/parse-result.v1.json.gz")
                 .build();
         when(ingestionTaskRepository.listParseArtifacts("asset-1", 4L))
                 .thenReturn(List.of(artifact));
-        when(artifactStore.readEmbeddedImageObjectKeys(artifact, "asset-1"))
-                .thenReturn(List.of("embedded/a.png"));
+        when(artifactStore.readEmbeddedImageObjectKeysIfPresent(artifact, "asset-1"))
+                .thenReturn(Optional.of(List.of("legacy/a.png")));
         doThrow(new IllegalStateException("OSS unavailable"))
-                .when(objectStoragePort).deleteObject("embedded/a.png");
+                .when(objectStoragePort).deleteObject("legacy/a.png");
         when(outboxEventRepository.markRetry(
                 eq(1L), eq("claim-1"), eq(1), any(), any(), any()))
                 .thenReturn(true);
@@ -245,6 +252,35 @@ class OutboxEventProcessorTest {
         verify(outboxEventRepository).markRetry(
                 eq(1L), eq("claim-1"), eq(1), any(), eq("OSS unavailable"), any());
         verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());
+    }
+
+    @Test
+    void process_shouldDeleteOnlyTheFailedAttemptPrefixes() {
+        String payload = "{\"taskId\":\"task-1\",\"itemId\":\"item-1\","
+                + "\"executionEpoch\":2,\"parseAttempt\":3,"
+                + "\"imagePrefix\":\"embedded/ingestion/task-1/item-1/parse/3/images/\","
+                + "\"parseArtifactPrefix\":\"ingestion/task-1/item-1/parse/3/\"}";
+        OutboxEvent event = OutboxEvent.builder()
+                .id(1L)
+                .eventType(OutboxEventType.DELETE_INGESTION_ATTEMPT_ARTIFACTS)
+                .aggregateType("INGESTION_ITEM")
+                .aggregateId("item-1")
+                .payload(payload)
+                .status(OutboxEventStatus.PROCESSING)
+                .retryCount(0)
+                .lockToken("claim-1")
+                .build();
+        when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any()))
+                .thenReturn(true);
+
+        processor.process(event);
+
+        verify(objectStoragePort).deleteObjectsByPrefix(
+                "embedded/ingestion/task-1/item-1/parse/3/images/");
+        verify(objectStoragePort).deleteObjectsByPrefix(
+                "ingestion/task-1/item-1/parse/3/");
+        verify(ingestionTaskRepository).deleteParseArtifact("item-1", 2L);
+        verifyNoInteractions(segmentRepository);
     }
 
     private OutboxEvent event(int retryCount, String payload) {

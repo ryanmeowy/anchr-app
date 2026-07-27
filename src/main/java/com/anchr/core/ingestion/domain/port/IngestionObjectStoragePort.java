@@ -1,5 +1,7 @@
 package com.anchr.core.ingestion.domain.port;
 
+import java.util.Optional;
+
 /**
  * Domain port for object storage operations used by ingestion.
  */
@@ -50,9 +52,19 @@ public interface IngestionObjectStoragePort {
      */
     byte[] readArtifact(String objectKey, int maxBytes);
 
+    /** Read an artifact for cleanup, returning empty only when the object does not exist. */
+    default Optional<byte[]> readArtifactIfPresent(String objectKey, int maxBytes) {
+        return Optional.of(readArtifact(objectKey, maxBytes));
+    }
+
     /** Idempotently remove one owned object. */
     default void deleteObject(String objectKey) {
         throw new UnsupportedOperationException("Object deletion is not configured.");
+    }
+
+    /** Idempotently remove every owned object below an exact, validated prefix. */
+    default void deleteObjectsByPrefix(String prefix) {
+        throw new UnsupportedOperationException("Prefix deletion is not configured.");
     }
 
 }

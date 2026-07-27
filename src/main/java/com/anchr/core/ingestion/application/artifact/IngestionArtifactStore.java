@@ -21,6 +21,7 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -213,6 +214,38 @@ public class IngestionArtifactStore {
                 .map(String::trim)
                 .distinct()
                 .toList();
+    }
+
+    /** Cleanup variant that treats an already deleted Parse artifact as success. */
+    public Optional<List<String>> readEmbeddedImageObjectKeysIfPresent(
+            IngestionArtifactReference reference, String expectedAssetId) {
+        if (reference == null) return Optional.of(List.of());
+        String objectKey = requireText(reference.getObjectKey(), "parseArtifact.objectKey");
+        Optional<byte[]> compressed = objectStoragePort.readArtifactIfPresent(
+                objectKey, maxCompressedBytes);
+        if (compressed.isEmpty()) return Optional.empty();
+        validateRegistryReference(
+                reference,
+                PARSE_REGISTRY_TYPE,
+                objectKey,
+                compressed.get(),
+                Long.MAX_VALUE);
+        IngestionParseArtifact artifact = readParseArtifact(objectKey, compressed.get());
+        if (!Objects.equals(expectedAssetId, artifact.assetId())
+                || !Objects.equals(objectKey, parseObjectKey(artifact))) {
+            throw identityMismatch(
+                    "Parse artifact identity does not match the asset cleanup request.");
+        }
+        if (artifact.result().images() == null) return Optional.of(List.of());
+        return Optional.of(artifact.result().images().stream()
+                .filter(Objects::nonNull)
+                .filter(image -> Objects.equals(ARTIFACT_VERSION, image.artifactVersion()))
+                .filter(image -> "UPLOADED".equalsIgnoreCase(image.uploadStatus()))
+                .map(ParseResponse.Image::imageObjectKey)
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList());
     }
 
     private byte[] encode(Object artifact) {

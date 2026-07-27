@@ -6,6 +6,8 @@ import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
+import com.anchr.core.ingestion.application.artifact.IngestionArtifactPaths;
+import com.anchr.core.ingestion.domain.model.IngestionAttemptArtifactDeletePayload;
 import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
@@ -23,6 +25,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
+import java.util.Optional;
 
 /**
  * Polls and executes durable outbox events without holding a database transaction
@@ -75,16 +78,32 @@ public class OutboxEventProcessor {
             switch (event.getEventType()) {
                 case DELETE_ASSET -> {
                     DocumentIndexDeletePayload payload = readDeletePayload(event);
-                    cleanupEmbeddedImageObjects(payload.assetId(), null);
+                    List<IngestionArtifactReference> artifacts =
+                            cleanupIngestionObjects(payload.assetId(), null);
                     segmentRepository.deleteByAssetId(payload.assetId());
+                    cleanupParseArtifactObjects(artifacts);
+                    ingestionTaskRepository.deleteParseArtifacts(payload.assetId(), null);
                 }
                 case DELETE_ASSET_GENERATION -> {
                     DocumentIndexGenerationDeletePayload payload =
                             readGenerationDeletePayload(event);
-                    cleanupEmbeddedImageObjects(
+                    List<IngestionArtifactReference> artifacts = cleanupIngestionObjects(
                             payload.assetId(), payload.indexGeneration());
                     segmentRepository.deleteByAssetGeneration(
                             payload.assetId(), payload.indexGeneration());
+                    cleanupParseArtifactObjects(artifacts);
+                    ingestionTaskRepository.deleteParseArtifacts(
+                            payload.assetId(), payload.indexGeneration());
+                }
+                case DELETE_INGESTION_ATTEMPT_ARTIFACTS -> {
+                    IngestionAttemptArtifactDeletePayload payload =
+                            readAttemptDeletePayload(event);
+                    if (payload.imagePrefix() != null) {
+                        objectStoragePort.deleteObjectsByPrefix(payload.imagePrefix());
+                    }
+                    objectStoragePort.deleteObjectsByPrefix(payload.parseArtifactPrefix());
+                    ingestionTaskRepository.deleteParseArtifact(
+                            payload.itemId(), payload.executionEpoch());
                 }
                 case UNKNOWN -> {
                     failPermanently(
@@ -106,16 +125,44 @@ public class OutboxEventProcessor {
         }
     }
 
-    private void cleanupEmbeddedImageObjects(String assetId, Long indexGeneration) {
+    private List<IngestionArtifactReference> cleanupIngestionObjects(
+            String assetId, Long indexGeneration) {
         LinkedHashSet<String> objectKeys = new LinkedHashSet<>();
+        LinkedHashSet<String> imagePrefixes = new LinkedHashSet<>();
         List<IngestionArtifactReference> parseArtifacts =
                 ingestionTaskRepository.listParseArtifacts(assetId, indexGeneration);
         for (IngestionArtifactReference artifact : parseArtifacts) {
-            objectKeys.addAll(
-                    artifactStore.readEmbeddedImageObjectKeys(artifact, assetId));
+            Optional<List<String>> imageKeys =
+                    artifactStore.readEmbeddedImageObjectKeysIfPresent(artifact, assetId);
+            if (imageKeys.isEmpty()) continue;
+            objectKeys.addAll(imageKeys.get());
+            for (String objectKey : imageKeys.get()) {
+                String prefix = IngestionArtifactPaths.imagePrefixFromObjectKey(objectKey);
+                if (prefix != null) imagePrefixes.add(prefix);
+            }
+        }
+        for (String prefix : imagePrefixes) {
+            objectStoragePort.deleteObjectsByPrefix(prefix);
         }
         for (String objectKey : objectKeys) {
             objectStoragePort.deleteObject(objectKey);
+        }
+        return parseArtifacts;
+    }
+
+    private void cleanupParseArtifactObjects(List<IngestionArtifactReference> artifacts) {
+        LinkedHashSet<String> prefixes = new LinkedHashSet<>();
+        for (IngestionArtifactReference artifact : artifacts) {
+            String prefix = IngestionArtifactPaths.parsePrefixFromArtifactKey(
+                    artifact.getObjectKey());
+            if (prefix == null) {
+                throw new PermanentEventException(
+                        "Parse artifact is outside the owned ingestion attempt directory.");
+            }
+            prefixes.add(prefix);
+        }
+        for (String prefix : prefixes) {
+            objectStoragePort.deleteObjectsByPrefix(prefix);
         }
     }
 
@@ -167,6 +214,34 @@ public class OutboxEventProcessor {
         } catch (JsonProcessingException | IllegalArgumentException e) {
             throw new PermanentEventException(
                     "Invalid document index generation delete payload.", e);
+        }
+    }
+
+    private IngestionAttemptArtifactDeletePayload readAttemptDeletePayload(
+            OutboxEvent event) {
+        try {
+            IngestionAttemptArtifactDeletePayload payload = objectMapper.readValue(
+                    event.getPayload(), IngestionAttemptArtifactDeletePayload.class);
+            if (payload == null
+                    || !StringUtils.hasText(payload.taskId())
+                    || !StringUtils.hasText(payload.itemId())
+                    || payload.executionEpoch() < 1L
+                    || payload.parseAttempt() < 1
+                    || !payload.itemId().trim().equals(event.getAggregateId())
+                    || !IngestionArtifactPaths.isExpectedParsePrefix(
+                            payload.parseArtifactPrefix(),
+                            payload.taskId(), payload.itemId(), payload.parseAttempt())
+                    || (payload.imagePrefix() != null
+                            && !IngestionArtifactPaths.isExpectedImagePrefix(
+                                    payload.imagePrefix(), payload.taskId(),
+                                    payload.itemId(), payload.parseAttempt()))) {
+                throw new PermanentEventException(
+                        "Invalid ingestion attempt artifact delete payload.");
+            }
+            return payload;
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            throw new PermanentEventException(
+                    "Invalid ingestion attempt artifact delete payload.", e);
         }
     }
 

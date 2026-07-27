@@ -49,6 +49,12 @@ public interface IngestionTaskRepository {
     List<IngestionArtifactReference> listParseArtifacts(
             String assetId, Long targetIndexGeneration);
 
+    /** Remove Parse artifact registry rows after their external objects are gone. */
+    int deleteParseArtifacts(String assetId, Long targetIndexGeneration);
+
+    /** Remove the Parse artifact registry row owned by one failed execution. */
+    int deleteParseArtifact(String itemId, long executionEpoch);
+
     boolean assignTargetIndexGeneration(String itemId, String assetId,
                                         long targetIndexGeneration,
                                         LocalDateTime updatedAt);

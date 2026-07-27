@@ -42,6 +42,7 @@ public record ParseRequest(
             String endpoint,
             String bucket,
             String basePath,
+            String objectKeyLayout,
             Map<String, String> encryptedCredentials
     ) {}
 

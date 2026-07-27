@@ -1,6 +1,7 @@
 package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.model.ParseRequest;
+import com.anchr.core.ingestion.application.artifact.IngestionArtifactPaths;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -30,7 +31,10 @@ public record IngestionParseRequestSnapshot(
 
     static IngestionParseRequestSnapshot capture(Asset asset,
                                                  boolean includeEmbeddedImages,
-                                                 StorageConfig storageConfig) {
+                                                 StorageConfig storageConfig,
+                                                 String taskId,
+                                                 String itemId,
+                                                 int parseAttempt) {
         if (asset == null || !StringUtils.hasText(asset.getFileName())) {
             throw new IllegalArgumentException("Asset file name is required for a Docling request.");
         }
@@ -39,7 +43,9 @@ public record IngestionParseRequestSnapshot(
             target = new StableOssTarget(
                     requireText(storageConfig.getEndpoint(), "OSS endpoint"),
                     requireText(storageConfig.getBucket(), "OSS bucket"),
-                    storageConfig.getPrefix() == null ? "" : storageConfig.getPrefix());
+                    IngestionArtifactPaths.imagePrefix(
+                            storageConfig.getPrefix(), taskId, itemId, parseAttempt),
+                    IngestionArtifactPaths.ATTEMPT_PREFIX_LAYOUT);
         }
         return new IngestionParseRequestSnapshot(
                 CURRENT_VERSION,
@@ -88,6 +94,7 @@ public record IngestionParseRequestSnapshot(
                     ossTarget.endpoint(),
                     ossTarget.bucket(),
                     ossTarget.basePath(),
+                    ossTarget.objectKeyLayout(),
                     Map.copyOf(encryptedCredentials));
         }
         return ParseRequest.builder()
@@ -101,25 +108,41 @@ public record IngestionParseRequestSnapshot(
                 .build();
     }
 
-    boolean targets(StorageConfig storageConfig) {
+    boolean targets(StorageConfig storageConfig,
+                    String taskId,
+                    String itemId,
+                    int parseAttempt) {
         if (ossTarget == null) {
             return true;
         }
-        return storageConfig != null
-                && ossTarget.endpoint().equals(storageConfig.getEndpoint())
-                && ossTarget.bucket().equals(storageConfig.getBucket())
-                && ossTarget.basePath().equals(
-                storageConfig.getPrefix() == null ? "" : storageConfig.getPrefix());
+        if (storageConfig == null
+                || !ossTarget.endpoint().equals(storageConfig.getEndpoint())
+                || !ossTarget.bucket().equals(storageConfig.getBucket())) {
+            return false;
+        }
+        if (ossTarget.objectKeyLayout() == null) {
+            return ossTarget.basePath().equals(
+                    storageConfig.getPrefix() == null ? "" : storageConfig.getPrefix());
+        }
+        return IngestionArtifactPaths.ATTEMPT_PREFIX_LAYOUT.equals(
+                ossTarget.objectKeyLayout())
+                && ossTarget.basePath().equals(IngestionArtifactPaths.imagePrefix(
+                        storageConfig.getPrefix(), taskId, itemId, parseAttempt));
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record StableOssTarget(String endpoint, String bucket, String basePath) {
+    public record StableOssTarget(String endpoint, String bucket, String basePath,
+                                  String objectKeyLayout) {
 
         private StableOssTarget validated() {
             requireText(endpoint, "OSS endpoint");
             requireText(bucket, "OSS bucket");
             if (basePath == null) {
                 throw new IllegalStateException("OSS base path is missing from the request snapshot.");
+            }
+            if (objectKeyLayout != null
+                    && !IngestionArtifactPaths.ATTEMPT_PREFIX_LAYOUT.equals(objectKeyLayout)) {
+                throw new IllegalStateException("Unsupported embedded-image object key layout.");
             }
             return this;
         }

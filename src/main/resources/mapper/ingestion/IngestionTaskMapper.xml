@@ -713,6 +713,30 @@
         order by ia.created_at asc, ia.execution_id asc
     </select>
 
+    <delete id="deleteArtifactsByAssetGeneration">
+        delete ia
+        from ingestion_item_artifact ia
+        inner join ingestion_item_execution ie
+            on ie.id = ia.execution_id
+        inner join ingestion_task_item iti
+            on iti.id = ie.item_id
+        where iti.asset_id = #{assetId}
+          and ia.artifact_type = #{artifactType}
+        <if test="targetIndexGeneration != null">
+            and iti.target_index_generation = #{targetIndexGeneration}
+        </if>
+    </delete>
+
+    <delete id="deleteArtifactByItemExecution">
+        delete ia
+        from ingestion_item_artifact ia
+        inner join ingestion_item_execution ie
+            on ie.id = ia.execution_id
+        where ie.item_id = #{itemId}
+          and ie.execution_epoch = #{executionEpoch}
+          and ia.artifact_type = #{artifactType}
+    </delete>
+
     <select id="findCurrentClaimForUpdate" resultType="java.lang.Long">
         select ie.id
         from ingestion_task_item iti

@@ -49,6 +49,8 @@ class IngestionIndexFinalizerTest {
     private SegmentBulkWriter segmentBulkWriter;
     @Mock
     private AssetIndexChangeRecorder assetIndexChangeRecorder;
+    @Mock
+    private IngestionArtifactCleanupRecorder artifactCleanupRecorder;
 
     private IngestionIndexFinalizer finalizer;
 
@@ -59,7 +61,8 @@ class IngestionIndexFinalizerTest {
                 ingestionTaskRepository,
                 segmentRepository,
                 segmentBulkWriter,
-                assetIndexChangeRecorder);
+                assetIndexChangeRecorder,
+                artifactCleanupRecorder);
     }
 
     @Test

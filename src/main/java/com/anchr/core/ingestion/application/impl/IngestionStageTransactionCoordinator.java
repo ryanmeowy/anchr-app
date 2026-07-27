@@ -22,6 +22,7 @@ public class IngestionStageTransactionCoordinator {
 
     private final IngestionTaskRepository ingestionTaskRepository;
     private final AssetRepository assetRepository;
+    private final IngestionArtifactCleanupRecorder artifactCleanupRecorder;
 
     @Transactional(rollbackFor = Exception.class)
     public IngestionTaskItem ensureTargetIndexGeneration(IngestionTaskItem item) {
@@ -121,6 +122,7 @@ public class IngestionStageTransactionCoordinator {
                     transition.getUpdatedBy(),
                     transitionTime(transition));
         }
+        artifactCleanupRecorder.terminalFailure(transition);
         return true;
     }
 
