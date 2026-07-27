@@ -106,6 +106,7 @@ class SegmentIndexMigrationValidationTest {
         };
         SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
                 null, null, null, null, storage,
+                null,
                 Runnable::run, null, null);
 
         assertEquals(

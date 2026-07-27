@@ -5,6 +5,7 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.ParseRequest;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
+import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactException;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
@@ -35,7 +36,6 @@ import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy.Profile;
 import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.domain.model.SegmentIdentity;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
@@ -101,6 +101,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final DoclingClient doclingClient;
     private final IngestionArtifactStore artifactStore;
     private final ObjectMapper objectMapper;
+    private final IdGen idGen;
 
     @Value("${app.ingestion.claim-batch-size:32}")
     private int claimBatchSize = 32;
@@ -893,13 +894,13 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         if (EmbeddingProjectionPolicy.requiresImageVisual(
                 profile, asset.getFileType())) {
             segments.add(Segment.builder()
-                    .segmentId(SegmentIdentity.imageVisual(
-                            asset.getId(), targetIndexGeneration))
+                    .segmentId(idGen.nextIdStr())
                     .kbId(asset.getKbId())
                     .assetId(asset.getId())
                     .indexGeneration(targetIndexGeneration)
                     .assetType(asset.getFileType())
                     .segmentType(SegmentType.IMAGE_VISUAL)
+                    .chunkOrder(0)
                     .title(StringUtils.hasText(asset.getTitle())
                             ? asset.getTitle() : asset.getFileName())
                     .sourceRef(stableSourceRef(asset, item))

@@ -1,19 +1,33 @@
 package com.anchr.core.ingestion.infrastructure.parser;
 
 import com.anchr.core.common.model.ParseResponse;
+import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.kb.domain.model.Asset;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class DoclingChunkMapperTest {
 
-    private final DoclingChunkMapper mapper = new DoclingChunkMapper();
+    private DoclingChunkMapper mapper;
+
+    @BeforeEach
+    void setUp() {
+        AtomicInteger ids = new AtomicInteger(1000);
+        IdGen idGen = mock(IdGen.class);
+        when(idGen.nextIdStr()).thenAnswer(
+                invocation -> String.valueOf(ids.incrementAndGet()));
+        mapper = new DoclingChunkMapper(idGen);
+    }
 
     @Test
     void toTextChunks_shouldUseAssetTypeForImageWhenResponseTypeDisagrees() {
@@ -30,6 +44,7 @@ class DoclingChunkMapperTest {
 
         assertEquals("recognized text", result.getOcrText());
         assertNull(result.getChunkText());
+        assertEquals("1001", result.getSegmentId());
     }
 
     @Test
@@ -50,7 +65,7 @@ class DoclingChunkMapperTest {
     }
 
     @Test
-    void toTextChunks_shouldGenerateStableIdFromRawChunkIdAndGeneration() {
+    void toTextChunks_shouldGenerateOrdinaryIdsWithoutChangingLogicalFields() {
         Asset asset = asset();
         ParseResponse response = response("pdf", "document text");
 
@@ -65,10 +80,8 @@ class DoclingChunkMapperTest {
                 .getSegmentId();
 
         assertThat(first)
-                .matches("[0-9a-f]{64}")
-                .isEqualTo(
-                        "da1466f17471b069bbd3ca625acae5ad8485a895399a0afcaee59c3ca89050ee")
-                .isEqualTo(retried)
+                .isEqualTo("1001")
+                .isNotEqualTo(retried)
                 .isNotEqualTo(nextGeneration);
     }
 
@@ -90,7 +103,7 @@ class DoclingChunkMapperTest {
     }
 
     @Test
-    void toTextChunks_shouldUseNormalizedFallbackWhenChunkIdIsMissing() {
+    void toTextChunks_shouldUseResponseOrderWhenChunkIdIsMissing() {
         Asset asset = asset();
         ParseResponse spaced = response(
                 "pdf",
@@ -121,7 +134,8 @@ class DoclingChunkMapperTest {
         Chunk retried = mapper.toTextChunks(asset, normalized, 2L).getFirst();
 
         assertThat(first.getChunkOrder()).isZero();
-        assertThat(first.getSegmentId()).isEqualTo(retried.getSegmentId());
+        assertThat(retried.getChunkOrder()).isZero();
+        assertThat(first.getSegmentId()).isNotEqualTo(retried.getSegmentId());
     }
 
     @Test
@@ -167,6 +181,7 @@ class DoclingChunkMapperTest {
         assertThat(images).singleElement().satisfies(image -> {
             assertThat(image.getSegmentType()).isEqualTo(
                     com.anchr.core.search.domain.model.SegmentType.DOCUMENT_IMAGE);
+            assertThat(image.getSegmentId()).isEqualTo("1001");
             assertThat(image.getSourceRef()).isEqualTo("embedded/picture-0.png");
             assertThat(image.getChunkText()).isEqualTo("caption\nalt\ncontext");
             assertThat(image.getOcrText()).isEqualTo("ocr");

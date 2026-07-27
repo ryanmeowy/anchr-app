@@ -26,13 +26,15 @@ class SegmentIndexMigrationProjectionTest {
                 null,
                 null,
                 null,
+                null,
                 Runnable::run,
                 new SegmentIndexWriteBarrier(),
                 null);
         EmbeddingProfile profile = new EmbeddingProfile(
                 1L, "MULTI_EMBEDDING", "multi-model", 2, "fingerprint");
         SegmentRebuildProjectionPlanner planner =
-                new SegmentRebuildProjectionPlanner(profile.capability());
+                new SegmentRebuildProjectionPlanner(
+                        profile.capability(), () -> "visual-1");
         List<String> calls = new ArrayList<>();
         EmbeddingSession session = (source, sourceType) -> {
             calls.add(sourceType + ":" + source);
@@ -42,14 +44,14 @@ class SegmentIndexMigrationProjectionTest {
         List<?> first = ReflectionTestUtils.invokeMethod(
                 manager,
                 "prepareMigrationBatch",
-                List.of(hit("ocr-1", imageOcr("ocr-1", "first"))),
+                List.of(hit("ocr-1", imageOcr("ocr-1", "first", 1))),
                 profile,
                 session,
                 planner);
         List<?> second = ReflectionTestUtils.invokeMethod(
                 manager,
                 "prepareMigrationBatch",
-                List.of(hit("ocr-2", imageOcr("ocr-2", "second"))),
+                List.of(hit("ocr-2", imageOcr("ocr-2", "second", 2))),
                 profile,
                 session,
                 planner);
@@ -81,6 +83,49 @@ class SegmentIndexMigrationProjectionTest {
                         assertThat(document.getEmbedding()).isNull());
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void managerShouldPreserveExistingEsIdAndSegmentIdIndependently() {
+        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
+                null,
+                new SegmentIndexConfig(),
+                null,
+                null,
+                null,
+                null,
+                Runnable::run,
+                new SegmentIndexWriteBarrier(),
+                null);
+        EmbeddingProfile profile = new EmbeddingProfile(
+                1L, "EMBEDDING", "text-model", 2, "fingerprint");
+        SegmentRebuildProjectionPlanner planner =
+                new SegmentRebuildProjectionPlanner(
+                        profile.capability(), () -> "unused");
+        SegmentDocument source = new SegmentDocument();
+        source.setSegmentId("source-segment-id");
+        source.setAssetId("asset-1");
+        source.setAssetType("PDF");
+        source.setSegmentType(SegmentType.TEXT_CHUNK.name());
+        source.setContentText("text");
+
+        List<?> migrated = ReflectionTestUtils.invokeMethod(
+                manager,
+                "prepareMigrationBatch",
+                List.of(hit("existing-es-id", source)),
+                profile,
+                (EmbeddingSession) (text, type) -> List.of(0.1f, 0.2f),
+                planner);
+
+        assertThat(migrated).singleElement().satisfies(item -> {
+            assertThat(ReflectionTestUtils.getField(item, "id"))
+                    .isEqualTo("existing-es-id");
+            SegmentDocument document = (SegmentDocument)
+                    ReflectionTestUtils.getField(item, "document");
+            assertThat(document.getSegmentId()).isEqualTo("source-segment-id");
+            assertThat(document.getChunkOrder()).isNull();
+        });
+    }
+
     private Hit<SegmentDocument> hit(
             String id,
             SegmentDocument document
@@ -91,7 +136,7 @@ class SegmentIndexMigrationProjectionTest {
                 .source(document));
     }
 
-    private SegmentDocument imageOcr(String id, String text) {
+    private SegmentDocument imageOcr(String id, String text, int chunkOrder) {
         SegmentDocument document = new SegmentDocument();
         document.setSegmentId(id);
         document.setKbId("kb-1");
@@ -99,6 +144,7 @@ class SegmentIndexMigrationProjectionTest {
         document.setIndexGeneration(3L);
         document.setAssetType("IMAGE");
         document.setSegmentType(SegmentType.IMAGE_OCR_BLOCK.name());
+        document.setChunkOrder(chunkOrder);
         document.setOcrText(text);
         document.setSourceRef("https://images.example.test/photo.png");
         return document;

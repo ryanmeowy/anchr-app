@@ -8,6 +8,7 @@ import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocum
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -29,7 +30,7 @@ class SegmentRebuildProjectionPlannerTest {
                             null,
                             null).orElseThrow();
             EmbeddingProjection rebuildProjection =
-                    new SegmentRebuildProjectionPlanner(capability)
+                    planner(capability)
                             .plan(text.getSegmentId(), text)
                             .getFirst()
                             .projection();
@@ -48,7 +49,7 @@ class SegmentRebuildProjectionPlannerTest {
                         imageForText.getOcrText(),
                         null).orElseThrow();
         EmbeddingProjection rebuildOcr =
-                new SegmentRebuildProjectionPlanner("EMBEDDING")
+                planner("EMBEDDING")
                         .plan(imageForText.getSegmentId(), imageForText)
                         .getFirst()
                         .projection();
@@ -66,7 +67,7 @@ class SegmentRebuildProjectionPlannerTest {
                 null)).isEmpty();
 
         List<SegmentRebuildProjectionPlanner.PlannedDocument> multiRebuild =
-                new SegmentRebuildProjectionPlanner("MULTI_EMBEDDING")
+                planner("MULTI_EMBEDDING")
                         .plan(imageForMulti.getSegmentId(), imageForMulti);
         assertThat(multiRebuild)
                 .filteredOn(item -> item.document().getSegmentType().equals(
@@ -94,13 +95,13 @@ class SegmentRebuildProjectionPlannerTest {
 
     @Test
     void multiTargetShouldKeepOcrWithoutVectorsAndCreateOneVisualPerGeneration() {
-        SegmentRebuildProjectionPlanner planner =
-                new SegmentRebuildProjectionPlanner("MULTI_EMBEDDING");
+        SegmentRebuildProjectionPlanner planner = planner("MULTI_EMBEDDING");
 
         List<SegmentRebuildProjectionPlanner.PlannedDocument> first =
                 planner.plan("ocr-1", imageOcr("ocr-1", 3L, "first", List.of(9f)));
         List<SegmentRebuildProjectionPlanner.PlannedDocument> second =
-                planner.plan("ocr-2", imageOcr("ocr-2", 3L, "second", List.of(8f)));
+                planner.plan("ocr-2", imageOcr(
+                        "ocr-2", 3L, "second", List.of(8f), 2));
 
         assertThat(first).hasSize(2);
         assertThat(first).filteredOn(item ->
@@ -122,7 +123,8 @@ class SegmentRebuildProjectionPlannerTest {
                     assertThat(item.projection().source())
                             .isEqualTo("images/photo.png");
                     assertThat(item.document().getOcrText()).isNull();
-                    assertThat(item.document().getChunkOrder()).isNull();
+                    assertThat(item.document().getChunkOrder()).isZero();
+                    assertThat(item.id()).isEqualTo("generated-segment-1");
                 });
         assertThat(second).singleElement().satisfies(item -> {
             assertThat(item.document().getSegmentType())
@@ -133,8 +135,7 @@ class SegmentRebuildProjectionPlannerTest {
 
     @Test
     void multiTargetShouldCreateOneVisualForEachAssetGeneration() {
-        SegmentRebuildProjectionPlanner planner =
-                new SegmentRebuildProjectionPlanner("MULTI_EMBEDDING");
+        SegmentRebuildProjectionPlanner planner = planner("MULTI_EMBEDDING");
 
         List<SegmentRebuildProjectionPlanner.PlannedDocument> firstGeneration =
                 planner.plan("ocr-1", imageOcr("ocr-1", 1L, "one", null));
@@ -149,11 +150,11 @@ class SegmentRebuildProjectionPlannerTest {
 
     @Test
     void existingVisualShouldNotBeDuplicated() {
-        SegmentRebuildProjectionPlanner planner =
-                new SegmentRebuildProjectionPlanner("MULTI_EMBEDDING");
+        SegmentRebuildProjectionPlanner planner = planner("MULTI_EMBEDDING");
         SegmentDocument existingVisual = imageOcr(
                 "visual-old", 3L, null, List.of(1f));
         existingVisual.setSegmentType(SegmentType.IMAGE_VISUAL.name());
+        existingVisual.setChunkOrder(0);
 
         List<SegmentRebuildProjectionPlanner.PlannedDocument> visual =
                 planner.plan("visual-old", existingVisual);
@@ -164,6 +165,9 @@ class SegmentRebuildProjectionPlannerTest {
                 assertThat(item.document().getSegmentType())
                         .isEqualTo(SegmentType.IMAGE_VISUAL.name());
                 assertThat(item.document().getEmbedding()).isNull();
+                assertThat(item.id()).isEqualTo("visual-old");
+                assertThat(item.document().getSegmentId()).isEqualTo("visual-old");
+                assertThat(item.document().getChunkOrder()).isZero();
                 assertThat(item.projection().inputType())
                         .isEqualTo(EmbeddingProjection.InputType.IMAGE);
                 assertThat(item.projection().source())
@@ -180,12 +184,14 @@ class SegmentRebuildProjectionPlannerTest {
             SegmentDocument source = new SegmentDocument();
             source.setSegmentId("text-1");
             source.setAssetId("asset-text");
+            source.setIndexGeneration(3L);
             source.setAssetType("PDF");
             source.setSegmentType(SegmentType.TEXT_CHUNK.name());
+            source.setChunkOrder(0);
             source.setContentText("document body");
             source.setEmbedding(List.of(9f));
 
-            var planned = new SegmentRebuildProjectionPlanner(capability)
+            var planned = planner(capability)
                     .plan("text-1", source);
 
             assertThat(planned).singleElement().satisfies(item -> {
@@ -199,6 +205,27 @@ class SegmentRebuildProjectionPlannerTest {
     }
 
     @Test
+    void rebuildShouldPreserveExistingIdAndMissingChunkOrder() {
+        SegmentDocument source = new SegmentDocument();
+        source.setSegmentId("existing-segment");
+        source.setAssetId("asset-text");
+        source.setIndexGeneration(3L);
+        source.setAssetType("PDF");
+        source.setSegmentType(SegmentType.TEXT_CHUNK.name());
+        source.setContentText("document body");
+
+        var planned = planner("EMBEDDING")
+                .plan("existing-segment", source);
+
+        assertThat(planned).singleElement().satisfies(item -> {
+            assertThat(item.id()).isEqualTo("existing-segment");
+            assertThat(item.document().getSegmentId())
+                    .isEqualTo("existing-segment");
+            assertThat(item.document().getChunkOrder()).isNull();
+        });
+    }
+
+    @Test
     void documentImageShouldUseSourceRefAsItsImageInput() {
         SegmentDocument source = new SegmentDocument();
         source.setSegmentId("document-image-1");
@@ -207,10 +234,11 @@ class SegmentRebuildProjectionPlannerTest {
         source.setIndexGeneration(2L);
         source.setAssetType("PDF");
         source.setSegmentType(SegmentType.DOCUMENT_IMAGE.name());
+        source.setChunkOrder(0);
         source.setContentText("architecture diagram");
         source.setSourceRef("embedded/architecture.png");
 
-        var planned = new SegmentRebuildProjectionPlanner("MULTI_EMBEDDING")
+        var planned = planner("MULTI_EMBEDDING")
                 .plan(source.getSegmentId(), source);
 
         assertThat(planned).singleElement().satisfies(item -> {
@@ -220,13 +248,16 @@ class SegmentRebuildProjectionPlannerTest {
                     .isEqualTo("embedded/architecture.png");
             assertThat(item.document().getSourceRef())
                     .isEqualTo("embedded/architecture.png");
+            assertThat(item.id()).isEqualTo("document-image-1");
+            assertThat(item.document().getSegmentId())
+                    .isEqualTo("document-image-1");
+            assertThat(item.document().getChunkOrder()).isZero();
         });
     }
 
     @Test
     void textTargetShouldDropVisualAndEmbedOnlyNonBlankOcr() {
-        SegmentRebuildProjectionPlanner planner =
-                new SegmentRebuildProjectionPlanner("EMBEDDING");
+        SegmentRebuildProjectionPlanner planner = planner("EMBEDDING");
         SegmentDocument visual = imageOcr("visual", 3L, null, List.of(1f));
         visual.setSegmentType(SegmentType.IMAGE_VISUAL.name());
 
@@ -250,8 +281,7 @@ class SegmentRebuildProjectionPlannerTest {
 
     @Test
     void multiTargetShouldFailInsteadOfEmbeddingAnUnrelatedThumbnail() {
-        SegmentRebuildProjectionPlanner planner =
-                new SegmentRebuildProjectionPlanner("MULTI_EMBEDDING");
+        SegmentRebuildProjectionPlanner planner = planner("MULTI_EMBEDDING");
         SegmentDocument source = imageOcr(
                 "ocr-1", 3L, "ocr", null);
         source.setSourceRef(null);
@@ -262,11 +292,41 @@ class SegmentRebuildProjectionPlannerTest {
                 .hasMessageContaining("no stable original image source");
     }
 
+    @Test
+    void existingVisualWithoutOriginalSourceShouldStillFailRebuild() {
+        SegmentDocument source = imageOcr(
+                "visual-old", 3L, null, List.of(1f));
+        source.setSegmentType(SegmentType.IMAGE_VISUAL.name());
+        source.setSourceRef(null);
+
+        assertThatThrownBy(() -> planner("MULTI_EMBEDDING")
+                .plan("visual-old", source))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no stable original image source");
+    }
+
     private SegmentDocument imageOcr(
             String segmentId,
             long generation,
             String ocrText,
             List<Float> embedding
+    ) {
+        return imageOcr(segmentId, generation, ocrText, embedding, 1);
+    }
+
+    private SegmentRebuildProjectionPlanner planner(String capability) {
+        AtomicInteger ids = new AtomicInteger();
+        return new SegmentRebuildProjectionPlanner(
+                capability,
+                () -> "generated-segment-" + ids.incrementAndGet());
+    }
+
+    private SegmentDocument imageOcr(
+            String segmentId,
+            long generation,
+            String ocrText,
+            List<Float> embedding,
+            int chunkOrder
     ) {
         SegmentDocument document = new SegmentDocument();
         document.setSegmentId(segmentId);
@@ -277,7 +337,7 @@ class SegmentRebuildProjectionPlannerTest {
         document.setSegmentType(SegmentType.IMAGE_OCR_BLOCK.name());
         document.setTitle("photo");
         document.setOcrText(ocrText);
-        document.setChunkOrder(1);
+        document.setChunkOrder(chunkOrder);
         document.setSourceRef("images/photo.png");
         document.setEmbedding(embedding);
         return document;
@@ -291,6 +351,7 @@ class SegmentRebuildProjectionPlannerTest {
         document.setIndexGeneration(3L);
         document.setAssetType("PDF");
         document.setSegmentType(SegmentType.TEXT_CHUNK.name());
+        document.setChunkOrder(0);
         document.setContentText("document body");
         document.setSourceRef("documents/file.pdf");
         return document;

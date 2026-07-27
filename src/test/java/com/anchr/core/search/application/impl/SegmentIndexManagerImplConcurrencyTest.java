@@ -176,6 +176,7 @@ class SegmentIndexManagerImplConcurrencyTest {
                 PROFILE_PROVIDER,
                 null,
                 null,
+                null,
                 Runnable::run,
                 new SegmentIndexWriteBarrier(),
                 aliasManager);
@@ -203,6 +204,7 @@ class SegmentIndexManagerImplConcurrencyTest {
                 null,
                 config,
                 PROFILE_PROVIDER,
+                null,
                 null,
                 null,
                 Runnable::run,
@@ -287,6 +289,7 @@ class SegmentIndexManagerImplConcurrencyTest {
                 null,
                 config,
                 profileProvider,
+                null,
                 null,
                 null,
                 executor,

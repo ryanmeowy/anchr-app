@@ -1,11 +1,13 @@
 package com.anchr.core.ingestion.infrastructure.parser;
 
 import com.anchr.core.common.model.BboxInfo;
+import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.search.domain.model.SegmentIdentity;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.google.common.collect.Lists;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
@@ -23,7 +25,10 @@ import java.util.stream.IntStream;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class DoclingChunkMapper {
+
+    private final IdGen idGen;
 
     public List<Chunk> toTextChunks(
             Asset asset, ParseResponse response, long targetIndexGeneration) {
@@ -73,25 +78,25 @@ public class DoclingChunkMapper {
         List<Chunk> chunks = new ArrayList<>(unique.size());
         int order = 0;
         for (ParseResponse.Image image : unique.values()) {
+            int chunkOrder = order++;
             List<BboxInfo> bboxes = Optional.ofNullable(image.bboxes())
                     .orElse(List.of()).stream()
                     .filter(Objects::nonNull)
                     .map(BboxInfo::convert2BboxInfo)
                     .toList();
             chunks.add(Chunk.builder()
-                    .segmentId(SegmentIdentity.documentImage(
-                            asset.getId(), targetIndexGeneration, image.blockId()))
+                    .segmentId(idGen.nextIdStr())
                     .kbId(asset.getKbId())
                     .assetId(asset.getId())
                     .title(StringUtils.hasText(asset.getTitle())
                             ? asset.getTitle() : asset.getFileName())
                     .pageNo(image.pageNo())
-                    .chunkOrder(order++)
+                    .chunkOrder(chunkOrder)
                     .chunkText(joinText(image.caption(), image.alt(), image.contextText()))
                     .ocrText(trimToNull(image.ocrText()))
                     .sourceRef(image.imageObjectKey().trim())
                     .bboxInfos(bboxes)
-                    .segmentType(com.anchr.core.search.domain.model.SegmentType.DOCUMENT_IMAGE)
+                    .segmentType(SegmentType.DOCUMENT_IMAGE)
                     .imageWidth(image.imageWidth())
                     .imageHeight(image.imageHeight())
                     .build());
@@ -107,20 +112,17 @@ public class DoclingChunkMapper {
             long targetIndexGeneration) {
         int pageNo = firstPageNo(chunk);
         int chunkOrder = parseChunkId(chunk.chunkId(), fallbackChunkOrder);
+        SegmentType segmentType = isImg
+                ? SegmentType.IMAGE_OCR_BLOCK
+                : SegmentType.TEXT_CHUNK;
         Chunk res = Chunk.builder()
-                .segmentId(SegmentIdentity.chunk(
-                        asset.getId(),
-                        targetIndexGeneration,
-                        chunk.chunkId(),
-                        pageNo,
-                        chunkOrder,
-                        StringUtils.hasText(chunk.textPlain())
-                                ? chunk.textPlain() : chunk.text()))
+                .segmentId(idGen.nextIdStr())
                 .kbId(asset.getKbId())
                 .assetId(asset.getId())
                 .title(CollectionUtils.isEmpty(chunk.headings()) ? asset.getFileName() : chunk.headings().getFirst())
                 .pageNo(pageNo)
                 .chunkOrder(chunkOrder)
+                .segmentType(segmentType)
                 .sourceRef(stableSourceRef(asset))
                 .bboxInfos(Optional.ofNullable(chunk.bboxes()).orElse(Lists.newArrayList()).stream().map(BboxInfo::convert2BboxInfo).toList())
                 .build();

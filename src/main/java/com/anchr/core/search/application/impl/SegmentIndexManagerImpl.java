@@ -15,6 +15,7 @@ import co.elastic.clients.elasticsearch.indices.IndexSettings;
 import co.elastic.clients.elasticsearch.indices.get_mapping.IndexMappingRecord;
 import co.elastic.clients.json.JsonData;
 import com.anchr.core.common.config.SegmentIndexConfig;
+import com.anchr.core.common.util.IdGen;
 import com.anchr.core.integration.ai.adapter.ServingEmbeddingConfigActivator;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
@@ -83,6 +84,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private final EmbeddingProfileProvider embeddingProfileProvider;
     private final SearchEmbeddingPort embeddingPort;
     private final SearchObjectStoragePort storagePort;
+    private final IdGen idGen;
 
     @Qualifier("indexInitExecutor")
     private final Executor indexInitExecutor;
@@ -609,7 +611,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         long processed = 0;
         long projected = 0;
         SegmentRebuildProjectionPlanner projectionPlanner =
-                new SegmentRebuildProjectionPlanner(targetProfile.capability());
+                new SegmentRebuildProjectionPlanner(
+                        targetProfile.capability(), idGen::nextIdStr);
         stateRef.updateAndGet(current -> current.withRebuildProgress(
                 new RebuildProgressState(0, totalDocs, "MIGRATING")));
 
@@ -684,9 +687,9 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 throw new IllegalStateException("Rebuild source contains a document without _source");
             }
             SegmentDocument document = hit.source();
-            String documentId = StringUtils.hasText(document.getSegmentId())
-                    ? document.getSegmentId()
-                    : hit.id();
+            String documentId = StringUtils.hasText(hit.id())
+                    ? hit.id()
+                    : document.getSegmentId();
             if (!StringUtils.hasText(documentId)) {
                 throw new IllegalStateException("Rebuild source contains a document without an id");
             }

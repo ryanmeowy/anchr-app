@@ -58,7 +58,7 @@
 | 主责卡 | 唯一拥有 | 只消费 | 明确不负责 |
 |---|---|---|---|
 | 101A | 当前单向量结构下 IMAGE 的分支前置条件、输入选择和向量回写 | 现有 Asset/Chunk/embedding 接口 | OCR+图片双 dense 写入、检索重构、模型切换 |
-| 101B | 单 `embedding` 的 Profile 投影 Policy、图片视觉投影单元、同一模型配置和来源契约 | 现有 BM25/RRF/Rerank；101A 的单载体线上修复；107 的确定性 ID | desired/serving profile、物理索引迁移、第二向量字段、文档内嵌图片制品/召回配额、分页快照、Asset generation |
+| 101B | 单 `embedding` 的 Profile 投影 Policy、图片视觉投影单元、同一模型配置和来源契约 | 现有 BM25/RRF/Rerank；101A 的单载体线上修复；107 的 generation 可见性 | desired/serving profile、物理索引迁移、第二向量字段、文档内嵌图片制品/召回配额、分页快照、Asset generation |
 | 101C | 内存待重建目标、目标模型 Session、全程 JVM 写屏障、alias 切换后启用模型 | 101B 的单向量投影 Policy | 持久化部署状态、分布式租约、增量追平、第二路 KNN、Asset generation、搜索 cursor/snapshot |
 | 102 | HTTP status/error metadata 与 OSS 清理许可契约 | 各业务卡提供的 errorCode 语义 | 创建幂等、任务恢复和业务重试策略 |
 | 103 | `clientRequestId/requestHash` 和创建响应丢失恢复 | 102 的错误元数据 | Docling attempt、任务执行调度、ES 幂等 |
@@ -66,7 +66,7 @@
 | 105 | `parseAttempt/sourceRevision/doclingRequestId/doclingJobId` 与 Docling 指纹协议 | 104 关闭后的请求体 | worker lease、阶段调度、parse artifact 生命周期、ES generation |
 | 106 | `executionEpoch/stageAttempt/lease/nextActionAt` 与可恢复阶段调度 | 105 的 submit/get/ack 和 parse attempt | 创建请求幂等、Docling 指纹、Asset generation、ES alias |
 | 106B | `ingestion_task_item`、current execution、artifact registry 的物理边界；内部 phase 与公开投影的唯一映射；按用例收窄查询模型；从 phase-local `stageAttempt` 到 execution-global `claimVersion` 的内部持久化表示；artifact 登记事务与 post-commit ACK 时序 | 106 已确定的 stage/retry/lease/attempt/artifact 语义和 stale-worker 拒绝结果 | 改变任务行为或 stale-worker 结果、Docling ACK HTTP 幂等协议、Asset generation、通用 DDD/Service 拆分 |
-| 107 | Asset `indexGeneration`、确定性 segmentId、MySQL/ES 可见性和清理事件 | 106B 的 execution/artifact 边界与 106 的 INDEX stage；现有 outbox 能力 | physical index version、embedding profile、检索融合、Outbox 搬包 |
+| 107 | Asset `indexGeneration`、目标 generation 重写、MySQL/ES 可见性和清理事件 | 106B 的 execution/artifact 边界与 106 的 INDEX stage；现有 outbox 能力 | physical index version、embedding profile、检索融合、Outbox 搬包 |
 | 108 | Search Snapshot、cursor、分页稳定性和模型调用一次性 | 101B 输出的已排序结果；101C 的物理索引/profile 标识 | 召回路由、RRF 权重、alias 切换、embedding profile 激活 |
 | 109 | Session 列表 keyset cursor、title CAS、updatedAt 单调更新 | 现有消息/Agent 数据 | 消息历史分页、Agent Activity、Conversation DTO 分层 |
 | 110 | `EmbeddedImageArtifact` 契约、`DOCUMENT_IMAGE` Segment、图片对象随 Asset generation 清理、同字段分路召回、父文档聚合和图片命中预览 | 104 的默认关闭门禁；105/106 的 Parse artifact；106B 的 artifact registry；107 的 generation/ID/事件；101B 的单向量 Policy；101C 的 profile 部署 | 图片专用生命周期、第二向量字段、模型部署状态机、Search Snapshot、通用 Docling attempt、通用 Outbox 搬包 |
@@ -83,12 +83,12 @@
 - 101B 向 108 交付：一次检索产生的稳定有序候选；108 不重新定义召回和融合。
 - 101B 向 110 交付：按 profile 对 `TEXT/IMAGE` 输入生成同一 `embedding` 字段的 Projection Policy；110 只增加内嵌图片制品和同字段召回分路，不复制投影算法、不增加第二向量字段。
 - 104/105/106 向 110 交付：默认关闭的旧上传门禁、稳定 Parse attempt 和持久化 Parse artifact；110 以版本化图片制品契约重新启用支线，不恢复旧 CBC/裸 URL 协议。
-- 107 向 110 交付：Asset generation、确定性 segmentId、激活门禁和旧 generation 清理事件；110 不建立第二套图片 generation。
+- 107 向 110 交付：Asset generation、目标 generation 重写、激活门禁和旧 generation 清理事件；110 不建立第二套图片 generation。
 - 101C 向 110 交付：目标 profile 的安全重建能力；110 的 mapping/存量回填复用该流程，不直接切 alias。
 - 110 向 108 交付：包含 `DOCUMENT_IMAGE` 分路召回、父资产聚合和稳定预览语义的最终有序结果；108 只为该结果建立分页快照。
 - 105 向 106 交付：幂等的 `submit/get/ack` 和 parse attempt 标识；106 只决定何时调用。
 - 106 向 106B 交付：已经验收的阶段、重试、lease、fence、Docling 恢复和公开 DTO 行为；106B 只重排持久化边界与读模型，不重新定义这些行为。
-- 106B 向 107 交付：收敛后的 current execution、通用 artifact registry 和进入 `INDEX` phase 的 fenced context；107 只增加 generation、确定性 ID 与索引激活一致性。
+- 106B 向 107 交付：收敛后的 current execution、通用 artifact registry 和进入 `INDEX` phase 的 fenced context；107 只增加 generation、目标 generation 重写与索引激活一致性。
 - 106B 向 110 交付：artifact registry 的表结构、登记 API 和事务语义；110 把版本化 `EmbeddedImageArtifact` 保存在既有 `PARSE_RESULT.images[]`，不新增 artifact type、业务表或 `ingestion_task_item` 图片制品指针列。
 - 102 向 103/105/106 交付：通用 HTTP 错误信封；各业务卡只定义自己的 errorCode、retryable 和 accepted 语义。
 - 201 只建立守门规则；202–205 分别消除自己拥有的违规；206 最后在不改变行为的前提下拆分类。
@@ -97,8 +97,8 @@
 
 | 共享修改面 | 可能涉及的卡 | 强制顺序 | 后卡必须保留的前卡契约 |
 |---|---|---|---|
-| Ingestion create/processor / 后续 stage handler | 101A、103、104、105、106、106B、107、101B、101C、110 | 101A → 104 → 105；102 → 103；两路汇合 → 106 → 106B → 107 → 101B → 101C → 110 | 图片分支/向量回写；创建幂等；关闭 STS 支线；Parse 协议；可恢复状态机；normalized execution/artifact 边界；Asset generation/确定性 ID；单向量 Policy；profile 部署；内嵌图片投影 |
-| `Segment` / `SegmentDocument` / mapping / bulk writer | 107、101B、101C、110 | 107 → 101B → 101C → 110 | Asset generation/确定性 ID → 单向量投影契约 → 物理索引部署 → 内嵌图片 schema/回填 |
+| Ingestion create/processor / 后续 stage handler | 101A、103、104、105、106、106B、107、101B、101C、110 | 101A → 104 → 105；102 → 103；两路汇合 → 106 → 106B → 107 → 101B → 101C → 110 | 图片分支/向量回写；创建幂等；关闭 STS 支线；Parse 协议；可恢复状态机；normalized execution/artifact 边界；Asset generation/目标重写；单向量 Policy；profile 部署；内嵌图片投影 |
+| `Segment` / `SegmentDocument` / mapping / bulk writer | 107、101B、101C、110 | 107 → 101B → 101C → 110 | Asset generation/目标重写 → 单向量投影契约 → 物理索引部署 → 内嵌图片 schema/回填 |
 | `UnifiedSearchServiceImpl` / ES repository | 107、101B、110、108、206 | 107 → 101B → 110 → 108 → 206 | active generation 过滤 → 同一模型与单向量字段 → 图片分路召回/父资产聚合 → 结果快照 → 机械拆分 |
 | Search/Conversation result DTO 与 Preview | 110、202、206 | 110 → 202 → 206 | 图片命中与父文档预览语义 → DTO 边界迁移 → 机械拆分 |
 | Capability settings / `SegmentIndexManagerImpl` | 101C、203、206 | 101C → 203 → 206 | 延后启用与单实例重建 → 依赖倒置 → 机械拆分 |
@@ -219,7 +219,7 @@ EmbeddingProjection {
 ```
 
 2. Ingestion 和 physical index rebuild 必须调用同一个 Policy；禁止各自通过 `isImage && isMulti` 再实现一遍。
-3. 多模态图片无论 Docling 返回多少 OCR chunks，都产生恰好一条 Asset 级 `IMAGE_VISUAL` 投影；它使用 107 的确定性 ID 契约。OCR chunks 保持独立记录，只写 `ocrText/bbox/pageNo`，不复制视觉向量。
+3. 多模态图片无论 Docling 返回多少 OCR chunks，都产生恰好一条 Asset 级 `IMAGE_VISUAL` 投影；它使用普通 Segment ID，并随 107 的 Asset generation 写入和清理。OCR chunks 保持独立记录，只写 `ocrText/bbox/pageNo`，不复制视觉向量。
 4. 纯文本 profile 不产生 `IMAGE_VISUAL` 投影；有文本的图片 OCR chunks 各自使用 `ocrText` 生成现有单 `embedding`，无 OCR 的 chunk 保持无向量。从多模态切到纯文本时由 101C 重建目标索引，不能把旧视觉向量复制到 OCR 记录。
 5. Query 固定以 `sourceType=TEXT` 使用当前 serving profile 生成 query vector；多模态 profile 下，该文本 query vector与同一 `embedding` 字段中的文本/图片向量比较。
 6. ES mapping 继续只有一个 `embedding`，维度来自 profile；`_source` 普通读取继续排除该字段。
@@ -228,7 +228,7 @@ EmbeddingProjection {
 
 ### 边界
 
-本卡负责单向量投影规则、`IMAGE_VISUAL` 投影单元、Ingestion/Rebuild 共用 Policy、唯一向量字段和输入来源契约；不改变模型启用时序、profile 部署状态、physical index rebuild/alias、Asset generation、Search Snapshot 或 RRF 参数。`IMAGE_VISUAL` 的确定性 ID 和可见性消费 107，不在本卡重新定义 generation。ANCHR-110 只能消费本卡 Policy 为文档内嵌图片生成向量，并可在同一字段上增加按 `segmentType` 过滤的召回通道；不得复制或改写投影规则。
+本卡负责单向量投影规则、`IMAGE_VISUAL` 投影单元、Ingestion/Rebuild 共用 Policy、唯一向量字段和输入来源契约；不改变模型启用时序、profile 部署状态、physical index rebuild/alias、Asset generation、Search Snapshot 或 RRF 参数。`IMAGE_VISUAL` 的可见性和清理消费 107，不在本卡重新定义 generation。ANCHR-110 只能消费本卡 Policy 为文档内嵌图片生成向量，并可在同一字段上增加按 `segmentType` 过滤的召回通道；不得复制或改写投影规则。
 
 101A 只修当前线上分支提前跳过和重复视觉向量的缺陷，使用首个有效 OCR chunk 作为兼容载体；101B 再把 Asset 级视觉信号从 OCR chunk 中拆成唯一 `IMAGE_VISUAL` 投影并收口成统一 Policy。101C 消费 Policy 对目标索引重新生成投影和 `embedding`，但不能复制其输入选择规则。
 
@@ -726,7 +726,7 @@ EMBED 从 Parse artifact 恢复并在内存中生成 chunk 向量。模型向量
 
 若进程在完成 phase 交接后、INDEX 提交前退出，租约到期后恢复 worker 会从持久化的 Parse artifact 重新映射 chunks 并重新调用嵌入模型，再执行 INDEX。该额外调用只发生在真实恢复场景，避免为了极低概率的 INDEX 中断持续保存所有文件的高维向量。`retainLease` 只允许用于 `EMBED → INDEX`，Repository 会拒绝其他 phase 携带该标记。
 
-同一 Asset 的跨 task generation、跨 execution 确定性 segmentId 和 ES 可见性不由 Parse artifact 或内存交接冒充解决，仍归 ANCHR-107。
+同一 Asset 的跨 task generation、跨 execution 目标 generation 清理重写和 ES 可见性不由 Parse artifact 或内存交接冒充解决，仍归 ANCHR-107。
 
 #### MySQL 原子边界
 
@@ -740,9 +740,9 @@ EMBED 从 Parse artifact 恢复并在内存中生成 chunk 向量。模型向量
 
 - ES bulk 仍发生在 MySQL 事务/行锁期间，ES 成功后 MySQL 回滚无法撤销；
 - 不同 task 同时处理同一 Asset 时还没有 Asset generation fence，旧 task 可能覆盖新 task 的 Asset 状态；
-- mapper 的随机 segmentId 在 INDEX 恢复重算时仍可能变化，既不能保证同 execution 重放幂等，也不能保证跨 generation 幂等；
+- mapper 的普通 segmentId 在 INDEX 恢复重算时可能变化，恢复前必须清理同一未激活 target generation，不能直接追加；
 - overwrite cleanup 仍是 COMPLETE 后 best-effort 删除，进程退出可能跳过；
-- partial bulk、active/target generation、确定性 ID、激活门禁和清理 outbox 全部归 107。
+- partial bulk、active/target generation、目标 generation 清理重写、激活门禁和清理 outbox 全部归 107。
 
 Docling `images[]` 已完整保存在 parse artifact，供 110 消费；`DOCUMENT_IMAGE` Segment、内嵌图片对象生命周期、图片召回和 Preview 不在 106 展开。前端不读取内部 execution/lease/artifact 字段。
 
@@ -961,7 +961,7 @@ V18 不是旧/新 worker 可混跑的 expand-contract 迁移；MySQL DDL 也不�
 
 - 不修改 Docling 指纹、ACK HTTP 幂等协议和 parse attempt 规则，这些属于 105；artifact 是否已经在 MySQL 提交，以及只能在提交后触发 ACK 的事务时序属于 106B；
 - 不修改 retry/backoff/lease/timeout/stale-worker 的业务结果，这些属于 106；106B 可以把内部 fence 从 phase-local `stageAttempt` 重表达为 execution-global `claimVersion`，但相同 stale worker 必须继续得到与 106 一致的拒绝结果；
-- 不增加 `indexGeneration`、确定性 segmentId、ES 可见性或 outbox，这些属于 107；
+- 不增加 `indexGeneration`、目标 generation 清理重写、ES 可见性或 outbox，这些属于 107；
 - 不定义图片 artifact 内容、图片 Segment 和多模态召回，这些属于 110；
 - 不借机迁移整个模块的 DTO、Port、聚合或拆分大 Service；通用 DDD 治理仍属于 201–206。
 
@@ -998,11 +998,11 @@ V18 不是旧/新 worker 可混跑的 expand-contract 迁移；MySQL DDL 也不�
 
 **状态：** 源码与本地回归已完成；业务库 V19、真实 Elasticsearch 故障演练和部署验收待完成。107 不得绕过 106B 的 V18 业务库迁移门禁进入生产。
 
-**目标：** 解决 ES 已写入但 MySQL 回滚、部分 bulk 成功、重跑随机 segmentId、overwrite 绕过 outbox。
+**目标：** 解决 ES 已写入但 MySQL 回滚、部分 bulk 成功后重跑追加、overwrite 绕过 outbox。
 
 ### 根因
 
-Mapper 每次生成随机 segmentId；ES bulk 发生在 MySQL 事务中但不能随事务回滚；重试会追加而非覆盖。普通删除已有 outbox 和 row lock，但 overwrite cleanup 直接删 ES 并吞异常。
+Mapper 每次生成普通 segmentId；ES bulk 发生在 MySQL 事务中但不能随事务回滚。若重试前不清理同一未激活 target generation，前一次部分成功记录会残留并形成追加。普通删除已有 outbox 和 row lock，但 overwrite cleanup 直接删 ES 并吞异常。
 
 源码：
 
@@ -1023,20 +1023,22 @@ index_generation
 
 旧资产和旧文档视为 generation 0；reparse/reembed 分配新 generation；同一目标 generation 的所有写入重试始终复用该 generation。
 
-确定性 ID：
+Segment ID 保持普通 ID：
 
 ```text
-segmentId = hash(assetId + generation + doclingChunkId)
+segmentId = IdGen.nextIdStr()
+ES _id = segmentId
 ```
 
-chunkId 缺失时使用 page、chunkOrder、规范化文本 hash，不再使用随机 ID。
+`assetId + indexGeneration + segmentType + chunkOrder` 均已作为 ES 独立字段存在，只在需要匹配逻辑 Segment 时组合判断，不拼入 `segmentId/_id`，也不新增逻辑键字段。Docling `chunkId` 只用于解析 `chunkOrder`，不直接持久化或拼入 ID。
 
 可见性流程：
 
-1. 新 generation 写入 ES。
-2. MySQL 原子切换 active generation。
-3. 搜索召回后批量加载资产 active generation，过滤不匹配 hit。
-4. 通过 outbox 删除旧 generation。
+1. 删除同一 Asset 下未激活 target generation 的重试残留。
+2. 使用本次生成的普通 Segment ID 写入 target generation。
+3. MySQL 原子切换 active generation。
+4. 搜索召回后批量加载资产 active generation，过滤不匹配 hit。
+5. 通过 outbox 删除旧 generation。
 
 因此 ES 写完但 DB 未提交时新文档不可见；旧文档删除失败也不会再参与搜索。
 
@@ -1056,7 +1058,7 @@ occurredAt
 
 ### 边界
 
-本卡中的 `indexGeneration` 是单个 Asset 内容/segment 的逻辑版本，不是 ES 物理索引版本。本卡拥有确定性 segmentId、generation 激活门禁、MySQL/ES 可见性和变化事件；可以在所有召回路由之后统一过滤非 active generation，但不得改变路由分数或相对顺序。不创建/切换 read-write alias，不选择 embedding profile，不增加第二向量检索路由，也不搬迁 Outbox 模块。Outbox 的现有可靠投递机制在本卡只被消费，包结构治理归 205。
+本卡中的 `indexGeneration` 是单个 Asset 内容/segment 的逻辑版本，不是 ES 物理索引版本。本卡拥有目标 generation 清理重写、generation 激活门禁、MySQL/ES 可见性和变化事件；可以在所有召回路由之后统一过滤非 active generation，但不得改变路由分数或相对顺序。不创建/切换 read-write alias，不选择 embedding profile，不增加第二向量检索路由，也不搬迁 Outbox 模块。Outbox 的现有可靠投递机制在本卡只被消费，包结构治理归 205。
 
 ### 验收
 
@@ -1071,7 +1073,7 @@ occurredAt
 
 - V19 增加 `asset.active_index_generation`、`ingestion_task_item.target_index_generation` 和只追加的 `asset_index_change`；没有新增业务 CHECK 或外键。旧 Asset/旧 ES 文档兼容为 generation 0。
 - 新建 Asset 固定从 generation 1 开始；REPARSE/REEMBED 在 Asset 行锁内按 `max(active generation, 已分配 target generation) + 1` 分配，旧数据中 target 为空的 item 在首次 claim 时用相同规则补齐。target 只保存在稳定 item，不复制到 execution。
-- `DoclingChunkMapper` 使用 Asset、target generation 和 Docling chunk identity 生成 SHA-256 segmentId；缺少 chunkId 时使用 page、chunkOrder 和规范化文本。`SegmentBulkWriter` 使用该 ID 覆盖写入，设置 `refresh=wait_for` 保证激活前新 generation 已可搜索，并拒绝空 ID、响应数量不一致和任一部分失败。
+- `DoclingChunkMapper` 使用既有 `IdGen` 为每个 Segment 生成普通 segmentId；`SegmentBulkWriter` 直接使用相同值作为 ES `_id` 写入，设置 `refresh=wait_for` 保证激活前新 generation 已可搜索，并拒绝空 ID、响应数量不一致和任一部分失败。
 - INDEX finalizer 先校验当前 claim 并锁定 Asset，再清理同一未激活 target generation 的重试残留、bulk 覆盖写、CAS 激活 generation，最后在同一 MySQL 事务写变化记录、旧 generation 清理 outbox 和 item COMPLETE。数据库提交失败时新 generation 留在 ES 但不满足 active gate；后续同 target 重试会先清掉残留。
 - 搜索在 RRF 合并后、Rerank 前一次批量读取候选 Asset 的 active generation，按原顺序 fail-closed 过滤；全文读取在分页开始时固定同一个 active generation。generation 0 查询同时兼容显式 `0` 和旧文档缺字段。
 - 普通删除与 overwrite 都在 Asset 行锁事务内 soft delete，并同时追加 `ASSET_DELETED` 变化和 `DELETE_ASSET` outbox；旧 generation 使用 `DELETE_ASSET_GENERATION` 复用现有 claim、lease、backoff 和失败重试，不再直接删 ES 或吞异常。
@@ -1282,15 +1284,16 @@ embedding        = 101B Projection Policy 的输出
 indexGeneration  = 107 当前目标 generation
 ```
 
-`sourceRef` 统一表示支撑当前 Segment 的对象：普通文本 Segment 指向原文档，`DOCUMENT_IMAGE` 指向内嵌图片对象。父文档通过既有 `assetId -> Asset.objectKey/previewObjectKey` 定位，不在每条图片 Segment 中重复保存父对象 key，也不新增 `imageObjectKey`、`imageBlockId` 或 `parentSourceRef`。`blockId` 只参与确定性 Segment ID 计算，不进入 ES mapping；不得把签名 URL 拼进 `sourceRef` 或 `contentText`。
+`sourceRef` 统一表示支撑当前 Segment 的对象：普通文本 Segment 指向原文档，`DOCUMENT_IMAGE` 指向内嵌图片对象。父文档通过既有 `assetId -> Asset.objectKey/previewObjectKey` 定位，不在每条图片 Segment 中重复保存父对象 key，也不新增 `imageObjectKey`、`imageBlockId` 或 `parentSourceRef`。`blockId` 只在解析阶段校验和去重，不参与 Segment ID，也不进入 ES mapping；不得把签名 URL 拼进 `sourceRef` 或 `contentText`。
 
-确定性 ID 消费 ANCHR-107：
+Segment ID 沿用普通 ID 契约：
 
 ```text
-segmentId = hash(assetId + indexGeneration + DOCUMENT_IMAGE + blockId)
+segmentId = IdGen.nextIdStr()
+ES _id = segmentId
 ```
 
-若上游无法提供稳定 blockId，只允许使用规范化图片内容 hash 加页面/文档顺序作为明确 fallback，并记录来源指标；禁止重新使用随机 `IdGen`。同一图片在多个 chunk 中被引用只能产生一个 Segment。
+`blockId` 继续用于同一次 Parse 结果内的图片去重；去重后的图片按稳定列表顺序分配 `chunkOrder`。同一图片在多个 chunk 中被引用只能产生一个 Segment。需要匹配逻辑图片 Segment 时直接比较现有 `assetId + indexGeneration + segmentType + chunkOrder` 字段，不改变 ID。
 
 图片对象 key 直接保存在现有 `PARSE_RESULT` artifact 的 `images[]` 中，并通过 execution → ingestion item 的既有关系归属 `assetId + targetIndexGeneration`。新 generation 激活时由已有 `DELETE_ASSET_GENERATION` 事件同时删除旧 generation 的图片对象和 Segment；Asset 删除复用已有 `DELETE_ASSET` 事件。清理失败沿用同一个 outbox 事件重试，不新增图片状态表、专用事件或第二套 generation 生命周期，也不只依赖 ES `_source` 作为对象删除清单。
 
@@ -1392,7 +1395,7 @@ assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
 
 - `anchr-docling` 已提供 v3 `EmbeddedImageArtifact` Pydantic 契约，包含稳定 `imageObjectKey`、上传状态、Picture Item 全 provenance bbox、宽高、mime、内容 hash 与文本代理；Markdown 图片允许无 page/bbox。图片上传 key 继续绑定稳定 requestId，响应 URL 仅用于返回 Markdown，app 写制品前会剥离诊断 URL。
 - App→Docling 临时凭据改为 AES-256-GCM envelope，包含 `version/keyId/nonce/ciphertext/tag/expiration`，AAD 固定绑定 `requestId/bucket/basePath/endpoint`；v2 fingerprint 继续兼容旧请求，启用内嵌图的新请求使用 contract v3。
-- App 已消费 `images[]` 并去重生成 `DOCUMENT_IMAGE`，ID 固定为 `assetId + indexGeneration + DOCUMENT_IMAGE + blockId` 的 SHA-256；`sourceRef` 直接保存图片对象 key，`blockId` 生成 ID 后不再持久化，父文档通过 `assetId -> Asset` 定位。TEXT profile 使用 `ocr + caption + alt + context`，MULTI profile 从 `sourceRef` 临时签名图片输入；rebuild 同样按 Segment type 投影。
+- App 已消费 `images[]` 并去重生成 `DOCUMENT_IMAGE`，使用既有 `IdGen` 生成普通 ID；`sourceRef` 直接保存图片对象 key，`blockId` 只用于解析阶段去重且不持久化，父文档通过 `assetId -> Asset` 定位。TEXT profile 使用 `ocr + caption + alt + context`，MULTI profile 从 `sourceRef` 临时签名图片输入；rebuild 原样保留已有 `_id/segmentId/chunkOrder`。
 - 图片列表只保存在既有 immutable `PARSE_RESULT` artifact，不复制第二份图片清单。`DELETE_ASSET_GENERATION` / `DELETE_ASSET` 通过 execution 与 ingestion item 的已有关系读取相应 Parse artifact，在同一事件中先幂等删除图片对象、再删除 ES Segment；任一步失败都由原事件重试。未新增图片表、状态或专用 outbox 事件。
 - 检索已拆为 BM25、普通同字段 vector route、`DOCUMENT_IMAGE` 同字段 vector route，分别配置 topK/similarity，RRF 后按 `assetId + segmentType` 限流再 Rerank、父资产聚合；`resultType` 保持 `TEXT/IMAGE/MIXED`，`topChunks` 保留 `DOCUMENT_IMAGE`、page/bbox、命中来源和短期图片缩略 URL。
 - Preview 保持父 PDF/Markdown `previewUrl` 与 page/bbox 定位，另签发 `imagePreviewUrl/imagePreviewExpiresAt`；Preview cache key 已包含对象身份。Web 已增加文档图片筛选、标签、缩略图和预览侧栏，回答链路仍只消费文本代理，没有暗中开启多模态 Answer。
@@ -1736,7 +1739,7 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 ### Wave 5：Asset Segment 写入一致性
 
-- ANCHR-107：Asset indexGeneration、确定性 segmentId、可见性和可重放变化。
+- ANCHR-107：Asset indexGeneration、目标 generation 清理重写、可见性和可重放变化。
 
 该 Wave 只接管 `INDEX` stage并提供一致性对账能力，不创建 physical index version。107 的生产发布必须显式记录所依赖的 106B 数据库验收证据，不能用 107 自身测试替代该门禁。
 
@@ -1826,5 +1829,5 @@ Wave 0
 9. ANCHR-101B 必须验证 Ingestion/Rebuild 对文本、OCR、原图使用相同的输入规则；多模态文本和图片请求使用同一个 `modelName/dimensions`；ES 只有一个 `embedding` 字段；既有 BM25/RRF/Rerank 顺序不变。不得增加第二向量字段或承担 110 的业务召回配额。
 10. ANCHR-101C 必须验证 profile fingerprint、同维不同模型、重建全程写阻塞、alias 切换后才启用目标配置以及失败时旧配置不变。
 11. ANCHR-106B 必须在真实 MySQL 上验证 fresh→V18 与 normalized V15→V18 两条路径、17 列 item、无 ingestion CHECK/FK、窄查询、坏 ownership/旧 execution 不可领取、公开投影兼容和部署稳定性；不得改变 106 的 retry/lease/stale-worker 业务结果。
-12. ANCHR-107 必须验证 generation 激活门禁、确定性 ID、部分 bulk、变化重放和清理失败，不承担 101C 的 physical index 验收。
+12. ANCHR-107 必须验证 generation 激活门禁、部分 bulk 后目标 generation 清理重写、变化重放和清理失败，不承担 101C 的 physical index 验收。
 13. ANCHR-110 必须验证图片 bbox 来自 Picture Item provenance、私有对象签名访问、存量 reparse、对象生命周期、同字段分路召回、父文档聚合和 Preview；不得以 `chunks[].bboxes` 猜测图片位置或增加第二 dense 字段。

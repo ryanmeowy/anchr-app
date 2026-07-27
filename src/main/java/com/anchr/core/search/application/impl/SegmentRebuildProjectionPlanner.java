@@ -3,7 +3,6 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy.Profile;
-import com.anchr.core.search.domain.model.SegmentIdentity;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import org.springframework.util.StringUtils;
@@ -13,6 +12,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Changes existing index documents into the segment shape required by a target profile.
@@ -20,10 +20,16 @@ import java.util.Set;
 final class SegmentRebuildProjectionPlanner {
 
     private final Profile targetProfile;
+    private final Supplier<String> segmentIdSupplier;
     private final Set<AssetGenerationKey> plannedVisuals = new HashSet<>();
 
-    SegmentRebuildProjectionPlanner(String targetCapability) {
+    SegmentRebuildProjectionPlanner(
+            String targetCapability,
+            Supplier<String> segmentIdSupplier
+    ) {
         this.targetProfile = Profile.fromCapability(targetCapability);
+        this.segmentIdSupplier = java.util.Objects.requireNonNull(
+                segmentIdSupplier, "segmentIdSupplier");
     }
 
     List<PlannedDocument> plan(String documentId, SegmentDocument source) {
@@ -53,11 +59,23 @@ final class SegmentRebuildProjectionPlanner {
         }
 
         AssetGenerationKey key = assetGenerationKey(source);
-        List<PlannedDocument> result = new ArrayList<>(2);
-        if (sourceType != SegmentType.IMAGE_VISUAL) {
-            source.setSegmentType(SegmentType.IMAGE_OCR_BLOCK.name());
-            result.add(planDocument(documentId, source));
+        if (sourceType == SegmentType.IMAGE_VISUAL) {
+            if (!plannedVisuals.add(key)) {
+                return List.of();
+            }
+            source.setSegmentType(SegmentType.IMAGE_VISUAL.name());
+            PlannedDocument visual = planDocument(documentId, source);
+            if (visual.projection() == null) {
+                throw new IllegalStateException(
+                        "Rebuild IMAGE asset " + key.assetId()
+                                + " has no stable original image source.");
+            }
+            return List.of(visual);
         }
+
+        List<PlannedDocument> result = new ArrayList<>(2);
+        source.setSegmentType(SegmentType.IMAGE_OCR_BLOCK.name());
+        result.add(planDocument(documentId, source));
         if (plannedVisuals.add(key)) {
             SegmentDocument visual = imageVisual(source, key);
             EmbeddingProjection projection = EmbeddingProjectionPolicy.select(
@@ -88,6 +106,7 @@ final class SegmentRebuildProjectionPlanner {
                         document.getContentText(),
                         document.getOcrText(),
                         segmentType == SegmentType.DOCUMENT_IMAGE
+                                || segmentType == SegmentType.IMAGE_VISUAL
                                 ? document.getSourceRef() : null)
                 .orElse(null);
         document.setEmbedding(null);
@@ -125,13 +144,13 @@ final class SegmentRebuildProjectionPlanner {
                 ? source.getSourceRef().trim()
                 : null;
         SegmentDocument visual = new SegmentDocument();
-        visual.setSegmentId(SegmentIdentity.imageVisual(
-                key.assetId(), key.indexGeneration()));
+        visual.setSegmentId(segmentIdSupplier.get());
         visual.setKbId(source.getKbId());
         visual.setAssetId(key.assetId());
         visual.setIndexGeneration(key.indexGeneration());
         visual.setAssetType(source.getAssetType());
         visual.setSegmentType(SegmentType.IMAGE_VISUAL.name());
+        visual.setChunkOrder(0);
         visual.setTitle(source.getTitle());
         visual.setImageWidth(source.getImageWidth());
         visual.setImageHeight(source.getImageHeight());

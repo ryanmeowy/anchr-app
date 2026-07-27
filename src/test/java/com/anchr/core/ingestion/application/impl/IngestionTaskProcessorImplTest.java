@@ -4,6 +4,7 @@ import com.anchr.core.common.model.ParseRequest;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.common.util.AesUtil;
+import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
 import com.anchr.core.ingestion.application.artifact.IngestionStoredArtifact;
 import com.anchr.core.ingestion.domain.model.Chunk;
@@ -27,7 +28,6 @@ import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.domain.model.SegmentIdentity;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -98,6 +98,8 @@ class IngestionTaskProcessorImplTest {
     private DoclingClient doclingClient;
     @Mock
     private IngestionArtifactStore artifactStore;
+    @Mock
+    private IdGen idGen;
 
     private ObjectMapper objectMapper;
     private IngestionTaskProcessorImpl processor;
@@ -107,6 +109,7 @@ class IngestionTaskProcessorImplTest {
         objectMapper = new ObjectMapper().findAndRegisterModules();
         lenient().when(transactionCoordinator.ensureTargetIndexGeneration(any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(idGen.nextIdStr()).thenReturn("visual-segment-1");
         processor = processor(Runnable::run);
     }
 
@@ -791,11 +794,10 @@ class IngestionTaskProcessorImplTest {
                         segment.getSegmentType() == SegmentType.IMAGE_VISUAL)
                 .singleElement()
                 .satisfies(segment -> {
-                    assertThat(segment.getSegmentId()).isEqualTo(
-                            SegmentIdentity.imageVisual("asset-1", 1L));
+                    assertThat(segment.getSegmentId()).isEqualTo("visual-segment-1");
                     assertThat(segment.getEmbedding()).containsExactly(0.8f, 0.9f);
                     assertThat(segment.getOcrText()).isNull();
-                    assertThat(segment.getChunkOrder()).isNull();
+                    assertThat(segment.getChunkOrder()).isZero();
                     assertThat(segment.getSourceRef()).isEqualTo("images/image.png");
                 });
         verify(embeddingPort, times(1))
@@ -1081,7 +1083,8 @@ class IngestionTaskProcessorImplTest {
                 doclingChunkMapper,
                 doclingClient,
                 artifactStore,
-                objectMapper);
+                objectMapper,
+                idGen);
     }
 
     private IngestionTaskItem claimed(IngestionExecutionStage stage) {
