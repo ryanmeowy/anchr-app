@@ -30,14 +30,14 @@ public class ThreadPoolConfig {
     @Bean("ingestionTaskExecutor")
     public Executor ingestionTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(4);
-        executor.setMaxPoolSize(8);
+        // Docling is configured with one worker. Keep the App ingestion chain serial as well;
+        // queued database items remain PENDING until this worker can claim them.
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
         executor.setQueueCapacity(64);
         executor.setKeepAliveSeconds(60);
         executor.setThreadNamePrefix("ingestion-task-");
-        // A rejected dispatch must remain in the database for a later scheduler pass. Running
-        // ingestion work on the request or transaction callback thread would make overload
-        // change API latency and could strand a claimed item if that thread is interrupted.
+        // A rejected dispatch remains PENDING for a later scheduler pass.
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;

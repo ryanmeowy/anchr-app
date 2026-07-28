@@ -1,6 +1,5 @@
 package com.anchr.core.ingestion.interfaces.rest.dto;
 
-import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
 import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
 import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
@@ -20,16 +19,16 @@ class IngestionTaskItemDTOTest {
         assertProjection(
                 IngestionPublicProjectionPolicy.pending(IngestionSourceType.REEMBED),
                 "EMBED", "PENDING", 60);
-        assertProjection(
-                IngestionPublicProjectionPolicy.running(
-                        IngestionExecutionStage.PARSE_SUBMIT, 60),
+        assertProjection(new IngestionPublicProjection(
+                        com.anchr.core.ingestion.domain.model.IngestionStage.PARSE,
+                        com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus.RUNNING, 60),
                 "PARSE", "RUNNING", 60);
         assertProjection(
                 IngestionPublicProjectionPolicy.explicitRetry(),
                 "UPLOAD", "PENDING", 0);
-        assertProjection(
-                IngestionPublicProjectionPolicy.running(
-                        IngestionExecutionStage.PARSE_SUBMIT, 0),
+        assertProjection(new IngestionPublicProjection(
+                        com.anchr.core.ingestion.domain.model.IngestionStage.PARSE,
+                        com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus.RUNNING, 20),
                 "PARSE", "RUNNING", 20);
         assertProjection(
                 IngestionPublicProjectionPolicy.preflightFailure(),
@@ -51,7 +50,7 @@ class IngestionTaskItemDTOTest {
 
         assertThat(json.properties().stream().map(entry -> entry.getKey()).toList())
                 .containsExactlyInAnyOrderElementsOf(Set.of(
-                        "itemId", "assetId", "fileName", "fileHash", "sourceUrl",
+                        "itemId", "assetId", "fileName", "fileHash",
                         "stage", "status", "progress", "dedupeStrategy", "dedupeResult",
                         "duplicateAssetId", "errorCode", "errorMessage",
                         "updatedAt", "finishedAt"));

@@ -70,7 +70,6 @@ app:
     poll-interval-ms: ${APP_INGESTION_POLL_INTERVAL_MS:1000}
     poll-initial-delay-ms: ${APP_INGESTION_POLL_INITIAL_DELAY_MS:1000}
     claim-batch-size: ${APP_INGESTION_CLAIM_BATCH_SIZE:32}
-    claim-lease-seconds: ${APP_INGESTION_CLAIM_LEASE_SECONDS:300}
     parse-poll-interval: ${APP_INGESTION_PARSE_POLL_INTERVAL:2s}
     parse-stage-timeout: ${APP_INGESTION_PARSE_STAGE_TIMEOUT:45m}
     stage-max-retries: ${APP_INGESTION_STAGE_MAX_RETRIES:5}

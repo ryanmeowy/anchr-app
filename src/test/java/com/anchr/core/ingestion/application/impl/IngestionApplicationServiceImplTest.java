@@ -10,8 +10,6 @@ import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
-import com.anchr.core.ingestion.domain.model.IngestionExecutionKind;
-import com.anchr.core.ingestion.domain.model.IngestionRetryConflictException;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
@@ -44,12 +42,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -98,6 +98,12 @@ class IngestionApplicationServiceImplTest {
         lenient().when(idGen.nextIdStr()).thenAnswer(invocation -> String.valueOf(nextId++));
         lenient().when(ingestionTaskRepository.findById(eq("kb-1"), any()))
                 .thenAnswer(invocation -> Optional.ofNullable(savedTask.get()));
+        lenient().when(assetRepository.findByIdForUpdate(eq("kb-1"), any()))
+                .thenAnswer(invocation -> Optional.of(Asset.builder()
+                        .id(invocation.getArgument(1))
+                        .kbId("kb-1")
+                        .activeIndexGeneration(1L)
+                        .build()));
         lenient().doAnswer(invocation -> {
             savedTask.set(invocation.getArgument(0));
             return null;
@@ -150,10 +156,6 @@ class IngestionApplicationServiceImplTest {
         assertThat(item.getDedupeResult()).isEqualTo(DedupeResult.NEW);
         assertThat(item.getDedupeStrategy()).isEqualTo(DedupeStrategy.SKIP);
         assertThat(item.getDuplicateAssetId()).isNull();
-        assertThat(item.getParseAttempt()).isEqualTo(1);
-        assertThat(item.getDoclingRequestId()).matches("[0-9]+:[0-9]+:1");
-        assertThat(item.getSourceRevision()).startsWith("v1:").hasSize(67);
-        assertThat(item.getDoclingJobId()).isNull();
         assertThat(item.getTargetIndexGeneration()).isEqualTo(1L);
         verify(assetRepository).save(any());
     }
@@ -204,54 +206,21 @@ class IngestionApplicationServiceImplTest {
         verify(assetRepository).save(assetCaptor.capture());
         assertThat(assetCaptor.getValue().getVersionGroupId()).isEqualTo("group-1");
         assertThat(assetCaptor.getValue().getVersionNo()).isEqualTo(3);
-        assertThat(assetCaptor.getValue().getPreviousAssetId()).isEqualTo("asset-old");
     }
 
     @Test
-    void createTask_shouldApplyDedupeToUrlImportWhenFileHashExists() {
-        Asset existing = existingAsset("asset-url", "hash-url");
-        when(assetRepository.findActiveByHash("kb-1", "hash-url")).thenReturn(Optional.of(existing));
-
-        IngestionTask task = service.createTask("kb-1", command(DedupeStrategy.SKIP, IngestionSourceType.URL, "hash-url")).task();
-
-        IngestionTaskItem item = task.getItems().getFirst();
-        assertThat(item.getStatus()).isEqualTo(IngestionTaskItemStatus.SKIPPED);
-        assertThat(item.getDedupeResult()).isEqualTo(DedupeResult.SKIPPED);
-        assertThat(item.getAssetId()).isEqualTo("asset-url");
-    }
-
-    @Test
-    void createTask_shouldUseUrlPendingProjectionForNewUrlAsset() {
-        when(assetRepository.findActiveByHash("kb-1", "hash-url"))
-                .thenReturn(Optional.empty());
-
-        IngestionTask task = service.createTask(
-                "kb-1",
-                command(DedupeStrategy.SKIP, IngestionSourceType.URL, "hash-url")).task();
-
-        IngestionTaskItem item = task.getItems().getFirst();
-        assertThat(item.getStage()).isEqualTo(IngestionStage.PARSE);
-        assertThat(item.getStatus()).isEqualTo(IngestionTaskItemStatus.PENDING);
-        assertThat(item.getProgress()).isEqualTo(10);
-    }
-
-    @Test
-    void genericCreateTask_shouldKeepLegacyUploadProjectionForMaintenanceSourceValues() {
+    void genericCreateTask_shouldRejectMaintenanceSourceValues() {
         for (IngestionSourceType sourceType : List.of(
                 IngestionSourceType.REPARSE,
                 IngestionSourceType.REEMBED,
                 IngestionSourceType.RETRY)) {
-            IngestionTask task = service.createTask(
-                    "kb-1",
-                    command(DedupeStrategy.SKIP, sourceType, "hash-" + sourceType)).task();
-
-            IngestionTaskItem item = task.getItems().getFirst();
-            assertThat(item.getStage()).isEqualTo(IngestionStage.UPLOAD);
-            assertThat(item.getStatus()).isEqualTo(IngestionTaskItemStatus.PENDING);
-            assertThat(item.getProgress()).isZero();
-            assertThat(savedTask.get().getInitialExecutionKind())
-                    .isEqualTo(IngestionExecutionKind.INITIAL);
+            BusinessException error = assertThrows(BusinessException.class, () ->
+                    service.createTask(
+                            "kb-1",
+                            command(DedupeStrategy.SKIP, sourceType, "hash-" + sourceType)));
+            assertThat(error.getError()).isEqualTo(ApiError.INVALID_REQUEST);
         }
+        verifyNoInteractions(assetRepository);
     }
 
     @Test
@@ -273,8 +242,8 @@ class IngestionApplicationServiceImplTest {
         assertThat(reparse.getItems().getFirst().getProgress()).isEqualTo(20);
         assertThat(reparse.getItems().getFirst().getTargetIndexGeneration())
                 .isEqualTo(1L);
-        assertThat(savedTask.get().getInitialExecutionKind())
-                .isEqualTo(IngestionExecutionKind.REPARSE);
+        assertThat(savedTask.get().getSourceType())
+                .isEqualTo(IngestionSourceType.REPARSE);
 
         IngestionTask reembed = service.createReembedTask("kb-1", "asset-1");
         assertThat(reembed.getItems().getFirst().getStage()).isEqualTo(IngestionStage.EMBED);
@@ -283,8 +252,8 @@ class IngestionApplicationServiceImplTest {
         assertThat(reembed.getItems().getFirst().getProgress()).isEqualTo(60);
         assertThat(reembed.getItems().getFirst().getTargetIndexGeneration())
                 .isEqualTo(2L);
-        assertThat(savedTask.get().getInitialExecutionKind())
-                .isEqualTo(IngestionExecutionKind.REEMBED);
+        assertThat(savedTask.get().getSourceType())
+                .isEqualTo(IngestionSourceType.REEMBED);
     }
 
     @Test
@@ -314,13 +283,13 @@ class IngestionApplicationServiceImplTest {
                 null,
                 null,
                 List.of(item(" mysql.pdf ", " MySQL ", "pdf", " application/pdf ",
-                        " objects/mysql.pdf ", " hash-a ", null)));
+                        " objects/mysql.pdf ", " hash-a ")));
         var replayCommand = new IngestionApplicationService.IngestionCreateCommand(
                 "request-1",
                 IngestionSourceType.UPLOAD,
                 DedupeStrategy.SKIP,
                 List.of(item("mysql.pdf", "MySQL", "PDF", "application/pdf",
-                        "objects/mysql.pdf", "hash-a", null)));
+                        "objects/mysql.pdf", "hash-a")));
 
         var first = service.createTask(" kb-1 ", firstCommand);
         var replay = service.createTask("kb-1", replayCommand);
@@ -441,8 +410,8 @@ class IngestionApplicationServiceImplTest {
     void createTask_sameIdWithReorderedItems_shouldReject() {
         when(ingestionTaskRepository.findByClientRequestId("user-a", "request-order"))
                 .thenAnswer(invocation -> Optional.ofNullable(savedTask.get()));
-        var firstItem = item("a.pdf", "A", "PDF", "application/pdf", "objects/a", "hash-a", null);
-        var secondItem = item("b.pdf", "B", "PDF", "application/pdf", "objects/b", "hash-b", null);
+        var firstItem = item("a.pdf", "A", "PDF", "application/pdf", "objects/a", "hash-a");
+        var secondItem = item("b.pdf", "B", "PDF", "application/pdf", "objects/b", "hash-b");
         var first = new IngestionApplicationService.IngestionCreateCommand(
                 "request-order", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                 List.of(firstItem, secondItem));
@@ -524,24 +493,26 @@ class IngestionApplicationServiceImplTest {
     }
 
     @Test
-    void retryItem_shouldAdvanceParseIdentityWithExplicitCasValues() {
-        IngestionTaskItem failedItem = failedItem("item-1", 3, "task-1:item-1:3");
+    void retryItem_shouldAllocateANewTargetGeneration() {
+        IngestionTaskItem failedItem = failedItem("item-1", 3);
         savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
                 .status(IngestionTaskStatus.FAILED)
                 .items(List.of(failedItem))
                 .build());
         when(ingestionTaskRepository.findRetryItem("kb-1", "task-1", "item-1"))
                 .thenReturn(Optional.of(failedItem));
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-item-1"))
+                .thenReturn(3L);
         when(ingestionTaskRepository.resetFailedItem(
-                eq("kb-1"), eq("task-1"), eq("item-1"),
-                eq(3), eq(4), eq("task-1:item-1:4"), any(LocalDateTime.class)))
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq(4L),
+                any(LocalDateTime.class)))
                 .thenReturn(true);
 
         service.retryItem("kb-1", "task-1", "item-1");
 
         verify(ingestionTaskRepository).resetFailedItem(
-                eq("kb-1"), eq("task-1"), eq("item-1"),
-                eq(3), eq(4), eq("task-1:item-1:4"), any(LocalDateTime.class));
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq(4L),
+                any(LocalDateTime.class));
         verify(ingestionTaskRepository)
                 .refreshSummary(eq("kb-1"), eq("task-1"), eq("user-a"), any(LocalDateTime.class));
         verify(ingestionTaskProcessor).submit("kb-1", "task-1", "user-a");
@@ -569,55 +540,61 @@ class IngestionApplicationServiceImplTest {
 
         assertThat(error.getError()).isEqualTo(ApiError.INGEST_RETRY_ONLY_FAILED);
         verify(ingestionTaskRepository, never()).resetFailedItem(
-                any(), any(), any(), anyInt(), anyInt(), any(), any());
+                any(), any(), any(), anyLong(), any());
         verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
     }
 
     @Test
-    void retryFailed_shouldAdvanceEveryIdentityIncludingLegacyNullRequestId() {
-        IngestionTaskItem legacyItem = failedItem("item-legacy", 1, null);
-        IngestionTaskItem currentItem = failedItem("item-current", 4, "task-1:item-current:4");
+    void retryFailed_shouldAllocateNewGenerationForEveryFailedItem() {
+        IngestionTaskItem legacyItem = failedItem("item-legacy", 1);
+        IngestionTaskItem currentItem = failedItem("item-current", 4);
         savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
                 .status(IngestionTaskStatus.FAILED)
                 .items(List.of(legacyItem, currentItem))
                 .build());
         when(ingestionTaskRepository.listFailedItems("kb-1", "task-1"))
                 .thenReturn(List.of(legacyItem, currentItem));
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-item-legacy"))
+                .thenReturn(1L);
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-item-current"))
+                .thenReturn(4L);
         when(ingestionTaskRepository.resetFailedItem(
-                eq("kb-1"), eq("task-1"), eq("item-legacy"),
-                eq(1), eq(2), eq("task-1:item-legacy:2"), any(LocalDateTime.class)))
+                eq("kb-1"), eq("task-1"), eq("item-legacy"), eq(2L),
+                any(LocalDateTime.class)))
                 .thenReturn(true);
         when(ingestionTaskRepository.resetFailedItem(
-                eq("kb-1"), eq("task-1"), eq("item-current"),
-                eq(4), eq(5), eq("task-1:item-current:5"), any(LocalDateTime.class)))
+                eq("kb-1"), eq("task-1"), eq("item-current"), eq(5L),
+                any(LocalDateTime.class)))
                 .thenReturn(true);
 
         service.retryFailed("kb-1", "task-1");
 
         verify(ingestionTaskRepository).resetFailedItem(
-                eq("kb-1"), eq("task-1"), eq("item-legacy"),
-                eq(1), eq(2), eq("task-1:item-legacy:2"), any(LocalDateTime.class));
+                eq("kb-1"), eq("task-1"), eq("item-legacy"), eq(2L),
+                any(LocalDateTime.class));
         verify(ingestionTaskRepository).resetFailedItem(
-                eq("kb-1"), eq("task-1"), eq("item-current"),
-                eq(4), eq(5), eq("task-1:item-current:5"), any(LocalDateTime.class));
+                eq("kb-1"), eq("task-1"), eq("item-current"), eq(5L),
+                any(LocalDateTime.class));
         verify(ingestionTaskRepository)
                 .refreshSummary(eq("kb-1"), eq("task-1"), eq("user-a"), any(LocalDateTime.class));
         verify(ingestionTaskProcessor).submit("kb-1", "task-1", "user-a");
     }
 
     @Test
-    void retryItem_whenCasLosesRace_shouldRejectWithoutSchedulingProcessor() {
-        IngestionTaskItem failedItem = failedItem("item-1", 2, "task-1:item-1:2");
+    void retryItem_whenStatusChanges_shouldRejectWithoutSchedulingProcessor() {
+        IngestionTaskItem failedItem = failedItem("item-1", 2);
         savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
                 .status(IngestionTaskStatus.FAILED)
                 .items(List.of(failedItem))
                 .build());
         when(ingestionTaskRepository.findRetryItem("kb-1", "task-1", "item-1"))
                 .thenReturn(Optional.of(failedItem));
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-item-1"))
+                .thenReturn(2L);
         when(ingestionTaskRepository.resetFailedItem(
-                eq("kb-1"), eq("task-1"), eq("item-1"),
-                eq(2), eq(3), eq("task-1:item-1:3"), any(LocalDateTime.class)))
-                .thenThrow(new IngestionRetryConflictException("pointer changed"));
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq(3L),
+                any(LocalDateTime.class)))
+                .thenReturn(false);
 
         BusinessException error = assertThrows(BusinessException.class,
                 () -> service.retryItem("kb-1", "task-1", "item-1"));
@@ -642,8 +619,7 @@ class IngestionApplicationServiceImplTest {
                         "application/pdf",
                         1024L,
                         "objects/mysql.pdf",
-                        fileHash,
-                        sourceType == IngestionSourceType.URL ? "https://example.com/mysql.pdf" : null
+                        fileHash
                 ))
         );
     }
@@ -655,7 +631,7 @@ class IngestionApplicationServiceImplTest {
                 IngestionSourceType.UPLOAD,
                 DedupeStrategy.SKIP,
                 List.of(item("mysql.pdf", title, "PDF", "application/pdf",
-                        "objects/mysql.pdf", "hash-a", null)));
+                        "objects/mysql.pdf", "hash-a")));
     }
 
     private IngestionApplicationService.IngestionCreateItemCommand item(String fileName,
@@ -663,10 +639,9 @@ class IngestionApplicationServiceImplTest {
                                                                          String fileType,
                                                                          String mimeType,
                                                                          String objectKey,
-                                                                         String fileHash,
-                                                                         String sourceUrl) {
+                                                                         String fileHash) {
         return new IngestionApplicationService.IngestionCreateItemCommand(
-                fileName, title, fileType, mimeType, 1024L, objectKey, fileHash, sourceUrl);
+                fileName, title, fileType, mimeType, 1024L, objectKey, fileHash);
     }
 
     private IngestionTask task(String taskId, String kbId, String clientRequestId, String requestHash) {
@@ -683,16 +658,14 @@ class IngestionApplicationServiceImplTest {
                 .build();
     }
 
-    private IngestionTaskItem failedItem(String itemId, int parseAttempt, String doclingRequestId) {
+    private IngestionTaskItem failedItem(String itemId, int targetGeneration) {
         return IngestionTaskItem.builder()
                 .id(itemId)
                 .taskId("task-1")
                 .kbId("kb-1")
                 .assetId("asset-" + itemId)
+                .targetIndexGeneration((long) targetGeneration)
                 .fileName(itemId + ".pdf")
-                .parseAttempt(parseAttempt)
-                .doclingRequestId(doclingRequestId)
-                .sourceRevision("v1:" + "a".repeat(64))
                 .status(IngestionTaskItemStatus.FAILED)
                 .build();
     }
@@ -704,7 +677,7 @@ class IngestionApplicationServiceImplTest {
                 .fileName("existing.pdf")
                 .fileType("PDF")
                 .fileHash(fileHash)
-                .sourceUrl("oss://existing.pdf")
+                .objectKey("objects/existing.pdf")
                 .versionNo(1)
                 .build();
     }

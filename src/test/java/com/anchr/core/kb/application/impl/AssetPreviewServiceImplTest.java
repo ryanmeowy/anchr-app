@@ -58,21 +58,16 @@ class AssetPreviewServiceImplTest {
         Asset asset = assetBuilder()
                 .previewObjectKey("preview/document.pdf")
                 .objectKey("original/document.pdf")
-                .thumbnailKey("thumbnail/document.png")
                 .build();
         long previewExpiry = System.currentTimeMillis() + 120_000L;
-        long thumbnailExpiry = previewExpiry - 10_000L;
         when(knowledgeBaseService.getDocument("kb-1", "asset-1")).thenReturn(asset);
         when(objectStoragePort.buildPreviewUrl("preview/document.pdf"))
                 .thenReturn(new SearchObjectStoragePort.SignedObjectUrl("https://preview", previewExpiry));
-        when(objectStoragePort.buildPreviewUrl("thumbnail/document.png"))
-                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl("https://thumbnail", thumbnailExpiry));
 
         var result = service.getPreview("kb-1", "asset-1");
 
         assertThat(result.getPreviewUrl()).isEqualTo("https://preview");
-        assertThat(result.getThumbnailUrl()).isEqualTo("https://thumbnail");
-        assertThat(result.getExpiresAt()).isEqualTo(thumbnailExpiry);
+        assertThat(result.getExpiresAt()).isEqualTo(previewExpiry);
         assertThat(result.getVersionNo()).isEqualTo(3);
         verify(objectStoragePort, never()).buildPreviewUrl("original/document.pdf");
     }
@@ -95,20 +90,6 @@ class AssetPreviewServiceImplTest {
         assertThat(result.getParseStatus()).isEqualTo("PENDING");
         assertThat(result.getIndexStatus()).isEqualTo("PENDING");
         assertThat(result.getExpiresAt()).isEqualTo(expiresAt);
-    }
-
-    @Test
-    void getPreview_shouldUseDirectHttpSourceWithoutSigning() {
-        Asset asset = assetBuilder()
-                .sourceUrl("https://docs.example.com/document.md")
-                .build();
-        when(knowledgeBaseService.getDocument("kb-1", "asset-1")).thenReturn(asset);
-
-        var result = service.getPreview("kb-1", "asset-1");
-
-        assertThat(result.getPreviewUrl()).isEqualTo("https://docs.example.com/document.md");
-        assertThat(result.getExpiresAt()).isNull();
-        verifyNoInteractions(objectStoragePort);
     }
 
     @Test

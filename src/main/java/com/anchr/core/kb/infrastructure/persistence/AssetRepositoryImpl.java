@@ -167,17 +167,13 @@ public class AssetRepositoryImpl implements AssetRepository {
                 .fileHash(record.getFileHash())
                 .versionGroupId(record.getVersionGroupId())
                 .versionNo(record.getVersionNo())
-                .previousAssetId(record.getPreviousAssetId())
                 .objectKey(record.getObjectKey())
                 .previewObjectKey(record.getPreviewObjectKey())
-                .thumbnailKey(record.getThumbnailKey())
-                .sourceUrl(record.getSourceUrl())
                 .parseStatus(parseStatus(record.getParseStatus()))
                 .indexStatus(indexStatus(record.getIndexStatus()))
                 .segmentCount(defaultInt(record.getSegmentCount()))
                 .indexedSegmentCount(defaultInt(record.getIndexedSegmentCount()))
                 .activeIndexGeneration(defaultLong(record.getActiveIndexGeneration()))
-                .embeddingProfile(record.getEmbeddingProfile())
                 .errorCode(record.getErrorCode())
                 .errorMessage(record.getErrorMessage())
                 .createdBy(record.getCreatedBy())
@@ -200,17 +196,13 @@ public class AssetRepositoryImpl implements AssetRepository {
         record.setFileHash(asset.getFileHash());
         record.setVersionGroupId(asset.getVersionGroupId());
         record.setVersionNo(asset.getVersionNo());
-        record.setPreviousAssetId(asset.getPreviousAssetId());
         record.setObjectKey(asset.getObjectKey());
         record.setPreviewObjectKey(asset.getPreviewObjectKey());
-        record.setThumbnailKey(asset.getThumbnailKey());
-        record.setSourceUrl(asset.getSourceUrl());
         record.setParseStatus(asset.getParseStatus().name());
         record.setIndexStatus(asset.getIndexStatus().name());
         record.setSegmentCount(asset.getSegmentCount());
         record.setIndexedSegmentCount(asset.getIndexedSegmentCount());
         record.setActiveIndexGeneration(asset.getActiveIndexGeneration());
-        record.setEmbeddingProfile(asset.getEmbeddingProfile());
         record.setErrorCode(asset.getErrorCode());
         record.setErrorMessage(asset.getErrorMessage());
         record.setCreatedBy(asset.getCreatedBy());

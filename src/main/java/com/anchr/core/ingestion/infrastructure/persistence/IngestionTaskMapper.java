@@ -1,8 +1,5 @@
 package com.anchr.core.ingestion.infrastructure.persistence;
 
-import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
-import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
-import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -10,14 +7,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * MyBatis mapper for ingestion task persistence.
- *
- * <p>Public reads, claim candidates, claimed executions and retries deliberately
- * use different records. This keeps lease, request-snapshot and artifact data
- * out of REST/list queries and keeps large source/error fields out of the claim
- * scan and row-lock query.</p>
- */
+/** MyBatis mapper for the two ingestion tables. */
 @Mapper
 public interface IngestionTaskMapper {
 
@@ -25,21 +15,12 @@ public interface IngestionTaskMapper {
 
     int insertItem(IngestionTaskItemRecord record);
 
-    int insertParseAttempt(IngestionParseAttemptRecord record);
-
-    int insertExecution(IngestionExecutionRecord record);
-
-    int insertArtifact(IngestionArtifactRecord record);
-
-    int pointItemToExecution(@Param("itemId") String itemId,
-                             @Param("executionId") Long executionId,
-                             @Param("updatedAt") LocalDateTime updatedAt);
-
     Optional<IngestionTaskRecord> findTask(@Param("kbId") String kbId,
                                            @Param("taskId") String taskId);
 
-    Optional<IngestionTaskRecord> findTaskByClientRequestId(@Param("createdBy") String createdBy,
-                                                            @Param("clientRequestId") String clientRequestId);
+    Optional<IngestionTaskRecord> findTaskByClientRequestId(
+            @Param("createdBy") String createdBy,
+            @Param("clientRequestId") String clientRequestId);
 
     List<IngestionTaskRecord> listTasks(@Param("kbId") String kbId,
                                         @Param("status") String status,
@@ -47,41 +28,65 @@ public interface IngestionTaskMapper {
 
     List<IngestionTaskRecord> listRecentTasks(@Param("limit") int limit);
 
-    List<IngestionItemViewRecord> listItems(@Param("taskId") String taskId);
+    List<IngestionTaskItemRecord> listItems(@Param("taskId") String taskId);
 
-    List<FailedItemRetryRecord> listFailedItems(@Param("kbId") String kbId,
-                                                @Param("taskId") String taskId);
+    List<IngestionTaskItemRecord> listFailedItems(@Param("kbId") String kbId,
+                                                  @Param("taskId") String taskId);
 
-    Optional<IngestionItemViewRecord> findItem(@Param("kbId") String kbId,
+    List<IngestionTaskItemRecord> listRunningItems();
+
+    Optional<IngestionTaskItemRecord> findItem(@Param("kbId") String kbId,
                                                @Param("taskId") String taskId,
                                                @Param("itemId") String itemId);
 
-    Optional<FailedItemRetryRecord> findRetryItem(@Param("kbId") String kbId,
-                                                  @Param("taskId") String taskId,
-                                                  @Param("itemId") String itemId);
+    Optional<IngestionTaskItemRecord> findRetryItem(@Param("kbId") String kbId,
+                                                    @Param("taskId") String taskId,
+                                                    @Param("itemId") String itemId);
 
-    List<String> listClaimableItemIds(@Param("limit") int limit);
+    List<String> listPendingItemIds(@Param("limit") int limit);
 
-    List<String> listClaimableItemIdsByTask(@Param("taskId") String taskId,
-                                            @Param("limit") int limit);
+    List<String> listPendingItemIdsByTask(@Param("taskId") String taskId,
+                                          @Param("limit") int limit);
 
-    Optional<ClaimCandidateRecord> selectClaimableItemForUpdate(@Param("itemId") String itemId);
+    int claimPending(@Param("itemId") String itemId);
 
-    int claimExecution(@Param("candidate") ClaimCandidateRecord candidate,
-                       @Param("leaseToken") String leaseToken,
-                       @Param("leaseSeconds") long leaseSeconds);
+    Optional<IngestionTaskItemRecord> findRunningItem(@Param("itemId") String itemId);
 
-    int projectClaimedItem(@Param("itemId") String itemId,
-                           @Param("executionId") Long executionId,
-                           @Param("projection")
-                           com.anchr.core.ingestion.domain.model.IngestionPublicProjection projection);
+    int advanceRunningItem(@Param("kbId") String kbId,
+                           @Param("taskId") String taskId,
+                           @Param("itemId") String itemId,
+                           @Param("expectedStage") String expectedStage,
+                           @Param("nextStage") String nextStage,
+                           @Param("progress") int progress,
+                           @Param("updatedAt") LocalDateTime updatedAt);
 
-    Optional<ClaimedExecutionRecord> findClaimedExecution(
-            @Param("itemId") String itemId,
-            @Param("leaseToken") String leaseToken,
-            @Param("includeParseSnapshot") boolean includeParseSnapshot);
+    Optional<String> findRunningItemForUpdate(@Param("itemId") String itemId,
+                                              @Param("expectedStage") String expectedStage);
+
+    int completeRunningItem(@Param("kbId") String kbId,
+                            @Param("taskId") String taskId,
+                            @Param("itemId") String itemId,
+                            @Param("expectedStage") String expectedStage,
+                            @Param("updatedAt") LocalDateTime updatedAt);
+
+    int failRunningItem(@Param("kbId") String kbId,
+                        @Param("taskId") String taskId,
+                        @Param("itemId") String itemId,
+                        @Param("expectedStage") String expectedStage,
+                        @Param("progress") int progress,
+                        @Param("errorCode") String errorCode,
+                        @Param("errorMessage") String errorMessage,
+                        @Param("updatedAt") LocalDateTime updatedAt);
+
+    int resetFailedItem(@Param("kbId") String kbId,
+                        @Param("taskId") String taskId,
+                        @Param("itemId") String itemId,
+                        @Param("nextTargetIndexGeneration") long nextTargetIndexGeneration,
+                        @Param("updatedAt") LocalDateTime updatedAt);
 
     Long findMaxTargetIndexGeneration(@Param("assetId") String assetId);
+
+    List<Long> listTargetIndexGenerations(@Param("assetId") String assetId);
 
     Optional<Long> findTargetIndexGeneration(@Param("itemId") String itemId,
                                              @Param("assetId") String assetId);
@@ -90,65 +95,6 @@ public interface IngestionTaskMapper {
                                     @Param("assetId") String assetId,
                                     @Param("targetIndexGeneration") long targetIndexGeneration,
                                     @Param("updatedAt") LocalDateTime updatedAt);
-
-    int renewClaim(@Param("itemId") String itemId,
-                   @Param("executionEpoch") long executionEpoch,
-                   @Param("expectedExecutionStage") IngestionExecutionStage expectedExecutionStage,
-                   @Param("claimVersion") long claimVersion,
-                   @Param("leaseToken") String leaseToken,
-                   @Param("leaseSeconds") long leaseSeconds);
-
-    int updateClaimContext(IngestionClaimContext context);
-
-    int transitionExecution(IngestionClaimTransition transition);
-
-    int projectTransitionToItem(IngestionClaimTransition transition);
-
-    int updateParseAttemptFromTransition(IngestionClaimTransition transition);
-
-    Optional<Long> findCurrentExecutionId(@Param("itemId") String itemId,
-                                          @Param("executionEpoch") long executionEpoch);
-
-    Optional<IngestionArtifactRecord> findArtifact(
-            @Param("executionId") Long executionId,
-            @Param("artifactType") String artifactType);
-
-    List<IngestionArtifactRecord> listArtifactsByAssetGeneration(
-            @Param("assetId") String assetId,
-            @Param("targetIndexGeneration") Long targetIndexGeneration,
-            @Param("artifactType") String artifactType);
-
-    int deleteArtifactsByAssetGeneration(
-            @Param("assetId") String assetId,
-            @Param("targetIndexGeneration") Long targetIndexGeneration,
-            @Param("artifactType") String artifactType);
-
-    int deleteArtifactByItemExecution(
-            @Param("itemId") String itemId,
-            @Param("executionEpoch") long executionEpoch,
-            @Param("artifactType") String artifactType);
-
-    Optional<Long> findCurrentClaimForUpdate(
-            @Param("itemId") String itemId,
-            @Param("executionEpoch") long executionEpoch,
-            @Param("expectedExecutionStage") IngestionExecutionStage expectedExecutionStage,
-            @Param("claimVersion") long claimVersion,
-            @Param("leaseToken") String leaseToken);
-
-    Optional<FailedItemRetryRecord> selectFailedItemForRetryForUpdate(
-            @Param("kbId") String kbId,
-            @Param("taskId") String taskId,
-            @Param("itemId") String itemId,
-            @Param("expectedParseAttempt") int expectedParseAttempt);
-
-    int resetFailedItemPointer(@Param("kbId") String kbId,
-                               @Param("taskId") String taskId,
-                               @Param("itemId") String itemId,
-                               @Param("expectedCurrentExecutionId") Long expectedCurrentExecutionId,
-                               @Param("nextExecutionId") Long nextExecutionId,
-                               @Param("projection")
-                               com.anchr.core.ingestion.domain.model.IngestionPublicProjection projection,
-                               @Param("updatedAt") LocalDateTime updatedAt);
 
     int refreshSummary(@Param("kbId") String kbId,
                        @Param("taskId") String taskId,

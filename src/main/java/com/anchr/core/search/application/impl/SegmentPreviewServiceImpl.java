@@ -283,7 +283,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         if (StringUtils.hasText(parentAsset.getObjectKey())) {
             return parentAsset.getObjectKey().trim();
         }
-        return parentAsset.getSourceUrl();
+        return null;
     }
 
     private String cacheIdentity(String assetId, String objectIdentity) {

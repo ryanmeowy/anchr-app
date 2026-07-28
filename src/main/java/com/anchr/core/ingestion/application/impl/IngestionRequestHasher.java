@@ -61,7 +61,8 @@ final class IngestionRequestHasher {
                 writeField(output, item.sizeBytes() == null ? null : item.sizeBytes().toString());
                 writeField(output, item.objectKey());
                 writeField(output, item.fileHash());
-                writeField(output, item.sourceUrl());
+                // Keep the retired URL slot null so valid UPLOAD requests retain their v1 hash.
+                writeField(output, null);
             }
             return bytes.toByteArray();
         } catch (IOException e) {

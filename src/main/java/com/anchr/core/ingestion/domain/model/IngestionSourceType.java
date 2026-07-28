@@ -5,7 +5,6 @@ package com.anchr.core.ingestion.domain.model;
  */
 public enum IngestionSourceType {
     UPLOAD,
-    URL,
     RETRY,
     REPARSE,
     REEMBED

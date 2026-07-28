@@ -52,7 +52,7 @@ public class AssetPreviewAccessCache {
         return CACHE_KEY_PREFIX + assetId.trim() + ":token:" + accessTokenHash.trim();
     }
 
-    public record AssetPreviewAccess(String previewUrl, String thumbnailUrl, Long expiresAt) {
+    public record AssetPreviewAccess(String previewUrl, Long expiresAt) {
     }
 
     private record CacheEntry(AssetPreviewAccess access, long cacheUntil) {

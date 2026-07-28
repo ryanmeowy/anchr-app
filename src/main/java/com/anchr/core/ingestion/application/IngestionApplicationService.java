@@ -43,7 +43,6 @@ public interface IngestionApplicationService {
                                       String mimeType,
                                       Long sizeBytes,
                                       String objectKey,
-                                      String fileHash,
-                                      String sourceUrl) {
+                                      String fileHash) {
     }
 }

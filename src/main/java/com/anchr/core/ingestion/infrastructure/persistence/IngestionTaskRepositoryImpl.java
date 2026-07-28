@@ -2,14 +2,6 @@ package com.anchr.core.ingestion.infrastructure.persistence;
 
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
-import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
-import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
-import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
-import com.anchr.core.ingestion.domain.model.IngestionExecutionKind;
-import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
-import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
-import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
-import com.anchr.core.ingestion.domain.model.IngestionRetryConflictException;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
@@ -24,71 +16,23 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
-import java.util.regex.Pattern;
 
-/**
- * MyBatis implementation for ingestion task persistence.
- *
- * <p>The public domain model remains API-compatible while persistence is split
- * into stable item, parse-attempt, execution and artifact lifecycles. Only the
- * claimed-execution query assembles the worker's wider runtime view.</p>
- */
+/** MyBatis implementation backed only by ingestion_task and ingestion_task_item. */
 @Repository
 @RequiredArgsConstructor
 public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
 
     private static final String SCHEDULER_USER = "ingestion-scheduler";
-    private static final String PARSE_ARTIFACT = "PARSE_RESULT";
-    private static final String PRODUCED_ARTIFACT = "PRODUCED";
-    private static final int ARTIFACT_VERSION = 1;
-    private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
-    private static final Set<IngestionExecutionStage> PARSE_PHASES = Set.of(
-            IngestionExecutionStage.PARSE_SUBMIT,
-            IngestionExecutionStage.PARSE_WAIT,
-            IngestionExecutionStage.PARSE_PERSIST);
 
     private final IngestionTaskMapper mapper;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void save(IngestionTask task) {
-        validateTaskForSave(task);
-        IngestionExecutionKind initialExecutionKind = Objects.requireNonNull(
-                task.getInitialExecutionKind(), "initialExecutionKind");
-        DedupeStrategy taskDedupeStrategy = resolveTaskDedupeStrategy(task);
-        mapper.insertTask(toRecord(task, taskDedupeStrategy));
-        if (task.getItems() == null) {
-            return;
-        }
-        for (IngestionTaskItem item : task.getItems()) {
-            mapper.insertItem(toRecord(item));
-            if (!requiresExecution(item)) {
-                continue;
-            }
-
-            IngestionExecutionStage phase = resolveExecutionStage(item);
-            IngestionParseAttemptRecord parseAttempt = newParseAttempt(item, phase);
-            mapper.insertParseAttempt(parseAttempt);
-
-            IngestionExecutionRecord execution = newExecution(
-                    item, parseAttempt.getId(), phase, initialExecutionKind.name());
-            mapper.insertExecution(execution);
-            registerInitialArtifact(
-                    execution.getId(),
-                    PARSE_ARTIFACT,
-                    item.getParseResultObjectKey(),
-                    item.getParseResultArtifact(),
-                    execution.getClaimVersion(),
-                    item.getUpdatedAt());
-            if (mapper.pointItemToExecution(item.getId(), execution.getId(), item.getUpdatedAt()) != 1) {
-                throw new IllegalStateException(
-                        "Failed to attach the initial ingestion execution to its item.");
-            }
-        }
+        List<IngestionTaskItemRecord> items = task.getItems() == null
+                ? List.of() : task.getItems().stream().map(this::toRecord).toList();
+        mapper.insertTask(toRecord(task, resolveTaskDedupeStrategy(task)));
+        items.forEach(mapper::insertItem);
     }
 
     @Override
@@ -105,15 +49,15 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
 
     @Override
     public List<IngestionTask> list(String kbId, IngestionTaskStatus status, int limit) {
-        String statusValue = status == null ? null : status.name();
-        return mapper.listTasks(kbId, statusValue, requirePositiveLimit(limit)).stream()
+        return mapper.listTasks(kbId, status == null ? null : status.name(), positiveLimit(limit))
+                .stream()
                 .map(record -> toDomain(record, mapper.listItems(record.getId())))
                 .toList();
     }
 
     @Override
     public List<IngestionTask> listRecent(int limit) {
-        return mapper.listRecentTasks(requirePositiveLimit(limit)).stream()
+        return mapper.listRecentTasks(positiveLimit(limit)).stream()
                 .map(record -> toDomain(record, List.of()))
                 .toList();
     }
@@ -125,9 +69,12 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
 
     @Override
     public List<IngestionTaskItem> listFailedItems(String kbId, String taskId) {
-        return mapper.listFailedItems(kbId, taskId).stream()
-                .map(this::toRetryDomain)
-                .toList();
+        return mapper.listFailedItems(kbId, taskId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<IngestionTaskItem> listRunningItems() {
+        return mapper.listRunningItems().stream().map(this::toDomain).toList();
     }
 
     @Override
@@ -138,322 +85,120 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     @Override
     public Optional<IngestionTaskItem> findRetryItem(
             String kbId, String taskId, String itemId) {
-        return mapper.findRetryItem(kbId, taskId, itemId).map(this::toRetryDomain);
+        return mapper.findRetryItem(kbId, taskId, itemId).map(this::toDomain);
     }
 
     @Override
-    public List<String> listClaimableItemIds(int limit) {
-        return mapper.listClaimableItemIds(requirePositiveLimit(limit));
+    public List<String> listPendingItemIds(int limit) {
+        return mapper.listPendingItemIds(positiveLimit(limit));
     }
 
     @Override
-    public List<String> listClaimableItemIds(String taskId, int limit) {
-        return mapper.listClaimableItemIdsByTask(taskId, requirePositiveLimit(limit));
+    public List<String> listPendingItemIds(String taskId, int limit) {
+        return mapper.listPendingItemIdsByTask(taskId, positiveLimit(limit));
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Optional<IngestionTaskItem> claimOne(String itemId, long leaseSeconds) {
-        requirePositiveLease(leaseSeconds);
-        Optional<ClaimCandidateRecord> candidate = mapper.selectClaimableItemForUpdate(itemId);
-        if (candidate.isEmpty()) {
+    public Optional<IngestionTaskItem> claimPending(String itemId) {
+        if (mapper.claimPending(itemId) != 1) {
             return Optional.empty();
         }
-        ClaimCandidateRecord record = candidate.get();
-        String leaseToken = UUID.randomUUID().toString();
-        if (mapper.claimExecution(record, leaseToken, leaseSeconds) != 1) {
-            return Optional.empty();
-        }
-        IngestionPublicProjection projection =
-                IngestionPublicProjectionPolicy.running(
-                        IngestionExecutionStage.valueOf(record.getPhase()),
-                        defaultInt(record.getItemProgress()));
-        if (mapper.projectClaimedItem(
-                itemId, record.getExecutionId(), projection) != 1) {
-            throw new IllegalStateException(
-                    "Claimed execution could not be projected to its current item.");
-        }
-        boolean includeParseSnapshot = PARSE_PHASES.contains(parsePhase(record.getPhase()));
-        ClaimedExecutionRecord claimed = mapper.findClaimedExecution(
-                        itemId, leaseToken, includeParseSnapshot)
+        IngestionTaskItemRecord claimed = mapper.findRunningItem(itemId)
                 .orElseThrow(() -> new IllegalStateException(
-                        "Claimed ingestion execution disappeared before commit."));
-        mapper.refreshSummary(
-                claimed.getKbId(),
-                claimed.getTaskId(),
-                hasText(claimed.getTaskCreatedBy())
-                        ? claimed.getTaskCreatedBy() : SCHEDULER_USER,
-                claimed.getClaimUpdatedAt());
+                        "Claimed ingestion item disappeared before commit."));
+        mapper.refreshSummary(claimed.getKbId(), claimed.getTaskId(),
+                updatedBy(claimed), claimed.getUpdatedAt());
         return Optional.of(toDomain(claimed));
     }
 
     @Override
+    public boolean advanceRunningItem(String kbId, String taskId, String itemId,
+                                      IngestionStage expectedStage, IngestionStage nextStage,
+                                      int progress, LocalDateTime updatedAt) {
+        return mapper.advanceRunningItem(kbId, taskId, itemId,
+                expectedStage.name(), nextStage.name(), progress, updatedAt) == 1;
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean isRunningForUpdate(String itemId, IngestionStage expectedStage) {
+        return mapper.findRunningItemForUpdate(itemId, expectedStage.name()).isPresent();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean completeRunningItem(String kbId, String taskId, String itemId,
+                                       IngestionStage expectedStage,
+                                       String updatedBy, LocalDateTime updatedAt) {
+        if (mapper.completeRunningItem(
+                kbId, taskId, itemId, expectedStage.name(), updatedAt) != 1) {
+            return false;
+        }
+        mapper.refreshSummary(kbId, taskId, fallbackUser(updatedBy), updatedAt);
+        return true;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean failRunningItem(String kbId, String taskId, String itemId,
+                                   IngestionStage expectedStage, int progress,
+                                   String errorCode, String errorMessage,
+                                   String updatedBy, LocalDateTime updatedAt) {
+        if (mapper.failRunningItem(kbId, taskId, itemId, expectedStage.name(),
+                progress, errorCode, errorMessage, updatedAt) != 1) {
+            return false;
+        }
+        mapper.refreshSummary(kbId, taskId, fallbackUser(updatedBy), updatedAt);
+        return true;
+    }
+
+    @Override
+    public boolean resetFailedItem(String kbId, String taskId, String itemId,
+                                   long nextTargetIndexGeneration,
+                                   LocalDateTime updatedAt) {
+        return mapper.resetFailedItem(
+                kbId, taskId, itemId, nextTargetIndexGeneration, updatedAt) == 1;
+    }
+
+    @Override
     public long findMaxTargetIndexGeneration(String assetId) {
-        requireText(assetId, "assetId");
         Long value = mapper.findMaxTargetIndexGeneration(assetId);
         return value == null ? 0L : Math.max(0L, value);
     }
 
     @Override
+    public List<Long> listTargetIndexGenerations(String assetId) {
+        return mapper.listTargetIndexGenerations(assetId);
+    }
+
+    @Override
     public Optional<Long> findTargetIndexGeneration(String itemId, String assetId) {
-        requireText(itemId, "itemId");
-        requireText(assetId, "assetId");
         return mapper.findTargetIndexGeneration(itemId, assetId);
-    }
-
-    @Override
-    public List<IngestionArtifactReference> listParseArtifacts(
-            String assetId, Long targetIndexGeneration) {
-        requireText(assetId, "assetId");
-        if (targetIndexGeneration != null && targetIndexGeneration < 0L) {
-            return List.of();
-        }
-        return mapper.listArtifactsByAssetGeneration(
-                        assetId.trim(), targetIndexGeneration, PARSE_ARTIFACT)
-                .stream()
-                .map(record -> artifactReference(
-                        PARSE_ARTIFACT,
-                        record.getObjectKey(),
-                        record.getArtifactVersion(),
-                        record.getProvenance(),
-                        record.getProducerClaimVersion(),
-                        record.getContentSha256()))
-                .toList();
-    }
-
-    @Override
-    public int deleteParseArtifacts(String assetId, Long targetIndexGeneration) {
-        requireText(assetId, "assetId");
-        if (targetIndexGeneration != null && targetIndexGeneration < 0L) return 0;
-        return mapper.deleteArtifactsByAssetGeneration(
-                assetId.trim(), targetIndexGeneration, PARSE_ARTIFACT);
-    }
-
-    @Override
-    public int deleteParseArtifact(String itemId, long executionEpoch) {
-        requireText(itemId, "itemId");
-        if (executionEpoch < 1L) return 0;
-        return mapper.deleteArtifactByItemExecution(
-                itemId.trim(), executionEpoch, PARSE_ARTIFACT);
     }
 
     @Override
     public boolean assignTargetIndexGeneration(String itemId, String assetId,
                                                long targetIndexGeneration,
                                                LocalDateTime updatedAt) {
-        requireText(itemId, "itemId");
-        requireText(assetId, "assetId");
-        if (targetIndexGeneration < 1L) {
-            throw new IllegalArgumentException(
-                    "targetIndexGeneration must be positive.");
-        }
-        Objects.requireNonNull(updatedAt, "updatedAt");
         return mapper.assignTargetIndexGeneration(
                 itemId, assetId, targetIndexGeneration, updatedAt) == 1;
     }
 
     @Override
-    public boolean renewClaim(String itemId, long executionEpoch,
-                              IngestionExecutionStage expectedExecutionStage,
-                              long claimVersion, String leaseToken, long leaseSeconds) {
-        requirePositiveLease(leaseSeconds);
-        validateClaimIdentity(
-                itemId, executionEpoch, expectedExecutionStage, claimVersion, leaseToken);
-        return mapper.renewClaim(
-                itemId, executionEpoch, expectedExecutionStage,
-                claimVersion, leaseToken, leaseSeconds) == 1;
-    }
-
-    @Override
-    public boolean updateClaimContext(IngestionClaimContext context) {
-        validateClaimContext(context);
-        return mapper.updateClaimContext(context) == 1;
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public boolean transitionClaim(IngestionClaimTransition transition) {
-        validatePublicProjection(transition);
-        if (mapper.transitionExecution(transition) != 1) {
-            return false;
-        }
-        if (PARSE_PHASES.contains(transition.getExpectedExecutionStage())
-                && mapper.updateParseAttemptFromTransition(transition) != 1) {
-            throw new IllegalStateException(
-                    "The current parse attempt disappeared during a fenced transition.");
-        }
-        if (mapper.projectTransitionToItem(transition) != 1) {
-            throw new IllegalStateException(
-                    "The transitioned execution could not be projected to its item.");
-        }
-
-        Long executionId = mapper.findCurrentExecutionId(
-                        transition.getItemId(), transition.getExecutionEpoch())
-                .orElseThrow(() -> new IllegalStateException(
-                        "The current execution pointer changed during a fenced transition."));
-        registerProducedArtifact(
-                executionId,
-                PARSE_ARTIFACT,
-                transition.getParseResultObjectKey(),
-                transition.getParseResultSha256(),
-                transition.getExpectedClaimVersion(),
-                transition.getUpdatedAt());
-        mapper.refreshSummary(
-                transition.getKbId(),
-                transition.getTaskId(),
-                hasText(transition.getUpdatedBy())
-                        ? transition.getUpdatedBy() : SCHEDULER_USER,
-                transition.getUpdatedAt() == null
-                        ? LocalDateTime.now() : transition.getUpdatedAt());
-        return true;
-    }
-
-    private void validatePublicProjection(IngestionClaimTransition transition) {
-        Objects.requireNonNull(transition, "transition");
-        validateClaimIdentity(
-                transition.getItemId(),
-                transition.getExecutionEpoch(),
-                transition.getExpectedExecutionStage(),
-                transition.getExpectedClaimVersion(),
-                transition.getLeaseToken());
-        Objects.requireNonNull(transition.getNextExecutionStage(), "nextExecutionStage");
-        if (transition.getExpectedExecutionStage().isTerminal()) {
-            throw new IllegalArgumentException(
-                    "A terminal ingestion execution cannot transition.");
-        }
-        if (transition.getNextStageRetryCount() < 0) {
-            throw new IllegalArgumentException(
-                    "nextStageRetryCount must not be negative.");
-        }
-        if (transition.getParseAttempt() < 1) {
-            throw new IllegalArgumentException("parseAttempt must be positive.");
-        }
-        boolean terminal = transition.getNextExecutionStage().isTerminal();
-        if (terminal != (transition.getFinishedAt() != null)) {
-            throw new IllegalArgumentException(
-                    "finishedAt must be present only for a terminal ingestion transition.");
-        }
-        if (terminal && transition.getNextActionAt() != null) {
-            throw new IllegalArgumentException(
-                    "A terminal ingestion transition cannot remain scheduled.");
-        }
-        if (!terminal && transition.getNextStageStartedAt() == null) {
-            throw new IllegalArgumentException(
-                    "An active ingestion transition requires nextStageStartedAt.");
-        }
-        if (!isAllowedTransition(
-                transition.getExpectedExecutionStage(),
-                transition.getNextExecutionStage())) {
-            throw new IllegalArgumentException(
-                    "Illegal ingestion execution transition: "
-                            + transition.getExpectedExecutionStage() + " -> "
-                            + transition.getNextExecutionStage());
-        }
-        if (transition.isRetainLease()
-                && (transition.getExpectedExecutionStage() != IngestionExecutionStage.EMBED
-                || transition.getNextExecutionStage() != IngestionExecutionStage.INDEX)) {
-            throw new IllegalArgumentException(
-                    "A claim lease may only be retained while handing EMBED directly to INDEX.");
-        }
-        IngestionPublicProjection expected = IngestionPublicProjectionPolicy.transition(
-                transition.getExpectedExecutionStage(),
-                transition.getNextExecutionStage(),
-                transition.getProgress());
-        IngestionPublicProjection supplied = new IngestionPublicProjection(
-                transition.getStage(),
-                transition.getStatus(),
-                transition.getProgress());
-        if (!expected.equals(supplied)) {
-            throw new IllegalArgumentException(
-                    "Ingestion transition carries a public projection inconsistent with its phase.");
-        }
-    }
-
-    @Override
-    @Transactional(propagation = Propagation.MANDATORY)
-    public boolean isClaimCurrentForUpdate(String itemId, long executionEpoch,
-                                           IngestionExecutionStage expectedExecutionStage,
-                                           long claimVersion, String leaseToken) {
-        return mapper.findCurrentClaimForUpdate(
-                itemId, executionEpoch, expectedExecutionStage,
-                claimVersion, leaseToken).isPresent();
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public boolean resetFailedItem(String kbId, String taskId,
-                                   String itemId, int expectedParseAttempt,
-                                   int nextParseAttempt, String nextDoclingRequestId,
-                                   LocalDateTime updatedAt) {
-        requireText(kbId, "kbId");
-        requireText(taskId, "taskId");
-        requireText(itemId, "itemId");
-        if (expectedParseAttempt < 1) {
-            throw new IllegalArgumentException("expectedParseAttempt must be positive.");
-        }
-        if (nextParseAttempt != Math.addExact(expectedParseAttempt, 1)) {
-            throw new IllegalArgumentException(
-                    "nextParseAttempt must immediately follow expectedParseAttempt.");
-        }
-        requireText(nextDoclingRequestId, "nextDoclingRequestId");
-        Objects.requireNonNull(updatedAt, "updatedAt");
-        FailedItemRetryRecord failed = mapper.selectFailedItemForRetryForUpdate(
-                        kbId, taskId, itemId, expectedParseAttempt)
-                .orElse(null);
-        if (!isRetryableState(failed)) {
-            return false;
-        }
-
-        IngestionParseAttemptRecord parseAttempt = new IngestionParseAttemptRecord();
-        parseAttempt.setItemId(itemId);
-        parseAttempt.setAttemptNo(nextParseAttempt);
-        parseAttempt.setRequestId(nextDoclingRequestId);
-        parseAttempt.setSourceRevision(failed.getSourceRevision());
-        parseAttempt.setStatus("ACTIVE");
-        parseAttempt.setCreatedAt(updatedAt);
-        parseAttempt.setUpdatedAt(updatedAt);
-        mapper.insertParseAttempt(parseAttempt);
-
-        long nextEpoch = Math.addExact(failed.getExecutionEpoch(), 1L);
-        IngestionExecutionRecord execution = new IngestionExecutionRecord();
-        execution.setItemId(itemId);
-        execution.setParseAttemptId(parseAttempt.getId());
-        execution.setExecutionEpoch(nextEpoch);
-        execution.setExecutionKind(IngestionExecutionKind.EXPLICIT_RETRY.name());
-        execution.setExecutionStatus("ACTIVE");
-        execution.setPhase(IngestionExecutionStage.PARSE_SUBMIT.name());
-        execution.setClaimVersion(0L);
-        execution.setPhaseRetryCount(0);
-        execution.setNextActionAt(updatedAt);
-        execution.setCreatedAt(updatedAt);
-        execution.setUpdatedAt(updatedAt);
-        mapper.insertExecution(execution);
-
-        IngestionPublicProjection projection =
-                IngestionPublicProjectionPolicy.explicitRetry();
-        if (mapper.resetFailedItemPointer(
-                kbId, taskId, itemId, failed.getCurrentExecutionId(),
-                execution.getId(), projection, updatedAt) != 1) {
-            throw new IngestionRetryConflictException(
-                    "Failed item changed while its retry execution was being attached.");
-        }
-        return true;
-    }
-
-    @Override
     public void refreshSummary(String kbId, String taskId,
                                String updatedBy, LocalDateTime updatedAt) {
-        mapper.refreshSummary(kbId, taskId, updatedBy, updatedAt);
+        mapper.refreshSummary(kbId, taskId, fallbackUser(updatedBy), updatedAt);
     }
 
-    private IngestionTaskRecord toRecord(IngestionTask task, DedupeStrategy dedupeStrategy) {
+    private IngestionTaskRecord toRecord(IngestionTask task, DedupeStrategy strategy) {
         IngestionTaskRecord record = new IngestionTaskRecord();
         record.setId(task.getId());
         record.setKbId(task.getKbId());
         record.setSourceType(task.getSourceType().name());
         record.setClientRequestId(task.getClientRequestId());
         record.setRequestHash(task.getRequestHash());
-        record.setDedupeStrategy(dedupeStrategy == null ? null : dedupeStrategy.name());
+        record.setDedupeStrategy(strategy == null ? null : strategy.name());
         record.setStatus(task.getStatus().name());
         record.setTotalCount(task.getTotalCount());
         record.setSuccessCount(task.getSuccessCount());
@@ -471,16 +216,19 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         IngestionTaskItemRecord record = new IngestionTaskItemRecord();
         record.setId(item.getId());
         record.setTaskId(item.getTaskId());
+        record.setKbId(item.getKbId());
+        record.setTaskCreatedBy(item.getTaskCreatedBy());
         record.setAssetId(item.getAssetId());
         record.setTargetIndexGeneration(item.getTargetIndexGeneration());
         record.setFileName(item.getFileName());
         record.setFileHash(item.getFileHash());
-        record.setSourceUrl(item.getSourceUrl());
         record.setStage(item.getStage().name());
         record.setStatus(item.getStatus().name());
         record.setProgress(item.getProgress());
-        record.setDedupeResult(
-                item.getDedupeResult() == null ? null : item.getDedupeResult().name());
+        record.setDedupeStrategy(item.getDedupeStrategy() == null
+                ? null : item.getDedupeStrategy().name());
+        record.setDedupeResult(item.getDedupeResult() == null
+                ? null : item.getDedupeResult().name());
         record.setDuplicateAssetId(item.getDuplicateAssetId());
         record.setErrorCode(item.getErrorCode());
         record.setErrorMessage(item.getErrorMessage());
@@ -490,52 +238,8 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         return record;
     }
 
-    private IngestionParseAttemptRecord newParseAttempt(
-            IngestionTaskItem item, IngestionExecutionStage phase) {
-        IngestionParseAttemptRecord record = new IngestionParseAttemptRecord();
-        record.setItemId(item.getId());
-        record.setAttemptNo(item.getParseAttempt());
-        record.setRequestId(item.getDoclingRequestId());
-        record.setJobId(item.getDoclingJobId());
-        record.setSourceRevision(item.getSourceRevision());
-        record.setRequestSnapshot(item.getParseRequestSnapshot());
-        boolean parsed = phase == IngestionExecutionStage.EMBED
-                || phase == IngestionExecutionStage.INDEX
-                || hasText(item.getParseResultObjectKey());
-        record.setStatus(parsed ? "SUCCEEDED" : "ACTIVE");
-        record.setCreatedAt(item.getCreatedAt());
-        record.setUpdatedAt(item.getUpdatedAt());
-        record.setFinishedAt(parsed ? item.getUpdatedAt() : null);
-        return record;
-    }
-
-    private IngestionExecutionRecord newExecution(
-            IngestionTaskItem item,
-            Long parseAttemptId,
-            IngestionExecutionStage phase,
-            String executionKind) {
-        IngestionExecutionRecord record = new IngestionExecutionRecord();
-        record.setItemId(item.getId());
-        record.setParseAttemptId(parseAttemptId);
-        record.setExecutionEpoch(item.getExecutionEpoch());
-        record.setExecutionKind(executionKind);
-        record.setPhase(phase.name());
-        record.setExecutionStatus("ACTIVE");
-        record.setClaimVersion(item.getClaimVersion());
-        record.setPhaseRetryCount(item.getStageRetryCount());
-        record.setPhaseStartedAt(item.getStageStartedAt());
-        record.setNextActionAt(resolveNextActionAt(item));
-        record.setLeaseToken(item.getLeaseToken());
-        record.setLeaseUntil(item.getLeaseUntil());
-        record.setErrorCode(item.getErrorCode());
-        record.setErrorMessage(item.getErrorMessage());
-        record.setCreatedAt(item.getCreatedAt());
-        record.setUpdatedAt(item.getUpdatedAt());
-        return record;
-    }
-
-    private IngestionTask toDomain(
-            IngestionTaskRecord record, List<IngestionItemViewRecord> itemRecords) {
+    private IngestionTask toDomain(IngestionTaskRecord record,
+                                   List<IngestionTaskItemRecord> items) {
         return IngestionTask.builder()
                 .id(record.getId())
                 .kbId(record.getKbId())
@@ -552,20 +256,20 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())
                 .finishedAt(record.getFinishedAt())
-                .items(itemRecords == null
-                        ? List.of() : itemRecords.stream().map(this::toDomain).toList())
+                .items(items == null ? List.of() : items.stream().map(this::toDomain).toList())
                 .build();
     }
 
-    private IngestionTaskItem toDomain(IngestionItemViewRecord record) {
+    private IngestionTaskItem toDomain(IngestionTaskItemRecord record) {
         return IngestionTaskItem.builder()
                 .id(record.getId())
                 .taskId(record.getTaskId())
                 .kbId(record.getKbId())
+                .taskCreatedBy(record.getTaskCreatedBy())
                 .assetId(record.getAssetId())
+                .targetIndexGeneration(record.getTargetIndexGeneration())
                 .fileName(record.getFileName())
                 .fileHash(record.getFileHash())
-                .sourceUrl(record.getSourceUrl())
                 .stage(IngestionStage.valueOf(record.getStage()))
                 .status(IngestionTaskItemStatus.valueOf(record.getStatus()))
                 .progress(defaultInt(record.getProgress()))
@@ -580,349 +284,18 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .build();
     }
 
-    private IngestionTaskItem toDomain(ClaimedExecutionRecord record) {
-        IngestionExecutionStage phase =
-                IngestionExecutionStage.valueOf(record.getPhase());
-        IngestionPublicProjection projection =
-                IngestionPublicProjectionPolicy.running(
-                        phase, defaultInt(record.getItemProgress()));
-        return IngestionTaskItem.builder()
-                .id(record.getItemId())
-                .taskId(record.getTaskId())
-                .kbId(record.getKbId())
-                .taskCreatedBy(record.getTaskCreatedBy())
-                .assetId(record.getAssetId())
-                .targetIndexGeneration(record.getTargetIndexGeneration())
-                .sourceUrl(record.getSourceUrl())
-                .parseAttempt(defaultAttempt(record.getParseAttemptNo()))
-                .doclingRequestId(record.getRequestId())
-                .doclingJobId(record.getJobId())
-                .sourceRevision(record.getSourceRevision())
-                .executionStage(phase)
-                .executionEpoch(defaultEpoch(record.getExecutionEpoch()))
-                .claimVersion(toClaimVersion(record.getClaimVersion()))
-                .stageRetryCount(defaultInt(record.getPhaseRetryCount()))
-                .stageStartedAt(record.getPhaseStartedAt())
-                .nextActionAt(record.getNextActionAt())
-                .leaseToken(record.getLeaseToken())
-                .leaseUntil(record.getLeaseUntil())
-                .parseRequestSnapshot(record.getRequestSnapshot())
-                .parseResultObjectKey(record.getParseResultObjectKey())
-                .parseResultArtifact(artifactReference(
-                        PARSE_ARTIFACT,
-                        record.getParseResultObjectKey(),
-                        record.getParseResultArtifactVersion(),
-                        record.getParseResultArtifactProvenance(),
-                        record.getParseResultProducerClaimVersion(),
-                        record.getParseResultSha256()))
-                .stage(projection.stage())
-                .status(projection.status())
-                .progress(projection.progress())
-                .dedupeResult(parseDedupeResult(record.getDedupeResult()))
-                .duplicateAssetId(record.getDuplicateAssetId())
-                .build();
-    }
-
-    private IngestionArtifactReference artifactReference(
-            String artifactType,
-            String objectKey,
-            Integer artifactVersion,
-            String provenance,
-            Long producerClaimVersion,
-            String contentSha256) {
-        if (!hasText(objectKey)) {
-            return null;
-        }
-        return IngestionArtifactReference.builder()
-                .artifactType(artifactType)
-                .artifactVersion(artifactVersion == null ? 0 : artifactVersion)
-                .provenance(provenance)
-                .producerClaimVersion(producerClaimVersion)
-                .objectKey(objectKey)
-                .contentSha256(contentSha256)
-                .build();
-    }
-
-    private IngestionTaskItem toRetryDomain(FailedItemRetryRecord record) {
-        return IngestionTaskItem.builder()
-                .id(record.getItemId())
-                .taskId(record.getTaskId())
-                .kbId(record.getKbId())
-                .parseAttempt(defaultAttempt(record.getParseAttemptNo()))
-                .sourceRevision(record.getSourceRevision())
-                .executionEpoch(defaultEpoch(record.getExecutionEpoch()))
-                .executionStage("FAILED".equals(record.getItemStatus())
-                        ? IngestionExecutionStage.FAILED : null)
-                .status(IngestionTaskItemStatus.valueOf(record.getItemStatus()))
-                .updatedAt(record.getItemUpdatedAt())
-                .build();
-    }
-
-    private void registerInitialArtifact(
-            Long executionId,
-            String artifactType,
-            String objectKey,
-            IngestionArtifactReference reference,
-            long currentClaimVersion,
-            LocalDateTime createdAt) {
-        if (!hasText(objectKey) && reference == null) {
-            return;
-        }
-        if (!hasText(objectKey)
-                || reference == null
-                || !artifactType.equals(reference.getArtifactType())
-                || reference.getArtifactVersion() != ARTIFACT_VERSION
-                || !PRODUCED_ARTIFACT.equals(reference.getProvenance())
-                || !objectKey.equals(reference.getObjectKey())
-                || reference.getProducerClaimVersion() == null
-                || reference.getProducerClaimVersion() > currentClaimVersion
-                || !hasText(reference.getContentSha256())) {
-            throw new IllegalArgumentException(
-                    "A new ingestion execution requires complete produced artifact metadata.");
-        }
-        registerProducedArtifact(
-                executionId,
-                artifactType,
-                objectKey,
-                reference.getContentSha256(),
-                reference.getProducerClaimVersion(),
-                createdAt);
-    }
-
-    private void registerProducedArtifact(
-            Long executionId,
-            String artifactType,
-            String objectKey,
-            String contentSha256,
-            long producerClaimVersion,
-            LocalDateTime createdAt) {
-        if (!hasText(contentSha256)) {
-            if (!hasText(objectKey)) {
-                return;
-            }
-            IngestionArtifactRecord registered =
-                    mapper.findArtifact(executionId, artifactType)
-                            .orElseThrow(() -> new IllegalStateException(
-                                    "An ingestion transition referenced an unregistered artifact."));
-            if (!Objects.equals(objectKey, registered.getObjectKey())
-                    || !Objects.equals(ARTIFACT_VERSION, registered.getArtifactVersion())
-                    || !Objects.equals(PRODUCED_ARTIFACT, registered.getProvenance())
-                    || registered.getProducerClaimVersion() == null
-                    || registered.getProducerClaimVersion() < 1
-                    || registered.getProducerClaimVersion() > producerClaimVersion
-                    || !hasText(registered.getContentSha256())
-                    || !SHA256.matcher(registered.getContentSha256()).matches()) {
-                throw new IllegalStateException(
-                        "An ingestion transition referenced invalid artifact metadata.");
-            }
-            return;
-        }
-        if (!hasText(objectKey)
-                || !SHA256.matcher(contentSha256).matches()
-                || producerClaimVersion < 1) {
-            throw new IllegalArgumentException(
-                    "Produced ingestion artifact metadata is incomplete or invalid.");
-        }
-        IngestionArtifactRecord proposed = new IngestionArtifactRecord();
-        proposed.setExecutionId(executionId);
-        proposed.setArtifactType(artifactType);
-        proposed.setArtifactVersion(ARTIFACT_VERSION);
-        proposed.setProducerClaimVersion(producerClaimVersion);
-        proposed.setObjectKey(objectKey);
-        proposed.setContentSha256(contentSha256);
-        proposed.setProvenance(PRODUCED_ARTIFACT);
-        proposed.setCreatedAt(createdAt == null ? LocalDateTime.now() : createdAt);
-        mapper.insertArtifact(proposed);
-
-        IngestionArtifactRecord stored = mapper.findArtifact(executionId, artifactType)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Artifact registration disappeared before commit."));
-        if (!sameArtifact(proposed, stored)) {
-            throw new IllegalStateException(
-                    "An immutable ingestion artifact is already registered with different metadata.");
-        }
-    }
-
-    private boolean sameArtifact(
-            IngestionArtifactRecord proposed, IngestionArtifactRecord stored) {
-        if (!Objects.equals(proposed.getExecutionId(), stored.getExecutionId())
-                || !Objects.equals(proposed.getArtifactType(), stored.getArtifactType())
-                || !Objects.equals(proposed.getArtifactVersion(), stored.getArtifactVersion())
-                || !Objects.equals(proposed.getObjectKey(), stored.getObjectKey())) {
-            return false;
-        }
-        return Objects.equals(PRODUCED_ARTIFACT, stored.getProvenance())
-                && Objects.equals(
-                proposed.getProducerClaimVersion(), stored.getProducerClaimVersion())
-                && Objects.equals(proposed.getContentSha256(), stored.getContentSha256());
-    }
-
     private DedupeStrategy resolveTaskDedupeStrategy(IngestionTask task) {
-        if (task.getItems() == null) {
-            return null;
-        }
-        List<DedupeStrategy> strategies = task.getItems().stream()
-                .map(IngestionTaskItem::getDedupeStrategy)
-                .distinct()
-                .toList();
-        if (strategies.size() > 1) {
-            throw new IllegalArgumentException(
-                    "All ingestion items in one task must use the same dedupe strategy.");
-        }
-        return strategies.isEmpty() ? null : strategies.get(0);
-    }
-
-    private boolean isRetryableState(FailedItemRetryRecord failed) {
-        return failed != null
-                && failed.getCurrentExecutionId() != null
-                && "FAILED".equals(failed.getExecutionStatus())
-                && failed.getExecutionEpoch() != null
-                && failed.getExecutionEpoch() >= 1
-                && failed.getParseAttemptNo() != null
-                && failed.getParseAttemptNo() >= 1;
-    }
-
-    private void validateTaskForSave(IngestionTask task) {
-        Objects.requireNonNull(task, "task");
-        requireText(task.getId(), "task.id");
-        requireText(task.getKbId(), "task.kbId");
-        Objects.requireNonNull(task.getSourceType(), "task.sourceType");
-        Objects.requireNonNull(task.getStatus(), "task.status");
-        Objects.requireNonNull(task.getInitialExecutionKind(), "task.initialExecutionKind");
-        if (task.getTotalCount() < 0
-                || task.getSuccessCount() < 0
-                || task.getFailureCount() < 0
-                || task.getRunningCount() < 0) {
-            throw new IllegalArgumentException(
-                    "Ingestion task counts must not be negative.");
-        }
-        long classifiedCount = (long) task.getSuccessCount()
-                + task.getFailureCount()
-                + task.getRunningCount();
-        if (classifiedCount > task.getTotalCount()) {
-            throw new IllegalArgumentException(
-                    "Ingestion task classified counts exceed totalCount.");
-        }
-        if (task.getItems() == null) {
-            return;
-        }
-        if (task.getTotalCount() != task.getItems().size()) {
-            throw new IllegalArgumentException(
-                    "Ingestion task totalCount does not match its item count.");
-        }
+        DedupeStrategy result = null;
+        if (task.getItems() == null) return null;
         for (IngestionTaskItem item : task.getItems()) {
-            Objects.requireNonNull(item, "task.items cannot contain null");
-            requireText(item.getId(), "item.id");
-            if (!task.getId().equals(item.getTaskId())) {
+            if (item == null || item.getDedupeStrategy() == null) continue;
+            if (result != null && result != item.getDedupeStrategy()) {
                 throw new IllegalArgumentException(
-                        "Ingestion item does not belong to its parent task.");
+                        "All ingestion items in one task must use the same dedupe strategy.");
             }
-            if (!task.getKbId().equals(item.getKbId())) {
-                throw new IllegalArgumentException(
-                        "Ingestion item does not belong to its parent knowledge base.");
-            }
-            new IngestionPublicProjection(
-                    Objects.requireNonNull(item.getStage(), "item.stage"),
-                    Objects.requireNonNull(item.getStatus(), "item.status"),
-                    item.getProgress());
-            boolean terminal = item.getStatus() == IngestionTaskItemStatus.SUCCESS
-                    || item.getStatus() == IngestionTaskItemStatus.FAILED
-                    || item.getStatus() == IngestionTaskItemStatus.SKIPPED;
-            if (terminal != (item.getFinishedAt() != null)) {
-                throw new IllegalArgumentException(
-                        "item.finishedAt must be present only for a terminal item.");
-            }
-            if (!requiresExecution(item)) {
-                continue;
-            }
-            if (item.getParseAttempt() < 1) {
-                throw new IllegalArgumentException("item.parseAttempt must be positive.");
-            }
-            if (item.getExecutionEpoch() < 1) {
-                throw new IllegalArgumentException("item.executionEpoch must be positive.");
-            }
-            if (item.getTargetIndexGeneration() != null
-                    && item.getTargetIndexGeneration() < 1L) {
-                throw new IllegalArgumentException(
-                        "item.targetIndexGeneration must be positive when present.");
-            }
-            if (item.getClaimVersion() < 0) {
-                throw new IllegalArgumentException(
-                        "item.claimVersion must not be negative.");
-            }
-            if (item.getStageRetryCount() < 0) {
-                throw new IllegalArgumentException(
-                        "item.stageRetryCount must not be negative.");
-            }
-            if ((item.getLeaseToken() == null) != (item.getLeaseUntil() == null)) {
-                throw new IllegalArgumentException(
-                        "item lease token and expiry must be both present or both absent.");
-            }
+            result = item.getDedupeStrategy();
         }
-    }
-
-    private boolean isAllowedTransition(
-            IngestionExecutionStage current,
-            IngestionExecutionStage next) {
-        if (next == IngestionExecutionStage.FAILED) {
-            return !current.isTerminal();
-        }
-        if (current == next) {
-            return !current.isTerminal();
-        }
-        return switch (current) {
-            case PARSE_SUBMIT -> next == IngestionExecutionStage.PARSE_WAIT
-                    || next == IngestionExecutionStage.PARSE_PERSIST;
-            case PARSE_WAIT -> next == IngestionExecutionStage.PARSE_SUBMIT
-                    || next == IngestionExecutionStage.PARSE_PERSIST;
-            case PARSE_PERSIST -> next == IngestionExecutionStage.PARSE_SUBMIT
-                    || next == IngestionExecutionStage.PARSE_WAIT
-                    || next == IngestionExecutionStage.EMBED;
-            case EMBED -> next == IngestionExecutionStage.INDEX;
-            case INDEX -> next == IngestionExecutionStage.COMPLETE;
-            case COMPLETE, FAILED -> false;
-        };
-    }
-
-    private boolean requiresExecution(IngestionTaskItem item) {
-        return item.getStatus() == IngestionTaskItemStatus.PENDING
-                || item.getStatus() == IngestionTaskItemStatus.RUNNING;
-    }
-
-    private IngestionExecutionStage resolveExecutionStage(IngestionTaskItem item) {
-        IngestionExecutionStage phase = item.getExecutionStage() == null
-                ? IngestionExecutionStage.PARSE_SUBMIT : item.getExecutionStage();
-        if (phase.isTerminal()) {
-            throw new IllegalArgumentException(
-                    "An active ingestion item cannot start at a terminal execution stage.");
-        }
-        validateExplicitExecutionStage(item, phase);
-        return phase;
-    }
-
-    private void validateExplicitExecutionStage(
-            IngestionTaskItem item, IngestionExecutionStage phase) {
-        if (phase == IngestionExecutionStage.EMBED
-                && !hasText(item.getParseResultObjectKey())) {
-            throw new IllegalArgumentException(
-                    "An ingestion item cannot start at EMBED without a parse artifact.");
-        }
-        if (phase == IngestionExecutionStage.INDEX
-                && !hasText(item.getParseResultObjectKey())) {
-            throw new IllegalArgumentException(
-                    "An ingestion item cannot start at INDEX without a parse artifact.");
-        }
-    }
-
-    private LocalDateTime resolveNextActionAt(IngestionTaskItem item) {
-        if (item.getNextActionAt() != null) {
-            return item.getNextActionAt();
-        }
-        return item.getUpdatedAt() == null ? item.getCreatedAt() : item.getUpdatedAt();
-    }
-
-    private IngestionExecutionStage parsePhase(String phase) {
-        return hasText(phase) ? IngestionExecutionStage.valueOf(phase) : null;
+        return result;
     }
 
     private DedupeResult parseDedupeResult(String value) {
@@ -933,80 +306,20 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         return value == null ? null : DedupeStrategy.valueOf(value);
     }
 
-    private int defaultAttempt(Integer value) {
-        return value == null ? 1 : Math.max(1, value);
+    private String updatedBy(IngestionTaskItemRecord record) {
+        return fallbackUser(record.getTaskCreatedBy());
     }
 
-    private long defaultEpoch(Long value) {
-        return value == null ? 1L : Math.max(1L, value);
+    private String fallbackUser(String value) {
+        return value == null || value.isBlank() ? SCHEDULER_USER : value;
     }
 
-    private long toClaimVersion(Long value) {
-        return value == null ? 0L : value;
+    private int positiveLimit(int limit) {
+        if (limit < 1) throw new IllegalArgumentException("limit must be positive");
+        return limit;
     }
 
     private int defaultInt(Integer value) {
         return value == null ? 0 : value;
-    }
-
-    private int requirePositiveLimit(int limit) {
-        if (limit <= 0) {
-            throw new IllegalArgumentException("limit must be positive");
-        }
-        return limit;
-    }
-
-    private void requirePositiveLease(long leaseSeconds) {
-        if (leaseSeconds <= 0) {
-            throw new IllegalArgumentException("leaseSeconds must be positive");
-        }
-    }
-
-    private void validateClaimContext(IngestionClaimContext context) {
-        Objects.requireNonNull(context, "context");
-        validateClaimIdentity(
-                context.getItemId(),
-                context.getExecutionEpoch(),
-                context.getExpectedExecutionStage(),
-                context.getClaimVersion(),
-                context.getLeaseToken());
-        if (!PARSE_PHASES.contains(context.getExpectedExecutionStage())) {
-            throw new IllegalArgumentException(
-                    "Parse context can only be updated during a parse phase.");
-        }
-        if (context.getParseAttempt() < 1) {
-            throw new IllegalArgumentException("parseAttempt must be positive.");
-        }
-        requireText(context.getDoclingRequestId(), "doclingRequestId");
-        requireText(context.getSourceRevision(), "sourceRevision");
-        requireText(context.getParseRequestSnapshot(), "parseRequestSnapshot");
-    }
-
-    private void validateClaimIdentity(
-            String itemId,
-            long executionEpoch,
-            IngestionExecutionStage expectedExecutionStage,
-            long claimVersion,
-            String leaseToken) {
-        requireText(itemId, "itemId");
-        if (executionEpoch < 1) {
-            throw new IllegalArgumentException("executionEpoch must be positive.");
-        }
-        Objects.requireNonNull(expectedExecutionStage, "expectedExecutionStage");
-        if (claimVersion < 1) {
-            throw new IllegalArgumentException("claimVersion must be positive.");
-        }
-        requireText(leaseToken, "leaseToken");
-    }
-
-    private String requireText(String value, String name) {
-        if (!hasText(value)) {
-            throw new IllegalArgumentException(name + " must not be blank.");
-        }
-        return value;
-    }
-
-    private boolean hasText(String value) {
-        return value != null && !value.isBlank();
     }
 }

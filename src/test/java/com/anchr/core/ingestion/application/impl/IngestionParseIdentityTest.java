@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class IngestionParseIdentityTest {
 
     @Test
-    void requestId_shouldSeparateBusinessParseAttempts() {
+    void requestId_shouldSeparateTargetGenerations() {
         assertThat(IngestionParseIdentity.requestId("task-1", "item-1", 1))
                 .isEqualTo("task-1:item-1:1");
         assertThat(IngestionParseIdentity.requestId("task-1", "item-1", 2))
@@ -21,11 +21,9 @@ class IngestionParseIdentityTest {
                 .id("asset-1")
                 .fileHash("ABC123")
                 .objectKey("old/object.pdf")
-                .sourceUrl("https://example.test/old.pdf")
                 .build();
         Asset moved = first.toBuilder()
                 .objectKey("new/object.pdf")
-                .sourceUrl("https://example.test/new.pdf")
                 .build();
 
         assertThat(IngestionParseIdentity.sourceRevision(first))

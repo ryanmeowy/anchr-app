@@ -50,7 +50,6 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
                 .segmentCount(asset.getSegmentCount())
                 .previewType(asset.getFileType())
                 .previewUrl(access.previewUrl())
-                .thumbnailUrl(access.thumbnailUrl())
                 .expiresAt(access.expiresAt())
                 .build();
     }
@@ -58,12 +57,8 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
     private AssetPreviewAccessCache.AssetPreviewAccess buildAndCacheAccess(
             Asset asset, String accessTokenHash) {
         SignedAccess preview = resolvePreview(asset);
-        SignedAccess thumbnail = StringUtils.hasText(asset.getThumbnailKey())
-                ? sign(asset.getThumbnailKey().trim())
-                : null;
-        Long expiresAt = earliestExpiry(preview.expiresAt(), thumbnail == null ? null : thumbnail.expiresAt());
         AssetPreviewAccessCache.AssetPreviewAccess access = new AssetPreviewAccessCache.AssetPreviewAccess(
-                preview.url(), thumbnail == null ? null : thumbnail.url(), expiresAt);
+                preview.url(), preview.expiresAt());
         previewAccessCache.save(asset.getId(), accessTokenHash, access);
         return access;
     }
@@ -74,9 +69,6 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
         }
         if (StringUtils.hasText(asset.getObjectKey())) {
             return sign(asset.getObjectKey().trim());
-        }
-        if (isHttpUrl(asset.getSourceUrl())) {
-            return new SignedAccess(asset.getSourceUrl().trim(), null);
         }
         throw new BusinessException(ApiError.DOCUMENT_PREVIEW_NOT_AVAILABLE);
     }
@@ -101,17 +93,6 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
             throw new BusinessException(ApiError.UNAUTHORIZED, "Authenticated token context is required.");
         }
         return accessTokenHash;
-    }
-
-    private Long earliestExpiry(Long first, Long second) {
-        if (first == null) return second;
-        if (second == null) return first;
-        return Math.min(first, second);
-    }
-
-    private boolean isHttpUrl(String value) {
-        return StringUtils.hasText(value)
-                && (value.trim().startsWith("http://") || value.trim().startsWith("https://"));
     }
 
     private record SignedAccess(String url, Long expiresAt) {

@@ -27,32 +27,28 @@ class IngestionRequestHasherTest {
 
         assertThat(List.of(
                 hash("kb-2", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP, List.of(baseItem)),
-                hash("kb-1", IngestionSourceType.URL, DedupeStrategy.SKIP, List.of(baseItem)),
                 hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.VERSIONED, List.of(baseItem)),
                 hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                         List.of(new IngestionCreateItemCommand("changed.pdf", "Title", "PDF", "application/pdf",
-                                12L, "objects/a", "hash-a", "https://example.com/a"))),
+                                12L, "objects/a", "hash-a"))),
                 hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                         List.of(new IngestionCreateItemCommand("a.pdf", "Changed", "PDF", "application/pdf",
-                                12L, "objects/a", "hash-a", "https://example.com/a"))),
+                                12L, "objects/a", "hash-a"))),
                 hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                         List.of(new IngestionCreateItemCommand("a.pdf", "Title", "DOCX", "application/pdf",
-                                12L, "objects/a", "hash-a", "https://example.com/a"))),
+                                12L, "objects/a", "hash-a"))),
                 hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                         List.of(new IngestionCreateItemCommand("a.pdf", "Title", "PDF", "other/type",
-                                12L, "objects/a", "hash-a", "https://example.com/a"))),
+                                12L, "objects/a", "hash-a"))),
                 hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                         List.of(new IngestionCreateItemCommand("a.pdf", "Title", "PDF", "application/pdf",
-                                13L, "objects/a", "hash-a", "https://example.com/a"))),
+                                13L, "objects/a", "hash-a"))),
                 hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                         List.of(new IngestionCreateItemCommand("a.pdf", "Title", "PDF", "application/pdf",
-                                12L, "objects/b", "hash-a", "https://example.com/a"))),
+                                12L, "objects/b", "hash-a"))),
                 hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                         List.of(new IngestionCreateItemCommand("a.pdf", "Title", "PDF", "application/pdf",
-                                12L, "objects/a", "hash-b", "https://example.com/a"))),
-                hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
-                        List.of(new IngestionCreateItemCommand("a.pdf", "Title", "PDF", "application/pdf",
-                                12L, "objects/a", "hash-a", "https://example.com/b")))
+                                12L, "objects/a", "hash-b")))
         )).doesNotContain(base);
     }
 
@@ -65,9 +61,9 @@ class IngestionRequestHasherTest {
                 .isNotEqualTo(hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
                         List.of(second, first)));
         assertThat(hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
-                List.of(new IngestionCreateItemCommand("ab", "c", "PDF", null, null, null, null, null))))
+                List.of(new IngestionCreateItemCommand("ab", "c", "PDF", null, null, null, null))))
                 .isNotEqualTo(hash("kb-1", IngestionSourceType.UPLOAD, DedupeStrategy.SKIP,
-                        List.of(new IngestionCreateItemCommand("a", "bc", "PDF", null, null, null, null, null))));
+                        List.of(new IngestionCreateItemCommand("a", "bc", "PDF", null, null, null, null))));
     }
 
     private String hash(String kbId, IngestionSourceType sourceType, DedupeStrategy strategy,
@@ -78,6 +74,6 @@ class IngestionRequestHasherTest {
     private IngestionCreateItemCommand item(String suffix) {
         return new IngestionCreateItemCommand(
                 suffix + ".pdf", "Title", "PDF", "application/pdf", 12L,
-                "objects/" + suffix, "hash-" + suffix, "https://example.com/" + suffix);
+                "objects/" + suffix, "hash-" + suffix);
     }
 }

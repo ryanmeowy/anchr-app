@@ -7,15 +7,8 @@ import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
-import com.anchr.core.ingestion.application.artifact.IngestionArtifactException;
-import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
-import com.anchr.core.ingestion.application.artifact.IngestionStoredArtifact;
 import com.anchr.core.ingestion.domain.model.Chunk;
-import com.anchr.core.ingestion.domain.model.IngestionClaimContext;
-import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
-import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
-import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
-import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
+import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
@@ -39,19 +32,19 @@ import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,11 +59,12 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Database-driven, restart-safe ingestion stage scheduler.
+ * Single-instance ingestion worker.
  *
- * <p>Each worker owns one fenced database claim. The EMBED-to-INDEX handoff retains that
- * claim so freshly generated vectors can be indexed from memory. If the process exits after
- * the handoff, the recovered INDEX claim regenerates vectors from the durable parse artifact.</p>
+ * <p>One claimed item runs from whole-document parse through index activation in the same
+ * worker. Provider retry state and Docling job identity stay in memory. A process restart does
+ * not pretend to resume the old call: startup marks residual RUNNING items failed and the user
+ * may explicitly retry the whole document.</p>
  */
 @Slf4j
 @Service
@@ -79,7 +73,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private static final int ERROR_MESSAGE_MAX_LENGTH = 1000;
     private static final Duration DEFAULT_PARSE_POLL_INTERVAL = Duration.ofSeconds(2);
-    private static final Duration DEFAULT_PARSE_STAGE_TIMEOUT = Duration.ofMinutes(45);
+    private static final Duration DEFAULT_PARSE_TIMEOUT = Duration.ofMinutes(45);
 
     private final Set<String> locallyDispatchedItems = ConcurrentHashMap.newKeySet();
     private final Object embeddingPaceLock = new Object();
@@ -99,24 +93,20 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final StorageConfigRepository storageConfigRepository;
     private final DoclingChunkMapper doclingChunkMapper;
     private final DoclingClient doclingClient;
-    private final IngestionArtifactStore artifactStore;
     private final ObjectMapper objectMapper;
     private final IdGen idGen;
 
     @Value("${app.ingestion.claim-batch-size:32}")
     private int claimBatchSize = 32;
 
-    @Value("${app.ingestion.claim-lease-seconds:300}")
-    private long claimLeaseSeconds = 300;
-
     @Value("${app.ingestion.parse-poll-interval:2s}")
     private Duration parsePollInterval = DEFAULT_PARSE_POLL_INTERVAL;
 
     @Value("${app.ingestion.parse-stage-timeout:45m}")
-    private Duration parseStageTimeout = DEFAULT_PARSE_STAGE_TIMEOUT;
+    private Duration parseTimeout = DEFAULT_PARSE_TIMEOUT;
 
     @Value("${app.ingestion.stage-max-retries:5}")
-    private int stageMaxRetries = 5;
+    private int providerMaxRetries = 5;
 
     @Value("${app.embedding.ingestion-min-interval-ms:1500}")
     private long embeddingMinIntervalMs = 1500;
@@ -130,289 +120,262 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     @Value("${app.docling.embedded-image-upload-enabled:false}")
     private boolean embeddedImageUploadEnabled;
 
-    @Scheduled(fixedDelayString = "${app.ingestion.poll-interval-ms:1000}",
-            initialDelayString = "${app.ingestion.poll-initial-delay-ms:1000}")
-    public void pollDueItems() {
-        try {
-            dispatch(ingestionTaskRepository.listClaimableItemIds(effectiveBatchSize()));
-        } catch (RuntimeException e) {
-            log.warn("failed to scan claimable ingestion items: {}", e.getMessage(), e);
+    @EventListener(ApplicationReadyEvent.class)
+    public void failInterruptedItemsAfterRestart() {
+        for (IngestionTaskItem item : ingestionTaskRepository.listRunningItems()) {
+            Asset asset = tryFindAsset(item);
+            String message = "服务重启，原处理过程不可继续，请重新执行该文档。";
+            try {
+                transactionCoordinator.failRunning(
+                        item, asset, ApiError.INTERNAL_ERROR, message,
+                        DocumentParseStatus.FAILED.name(), DocumentIndexStatus.FAILED.name());
+            } catch (RuntimeException exception) {
+                log.error("failed to settle interrupted ingestion item, itemId={}: {}",
+                        item.getId(), exception.getMessage(), exception);
+            }
         }
     }
 
-    /**
-     * Fast wake-up after a transaction commits. The scheduled database scan remains the
-     * authoritative recovery mechanism if this hint is rejected or the process exits.
-     */
+    @Scheduled(fixedDelayString = "${app.ingestion.poll-interval-ms:1000}",
+            initialDelayString = "${app.ingestion.poll-initial-delay-ms:1000}")
+    public void pollPendingItems() {
+        try {
+            dispatch(ingestionTaskRepository.listPendingItemIds(effectiveBatchSize()));
+        } catch (RuntimeException exception) {
+            log.warn("failed to scan pending ingestion items: {}",
+                    exception.getMessage(), exception);
+        }
+    }
+
     @Override
     public void submit(String kbId, String taskId, String userId) {
-        if (!StringUtils.hasText(taskId)) {
-            return;
-        }
+        if (!StringUtils.hasText(taskId)) return;
         try {
-            dispatch(ingestionTaskRepository.listClaimableItemIds(taskId, effectiveBatchSize()));
-        } catch (RuntimeException e) {
-            log.debug("ingestion fast wake-up deferred to scheduler, taskId={}, reason={}",
-                    taskId, e.getMessage());
+            dispatch(ingestionTaskRepository.listPendingItemIds(
+                    taskId, effectiveBatchSize()));
+        } catch (RuntimeException exception) {
+            log.debug("ingestion wake-up deferred to scheduler, taskId={}, reason={}",
+                    taskId, exception.getMessage());
         }
     }
 
     private void dispatch(List<String> itemIds) {
-        if (itemIds == null || itemIds.isEmpty()) {
-            return;
-        }
+        if (itemIds == null) return;
         for (String itemId : itemIds) {
-            if (!StringUtils.hasText(itemId) || !locallyDispatchedItems.add(itemId)) {
-                continue;
-            }
+            if (!StringUtils.hasText(itemId) || !locallyDispatchedItems.add(itemId)) continue;
             try {
                 ingestionTaskExecutor.execute(() -> processCandidate(itemId));
             } catch (RejectedExecutionException rejected) {
                 locallyDispatchedItems.remove(itemId);
-                log.debug("ingestion executor saturated; item remains claimable, itemId={}", itemId);
-            } catch (RuntimeException e) {
+                log.debug("ingestion executor saturated; item remains pending, itemId={}", itemId);
+            } catch (RuntimeException exception) {
                 locallyDispatchedItems.remove(itemId);
-                log.warn("failed to dispatch ingestion item, itemId={}: {}", itemId, e.getMessage());
+                log.warn("failed to dispatch ingestion item, itemId={}: {}",
+                        itemId, exception.getMessage());
             }
         }
     }
 
     private void processCandidate(String itemId) {
-        Optional<IngestionTaskItem> claim;
         try {
-            claim = ingestionTaskRepository.claimOne(itemId, effectiveLeaseSeconds());
-        } catch (RuntimeException e) {
+            ingestionTaskRepository.claimPending(itemId).ifPresent(this::processItem);
+        } catch (RuntimeException exception) {
             log.warn("failed to claim ingestion item, itemId={}: {}",
-                    itemId, e.getMessage(), e);
-            return;
+                    itemId, exception.getMessage(), exception);
         } finally {
-            // This set only suppresses duplicate executor submissions before the DB claim.
-            // Remove it before external work so an expired lease can be reclaimed by this same
-            // instance even if the previous worker is stuck in a provider call.
             locallyDispatchedItems.remove(itemId);
         }
-        claim.ifPresent(this::processClaim);
     }
 
-    void processClaim(IngestionTaskItem item) {
-        if (item == null || item.getExecutionStage() == null) {
-            return;
-        }
-        IngestionTaskItem failureContext = item;
+    void processItem(IngestionTaskItem claimedItem) {
+        IngestionTaskItem item = claimedItem;
+        Asset asset = null;
+        String doclingJobId = null;
         try {
             item = transactionCoordinator.ensureTargetIndexGeneration(item);
-            failureContext = item;
-            if (item.getStageRetryCount() > effectiveStageMaxRetries()) {
-                failClaim(item, tryFindAsset(item), ApiError.INTERNAL_ERROR,
-                        "Ingestion stage exceeded its recovery-attempt limit.");
-                return;
-            }
-            switch (item.getExecutionStage()) {
-                case PARSE_SUBMIT -> processParseSubmit(item);
-                case PARSE_WAIT -> processParseWait(item);
-                case PARSE_PERSIST -> processParsePersist(item);
-                case EMBED -> {
-                    PreparedIndex prepared = processEmbed(item);
-                    failureContext = prepared.item();
-                    processIndex(prepared.item(), prepared.asset(), prepared.segments());
-                }
-                case INDEX -> processIndex(item);
-                case COMPLETE, FAILED -> log.debug(
-                        "terminal ingestion item was unexpectedly claimed, itemId={}, stage={}",
-                        item.getId(), item.getExecutionStage());
-            }
-        } catch (StaleClaimException stale) {
-            log.debug("stale ingestion worker stopped, itemId={}, stage={}, attempt={}",
-                    item.getId(), item.getExecutionStage(), item.getClaimVersion());
-        } catch (RuntimeException e) {
-            handleClaimFailure(failureContext, tryFindAsset(failureContext), e);
-        }
-    }
-
-    private void processParseSubmit(IngestionTaskItem claimedItem) {
-        Asset asset = findAsset(claimedItem);
-        IngestionTaskItem item = ensureParseContext(claimedItem, asset);
-        try {
-            if (!transactionCoordinator.updateAssetStatusForCurrentClaim(
-                    item,
-                    asset,
+            asset = findAsset(item);
+            if (!transactionCoordinator.updateAssetStatus(
+                    item, asset,
                     DocumentParseStatus.RUNNING.name(),
                     DocumentIndexStatus.PENDING.name())) {
-                throw new StaleClaimException();
+                return;
             }
 
-            ParseRequest request = buildParseRequest(item, asset);
-            DoclingJob job = doclingClient.submitJob(request);
-            IngestionTaskItem withJob = item.toBuilder().doclingJobId(job.jobId()).build();
-            switch (job.normalizedStatus()) {
-                case "queued", "running" -> transitionOrStop(runningTransition(
-                        withJob,
-                        IngestionExecutionStage.PARSE_WAIT,
-                        LocalDateTime.now().plus(effectiveParsePollInterval()),
-                        item.getStageRetryCount()));
-                case "succeeded" -> transitionOrStop(runningTransition(
-                        withJob,
-                        IngestionExecutionStage.PARSE_PERSIST,
-                        LocalDateTime.now(),
-                        item.getStageRetryCount()));
-                case "failed" -> handleFailedDoclingJob(withJob, asset, job.error());
-                default -> failClaim(item, asset, ApiError.TEXT_PARSE_FAILED,
-                        "Docling returned unknown job status: " + clip(job.status(), 128));
+            ParseRunContext parseContext = createParseContext(item, asset);
+            ParsedJob parsedJob = parseDocument(parseContext, asset);
+            doclingJobId = parsedJob.jobId();
+
+            if (!transactionCoordinator.advanceAndUpdateAssetStatus(
+                    item, IngestionStage.EMBED, 55, asset,
+                    DocumentParseStatus.SUCCESS.name(),
+                    DocumentIndexStatus.PENDING.name())) {
+                return;
             }
-        } catch (StaleClaimException stale) {
-            throw stale;
-        } catch (RuntimeException e) {
-            // ensureParseContext may have durably filled the v2 identity and request snapshot.
-            // Every retry transition after that point must copy the prepared item, never the
-            // stale pre-context claim that could clear those fields.
+            item = item.toBuilder()
+                    .stage(IngestionStage.EMBED)
+                    .progress(Math.max(item.getProgress(), 55))
+                    .build();
+
+            List<Segment> segments = prepareSegments(item, asset, parsedJob.result());
+            if (!transactionCoordinator.advanceAndUpdateAssetStatus(
+                    item, IngestionStage.INDEX, 75, asset,
+                    DocumentParseStatus.SUCCESS.name(),
+                    DocumentIndexStatus.RUNNING.name())) {
+                return;
+            }
+            item = item.toBuilder()
+                    .stage(IngestionStage.INDEX)
+                    .progress(Math.max(item.getProgress(), 75))
+                    .build();
+
+            if (!ingestionIndexFinalizer.finalizeIndex(item, asset, segments)) return;
+            acknowledgeBestEffort(doclingJobId);
+            refreshKnowledgeBaseStats(item);
+        } catch (WorkerInterruptedException interrupted) {
+            failItem(item, asset, ApiError.INTERNAL_ERROR,
+                    "文档处理线程被中断，请重新执行。", doclingJobId);
+        } catch (BusinessException businessFailure) {
+            failItem(item, asset, businessFailure.getError(),
+                    businessFailure.getMessage(), doclingJobId);
+        } catch (RuntimeException exception) {
+            ApiError error = exception instanceof EmbeddingCallException
+                    ? ApiError.EMBEDDING_FAILED : ApiError.INTERNAL_ERROR;
+            failItem(item, asset, error, exception.getMessage(), doclingJobId);
+        }
+    }
+
+    private ParseRunContext createParseContext(IngestionTaskItem item, Asset asset) {
+        long generation = requireTargetIndexGeneration(item);
+        StorageConfig storageConfig = embeddedImageUploadEnabled
+                ? storageConfigRepository.find().orElse(null) : null;
+        IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
+                asset, embeddedImageUploadEnabled, storageConfig,
+                asset.getId(), generation).validated();
+        return new ParseRunContext(
+                IngestionParseIdentity.requestId(item.getTaskId(), item.getId(), generation),
+                IngestionParseIdentity.sourceRevision(asset),
+                asset.getId(),
+                generation,
+                template);
+    }
+
+    private ParsedJob parseDocument(ParseRunContext context, Asset asset) {
+        Instant deadline = Instant.now().plus(effectiveParseTimeout());
+        int recoveries = 0;
+        String jobId = null;
+        while (Instant.now().isBefore(deadline)) {
             try {
-                handleClaimFailure(item, asset, e);
-            } catch (StaleClaimException stale) {
-                throw stale;
-            } catch (RuntimeException transitionFailure) {
-                // Do not fall back to the pre-context item. Leaving the prepared claim in place
-                // lets the DB lease expire and preserves the stable request fingerprint.
-                log.warn("failed to persist prepared parse retry, itemId={}, requestId={}: {}",
-                        item.getId(), item.getDoclingRequestId(), transitionFailure.getMessage(),
-                        transitionFailure);
+                DoclingJob job;
+                if (!StringUtils.hasText(jobId)) {
+                    job = doclingClient.submitJob(buildParseRequest(context, asset));
+                    jobId = job.jobId();
+                } else {
+                    job = doclingClient.getJob(jobId, context.requestId());
+                }
+                switch (job.normalizedStatus()) {
+                    case "succeeded" -> {
+                        if (job.result() == null) {
+                            throw new BusinessException(
+                                    ApiError.TEXT_PARSE_FAILED,
+                                    "Docling succeeded without a parse result.");
+                        }
+                        return new ParsedJob(jobId, job.result());
+                    }
+                    case "queued", "running" -> sleep(effectiveParsePollInterval());
+                    case "failed" -> {
+                        if (!isRetryable(job.error()) || recoveries >= effectiveProviderMaxRetries()) {
+                            throw doclingJobFailure(job.error());
+                        }
+                        acknowledgeFailedJob(jobId);
+                        jobId = null;
+                        recoveries++;
+                        sleep(retryDelay(recoveries));
+                    }
+                    default -> throw new BusinessException(
+                            ApiError.TEXT_PARSE_FAILED,
+                            "Docling returned unknown job status: " + clip(job.status(), 128));
+                }
+            } catch (DoclingClientException failure) {
+                if (failure.kind() == DoclingClient.FailureKind.NOT_FOUND
+                        && recoveries < effectiveProviderMaxRetries()) {
+                    jobId = null;
+                    recoveries++;
+                    sleep(retryDelay(recoveries));
+                    continue;
+                }
+                if (failure.kind() == DoclingClient.FailureKind.TRANSIENT
+                        && recoveries < effectiveProviderMaxRetries()) {
+                    recoveries++;
+                    sleep(positiveDuration(failure.retryAfter())
+                            ? failure.retryAfter() : retryDelay(recoveries));
+                    continue;
+                }
+                throw new BusinessException(
+                        ApiError.TEXT_PARSE_FAILED, failure.getMessage(), failure);
             }
         }
+        throw new BusinessException(
+                ApiError.TEXT_PARSE_FAILED,
+                "Docling parse exceeded " + effectiveParseTimeout() + ".");
     }
 
-    private void processParseWait(IngestionTaskItem item) {
-        Asset asset = findAsset(item);
-        requireParseJob(item);
-        if (parseStageExpired(item)) {
-            failClaim(item, asset, ApiError.TEXT_PARSE_FAILED,
-                    "Docling parse stage exceeded " + effectiveParseStageTimeout() + ".");
-            return;
-        }
-
-        DoclingJob job = doclingClient.getJob(item.getDoclingJobId(), item.getDoclingRequestId());
-        switch (job.normalizedStatus()) {
-            case "queued", "running" -> transitionOrStop(runningTransition(
-                    item,
-                    IngestionExecutionStage.PARSE_WAIT,
-                    LocalDateTime.now().plus(effectiveParsePollInterval()),
-                    item.getStageRetryCount()));
-            case "succeeded" -> transitionOrStop(runningTransition(
-                    item,
-                    IngestionExecutionStage.PARSE_PERSIST,
-                    LocalDateTime.now(),
-                    item.getStageRetryCount()));
-            case "failed" -> handleFailedDoclingJob(item, asset, job.error());
-            default -> failClaim(item, asset, ApiError.TEXT_PARSE_FAILED,
-                    "Docling returned unknown job status: " + clip(job.status(), 128));
-        }
+    private ParseRequest buildParseRequest(ParseRunContext context, Asset asset) {
+        return context.template().toRequest(
+                context.requestId(), context.sourceRevision(), resolveSourceUrl(asset),
+                buildEncryptedOssCredentials(context));
     }
 
-    private void processParsePersist(IngestionTaskItem item) {
-        Asset asset = findAsset(item);
-        if (StringUtils.hasText(item.getParseResultObjectKey())) {
-            transitionOrStop(runningTransition(
-                    item,
-                    IngestionExecutionStage.EMBED,
-                    LocalDateTime.now(),
-                    0));
-            acknowledgeAfterCommit(item.getDoclingJobId());
-            return;
+    private Map<String, String> buildEncryptedOssCredentials(ParseRunContext context) {
+        IngestionParseRequestTemplate template = context.template();
+        if (template.ossTarget() == null) return null;
+        StorageConfig config = storageConfigRepository.find()
+                .orElseThrow(() -> new BusinessException(
+                        ApiError.INTERNAL_ERROR,
+                        "Docling image output requires storage configuration."));
+        if (!template.targets(config, context.assetId(), context.targetGeneration())) {
+            throw new BusinessException(
+                    ApiError.INTERNAL_ERROR,
+                    "Storage output target changed during document processing.");
         }
-
-        requireParseJob(item);
-        DoclingJob job = doclingClient.getJob(item.getDoclingJobId(), item.getDoclingRequestId());
-        switch (job.normalizedStatus()) {
-            case "succeeded" -> persistParseResultAndAdvance(item, job);
-            case "queued", "running" -> transitionOrStop(runningTransition(
-                    item,
-                    IngestionExecutionStage.PARSE_WAIT,
-                    LocalDateTime.now().plus(effectiveParsePollInterval()),
-                    item.getStageRetryCount()));
-            case "failed" -> handleFailedDoclingJob(item, asset, job.error());
-            default -> failClaim(item, asset, ApiError.TEXT_PARSE_FAILED,
-                    "Docling returned unknown job status: " + clip(job.status(), 128));
+        try {
+            String accessKey = aesUtil.decrypt(config.getAccessKeyEnc());
+            String secretKey = aesUtil.decrypt(config.getSecretKeyEnc());
+            Map<String, Object> token = storageTokenIssuer.issueToken(
+                    config, accessKey, secretKey);
+            String aad = String.join("\n",
+                    context.requestId(), template.ossTarget().bucket(),
+                    template.ossTarget().basePath(), template.ossTarget().endpoint());
+            AesUtil.AeadEnvelope envelope = aesUtil.encryptAead(
+                    objectMapper.writeValueAsString(token), aad);
+            return Map.of(
+                    "version", "1",
+                    "keyId", "app-security-v1",
+                    "nonce", envelope.nonce(),
+                    "ciphertext", envelope.ciphertext(),
+                    "tag", envelope.tag(),
+                    "expiration", Objects.toString(token.get("expiration"), ""));
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(
+                    ApiError.INTERNAL_ERROR,
+                    "Failed to issue temporary Docling output credentials.", exception);
         }
     }
 
-    private void persistParseResultAndAdvance(IngestionTaskItem item, DoclingJob job) {
-        ParseResponse result = job.result();
-        if (result == null) {
-            failClaim(item, tryFindAsset(item), ApiError.TEXT_PARSE_FAILED,
-                    "Docling succeeded without a parse result.");
-            return;
-        }
-        IngestionStoredArtifact artifact =
-                artifactStore.writeParseArtifact(item, job.jobId(), result);
-        IngestionTaskItem withArtifact = item.toBuilder()
-                .parseResultObjectKey(artifact.objectKey())
-                .build();
-        IngestionClaimTransition transition = runningTransition(
-                        withArtifact,
-                        IngestionExecutionStage.EMBED,
-                        LocalDateTime.now(),
-                        0)
-                .toBuilder()
-                .parseResultSha256(artifact.sha256())
-                .build();
-        boolean transitioned = ingestionTaskRepository.transitionClaim(transition);
-        if (!transitioned) {
-            // The immutable object may become an orphan, but a stale worker must not ACK the
-            // winner's only recoverable Docling result.
-            throw new StaleClaimException();
-        }
-        acknowledgeAfterCommit(job.jobId());
-    }
-
-    private PreparedIndex processEmbed(IngestionTaskItem item) {
-        Asset asset = findAsset(item);
-        List<Segment> segments = prepareSegments(item, asset);
-        LocalDateTime now = LocalDateTime.now();
-        IngestionClaimTransition transition = runningTransition(
-                        item,
-                        IngestionExecutionStage.INDEX,
-                        now,
-                        0)
-                .toBuilder()
-                .retainLease(true)
-                .build();
-        boolean transitioned = transactionCoordinator.transitionAndUpdateAssetStatus(
-                transition,
-                asset,
-                DocumentParseStatus.SUCCESS.name(),
-                DocumentIndexStatus.RUNNING.name());
-        if (!transitioned) {
-            throw new StaleClaimException();
-        }
-        IngestionTaskItem indexClaim = item.toBuilder()
-                .executionStage(IngestionExecutionStage.INDEX)
-                .stageRetryCount(0)
-                .stageStartedAt(transition.getNextStageStartedAt())
-                .nextActionAt(transition.getNextActionAt())
-                .stage(transition.getStage())
-                .status(transition.getStatus())
-                .progress(transition.getProgress())
-                .errorCode(null)
-                .errorMessage(null)
-                .finishedAt(null)
-                .build();
-        return new PreparedIndex(indexClaim, asset, segments);
-    }
-
-    private List<Segment> prepareSegments(IngestionTaskItem item, Asset asset) {
-        ParseResponse parsed = artifactStore.readParseResult(item);
+    private List<Segment> prepareSegments(
+            IngestionTaskItem item, Asset asset, ParseResponse parsed) {
         boolean parsedContentIsEmpty = parsed.chunks() == null || parsed.chunks().isEmpty();
-        long targetIndexGeneration = requireTargetIndexGeneration(item);
-        List<Chunk> chunks = doclingChunkMapper.toTextChunks(
-                asset, parsed, targetIndexGeneration);
-        if (chunks == null) {
-            chunks = List.of();
-        }
+        long generation = requireTargetIndexGeneration(item);
+        List<Chunk> chunks = doclingChunkMapper.toTextChunks(asset, parsed, generation);
+        if (chunks == null) chunks = List.of();
         List<Chunk> embeddedImages = doclingChunkMapper.toDocumentImageChunks(
-                asset, parsed, targetIndexGeneration);
+                asset, parsed, generation);
         if (!embeddedImages.isEmpty()) {
-            List<Chunk> allChunks = new ArrayList<>(chunks.size() + embeddedImages.size());
-            allChunks.addAll(chunks);
-            allChunks.addAll(embeddedImages);
-            chunks = List.copyOf(allChunks);
+            List<Chunk> combined = new ArrayList<>(chunks.size() + embeddedImages.size());
+            combined.addAll(chunks);
+            combined.addAll(embeddedImages);
+            chunks = List.copyOf(combined);
         }
         if (chunks.isEmpty() && !isImage(asset)) {
             throw new BusinessException(
@@ -423,463 +386,28 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
 
         Profile profile = Profile.fromMulti(embeddingPort.isMulti());
-        List<Segment> segments = buildSegments(
-                item, asset, chunks, targetIndexGeneration, profile);
+        List<Segment> segments = buildSegments(asset, chunks, generation, profile);
         String imageInput = EmbeddingProjectionPolicy.requiresImageVisual(
-                profile, asset.getFileType())
-                ? resolveImageEmbeddingUrl(asset, item)
-                : null;
-        segments = applyEmbeddings(item, asset, segments, profile, imageInput);
-        assertCurrentClaim(item);
-        return segments;
-    }
-
-    private void processIndex(IngestionTaskItem item) {
-        Asset asset = findAsset(item);
-        List<Segment> segments = prepareSegments(item, asset);
-        processIndex(item, asset, segments);
-    }
-
-    private void processIndex(
-            IngestionTaskItem item, Asset asset, List<Segment> segments) {
-        boolean indexed = ingestionIndexFinalizer.finalizeIndex(item, asset, segments);
-        if (!indexed) {
-            return;
-        }
-        try {
-            knowledgeBaseRepository.refreshDocumentStats(
-                    item.getKbId(), updatedBy(item), true);
-        } catch (RuntimeException e) {
-            // Index and item completion are already committed. Stats are derived data and must
-            // never drive the completed claim backwards.
-            log.warn("failed to refresh knowledge-base stats after ingestion, kbId={}, itemId={}: {}",
-                    item.getKbId(), item.getId(), e.getMessage());
-        }
-    }
-
-    private IngestionTaskItem ensureParseContext(IngestionTaskItem item, Asset asset) {
-        int parseAttempt = Math.max(IngestionParseIdentity.INITIAL_ATTEMPT, item.getParseAttempt());
-        String expectedRequestId = IngestionParseIdentity.requestId(
-                item.getTaskId(), item.getId(), parseAttempt);
-        String requestId = StringUtils.hasText(item.getDoclingRequestId())
-                ? item.getDoclingRequestId() : expectedRequestId;
-        if (!expectedRequestId.equals(requestId)) {
-            throw new BusinessException(
-                    ApiError.TEXT_PARSE_FAILED, "Persisted Docling request identity is invalid.");
-        }
-        String sourceRevision = StringUtils.hasText(item.getSourceRevision())
-                ? item.getSourceRevision() : IngestionParseIdentity.sourceRevision(asset);
-
-        String snapshotJson = item.getParseRequestSnapshot();
-        if (!StringUtils.hasText(snapshotJson)) {
-            StorageConfig storageConfig = embeddedImageUploadEnabled
-                    ? storageConfigRepository.find().orElse(null) : null;
-            snapshotJson = encodeSnapshot(IngestionParseRequestSnapshot.capture(
-                    asset, embeddedImageUploadEnabled, storageConfig,
-                    item.getTaskId(), item.getId(), parseAttempt));
-        }
-
-        IngestionTaskItem prepared = item.toBuilder()
-                .parseAttempt(parseAttempt)
-                .doclingRequestId(requestId)
-                .sourceRevision(sourceRevision)
-                .parseRequestSnapshot(snapshotJson)
-                .build();
-        boolean changed = parseAttempt != item.getParseAttempt()
-                || !Objects.equals(requestId, item.getDoclingRequestId())
-                || !Objects.equals(sourceRevision, item.getSourceRevision())
-                || !Objects.equals(snapshotJson, item.getParseRequestSnapshot());
-        if (!changed) {
-            return prepared;
-        }
-        boolean updated;
-        try {
-            updated = ingestionTaskRepository.updateClaimContext(
-                    IngestionClaimContext.builder()
-                            .itemId(item.getId())
-                            .executionEpoch(item.getExecutionEpoch())
-                            .expectedExecutionStage(item.getExecutionStage())
-                            .claimVersion(item.getClaimVersion())
-                            .leaseToken(item.getLeaseToken())
-                            .parseAttempt(parseAttempt)
-                            .doclingRequestId(requestId)
-                            .doclingJobId(item.getDoclingJobId())
-                            .sourceRevision(sourceRevision)
-                            .parseRequestSnapshot(snapshotJson)
-                            .build());
-        } catch (RuntimeException ambiguousWrite) {
-            // The database may have committed even when the client lost the response. A
-            // transition built from the pre-context item could clear the stable v2 fingerprint,
-            // so leave the claim untouched and let a later lease holder read the row.
-            throw new AmbiguousContextWriteException(ambiguousWrite);
-        }
-        if (!updated) {
-            throw new StaleClaimException();
-        }
-        return prepared;
-    }
-
-    private ParseRequest buildParseRequest(IngestionTaskItem item, Asset asset) {
-        IngestionParseRequestSnapshot snapshot = decodeSnapshot(item.getParseRequestSnapshot());
-        String sourceUrl = resolveSourceUrl(asset, item);
-        return snapshot.toRequest(
-                item.getDoclingRequestId(),
-                item.getSourceRevision(),
-                sourceUrl,
-                buildEncryptedOssCredentials(item, snapshot));
-    }
-
-    private Map<String, String> buildEncryptedOssCredentials(
-            IngestionTaskItem item,
-            IngestionParseRequestSnapshot snapshot) {
-        if (snapshot.ossTarget() == null) {
-            return null;
-        }
-        StorageConfig config = storageConfigRepository.find()
-                .orElseThrow(() -> new BusinessException(
-                        ApiError.INTERNAL_ERROR,
-                        "The persisted Docling output target no longer has storage credentials."));
-        if (!snapshot.targets(
-                config, item.getTaskId(), item.getId(), item.getParseAttempt())) {
-            throw new BusinessException(
-                    ApiError.INTERNAL_ERROR,
-                    "The storage output target changed during the current parse attempt.");
-        }
-        try {
-            String accessKey = aesUtil.decrypt(config.getAccessKeyEnc());
-            String secretKey = aesUtil.decrypt(config.getSecretKeyEnc());
-            Map<String, Object> token = storageTokenIssuer.issueToken(
-                    config, accessKey, secretKey);
-            String aad = String.join("\n",
-                    item.getDoclingRequestId(),
-                    snapshot.ossTarget().bucket(),
-                    snapshot.ossTarget().basePath(),
-                    snapshot.ossTarget().endpoint());
-            AesUtil.AeadEnvelope envelope = aesUtil.encryptAead(
-                    objectMapper.writeValueAsString(token), aad);
-            return Map.of(
-                    "version", "1",
-                    "keyId", "app-security-v1",
-                    "nonce", envelope.nonce(),
-                    "ciphertext", envelope.ciphertext(),
-                    "tag", envelope.tag(),
-                    "expiration", Objects.toString(token.get("expiration"), ""));
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new BusinessException(
-                    ApiError.INTERNAL_ERROR,
-                    "Failed to issue temporary Docling output credentials.", e);
-        }
-    }
-
-    private String encodeSnapshot(IngestionParseRequestSnapshot snapshot) {
-        try {
-            return objectMapper.writeValueAsString(snapshot.validated());
-        } catch (JsonProcessingException e) {
-            throw new BusinessException(
-                    ApiError.INTERNAL_ERROR, "Failed to persist Docling request parameters.", e);
-        }
-    }
-
-    private IngestionParseRequestSnapshot decodeSnapshot(String snapshotJson) {
-        if (!StringUtils.hasText(snapshotJson)) {
-            throw new BusinessException(
-                    ApiError.INTERNAL_ERROR, "Docling request parameters are missing.");
-        }
-        try {
-            return objectMapper.readValue(
-                    snapshotJson, IngestionParseRequestSnapshot.class).validated();
-        } catch (JsonProcessingException | IllegalStateException e) {
-            throw new BusinessException(
-                    ApiError.INTERNAL_ERROR, "Persisted Docling request parameters are invalid.", e);
-        }
-    }
-
-    private void handleClaimFailure(IngestionTaskItem item,
-                                    Asset asset,
-                                    RuntimeException exception) {
-        if (exception instanceof StaleClaimException stale) {
-            throw stale;
-        }
-        if (exception instanceof AmbiguousContextWriteException) {
-            log.warn("parse context write outcome is ambiguous; leaving claim for lease recovery, itemId={}, cause={}",
-                    item.getId(), exception.getCause() == null
-                            ? exception.getMessage() : exception.getCause().getMessage());
-            return;
-        }
-        if (exception instanceof WorkerInterruptedException) {
-            log.info("ingestion worker interrupted; leaving claim for lease recovery, itemId={}, stage={}",
-                    item.getId(), item.getExecutionStage());
-            return;
-        }
-        if (exception instanceof DoclingClientException doclingFailure) {
-            handleDoclingClientFailure(item, asset, doclingFailure);
-            return;
-        }
-        if (exception instanceof IngestionArtifactException artifactFailure) {
-            if (artifactFailure.isRetryable()) {
-                retryOrFail(item, asset, ApiError.INTERNAL_ERROR,
-                        artifactFailure.getMessage(), effectiveStageMaxRetries(), null);
-            } else {
-                failClaim(item, asset, ApiError.INTERNAL_ERROR, artifactFailure.getMessage());
-            }
-            return;
-        }
-        if (exception instanceof BusinessException businessFailure) {
-            failClaim(item, asset, businessFailure.getError(), businessFailure.getMessage());
-            return;
-        }
-        if (exception instanceof EmbeddingCallException embeddingFailure) {
-            if (isRateLimitError(embeddingFailure)) {
-                retryOrFail(item, asset, ApiError.EMBEDDING_FAILED,
-                        embeddingFailure.getMessage(), effectiveEmbeddingMaxRetries(),
-                        Duration.ofMillis(resolveEmbeddingBackoffMs(
-                                item.getStageRetryCount() + 1)));
-            } else {
-                retryOrFail(item, asset, ApiError.INTERNAL_ERROR,
-                        embeddingFailure.getMessage(), effectiveStageMaxRetries(), null);
-            }
-            return;
-        }
-        retryOrFail(item, asset, ApiError.INTERNAL_ERROR,
-                exception.getMessage(), effectiveStageMaxRetries(), null);
-    }
-
-    private void handleDoclingClientFailure(IngestionTaskItem item,
-                                            Asset asset,
-                                            DoclingClientException exception) {
-        switch (exception.kind()) {
-            case TRANSIENT -> retryOrFail(
-                    item,
-                    asset,
-                    ApiError.TEXT_PARSE_FAILED,
-                    exception.getMessage(),
-                    effectiveStageMaxRetries(),
-                    exception.retryAfter());
-            case NOT_FOUND -> moveBackToParseSubmit(
-                    item, asset, "Docling job no longer exists.");
-            case CONFLICT, CONFIGURATION, PERMANENT -> failClaim(
-                    item, asset, ApiError.TEXT_PARSE_FAILED, exception.getMessage());
-        }
-    }
-
-    private void handleFailedDoclingJob(IngestionTaskItem item,
-                                        Asset asset,
-                                        DoclingJobError error) {
-        String code = error == null || !StringUtils.hasText(error.code())
-                ? "UNKNOWN" : error.code().trim().toUpperCase(Locale.ROOT);
-        String message = error == null
-                ? "Docling job failed."
-                : "Docling job failed [" + code + "]: " + clip(error.message(), 300);
-        boolean retryable = "QUEUE_TIMEOUT".equals(code)
-                || "INTERNAL_ERROR".equals(code)
-                || "SOURCE_DOWNLOAD_ERROR".equals(code);
-        if (!retryable) {
-            failClaim(item, asset, ApiError.TEXT_PARSE_FAILED, message);
-            return;
-        }
-        if (item.getStageRetryCount() + 1 > effectiveStageMaxRetries()) {
-            failClaim(item, asset, ApiError.TEXT_PARSE_FAILED, message);
-            return;
-        }
-        try {
-            // A failed record must be removed before submitting the same v2 identity, otherwise
-            // Docling correctly returns the same terminal job forever.
-            doclingClient.ackJob(item.getDoclingJobId());
-        } catch (DoclingClientException e) {
-            handleDoclingClientFailure(item, asset, e);
-            return;
-        }
-        moveBackToParseSubmit(item, asset, message);
-    }
-
-    private void moveBackToParseSubmit(IngestionTaskItem item,
-                                       Asset asset,
-                                       String reason) {
-        int retryCount = item.getStageRetryCount() + 1;
-        if (retryCount > effectiveStageMaxRetries()) {
-            failClaim(item, asset, ApiError.TEXT_PARSE_FAILED, reason);
-            return;
-        }
-        IngestionTaskItem withoutJob = item.toBuilder().doclingJobId(null).build();
-        transitionOrStop(runningTransition(
-                withoutJob,
-                IngestionExecutionStage.PARSE_SUBMIT,
-                LocalDateTime.now().plus(retryDelay(retryCount)),
-                retryCount));
-    }
-
-    private void retryOrFail(IngestionTaskItem item,
-                             Asset asset,
-                             ApiError terminalError,
-                             String message,
-                             int maxRetries,
-                             Duration requestedDelay) {
-        int retryCount = item.getStageRetryCount() + 1;
-        if (retryCount > Math.max(0, maxRetries)) {
-            failClaim(item, asset, terminalError, message);
-            return;
-        }
-        Duration delay = positiveDuration(requestedDelay)
-                ? requestedDelay : retryDelay(retryCount);
-        transitionOrStop(runningTransition(
-                item,
-                item.getExecutionStage(),
-                LocalDateTime.now().plus(delay),
-                retryCount));
-    }
-
-    private void failClaim(IngestionTaskItem item,
-                           Asset asset,
-                           ApiError error,
-                           String message) {
-        if (item == null || item.getExecutionStage() == null
-                || item.getExecutionStage().isTerminal()) {
-            return;
-        }
-        LocalDateTime now = LocalDateTime.now();
-        String safeMessage = clip(
-                StringUtils.hasText(message) ? message : error.getMessage(),
-                ERROR_MESSAGE_MAX_LENGTH);
-        IngestionPublicProjection projection =
-                IngestionPublicProjectionPolicy.failed(
-                        item.getExecutionStage(), item.getProgress());
-        IngestionClaimTransition transition = IngestionClaimTransitions.copyOf(item, now)
-                .nextExecutionStage(IngestionExecutionStage.FAILED)
-                .nextStageRetryCount(item.getStageRetryCount())
-                .nextStageStartedAt(now)
-                .nextActionAt(null)
-                .stage(projection.stage())
-                .status(projection.status())
-                .progress(projection.progress())
-                .errorCode(error.name())
-                .errorMessage(safeMessage)
-                .finishedAt(now)
-                .build();
-        boolean transitioned = transactionCoordinator.transitionFailed(
-                transition,
-                asset,
-                DocumentParseStatus.FAILED.name(),
-                DocumentIndexStatus.FAILED.name(),
-                asset == null ? 0 : asset.getSegmentCount(),
-                asset == null ? 0 : asset.getIndexedSegmentCount(),
-                item.getTargetIndexGeneration());
-        if (transitioned) {
-            log.warn("knowledge-base ingestion item failed, taskId={}, itemId={}, stage={}, errorCode={}, error={}",
-                    item.getTaskId(), item.getId(), item.getExecutionStage(), error, safeMessage);
-        }
-    }
-
-    private IngestionClaimTransition runningTransition(IngestionTaskItem item,
-                                                       IngestionExecutionStage nextStage,
-                                                       LocalDateTime nextActionAt,
-                                                       int nextRetryCount) {
-        LocalDateTime now = LocalDateTime.now();
-        boolean sameStage = item.getExecutionStage() == nextStage;
-        IngestionPublicProjection projection =
-                IngestionPublicProjectionPolicy.running(nextStage, item.getProgress());
-        return IngestionClaimTransitions.copyOf(item, now)
-                .nextExecutionStage(nextStage)
-                .nextStageRetryCount(Math.max(0, nextRetryCount))
-                .nextStageStartedAt(sameStage && item.getStageStartedAt() != null
-                        ? item.getStageStartedAt() : now)
-                .nextActionAt(nextActionAt)
-                .stage(projection.stage())
-                .status(projection.status())
-                .progress(projection.progress())
-                .errorCode(null)
-                .errorMessage(null)
-                .finishedAt(null)
-                .build();
-    }
-
-    private void transitionOrStop(IngestionClaimTransition transition) {
-        if (!ingestionTaskRepository.transitionClaim(transition)) {
-            throw new StaleClaimException();
-        }
-    }
-
-    private void assertCurrentClaim(IngestionTaskItem item) {
-        if (!ingestionTaskRepository.renewClaim(
-                item.getId(),
-                item.getExecutionEpoch(),
-                item.getExecutionStage(),
-                item.getClaimVersion(),
-                item.getLeaseToken(),
-                effectiveLeaseSeconds())) {
-            throw new StaleClaimException();
-        }
-    }
-
-    private void requireParseJob(IngestionTaskItem item) {
-        if (!StringUtils.hasText(item.getDoclingRequestId())
-                || !StringUtils.hasText(item.getDoclingJobId())) {
-            throw new BusinessException(
-                    ApiError.TEXT_PARSE_FAILED, "Persisted Docling job identity is incomplete.");
-        }
-    }
-
-    private Asset findAsset(IngestionTaskItem item) {
-        if (item == null || !StringUtils.hasText(item.getAssetId())) {
-            throw new BusinessException(
-                    ApiError.DOCUMENT_NOT_FOUND, "Task item is not linked to a document asset.");
-        }
-        return assetRepository.findActiveById(item.getKbId(), item.getAssetId())
-                .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
-    }
-
-    private Asset tryFindAsset(IngestionTaskItem item) {
-        if (item == null || !StringUtils.hasText(item.getKbId())
-                || !StringUtils.hasText(item.getAssetId())) {
-            return null;
-        }
-        try {
-            return assetRepository.findActiveById(item.getKbId(), item.getAssetId())
-                    .orElse(null);
-        } catch (RuntimeException ignored) {
-            return null;
-        }
-    }
-
-    private String resolveSourceUrl(Asset asset, IngestionTaskItem item) {
-        if (StringUtils.hasText(asset.getObjectKey())) {
-            return objectStoragePort.buildDownloadUrl(asset.getObjectKey());
-        }
-        if (StringUtils.hasText(asset.getSourceUrl())) {
-            return asset.getSourceUrl().trim();
-        }
-        if (StringUtils.hasText(item.getSourceUrl())) {
-            return item.getSourceUrl().trim();
-        }
-        throw new BusinessException(
-                ApiError.TEXT_PARSE_FAILED, "Document has no parseable source location.");
+                profile, asset.getFileType()) ? resolveImageEmbeddingUrl(asset) : null;
+        return applyEmbeddings(asset, segments, profile, imageInput);
     }
 
     private List<Segment> buildSegments(
-            IngestionTaskItem item,
-            Asset asset,
-            List<Chunk> chunks,
-            long targetIndexGeneration,
-            Profile profile
-    ) {
+            Asset asset, List<Chunk> chunks, long generation, Profile profile) {
         long createdAt = System.currentTimeMillis();
         List<Segment> segments = new ArrayList<>();
         for (Chunk chunk : chunks) {
-            if (chunk == null || !StringUtils.hasText(chunk.getSegmentId())) {
-                continue;
-            }
+            if (chunk == null || !StringUtils.hasText(chunk.getSegmentId())) continue;
             segments.add(Segment.builder()
                     .segmentId(chunk.getSegmentId())
                     .kbId(chunk.getKbId())
                     .assetId(asset.getId())
-                    .indexGeneration(targetIndexGeneration)
+                    .indexGeneration(generation)
                     .assetType(asset.getFileType())
                     .segmentType(chunk.getSegmentType() != null
                             ? chunk.getSegmentType()
                             : isImage(asset)
-                                    ? SegmentType.IMAGE_OCR_BLOCK
-                                    : SegmentType.TEXT_CHUNK)
+                                    ? SegmentType.IMAGE_OCR_BLOCK : SegmentType.TEXT_CHUNK)
                     .title(chunk.getTitle())
                     .contentText(chunk.getChunkText())
                     .ocrText(chunk.getOcrText())
@@ -892,69 +420,43 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     .bbox(chunk.getBboxInfos())
                     .build());
         }
-        if (EmbeddingProjectionPolicy.requiresImageVisual(
-                profile, asset.getFileType())) {
+        if (EmbeddingProjectionPolicy.requiresImageVisual(profile, asset.getFileType())) {
             segments.add(Segment.builder()
                     .segmentId(idGen.nextIdStr())
                     .kbId(asset.getKbId())
                     .assetId(asset.getId())
-                    .indexGeneration(targetIndexGeneration)
+                    .indexGeneration(generation)
                     .assetType(asset.getFileType())
                     .segmentType(SegmentType.IMAGE_VISUAL)
                     .chunkOrder(0)
                     .title(StringUtils.hasText(asset.getTitle())
                             ? asset.getTitle() : asset.getFileName())
-                    .sourceRef(stableSourceRef(asset, item))
-                    .thumbnail(asset.getThumbnailKey())
+                    .sourceRef(stableSourceRef(asset))
                     .createdAt(createdAt)
                     .build());
         }
         return segments;
     }
 
-    private long requireTargetIndexGeneration(IngestionTaskItem item) {
-        if (item.getTargetIndexGeneration() == null
-                || item.getTargetIndexGeneration() < 1L) {
-            throw new IllegalStateException(
-                    "Ingestion item has no valid target index generation.");
-        }
-        return item.getTargetIndexGeneration();
-    }
-
     private List<Segment> applyEmbeddings(
-            IngestionTaskItem item,
-            Asset asset,
-            List<Segment> segments,
-            Profile profile,
-            String imageInput
-    ) {
+            Asset asset, List<Segment> segments, Profile profile, String imageInput) {
         List<Segment> embedded = new ArrayList<>(segments.size());
         for (Segment segment : segments) {
-            String projectionImageSource = switch (segment.getSegmentType()) {
+            String imageSource = switch (segment.getSegmentType()) {
                 case IMAGE_VISUAL -> imageInput;
                 case DOCUMENT_IMAGE -> StringUtils.hasText(segment.getSourceRef())
-                        ? objectStoragePort.buildImageEmbeddingUrl(
-                                segment.getSourceRef())
-                        : null;
+                        ? objectStoragePort.buildImageEmbeddingUrl(segment.getSourceRef()) : null;
                 default -> null;
             };
-            Optional<EmbeddingProjection> projection =
-                    EmbeddingProjectionPolicy.select(
-                            profile,
-                            asset.getFileType(),
-                            segment.getSegmentType(),
-                            segment.getContentText(),
-                            segment.getOcrText(),
-                            projectionImageSource);
+            Optional<EmbeddingProjection> projection = EmbeddingProjectionPolicy.select(
+                    profile, asset.getFileType(), segment.getSegmentType(),
+                    segment.getContentText(), segment.getOcrText(), imageSource);
             if (projection.isEmpty()) {
                 embedded.add(segment.toBuilder().embedding(null).build());
                 continue;
             }
             EmbeddingProjection selected = projection.get();
-            List<Float> embedding = embed(
-                    item,
-                    selected.source(),
-                    selected.inputType().requestValue());
+            List<Float> embedding = embed(selected.source(), selected.inputType().requestValue());
             if (embedding == null || embedding.isEmpty()) {
                 throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
             }
@@ -963,37 +465,137 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         return embedded;
     }
 
-    private String stableSourceRef(Asset asset, IngestionTaskItem item) {
-        if (StringUtils.hasText(asset.getObjectKey())) {
-            return asset.getObjectKey().trim();
+    private List<Float> embed(String input, String inputType) {
+        int attempts = Math.max(1, embeddingRateLimitMaxAttempts);
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            reserveEmbeddingCallSlot();
+            try {
+                return embeddingPort.embed(input, inputType);
+            } catch (BusinessException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                if (!isRateLimitError(exception) || attempt == attempts) {
+                    throw new EmbeddingCallException(exception);
+                }
+                sleep(Duration.ofMillis(resolveEmbeddingBackoffMs(attempt)));
+            }
         }
-        if (StringUtils.hasText(asset.getSourceUrl())) {
-            return asset.getSourceUrl().trim();
-        }
-        return StringUtils.hasText(item.getSourceUrl())
-                ? item.getSourceUrl().trim() : null;
+        throw new IllegalStateException("Embedding retry loop terminated unexpectedly.");
     }
 
-    private String resolveImageEmbeddingUrl(Asset asset, IngestionTaskItem item) {
-        if (StringUtils.hasText(asset.getObjectKey())) {
-            return objectStoragePort.buildImageEmbeddingUrl(
-                    asset.getObjectKey().trim());
-        }
-        return resolveSourceUrl(asset, item);
+    private void failItem(IngestionTaskItem item,
+                          Asset asset,
+                          ApiError error,
+                          String message,
+                          String jobId) {
+        if (item == null) return;
+        String safeMessage = clip(
+                StringUtils.hasText(message) ? message : error.getMessage(),
+                ERROR_MESSAGE_MAX_LENGTH);
+        boolean failed = transactionCoordinator.failRunning(
+                item, asset, error, safeMessage,
+                DocumentParseStatus.FAILED.name(), DocumentIndexStatus.FAILED.name());
+        if (!failed) return;
+        acknowledgeBestEffort(jobId);
+        log.warn("knowledge-base ingestion item failed, taskId={}, itemId={}, stage={}, errorCode={}, error={}",
+                item.getTaskId(), item.getId(), item.getStage(), error, safeMessage);
     }
 
-    private List<Float> embed(IngestionTaskItem item, String input, String inputType) {
-        assertCurrentClaim(item);
-        reserveEmbeddingCallSlot();
-        assertCurrentClaim(item);
+    private Asset findAsset(IngestionTaskItem item) {
+        if (item == null || !StringUtils.hasText(item.getAssetId())) {
+            throw new BusinessException(
+                    ApiError.DOCUMENT_NOT_FOUND,
+                    "Task item is not linked to a document asset.");
+        }
+        return assetRepository.findActiveById(item.getKbId(), item.getAssetId())
+                .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
+    }
+
+    private Asset tryFindAsset(IngestionTaskItem item) {
+        if (item == null || !StringUtils.hasText(item.getKbId())
+                || !StringUtils.hasText(item.getAssetId())) return null;
         try {
-            return embeddingPort.embed(input, inputType);
-        } catch (StaleClaimException | WorkerInterruptedException e) {
-            throw e;
-        } catch (BusinessException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            throw new EmbeddingCallException(e);
+            return assetRepository.findActiveById(item.getKbId(), item.getAssetId()).orElse(null);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private String resolveSourceUrl(Asset asset) {
+        if (StringUtils.hasText(asset.getObjectKey())) {
+            return objectStoragePort.buildDownloadUrl(asset.getObjectKey());
+        }
+        throw new BusinessException(
+                ApiError.TEXT_PARSE_FAILED, "Document has no source object key.");
+    }
+
+    private String stableSourceRef(Asset asset) {
+        if (StringUtils.hasText(asset.getObjectKey())) return asset.getObjectKey().trim();
+        throw new BusinessException(
+                ApiError.TEXT_PARSE_FAILED, "Document has no source object key.");
+    }
+
+    private String resolveImageEmbeddingUrl(Asset asset) {
+        if (StringUtils.hasText(asset.getObjectKey())) {
+            return objectStoragePort.buildImageEmbeddingUrl(asset.getObjectKey().trim());
+        }
+        return resolveSourceUrl(asset);
+    }
+
+    private long requireTargetIndexGeneration(IngestionTaskItem item) {
+        Long generation = item.getTargetIndexGeneration();
+        if (generation == null || generation < 1L) {
+            throw new BusinessException(
+                    ApiError.INTERNAL_ERROR,
+                    "Ingestion item has no valid target index generation.");
+        }
+        return generation;
+    }
+
+    private void refreshKnowledgeBaseStats(IngestionTaskItem item) {
+        try {
+            knowledgeBaseRepository.refreshDocumentStats(
+                    item.getKbId(), updatedBy(item), true);
+        } catch (RuntimeException exception) {
+            log.warn("failed to refresh knowledge-base stats after ingestion, kbId={}, itemId={}: {}",
+                    item.getKbId(), item.getId(), exception.getMessage());
+        }
+    }
+
+    private boolean isRetryable(DoclingJobError error) {
+        if (error == null || !StringUtils.hasText(error.code())) return false;
+        String code = error.code().trim().toUpperCase(Locale.ROOT);
+        return "QUEUE_TIMEOUT".equals(code)
+                || "INTERNAL_ERROR".equals(code)
+                || "SOURCE_DOWNLOAD_ERROR".equals(code);
+    }
+
+    private BusinessException doclingJobFailure(DoclingJobError error) {
+        String message = error == null
+                ? "Docling job failed."
+                : "Docling job failed [" + clip(error.code(), 80) + "]: "
+                        + clip(error.message(), 300);
+        return new BusinessException(ApiError.TEXT_PARSE_FAILED, message);
+    }
+
+    private void acknowledgeFailedJob(String jobId) {
+        try {
+            doclingClient.ackJob(jobId);
+        } catch (DoclingClientException exception) {
+            throw new BusinessException(
+                    ApiError.TEXT_PARSE_FAILED,
+                    "Failed to release the unsuccessful Docling job: " + exception.getMessage(),
+                    exception);
+        }
+    }
+
+    private void acknowledgeBestEffort(String jobId) {
+        if (!StringUtils.hasText(jobId)) return;
+        try {
+            doclingClient.ackJob(jobId);
+        } catch (RuntimeException exception) {
+            log.warn("Docling ACK failed after ingestion terminal state, jobId={}: {}",
+                    jobId, exception.getMessage());
         }
     }
 
@@ -1005,73 +607,29 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             nextEmbeddingCallAt = Math.max(now, nextEmbeddingCallAt)
                     + Math.max(0L, embeddingMinIntervalMs);
         }
-        if (waitMs <= 0L) {
-            return;
-        }
+        if (waitMs > 0L) sleep(Duration.ofMillis(waitMs));
+    }
+
+    private void sleep(Duration duration) {
+        if (!positiveDuration(duration)) return;
         try {
-            TimeUnit.MILLISECONDS.sleep(waitMs);
-        } catch (InterruptedException e) {
+            TimeUnit.MILLISECONDS.sleep(duration.toMillis());
+        } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new WorkerInterruptedException(e);
+            throw new WorkerInterruptedException(exception);
         }
-    }
-
-    private void acknowledgeBestEffort(String jobId) {
-        if (!StringUtils.hasText(jobId)) {
-            return;
-        }
-        try {
-            doclingClient.ackJob(jobId);
-        } catch (RuntimeException e) {
-            // The durable artifact reference is already committed. Docling TTL cleanup is the
-            // fallback, and ACK failure must not move the item back to PARSE.
-            log.warn("Docling result ACK failed after durable persistence, jobId={}: {}",
-                    jobId, e.getMessage());
-        }
-    }
-
-    private void acknowledgeAfterCommit(String jobId) {
-        if (!StringUtils.hasText(jobId)) {
-            return;
-        }
-        if (!TransactionSynchronizationManager.isActualTransactionActive()
-                || !TransactionSynchronizationManager.isSynchronizationActive()) {
-            acknowledgeBestEffort(jobId);
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(
-                new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        acknowledgeBestEffort(jobId);
-                    }
-                });
-    }
-
-    private boolean parseStageExpired(IngestionTaskItem item) {
-        return item.getStageStartedAt() != null
-                && LocalDateTime.now().isAfter(
-                item.getStageStartedAt().plus(effectiveParseStageTimeout()));
-    }
-
-    private boolean isImage(Asset asset) {
-        return "IMAGE".equalsIgnoreCase(asset.getFileType());
     }
 
     private boolean isRateLimitError(Throwable error) {
         Throwable current = error;
         while (current != null) {
-            if (current instanceof AiClient.OpenAiException openAiFailure
-                    && openAiFailure.statusCode() == 429) {
-                return true;
-            }
+            if (current instanceof AiClient.OpenAiException failure
+                    && failure.statusCode() == 429) return true;
             String message = current.getMessage();
             if (StringUtils.hasText(message)) {
                 String lower = message.toLowerCase(Locale.ROOT);
-                if (message.contains("429")
-                        || message.contains("Throttling")
-                        || message.contains("RateQuota")
-                        || lower.contains("rate limit")) {
+                if (message.contains("429") || message.contains("Throttling")
+                        || message.contains("RateQuota") || lower.contains("rate limit")) {
                     return true;
                 }
             }
@@ -1087,7 +645,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     }
 
     private Duration retryDelay(int retryCount) {
-        long seconds = Math.min(300L, 1L << Math.min(Math.max(0, retryCount - 1), 8));
+        long seconds = Math.min(60L, 1L << Math.min(Math.max(0, retryCount - 1), 6));
         return Duration.ofSeconds(seconds);
     }
 
@@ -1099,19 +657,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         return Math.max(1, claimBatchSize);
     }
 
-    private long effectiveLeaseSeconds() {
-        return Math.max(30L, claimLeaseSeconds);
-    }
-
-    private int effectiveStageMaxRetries() {
-        return Math.max(1, stageMaxRetries);
-    }
-
-    private int effectiveEmbeddingMaxRetries() {
-        // The configuration is intentionally expressed as total provider-call attempts.
-        // The first call happens before any persisted retry, so N attempts allow N - 1
-        // retry transitions.
-        return Math.max(0, embeddingRateLimitMaxAttempts - 1);
+    private int effectiveProviderMaxRetries() {
+        return Math.max(0, providerMaxRetries);
     }
 
     private Duration effectiveParsePollInterval() {
@@ -1119,30 +666,22 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 ? parsePollInterval : DEFAULT_PARSE_POLL_INTERVAL;
     }
 
-    private Duration effectiveParseStageTimeout() {
-        return positiveDuration(parseStageTimeout)
-                ? parseStageTimeout : DEFAULT_PARSE_STAGE_TIMEOUT;
+    private Duration effectiveParseTimeout() {
+        return positiveDuration(parseTimeout) ? parseTimeout : DEFAULT_PARSE_TIMEOUT;
+    }
+
+    private boolean isImage(Asset asset) {
+        return "IMAGE".equalsIgnoreCase(asset.getFileType());
     }
 
     private String updatedBy(IngestionTaskItem item) {
         return StringUtils.hasText(item.getTaskCreatedBy())
-                ? item.getTaskCreatedBy() : "system";
+                ? item.getTaskCreatedBy() : "ingestion-worker";
     }
 
     private String clip(String text, int maxLength) {
-        if (!StringUtils.hasText(text)) {
-            return null;
-        }
+        if (!StringUtils.hasText(text)) return null;
         return text.length() <= maxLength ? text : text.substring(0, maxLength);
-    }
-
-    private static final class StaleClaimException extends RuntimeException {
-    }
-
-    private static final class AmbiguousContextWriteException extends RuntimeException {
-        private AmbiguousContextWriteException(Throwable cause) {
-            super(cause);
-        }
     }
 
     private static final class WorkerInterruptedException extends RuntimeException {
@@ -1157,7 +696,14 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
     }
 
-    private record PreparedIndex(
-            IngestionTaskItem item, Asset asset, List<Segment> segments) {
+    private record ParseRunContext(
+            String requestId,
+            String sourceRevision,
+            String assetId,
+            long targetGeneration,
+            IngestionParseRequestTemplate template) {
+    }
+
+    private record ParsedJob(String jobId, ParseResponse result) {
     }
 }

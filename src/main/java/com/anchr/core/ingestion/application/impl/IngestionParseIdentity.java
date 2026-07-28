@@ -9,19 +9,18 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
 
-/** Stable identity for one business parse attempt. */
+/** Stable identity for one whole-document ingestion run. */
 final class IngestionParseIdentity {
-
-    static final int INITIAL_ATTEMPT = 1;
 
     private IngestionParseIdentity() {
     }
 
-    static String requestId(String taskId, String itemId, int parseAttempt) {
-        if (!StringUtils.hasText(taskId) || !StringUtils.hasText(itemId) || parseAttempt < 1) {
-            throw new IllegalArgumentException("taskId, itemId and a positive parseAttempt are required");
+    static String requestId(String taskId, String itemId, long targetGeneration) {
+        if (!StringUtils.hasText(taskId) || !StringUtils.hasText(itemId) || targetGeneration < 1) {
+            throw new IllegalArgumentException(
+                    "taskId, itemId and a positive targetGeneration are required");
         }
-        return taskId.trim() + ":" + itemId.trim() + ":" + parseAttempt;
+        return taskId.trim() + ":" + itemId.trim() + ":" + targetGeneration;
     }
 
     static String sourceRevision(Asset asset) {
@@ -33,8 +32,6 @@ final class IngestionParseIdentity {
             stableSource = "file-hash\0" + asset.getFileHash().trim().toLowerCase(Locale.ROOT);
         } else if (StringUtils.hasText(asset.getObjectKey())) {
             stableSource = "object-key\0" + asset.getObjectKey().trim();
-        } else if (StringUtils.hasText(asset.getSourceUrl())) {
-            stableSource = "source-url\0" + asset.getSourceUrl().trim();
         } else if (StringUtils.hasText(asset.getId())) {
             stableSource = "asset-id\0" + asset.getId().trim();
         } else {

@@ -20,17 +20,13 @@ public class AssetRecord {
     private String fileHash;
     private String versionGroupId;
     private Integer versionNo;
-    private String previousAssetId;
     private String objectKey;
     private String previewObjectKey;
-    private String thumbnailKey;
-    private String sourceUrl;
     private String parseStatus;
     private String indexStatus;
     private Integer segmentCount;
     private Integer indexedSegmentCount;
     private Long activeIndexGeneration;
-    private String embeddingProfile;
     private String errorCode;
     private String errorMessage;
     private String createdBy;

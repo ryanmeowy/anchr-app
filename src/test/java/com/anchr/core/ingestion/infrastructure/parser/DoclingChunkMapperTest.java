@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
@@ -86,20 +87,18 @@ class DoclingChunkMapperTest {
     }
 
     @Test
-    void toTextChunks_shouldKeepStableSourceUrlWhenObjectKeyIsMissing() {
+    void toTextChunks_shouldRejectMissingObjectKey() {
         Asset asset = Asset.builder()
                 .id("asset-1")
                 .kbId("kb-1")
                 .fileName("remote.png")
                 .fileType("IMAGE")
-                .sourceUrl("https://cdn.example.test/remote.png")
                 .build();
 
-        Chunk result = mapper.toTextChunks(
-                asset, response("image", "recognized text"), 1L).getFirst();
-
-        assertThat(result.getSourceRef())
-                .isEqualTo("https://cdn.example.test/remote.png");
+        assertThatThrownBy(() ->
+                mapper.toTextChunks(asset, response("image", "recognized text"), 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("objectKey");
     }
 
     @Test

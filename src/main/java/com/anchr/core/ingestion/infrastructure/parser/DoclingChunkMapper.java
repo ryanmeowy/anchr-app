@@ -139,9 +139,10 @@ public class DoclingChunkMapper {
     }
 
     private String stableSourceRef(Asset asset) {
-        return StringUtils.hasText(asset.getObjectKey())
-                ? asset.getObjectKey().trim()
-                : asset.getSourceUrl();
+        if (!StringUtils.hasText(asset.getObjectKey())) {
+            throw new IllegalArgumentException("asset.objectKey cannot be blank.");
+        }
+        return asset.getObjectKey().trim();
     }
 
     private int firstPageNo(ParseResponse.Chunk chunk) {

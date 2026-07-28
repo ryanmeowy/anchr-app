@@ -61,8 +61,7 @@ class KnowledgeBaseControllerTest {
                 .andExpect(jsonPath("$.data.items[0].availabilityStatus").value("ANSWERABLE"))
                 .andExpect(jsonPath("$.data.segmentTotal").value(87))
                 .andExpect(jsonPath("$.data.items[0].previewAvailable").value(true))
-                .andExpect(jsonPath("$.data.items[0].previewObjectKey").doesNotExist())
-                .andExpect(jsonPath("$.data.items[0].thumbnailKey").doesNotExist());
+                .andExpect(jsonPath("$.data.items[0].previewObjectKey").doesNotExist());
 
         verify(knowledgeBaseService).listDocuments(
                 "kb-1", "RAG", "pdf",

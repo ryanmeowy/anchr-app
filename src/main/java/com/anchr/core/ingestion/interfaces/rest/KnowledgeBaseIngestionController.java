@@ -138,7 +138,6 @@ public class KnowledgeBaseIngestionController {
                 item.getMimeType(),
                 item.getSizeBytes(),
                 item.getObjectKey(),
-                item.getFileHash(),
-                item.getSourceUrl());
+                item.getFileHash());
     }
 }

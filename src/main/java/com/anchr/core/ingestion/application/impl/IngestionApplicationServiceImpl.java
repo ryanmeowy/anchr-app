@@ -15,10 +15,8 @@ import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
-import com.anchr.core.ingestion.domain.model.IngestionExecutionKind;
 import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
 import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
-import com.anchr.core.ingestion.domain.model.IngestionRetryConflictException;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
@@ -106,8 +104,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         List<IngestionTaskItem> items = createItems(context, kbId, request.sourceType(),
                 request.dedupeStrategy(), request.items(), now);
         IngestionTask task = buildTask(
-                context, kbId, request.sourceType(), IngestionExecutionKind.INITIAL,
-                items, now, request.clientRequestId(), requestHash);
+                context, kbId, request.sourceType(), items, now,
+                request.clientRequestId(), requestHash);
         ingestionTaskRepository.save(task);
         activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
                 task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
@@ -189,26 +187,15 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private void resetFailedItemForRetry(String kbId, String taskId,
                                          IngestionTaskItem item, LocalDateTime updatedAt) {
-        int expectedAttempt = Math.max(IngestionParseIdentity.INITIAL_ATTEMPT, item.getParseAttempt());
-        int nextAttempt;
-        try {
-            nextAttempt = Math.addExact(expectedAttempt, 1);
-        } catch (ArithmeticException overflow) {
-            throw new BusinessException(
-                    ApiError.INTERNAL_ERROR, "Parse attempt limit reached.", overflow);
-        }
-        String nextRequestId = IngestionParseIdentity.requestId(taskId, item.getId(), nextAttempt);
-        boolean reset;
-        try {
-            reset = ingestionTaskRepository.resetFailedItem(
-                    kbId, taskId, item.getId(),
-                    expectedAttempt, nextAttempt, nextRequestId, updatedAt);
-        } catch (IngestionRetryConflictException conflict) {
-            throw new BusinessException(
-                    ApiError.INGEST_RETRY_ONLY_FAILED,
-                    "Failed item changed while retry was being prepared.",
-                    conflict);
-        }
+        Asset asset = assetRepository.findByIdForUpdate(kbId, item.getAssetId())
+                .filter(candidate -> candidate.getDeletedAt() == null)
+                .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
+        long nextGeneration = Math.addExact(
+                Math.max(asset.getActiveIndexGeneration(),
+                        ingestionTaskRepository.findMaxTargetIndexGeneration(asset.getId())),
+                1L);
+        boolean reset = ingestionTaskRepository.resetFailedItem(
+                kbId, taskId, item.getId(), nextGeneration, updatedAt);
         if (!reset) {
             throw new BusinessException(
                     ApiError.INGEST_RETRY_ONLY_FAILED,
@@ -254,14 +241,6 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .targetIndexGeneration(targetIndexGeneration)
                 .fileName(document.getFileName())
                 .fileHash(document.getFileHash())
-                .sourceUrl(document.getSourceUrl())
-                .parseAttempt(IngestionParseIdentity.INITIAL_ATTEMPT)
-                .doclingRequestId(IngestionParseIdentity.requestId(
-                        taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
-                .sourceRevision(IngestionParseIdentity.sourceRevision(document))
-                .executionEpoch(1L)
-                .claimVersion(0L)
-                .stageRetryCount(0)
                 .stage(projection.stage())
                 .status(projection.status())
                 .progress(projection.progress())
@@ -299,59 +278,20 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         String taskId = idGen.nextIdStr();
         List<IngestionTaskItem> items = new ArrayList<>();
         for (IngestionCreateItemCommand command : commands) {
-            items.add(createItem(context, kbId, taskId, sourceType, dedupeStrategy, command, now));
+            items.add(createItem(context, kbId, taskId, dedupeStrategy, command, now));
         }
         return items;
     }
 
     private IngestionTaskItem createItem(RequestUserContext context, String kbId, String taskId,
-                                         IngestionSourceType sourceType, DedupeStrategy dedupeStrategy,
+                                         DedupeStrategy dedupeStrategy,
                                          IngestionCreateItemCommand command, LocalDateTime now) {
         String fileType = normalizeFileType(command.fileType());
-        String fileName = normalizeFileName(command.fileName(), command.sourceUrl());
+        String fileName = normalizeFileName(command.fileName());
         IngestionPublicProjection pendingProjection =
-                IngestionPublicProjectionPolicy.intakePending(sourceType);
-        if (sourceType == IngestionSourceType.URL) {
-            requireText(command.sourceUrl(), "sourceUrl");
-            if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
-                return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
-                        dedupeStrategy, null, "UNSUPPORTED_FILE_TYPE", "Unsupported URL file type.", now);
-            }
-            DedupeDecision decision = resolveDedupeDecision(kbId, dedupeStrategy, command.fileHash());
-            if (decision.result() == DedupeResult.SKIPPED) {
-                return skippedItem(kbId, taskId, decision.existingAsset(), dedupeStrategy, now);
-            }
-            Asset document = createDocument(context, kbId, command, fileName, fileType, decision, now);
-            assetRepository.save(document);
-            String itemId = idGen.nextIdStr();
-            return IngestionTaskItem.builder()
-                    .id(itemId)
-                    .taskId(taskId)
-                    .kbId(kbId)
-                    .assetId(document.getId())
-                    .targetIndexGeneration(1L)
-                    .fileName(fileName)
-                    .fileHash(trimToNull(command.fileHash()))
-                    .sourceUrl(trimToNull(command.sourceUrl()))
-                    .parseAttempt(IngestionParseIdentity.INITIAL_ATTEMPT)
-                    .doclingRequestId(IngestionParseIdentity.requestId(
-                            taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
-                    .sourceRevision(IngestionParseIdentity.sourceRevision(document))
-                    .executionEpoch(1L)
-                    .claimVersion(0L)
-                    .stageRetryCount(0)
-                    .stage(pendingProjection.stage())
-                    .status(pendingProjection.status())
-                    .progress(pendingProjection.progress())
-                    .dedupeStrategy(dedupeStrategy)
-                    .dedupeResult(decision.result())
-                    .duplicateAssetId(decision.duplicateAssetId())
-                    .createdAt(now)
-                    .updatedAt(now)
-                    .build();
-        }
+                IngestionPublicProjectionPolicy.intakePending();
         if (!ingestionCapabilityService.isSupportedFileType(fileType)) {
-            return failedItem(kbId, taskId, fileName, command.fileHash(), command.sourceUrl(),
+            return failedItem(kbId, taskId, fileName, command.fileHash(),
                     dedupeStrategy, null, "UNSUPPORTED_FILE_TYPE", "Unsupported file type.", now);
         }
         DedupeDecision decision = resolveDedupeDecision(kbId, dedupeStrategy, command.fileHash());
@@ -370,14 +310,6 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .targetIndexGeneration(1L)
                 .fileName(fileName)
                 .fileHash(trimToNull(command.fileHash()))
-                .sourceUrl(trimToNull(command.sourceUrl()))
-                .parseAttempt(IngestionParseIdentity.INITIAL_ATTEMPT)
-                .doclingRequestId(IngestionParseIdentity.requestId(
-                        taskId, itemId, IngestionParseIdentity.INITIAL_ATTEMPT))
-                .sourceRevision(IngestionParseIdentity.sourceRevision(document))
-                .executionEpoch(1L)
-                .claimVersion(0L)
-                .stageRetryCount(0)
                 .stage(pendingProjection.stage())
                 .status(pendingProjection.status())
                 .progress(pendingProjection.progress())
@@ -402,9 +334,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .fileHash(trimToNull(command.fileHash()))
                 .versionGroupId(decision.versionGroupId())
                 .versionNo(decision.versionNo())
-                .previousAssetId(decision.previousAssetId())
-                .objectKey(trimToNull(command.objectKey()))
-                .sourceUrl(trimToNull(command.sourceUrl()))
+                .objectKey(requireText(command.objectKey(), "objectKey"))
                 .parseStatus(DocumentParseStatus.PENDING)
                 .indexStatus(DocumentIndexStatus.PENDING)
                 .segmentCount(0)
@@ -418,20 +348,13 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
 
     private IngestionTask buildTask(RequestUserContext context, String kbId, IngestionSourceType sourceType,
                                     List<IngestionTaskItem> items, LocalDateTime now) {
-        IngestionExecutionKind executionKind = switch (sourceType) {
-            case REPARSE -> IngestionExecutionKind.REPARSE;
-            case REEMBED -> IngestionExecutionKind.REEMBED;
-            case UPLOAD, URL, RETRY -> IngestionExecutionKind.INITIAL;
-        };
-        return buildTask(
-                context, kbId, sourceType, executionKind, items, now, null, null);
+        return buildTask(context, kbId, sourceType, items, now, null, null);
     }
 
     private IngestionTask buildTask(
             RequestUserContext context,
             String kbId,
             IngestionSourceType sourceType,
-            IngestionExecutionKind executionKind,
             List<IngestionTaskItem> items,
             LocalDateTime now,
             String clientRequestId,
@@ -446,7 +369,6 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .id(items.get(0).getTaskId())
                 .kbId(kbId)
                 .sourceType(sourceType)
-                .initialExecutionKind(executionKind)
                 .clientRequestId(clientRequestId)
                 .requestHash(requestHash)
                 .status(resolveTaskStatus(items, successCount, failureCount, runningCount))
@@ -464,7 +386,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
     }
 
     private IngestionTaskItem failedItem(String kbId, String taskId, String fileName, String fileHash,
-                                         String sourceUrl, DedupeStrategy dedupeStrategy, String duplicateAssetId,
+                                         DedupeStrategy dedupeStrategy, String duplicateAssetId,
                                          String errorCode, String errorMessage,
                                          LocalDateTime now) {
         IngestionPublicProjection projection =
@@ -475,7 +397,6 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .kbId(kbId)
                 .fileName(fileName)
                 .fileHash(trimToNull(fileHash))
-                .sourceUrl(trimToNull(sourceUrl))
                 .stage(projection.stage())
                 .status(projection.status())
                 .progress(projection.progress())
@@ -501,7 +422,6 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .assetId(existing.getId())
                 .fileName(existing.getFileName())
                 .fileHash(existing.getFileHash())
-                .sourceUrl(existing.getSourceUrl())
                 .stage(projection.stage())
                 .status(projection.status())
                 .progress(projection.progress())
@@ -595,6 +515,10 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         }
         IngestionSourceType sourceType = command.sourceType() == null
                 ? IngestionSourceType.UPLOAD : command.sourceType();
+        if (sourceType != IngestionSourceType.UPLOAD) {
+            throw new BusinessException(
+                    ApiError.INVALID_REQUEST, "sourceType must be UPLOAD for ingestion creation.");
+        }
         DedupeStrategy dedupeStrategy = command.dedupeStrategy() == null
                 ? DedupeStrategy.SKIP : command.dedupeStrategy();
         List<IngestionCreateItemCommand> items = new ArrayList<>(command.items().size());
@@ -602,19 +526,14 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
             if (item == null) {
                 throw new BusinessException(ApiError.INVALID_REQUEST, "items cannot contain null.");
             }
-            String sourceUrl = trimToNull(item.sourceUrl());
-            if (sourceType == IngestionSourceType.URL) {
-                sourceUrl = requireText(sourceUrl, "sourceUrl");
-            }
             items.add(new IngestionCreateItemCommand(
-                    normalizeFileName(item.fileName(), sourceUrl),
+                    normalizeFileName(item.fileName()),
                     trimToNull(item.title()),
                     normalizeFileType(item.fileType()),
                     trimToNull(item.mimeType()),
                     item.sizeBytes(),
-                    trimToNull(item.objectKey()),
-                    trimToNull(item.fileHash()),
-                    sourceUrl));
+                    requireText(item.objectKey(), "objectKey"),
+                    trimToNull(item.fileHash())));
         }
         return new NormalizedCreateRequest(
                 normalizeOptionalClientRequestId(command.clientRequestId()), sourceType, dedupeStrategy, List.copyOf(items));
@@ -668,14 +587,8 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
         return requireText(fileType, "fileType").toUpperCase(Locale.ROOT);
     }
 
-    private String normalizeFileName(String fileName, String sourceUrl) {
-        if (StringUtils.hasText(fileName)) {
-            return fileName.trim();
-        }
-        if (StringUtils.hasText(sourceUrl)) {
-            return sourceUrl.trim();
-        }
-        throw new BusinessException(ApiError.INVALID_REQUEST, "fileName cannot be blank.");
+    private String normalizeFileName(String fileName) {
+        return requireText(fileName, "fileName");
     }
 
     private String trimToNull(String value) {
@@ -692,27 +605,25 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                                   Asset existingAsset,
                                   String duplicateAssetId,
                                   String versionGroupId,
-                                  Integer versionNo,
-                                  String previousAssetId) {
+                                  Integer versionNo) {
 
         private static DedupeDecision newAsset(String versionGroupId, Integer versionNo) {
-            return new DedupeDecision(DedupeResult.NEW, null, null, versionGroupId, versionNo, null);
+            return new DedupeDecision(DedupeResult.NEW, null, null, versionGroupId, versionNo);
         }
 
         private static DedupeDecision skipped(Asset existingAsset) {
-            return new DedupeDecision(DedupeResult.SKIPPED, existingAsset, existingAsset.getId(), null, null, null);
+            return new DedupeDecision(DedupeResult.SKIPPED, existingAsset, existingAsset.getId(), null, null);
         }
 
         private static DedupeDecision overwritten(Asset existingAsset) {
             return new DedupeDecision(DedupeResult.OVERWRITTEN, existingAsset, existingAsset.getId(),
                     existingAsset.getVersionGroupId(),
-                    existingAsset.getVersionNo() == null ? 1 : existingAsset.getVersionNo(),
-                    existingAsset.getPreviousAssetId());
+                    existingAsset.getVersionNo() == null ? 1 : existingAsset.getVersionNo());
         }
 
         private static DedupeDecision versioned(Asset existingAsset, String versionGroupId, Integer versionNo) {
             return new DedupeDecision(DedupeResult.VERSIONED, existingAsset, existingAsset.getId(),
-                    versionGroupId, versionNo, existingAsset.getId());
+                    versionGroupId, versionNo);
         }
     }
 }

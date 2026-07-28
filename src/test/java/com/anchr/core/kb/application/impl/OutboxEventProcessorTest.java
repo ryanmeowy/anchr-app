@@ -6,11 +6,11 @@ import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
-import com.anchr.core.ingestion.application.artifact.IngestionArtifactStore;
-import com.anchr.core.ingestion.domain.model.IngestionArtifactReference;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.settings.domain.model.StorageConfig;
+import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +33,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,7 +47,7 @@ class OutboxEventProcessorTest {
     @Mock
     private IngestionObjectStoragePort objectStoragePort;
     @Mock
-    private IngestionArtifactStore artifactStore;
+    private StorageConfigRepository storageConfigRepository;
 
     private OutboxEventProcessor processor;
 
@@ -59,8 +58,8 @@ class OutboxEventProcessorTest {
                 segmentRepository,
                 new ObjectMapper(),
                 ingestionTaskRepository,
-                artifactStore,
-                objectStoragePort);
+                objectStoragePort,
+                storageConfigRepository);
         ReflectionTestUtils.setField(processor, "maxAttempts", 10);
     }
 
@@ -199,27 +198,14 @@ class OutboxEventProcessorTest {
                 OutboxEventType.DELETE_ASSET_GENERATION,
                 0,
                 generationPayload(4L));
-        IngestionArtifactReference artifact = IngestionArtifactReference.builder()
-                .artifactType("PARSE_RESULT")
-                .artifactVersion(1)
-                .objectKey("ingestion/task-1/item-1/parse/1/jobs/job-1/parse-result.v1.json.gz")
-                .build();
-        when(ingestionTaskRepository.listParseArtifacts("asset-1", 4L))
-                .thenReturn(List.of(artifact));
-        when(artifactStore.readEmbeddedImageObjectKeysIfPresent(artifact, "asset-1"))
-                .thenReturn(Optional.of(List.of(
-                        "embedded/ingestion/task-1/item-1/parse/1/images/a.png",
-                        "embedded/ingestion/task-1/item-1/parse/1/images/b.png")));
+        when(storageConfigRepository.find()).thenReturn(Optional.of(storageConfig()));
         when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any()))
                 .thenReturn(true);
 
         processor.process(event);
 
         verify(objectStoragePort).deleteObjectsByPrefix(
-                "embedded/ingestion/task-1/item-1/parse/1/images/");
-        verify(objectStoragePort).deleteObjectsByPrefix(
-                "ingestion/task-1/item-1/parse/1/");
-        verify(ingestionTaskRepository).deleteParseArtifacts("asset-1", 4L);
+                "embedded/ingestion/assets/asset-1/generations/4/images/");
         verify(segmentRepository).deleteByAssetGeneration("asset-1", 4L);
         verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
     }
@@ -230,17 +216,10 @@ class OutboxEventProcessorTest {
                 OutboxEventType.DELETE_ASSET_GENERATION,
                 0,
                 generationPayload(4L));
-        IngestionArtifactReference artifact = IngestionArtifactReference.builder()
-                .artifactType("PARSE_RESULT")
-                .artifactVersion(1)
-                .objectKey("ingestion/task-1/item-1/parse/1/jobs/job-1/parse-result.v1.json.gz")
-                .build();
-        when(ingestionTaskRepository.listParseArtifacts("asset-1", 4L))
-                .thenReturn(List.of(artifact));
-        when(artifactStore.readEmbeddedImageObjectKeysIfPresent(artifact, "asset-1"))
-                .thenReturn(Optional.of(List.of("legacy/a.png")));
+        when(storageConfigRepository.find()).thenReturn(Optional.of(storageConfig()));
         doThrow(new IllegalStateException("OSS unavailable"))
-                .when(objectStoragePort).deleteObject("legacy/a.png");
+                .when(objectStoragePort).deleteObjectsByPrefix(
+                        "embedded/ingestion/assets/asset-1/generations/4/images/");
         when(outboxEventRepository.markRetry(
                 eq(1L), eq("claim-1"), eq(1), any(), any(), any()))
                 .thenReturn(true);
@@ -254,33 +233,8 @@ class OutboxEventProcessorTest {
         verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());
     }
 
-    @Test
-    void process_shouldDeleteOnlyTheFailedAttemptPrefixes() {
-        String payload = "{\"taskId\":\"task-1\",\"itemId\":\"item-1\","
-                + "\"executionEpoch\":2,\"parseAttempt\":3,"
-                + "\"imagePrefix\":\"embedded/ingestion/task-1/item-1/parse/3/images/\","
-                + "\"parseArtifactPrefix\":\"ingestion/task-1/item-1/parse/3/\"}";
-        OutboxEvent event = OutboxEvent.builder()
-                .id(1L)
-                .eventType(OutboxEventType.DELETE_INGESTION_ATTEMPT_ARTIFACTS)
-                .aggregateType("INGESTION_ITEM")
-                .aggregateId("item-1")
-                .payload(payload)
-                .status(OutboxEventStatus.PROCESSING)
-                .retryCount(0)
-                .lockToken("claim-1")
-                .build();
-        when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any()))
-                .thenReturn(true);
-
-        processor.process(event);
-
-        verify(objectStoragePort).deleteObjectsByPrefix(
-                "embedded/ingestion/task-1/item-1/parse/3/images/");
-        verify(objectStoragePort).deleteObjectsByPrefix(
-                "ingestion/task-1/item-1/parse/3/");
-        verify(ingestionTaskRepository).deleteParseArtifact("item-1", 2L);
-        verifyNoInteractions(segmentRepository);
+    private StorageConfig storageConfig() {
+        return StorageConfig.builder().prefix("embedded").build();
     }
 
     private OutboxEvent event(int retryCount, String payload) {

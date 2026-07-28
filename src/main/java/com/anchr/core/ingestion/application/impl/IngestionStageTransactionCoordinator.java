@@ -2,8 +2,7 @@ package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
-import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
+import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
@@ -15,23 +14,18 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
-/**
- * Keeps fenced item transitions and their MySQL asset projection in one short transaction.
- */
+/** Keeps item state and its Asset projection in one short MySQL transaction. */
 @Service
 @RequiredArgsConstructor
 public class IngestionStageTransactionCoordinator {
 
     private final IngestionTaskRepository ingestionTaskRepository;
     private final AssetRepository assetRepository;
-    private final IngestionArtifactCleanupRecorder artifactCleanupRecorder;
     private final AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
 
     @Transactional(rollbackFor = Exception.class)
     public IngestionTaskItem ensureTargetIndexGeneration(IngestionTaskItem item) {
-        if (item.getTargetIndexGeneration() != null) {
-            return item;
-        }
+        if (item.getTargetIndexGeneration() != null) return item;
         Asset asset = assetRepository.findByIdForUpdate(item.getKbId(), item.getAssetId())
                 .filter(candidate -> candidate.getDeletedAt() == null)
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
@@ -41,37 +35,24 @@ public class IngestionStageTransactionCoordinator {
                 1L);
         boolean assigned = ingestionTaskRepository.assignTargetIndexGeneration(
                 item.getId(), asset.getId(), targetGeneration, LocalDateTime.now());
-        long storedGeneration = assigned
-                ? targetGeneration
+        long stored = assigned ? targetGeneration
                 : ingestionTaskRepository.findTargetIndexGeneration(item.getId(), asset.getId())
                         .orElseThrow(() -> new IllegalStateException(
                                 "Ingestion target generation disappeared during allocation."));
-        return item.toBuilder()
-                .targetIndexGeneration(storedGeneration)
-                .build();
+        return item.toBuilder().targetIndexGeneration(stored).build();
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public boolean updateAssetStatusForCurrentClaim(IngestionTaskItem item,
-                                                    Asset asset,
-                                                    String parseStatus,
-                                                    String indexStatus) {
-        if (!ingestionTaskRepository.isClaimCurrentForUpdate(
-                item.getId(),
-                item.getExecutionEpoch(),
-                item.getExecutionStage(),
-                item.getClaimVersion(),
-                item.getLeaseToken())) {
+    public boolean updateAssetStatus(IngestionTaskItem item,
+                                     Asset asset,
+                                     String parseStatus,
+                                     String indexStatus) {
+        if (!ingestionTaskRepository.isRunningForUpdate(item.getId(), item.getStage())) {
             return false;
         }
-        boolean updated = assetRepository.updateStatuses(
-                item.getKbId(),
-                asset.getId(),
-                parseStatus,
-                indexStatus,
-                item.getTaskCreatedBy(),
-                LocalDateTime.now());
-        if (!updated) {
+        if (!assetRepository.updateStatuses(
+                item.getKbId(), asset.getId(), parseStatus, indexStatus,
+                updatedBy(item), LocalDateTime.now())) {
             throw new IllegalStateException(
                     "Document disappeared while updating its ingestion status.");
         }
@@ -79,21 +60,21 @@ public class IngestionStageTransactionCoordinator {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public boolean transitionAndUpdateAssetStatus(IngestionClaimTransition transition,
-                                                  Asset asset,
-                                                  String parseStatus,
-                                                  String indexStatus) {
-        if (!ingestionTaskRepository.transitionClaim(transition)) {
+    public boolean advanceAndUpdateAssetStatus(IngestionTaskItem item,
+                                               IngestionStage nextStage,
+                                               int progress,
+                                               Asset asset,
+                                               String parseStatus,
+                                               String indexStatus) {
+        LocalDateTime now = LocalDateTime.now();
+        if (!ingestionTaskRepository.advanceRunningItem(
+                item.getKbId(), item.getTaskId(), item.getId(), item.getStage(),
+                nextStage, progress, now)) {
             return false;
         }
-        boolean updated = assetRepository.updateStatuses(
-                transition.getKbId(),
-                asset.getId(),
-                parseStatus,
-                indexStatus,
-                transition.getUpdatedBy(),
-                transitionTime(transition));
-        if (!updated) {
+        if (!assetRepository.updateStatuses(
+                item.getKbId(), asset.getId(), parseStatus, indexStatus,
+                updatedBy(item), now)) {
             throw new IllegalStateException(
                     "Document disappeared while advancing its ingestion stage.");
         }
@@ -101,57 +82,45 @@ public class IngestionStageTransactionCoordinator {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public boolean transitionFailed(IngestionClaimTransition transition,
-                                    Asset asset,
-                                    String parseStatus,
-                                    String indexStatus,
-                                    int segmentCount,
-                                    int indexedSegmentCount,
-                                    Long targetIndexGeneration) {
-        if (!ingestionTaskRepository.transitionClaim(transition)) {
+    public boolean failRunning(IngestionTaskItem item,
+                               Asset asset,
+                               ApiError error,
+                               String message,
+                               String parseStatus,
+                               String indexStatus) {
+        LocalDateTime now = LocalDateTime.now();
+        if (!ingestionTaskRepository.failRunningItem(
+                item.getKbId(), item.getTaskId(), item.getId(), item.getStage(),
+                item.getProgress(), error.name(), message, updatedBy(item), now)) {
             return false;
         }
         if (asset != null) {
-            boolean indexFailure = transition.getExpectedExecutionStage()
-                    == IngestionExecutionStage.INDEX;
-            // A concurrent delete is allowed to win. The item failure is still authoritative,
-            // while an inactive asset must not be resurrected merely to record an error.
-            Asset currentAsset = indexFailure
-                    ? assetRepository.findByIdForUpdate(
-                            transition.getKbId(), asset.getId()).orElse(null)
-                    : asset;
-            if (currentAsset != null
-                    && (!indexFailure || currentAsset.getDeletedAt() == null)) {
+            Asset current = assetRepository.findByIdForUpdate(
+                    item.getKbId(), asset.getId()).orElse(null);
+            if (current != null && current.getDeletedAt() == null) {
                 assetRepository.updateIngestionResult(
-                        transition.getKbId(),
-                        currentAsset.getId(),
-                        parseStatus,
-                        indexStatus,
-                        segmentCount,
-                        indexedSegmentCount,
-                        transition.getErrorCode(),
-                        transition.getErrorMessage(),
-                        transition.getUpdatedBy(),
-                        transitionTime(transition));
-                if (indexFailure
-                        && targetIndexGeneration != null
-                        && targetIndexGeneration > 0L
-                        && targetIndexGeneration
-                        != currentAsset.getActiveIndexGeneration()) {
-                    assetCleanupOutboxRecorder.generationRetired(
-                            transition.getKbId(),
-                            currentAsset.getId(),
-                            targetIndexGeneration,
-                            transition.getUpdatedBy(),
-                            transitionTime(transition));
-                }
+                        item.getKbId(), current.getId(), parseStatus, indexStatus,
+                        current.getSegmentCount(), current.getIndexedSegmentCount(),
+                        error.name(), message, updatedBy(item), now);
+                retireInactiveGeneration(item, current, now);
             }
         }
-        artifactCleanupRecorder.terminalFailure(transition);
         return true;
     }
 
-    private LocalDateTime transitionTime(IngestionClaimTransition transition) {
-        return transition.getUpdatedAt() == null ? LocalDateTime.now() : transition.getUpdatedAt();
+    private void retireInactiveGeneration(
+            IngestionTaskItem item, Asset asset, LocalDateTime now) {
+        Long generation = item.getTargetIndexGeneration();
+        if (generation == null || generation < 1L
+                || generation == asset.getActiveIndexGeneration()) {
+            return;
+        }
+        assetCleanupOutboxRecorder.generationRetired(
+                item.getKbId(), asset.getId(), generation, updatedBy(item), now);
+    }
+
+    private String updatedBy(IngestionTaskItem item) {
+        return item.getTaskCreatedBy() == null || item.getTaskCreatedBy().isBlank()
+                ? "ingestion-worker" : item.getTaskCreatedBy();
     }
 }

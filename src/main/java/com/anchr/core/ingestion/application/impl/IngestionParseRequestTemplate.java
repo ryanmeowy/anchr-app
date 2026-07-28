@@ -1,40 +1,33 @@
 package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.model.ParseRequest;
-import com.anchr.core.ingestion.application.artifact.IngestionArtifactPaths;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.settings.domain.model.StorageConfig;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.springframework.util.StringUtils;
 
 import java.util.Map;
 
 /**
- * Secret-free, stable portion of a Docling v2 request.
+ * 单次整文档处理期间使用的 Docling 请求模板，仅存在于当前 worker 内存中。
  *
- * <p>The signed source URL and temporary OSS credentials are deliberately excluded. They are
- * refreshed for every submission, while this snapshot keeps the fields used by Docling's v2
- * idempotency fingerprint stable across process restarts and lost-job resubmissions.</p>
+ * <p>签名下载地址和临时 OSS 凭据不进入模板，每次提交时即时生成；服务重启后不恢复
+ * 当前处理，而是将对应 item 标记为失败。</p>
  */
-@JsonIgnoreProperties(ignoreUnknown = true)
-public record IngestionParseRequestSnapshot(
-        int artifactVersion,
+public record IngestionParseRequestTemplate(
         int contractVersion,
         String fileName,
         ParseRequest.Options options,
         StableOssTarget ossTarget
 ) {
 
-    static final int CURRENT_VERSION = 1;
     static final int LEGACY_DOCLING_CONTRACT_VERSION = 2;
     static final int EMBEDDED_IMAGE_CONTRACT_VERSION = 3;
 
-    static IngestionParseRequestSnapshot capture(Asset asset,
+    static IngestionParseRequestTemplate capture(Asset asset,
                                                  boolean includeEmbeddedImages,
                                                  StorageConfig storageConfig,
-                                                 String taskId,
-                                                 String itemId,
-                                                 int parseAttempt) {
+                                                 String assetId,
+                                                 long targetGeneration) {
         if (asset == null || !StringUtils.hasText(asset.getFileName())) {
             throw new IllegalArgumentException("Asset file name is required for a Docling request.");
         }
@@ -43,12 +36,11 @@ public record IngestionParseRequestSnapshot(
             target = new StableOssTarget(
                     requireText(storageConfig.getEndpoint(), "OSS endpoint"),
                     requireText(storageConfig.getBucket(), "OSS bucket"),
-                    IngestionArtifactPaths.imagePrefix(
-                            storageConfig.getPrefix(), taskId, itemId, parseAttempt),
-                    IngestionArtifactPaths.ATTEMPT_PREFIX_LAYOUT);
+                    IngestionImagePaths.imagePrefix(
+                            storageConfig.getPrefix(), assetId, targetGeneration),
+                    IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT);
         }
-        return new IngestionParseRequestSnapshot(
-                CURRENT_VERSION,
+        return new IngestionParseRequestTemplate(
                 includeEmbeddedImages
                         ? EMBEDDED_IMAGE_CONTRACT_VERSION
                         : LEGACY_DOCLING_CONTRACT_VERSION,
@@ -57,17 +49,14 @@ public record IngestionParseRequestSnapshot(
                 target);
     }
 
-    IngestionParseRequestSnapshot validated() {
-        if (artifactVersion != CURRENT_VERSION) {
-            throw new IllegalStateException("Unsupported ingestion parse request snapshot version.");
-        }
+    IngestionParseRequestTemplate validated() {
         if (contractVersion != LEGACY_DOCLING_CONTRACT_VERSION
                 && contractVersion != EMBEDDED_IMAGE_CONTRACT_VERSION) {
-            throw new IllegalStateException("Unsupported Docling contract version in parse request snapshot.");
+            throw new IllegalStateException("Unsupported Docling contract version in parse request template.");
         }
         requireText(fileName, "Docling file name");
         if (options == null) {
-            throw new IllegalStateException("Docling parse options are missing from the request snapshot.");
+            throw new IllegalStateException("Docling parse options are missing from the request template.");
         }
         if (ossTarget != null) {
             if (contractVersion != EMBEDDED_IMAGE_CONTRACT_VERSION) {
@@ -88,7 +77,7 @@ public record IngestionParseRequestSnapshot(
         if (ossTarget != null) {
             if (encryptedCredentials == null || encryptedCredentials.isEmpty()) {
                 throw new IllegalStateException(
-                        "Temporary OSS credentials are required by the persisted parse request snapshot.");
+                        "Temporary OSS credentials are required by the parse request template.");
             }
             oss = new ParseRequest.Oss(
                     ossTarget.endpoint(),
@@ -109,9 +98,8 @@ public record IngestionParseRequestSnapshot(
     }
 
     boolean targets(StorageConfig storageConfig,
-                    String taskId,
-                    String itemId,
-                    int parseAttempt) {
+                    String assetId,
+                    long targetGeneration) {
         if (ossTarget == null) {
             return true;
         }
@@ -120,17 +108,12 @@ public record IngestionParseRequestSnapshot(
                 || !ossTarget.bucket().equals(storageConfig.getBucket())) {
             return false;
         }
-        if (ossTarget.objectKeyLayout() == null) {
-            return ossTarget.basePath().equals(
-                    storageConfig.getPrefix() == null ? "" : storageConfig.getPrefix());
-        }
-        return IngestionArtifactPaths.ATTEMPT_PREFIX_LAYOUT.equals(
+        return IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT.equals(
                 ossTarget.objectKeyLayout())
-                && ossTarget.basePath().equals(IngestionArtifactPaths.imagePrefix(
-                        storageConfig.getPrefix(), taskId, itemId, parseAttempt));
+                && ossTarget.basePath().equals(IngestionImagePaths.imagePrefix(
+                        storageConfig.getPrefix(), assetId, targetGeneration));
     }
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public record StableOssTarget(String endpoint, String bucket, String basePath,
                                   String objectKeyLayout) {
 
@@ -138,10 +121,9 @@ public record IngestionParseRequestSnapshot(
             requireText(endpoint, "OSS endpoint");
             requireText(bucket, "OSS bucket");
             if (basePath == null) {
-                throw new IllegalStateException("OSS base path is missing from the request snapshot.");
+                throw new IllegalStateException("OSS base path is missing from the request template.");
             }
-            if (objectKeyLayout != null
-                    && !IngestionArtifactPaths.ATTEMPT_PREFIX_LAYOUT.equals(objectKeyLayout)) {
+            if (!IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT.equals(objectKeyLayout)) {
                 throw new IllegalStateException("Unsupported embedded-image object key layout.");
             }
             return this;

@@ -10,6 +10,7 @@ import lombok.Data;
 @Data
 public class IngestionTaskCreateItemDTO {
 
+    @NotBlank
     @Size(max = 512)
     private String fileName;
 
@@ -25,11 +26,11 @@ public class IngestionTaskCreateItemDTO {
 
     private Long sizeBytes;
 
+    @NotBlank
     @Size(max = 1024)
     private String objectKey;
 
     @Size(max = 128)
     private String fileHash;
 
-    private String sourceUrl;
 }

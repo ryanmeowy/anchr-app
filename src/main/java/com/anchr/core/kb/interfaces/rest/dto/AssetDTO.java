@@ -23,7 +23,6 @@ public class AssetDTO {
     String mimeType;
     Long sizeBytes;
     String fileHash;
-    String sourceUrl;
     Integer versionNo;
     boolean previewAvailable;
     String parseStatus;
@@ -31,7 +30,6 @@ public class AssetDTO {
     String availabilityStatus;
     int segmentCount;
     int indexedSegmentCount;
-    String embeddingProfile;
     String errorCode;
     String errorMessage;
     LocalDateTime createdAt;
@@ -47,7 +45,6 @@ public class AssetDTO {
                 .mimeType(document.getMimeType())
                 .sizeBytes(document.getSizeBytes())
                 .fileHash(document.getFileHash())
-                .sourceUrl(document.getSourceUrl())
                 .versionNo(document.getVersionNo())
                 .previewAvailable(isPreviewAvailable(document))
                 .parseStatus(document.getParseStatus().name())
@@ -55,7 +52,6 @@ public class AssetDTO {
                 .availabilityStatus(DocumentAvailabilityStatus.from(document).name())
                 .segmentCount(document.getSegmentCount())
                 .indexedSegmentCount(document.getIndexedSegmentCount())
-                .embeddingProfile(document.getEmbeddingProfile())
                 .errorCode(document.getErrorCode())
                 .errorMessage(document.getErrorMessage())
                 .createdAt(document.getCreatedAt())
@@ -65,12 +61,6 @@ public class AssetDTO {
 
     private static boolean isPreviewAvailable(Asset document) {
         return StringUtils.hasText(document.getPreviewObjectKey())
-                || StringUtils.hasText(document.getObjectKey())
-                || isHttpUrl(document.getSourceUrl());
-    }
-
-    private static boolean isHttpUrl(String value) {
-        return StringUtils.hasText(value)
-                && (value.trim().startsWith("http://") || value.trim().startsWith("https://"));
+                || StringUtils.hasText(document.getObjectKey());
     }
 }
