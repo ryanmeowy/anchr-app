@@ -763,7 +763,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 DocumentParseStatus.FAILED.name(),
                 DocumentIndexStatus.FAILED.name(),
                 asset == null ? 0 : asset.getSegmentCount(),
-                asset == null ? 0 : asset.getIndexedSegmentCount());
+                asset == null ? 0 : asset.getIndexedSegmentCount(),
+                item.getTargetIndexGeneration());
         if (transitioned) {
             log.warn("knowledge-base ingestion item failed, taskId={}, itemId={}, stage={}, errorCode={}, error={}",
                     item.getTaskId(), item.getId(), item.getExecutionStage(), error, safeMessage);

@@ -787,7 +787,8 @@ class IngestionExecutionStateMysqlIntegrationTest {
                 new IngestionStageTransactionCoordinator(
                         repository,
                         failingAssetRepository,
-                        mock(com.anchr.core.ingestion.application.impl.IngestionArtifactCleanupRecorder.class));
+                        mock(com.anchr.core.ingestion.application.impl.IngestionArtifactCleanupRecorder.class),
+                        mock(com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder.class));
 
         assertThatThrownBy(() -> transaction.executeWithoutResult(ignored ->
                 coordinator.transitionAndUpdateAssetStatus(

@@ -116,7 +116,7 @@ class IngestionIndexFinalizerTest {
     }
 
     @Test
-    void finalizeIndex_shouldRejectSupersededGenerationBeforeWritingEs() {
+    void finalizeIndex_shouldRejectActiveGenerationWithoutCleaningIt() {
         IngestionTaskItem item = claimedIndexItem();
         Asset source = asset("asset-1", 1L, null);
         when(ingestionTaskRepository.isClaimCurrentForUpdate(
@@ -134,10 +134,40 @@ class IngestionIndexFinalizerTest {
         verify(assetRepository, never()).activateIndexGeneration(
                 any(), any(), anyLong(), anyLong(),
                 any(), any(), anyInt(), anyInt(), any(), any());
+        verify(assetCleanupOutboxRecorder, never()).generationRetired(
+                any(), any(), anyLong(), any(), any());
         ArgumentCaptor<IngestionClaimTransition> transition =
                 ArgumentCaptor.forClass(IngestionClaimTransition.class);
         verify(ingestionTaskRepository).transitionClaim(transition.capture());
         assertThat(transition.getValue().getErrorCode()).isEqualTo("INTERNAL_ERROR");
+        assertThat(transition.getValue().getErrorMessage())
+                .contains("superseded");
+    }
+
+    @Test
+    void finalizeIndex_shouldFailAndCleanSupersededTargetGeneration() {
+        IngestionTaskItem item = claimedIndexItem();
+        Asset source = asset("asset-1", 2L, null);
+        when(ingestionTaskRepository.isClaimCurrentForUpdate(
+                "item-1", 3L, IngestionExecutionStage.INDEX, 4, "lease-1"))
+                .thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(source));
+        when(ingestionTaskRepository.transitionClaim(any())).thenReturn(true);
+
+        boolean indexed = finalizer.finalizeIndex(item, source, List.of());
+
+        assertThat(indexed).isFalse();
+        verify(segmentRepository, never()).deleteByAssetGeneration(
+                any(), anyLong());
+        verify(segmentBulkWriter, never()).write(any());
+        verify(assetCleanupOutboxRecorder).generationRetired(
+                eq("kb-1"), eq("asset-1"), eq(1L), eq("user-a"), any());
+        ArgumentCaptor<IngestionClaimTransition> transition =
+                ArgumentCaptor.forClass(IngestionClaimTransition.class);
+        verify(ingestionTaskRepository).transitionClaim(transition.capture());
+        assertThat(transition.getValue().getNextExecutionStage())
+                .isEqualTo(IngestionExecutionStage.FAILED);
         assertThat(transition.getValue().getErrorMessage())
                 .contains("superseded");
     }

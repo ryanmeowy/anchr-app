@@ -1042,6 +1042,11 @@ ES _id = segmentId
 5. 通过 outbox 删除旧 generation。
 
 因此 ES 写完但 DB 未提交时新文档不可见；旧文档删除失败也不会再参与搜索。
+如果 INDEX 在 partial bulk 后终态失败，失败事务会锁定当前 Asset；只要 target generation
+为正且不等于 active generation，就在同一事务写入 `DELETE_ASSET_GENERATION`。Finalizer
+发现 `target < active` 时同样失败任务并清理被淘汰的 target；`target == active` 时只失败
+任务，禁止删除正在服务的 generation。Asset 已删除时不重复写 generation 事件，由既有
+`DELETE_ASSET` 完成全量清理。
 
 overwrite 必须在同一事务 soft delete 旧 asset 并写 `DELETE_ASSET` outbox，不再直接调用 ES 或吞异常。复用现有 outbox 的 claim、lease、backoff 和 `SKIP LOCKED`。
 
@@ -1057,6 +1062,8 @@ overwrite 必须在同一事务 soft delete 旧 asset 并写 `DELETE_ASSET` outb
 - overwrite 删除失败进入 outbox。
 - 删除与 ingestion 并发不会复活资产。
 - generation/Asset 清理事件失败后可按既有 Outbox 策略重试。
+- INDEX 终态失败和被更高 generation 淘汰的未激活 target 会进入清理 Outbox；非 INDEX
+  失败、active target 和已删除 Asset 不产生额外 generation 删除事件。
 
 ### 实施与验证记录
 
@@ -1064,10 +1071,11 @@ overwrite 必须在同一事务 soft delete 旧 asset 并写 `DELETE_ASSET` outb
 - 新建 Asset 固定从 generation 1 开始；REPARSE/REEMBED 在 Asset 行锁内按 `max(active generation, 已分配 target generation) + 1` 分配，旧数据中 target 为空的 item 在首次 claim 时用相同规则补齐。target 只保存在稳定 item，不复制到 execution。
 - `DoclingChunkMapper` 使用既有 `IdGen` 为每个 Segment 生成普通 segmentId；`SegmentBulkWriter` 直接使用相同值作为 ES `_id` 写入，设置 `refresh=wait_for` 保证激活前新 generation 已可搜索，并拒绝空 ID、响应数量不一致和任一部分失败。
 - INDEX finalizer 先校验当前 claim 并锁定 Asset，再清理同一未激活 target generation 的重试残留、bulk 覆盖写、CAS 激活 generation，最后在同一 MySQL 事务写旧 generation 清理 outbox 和 item COMPLETE。数据库提交失败时新 generation 留在 ES 但不满足 active gate；后续同 target 重试会先清掉残留。
+- INDEX 终态失败也在失败 transition 的同一 MySQL 事务锁定当前 Asset：未激活 target 写入既有 `DELETE_ASSET_GENERATION`，随后由现有处理器统一删除该 generation 的 ES Segment、Parse artifact、内嵌图片和 registry 行。Finalizer 对 `target < active` 执行相同清理，对 `target == active` 明确禁删；非 INDEX 失败和已删除 Asset 不追加 generation 事件。Outbox 保存异常会回滚失败 transition。
 - 搜索在 RRF 合并后、Rerank 前一次批量读取候选 Asset 的 active generation，按原顺序 fail-closed 过滤；全文读取在分页开始时固定同一个 active generation。generation 0 查询同时兼容显式 `0` 和旧文档缺字段。
 - Segment Preview 与刷新入口也校验父 Asset 的 active generation；旧 generation、已删除 Asset 或不存在的 Segment 统一返回 `SEGMENT_NOT_FOUND`，不会通过旧 segmentId 绕过搜索可见性门禁。
 - 普通删除与 overwrite 都在 Asset 行锁事务内 soft delete，并同时追加 `DELETE_ASSET` outbox；旧 generation 使用 `DELETE_ASSET_GENERATION` 复用现有 claim、lease、backoff 和失败重试，不再直接删 ES 或吞异常。
-- JDK 21 全量回归共 463 项，0 failure、0 error、27 skipped；27 项均为当前机器无 Docker 而跳过的 Testcontainers 用例。`git diff --check`、三个变更 Mapper 的 `xmllint`、ES mapping JSON 校验、主代码编译和测试代码编译通过。
+- JDK 21 全量回归共 541 项，0 failure、0 error、27 skipped；27 项均为当前机器无 Docker 而跳过的 Testcontainers 用例。107 新增回归覆盖 partial bulk 最终失败、未激活 target 清理、superseded target、active target 禁删、非 INDEX 失败、已删除 Asset 和 Outbox 回滚。`git diff --check`、全部 Mapper XML 校验、主代码编译和测试代码编译通过。
 - 尚未执行业务库 V19、真实 Elasticsearch partial-bulk/DB-rollback/crash 故障演练或部署观察，因此当前状态不表示已迁移、发布或接管生产 INDEX 流量。`anchr-web`、`anchr-docling` 不在本卡实现边界内，没有生产代码改动。
 
 ---

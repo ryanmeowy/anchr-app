@@ -605,7 +605,7 @@ class IngestionTaskProcessorImplTest {
         verify(ingestionIndexFinalizer).finalizeIndex(
                 any(IngestionTaskItem.class), eq(asset), eq(List.of()));
         verify(transactionCoordinator, never()).transitionFailed(
-                any(), eq(asset), any(), any(), anyInt(), anyInt());
+                any(), eq(asset), any(), any(), anyInt(), anyInt(), any());
         verify(knowledgeBaseRepository).refreshDocumentStats("kb-1", "user-a", true);
     }
 
@@ -630,7 +630,7 @@ class IngestionTaskProcessorImplTest {
                 .thenReturn(Optional.of(asset));
         when(artifactStore.readParseResult(item)).thenReturn(parsed);
         when(transactionCoordinator.transitionFailed(
-                any(), eq(asset), any(), any(), anyInt(), anyInt()))
+                any(), eq(asset), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(true);
 
         processor.processClaim(item);
@@ -643,7 +643,7 @@ class IngestionTaskProcessorImplTest {
                 ArgumentCaptor.forClass(IngestionClaimTransition.class);
         verify(transactionCoordinator).transitionFailed(
                 failure.capture(), eq(asset), eq("FAILED"), eq("FAILED"),
-                eq(0), eq(0));
+                eq(0), eq(0), eq(1L));
         assertThat(failure.getValue().getErrorCode())
                 .isEqualTo("TEXT_PARSE_FAILED");
         assertThat(failure.getValue().getErrorMessage())
@@ -696,7 +696,7 @@ class IngestionTaskProcessorImplTest {
             assertThat(segment.getEmbedding()).containsExactly(0.4f, 0.6f);
         });
         verify(transactionCoordinator, never()).transitionFailed(
-                any(), any(), any(), any(), anyInt(), anyInt());
+                any(), any(), any(), any(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -879,7 +879,7 @@ class IngestionTaskProcessorImplTest {
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
                 eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
         when(transactionCoordinator.transitionFailed(
-                any(), eq(asset), any(), any(), anyInt(), anyInt()))
+                any(), eq(asset), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(true);
 
         processor.processClaim(item);
@@ -888,7 +888,7 @@ class IngestionTaskProcessorImplTest {
                 ArgumentCaptor.forClass(IngestionClaimTransition.class);
         verify(transactionCoordinator).transitionFailed(
                 failed.capture(), eq(asset), eq("FAILED"), eq("FAILED"),
-                eq(0), eq(0));
+                eq(0), eq(0), eq(1L));
         assertThat(failed.getValue().getErrorCode())
                 .isEqualTo("EMBEDDING_RESULT_EMPTY");
         verifyNoInteractions(ingestionIndexFinalizer);
@@ -923,7 +923,7 @@ class IngestionTaskProcessorImplTest {
                 eq("item-1"), eq(1L), eq(IngestionExecutionStage.EMBED),
                 eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
         when(transactionCoordinator.transitionFailed(
-                any(), eq(asset), any(), any(), anyInt(), anyInt())).thenReturn(true);
+                any(), eq(asset), any(), any(), anyInt(), anyInt(), any())).thenReturn(true);
 
         processor.processClaim(item);
 
@@ -931,7 +931,8 @@ class IngestionTaskProcessorImplTest {
         ArgumentCaptor<IngestionClaimTransition> failed =
                 ArgumentCaptor.forClass(IngestionClaimTransition.class);
         verify(transactionCoordinator).transitionFailed(
-                failed.capture(), eq(asset), eq("FAILED"), eq("FAILED"), eq(0), eq(0));
+                failed.capture(), eq(asset), eq("FAILED"), eq("FAILED"),
+                eq(0), eq(0), eq(1L));
         assertThat(failed.getValue().getNextExecutionStage())
                 .isEqualTo(IngestionExecutionStage.FAILED);
         assertThat(failed.getValue().getErrorCode()).isEqualTo("EMBEDDING_FAILED");
@@ -1014,6 +1015,51 @@ class IngestionTaskProcessorImplTest {
     }
 
     @Test
+    void indexPartialBulkFinalFailure_shouldPassTargetGenerationToFailureTransaction() {
+        IngestionTaskItem item = claimed(IngestionExecutionStage.INDEX).toBuilder()
+                .parseResultObjectKey("parse-result.gz")
+                .stageRetryCount(5)
+                .build();
+        Asset asset = pdfAsset("objects/document.pdf", null);
+        ParseResponse parsed = parsedResponse("task-1:item-1:1");
+        Chunk chunk = Chunk.builder()
+                .segmentId("segment-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .chunkText("body")
+                .build();
+        ReflectionTestUtils.setField(processor, "stageMaxRetries", 5);
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(artifactStore.readParseResult(item)).thenReturn(parsed);
+        when(doclingChunkMapper.toTextChunks(asset, parsed, 1L))
+                .thenReturn(List.of(chunk));
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.embed("body", "text")).thenReturn(List.of(0.1f));
+        when(ingestionTaskRepository.renewClaim(
+                eq("item-1"), eq(1L), eq(IngestionExecutionStage.INDEX),
+                eq(2L), eq("lease-1"), anyLong())).thenReturn(true);
+        when(ingestionIndexFinalizer.finalizeIndex(
+                eq(item), eq(asset), any()))
+                .thenThrow(new IllegalStateException("partial bulk failed"));
+        when(transactionCoordinator.transitionFailed(
+                any(), eq(asset), any(), any(), anyInt(), anyInt(), eq(1L)))
+                .thenReturn(true);
+
+        processor.processClaim(item);
+
+        ArgumentCaptor<IngestionClaimTransition> failed =
+                ArgumentCaptor.forClass(IngestionClaimTransition.class);
+        verify(transactionCoordinator).transitionFailed(
+                failed.capture(), eq(asset), eq("FAILED"), eq("FAILED"),
+                eq(0), eq(0), eq(1L));
+        assertThat(failed.getValue().getExpectedExecutionStage())
+                .isEqualTo(IngestionExecutionStage.INDEX);
+        assertThat(failed.getValue().getNextExecutionStage())
+                .isEqualTo(IngestionExecutionStage.FAILED);
+    }
+
+    @Test
     void indexRecoveryRateLimit_shouldRetryIndexWithoutPersistingVectors() {
         IngestionTaskItem item = claimed(IngestionExecutionStage.INDEX).toBuilder()
                 .parseResultObjectKey("parse-result.gz")
@@ -1093,7 +1139,7 @@ class IngestionTaskProcessorImplTest {
         when(assetRepository.findActiveById("kb-1", "asset-1"))
                 .thenReturn(Optional.empty());
         when(transactionCoordinator.transitionFailed(
-                any(), eq(null), any(), any(), anyInt(), anyInt()))
+                any(), eq(null), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(true);
 
         processor.processClaim(item);
@@ -1101,7 +1147,8 @@ class IngestionTaskProcessorImplTest {
         ArgumentCaptor<IngestionClaimTransition> transition =
                 ArgumentCaptor.forClass(IngestionClaimTransition.class);
         verify(transactionCoordinator).transitionFailed(
-                transition.capture(), eq(null), eq("FAILED"), eq("FAILED"), eq(0), eq(0));
+                transition.capture(), eq(null), eq("FAILED"), eq("FAILED"),
+                eq(0), eq(0), eq(1L));
         assertThat(transition.getValue().getNextExecutionStage())
                 .isEqualTo(IngestionExecutionStage.FAILED);
         assertThat(transition.getValue().getErrorCode())

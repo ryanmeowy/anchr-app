@@ -62,7 +62,8 @@ public class IngestionIndexFinalizer {
                     item,
                     ApiError.DOCUMENT_NOT_FOUND,
                     "Document was deleted before indexing completed.",
-                    now);
+                    now,
+                    null);
         }
 
         long targetGeneration = requireTargetGeneration(item);
@@ -72,7 +73,9 @@ public class IngestionIndexFinalizer {
                     item,
                     ApiError.INTERNAL_ERROR,
                     "Index generation was superseded before activation.",
-                    now);
+                    now,
+                    targetGeneration < previousGeneration
+                            ? targetGeneration : null);
         }
 
         validateSegments(segments, lockedAsset, targetGeneration);
@@ -124,7 +127,8 @@ public class IngestionIndexFinalizer {
     private boolean failClaim(IngestionTaskItem item,
                               ApiError error,
                               String message,
-                              LocalDateTime now) {
+                              LocalDateTime now,
+                              Long inactiveGeneration) {
         IngestionPublicProjection projection =
                 IngestionPublicProjectionPolicy.failed(
                         IngestionExecutionStage.INDEX, item.getProgress());
@@ -145,6 +149,14 @@ public class IngestionIndexFinalizer {
                     "Index claim changed while its item row was locked.");
         }
         artifactCleanupRecorder.terminalFailure(failed);
+        if (inactiveGeneration != null) {
+            assetCleanupOutboxRecorder.generationRetired(
+                    item.getKbId(),
+                    item.getAssetId(),
+                    inactiveGeneration,
+                    item.getTaskCreatedBy(),
+                    now);
+        }
         return false;
     }
 

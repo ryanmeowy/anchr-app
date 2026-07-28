@@ -3,8 +3,10 @@ package com.anchr.core.ingestion.application.impl;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.ingestion.domain.model.IngestionClaimTransition;
+import com.anchr.core.ingestion.domain.model.IngestionExecutionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
+import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,7 @@ public class IngestionStageTransactionCoordinator {
     private final IngestionTaskRepository ingestionTaskRepository;
     private final AssetRepository assetRepository;
     private final IngestionArtifactCleanupRecorder artifactCleanupRecorder;
+    private final AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
 
     @Transactional(rollbackFor = Exception.class)
     public IngestionTaskItem ensureTargetIndexGeneration(IngestionTaskItem item) {
@@ -103,24 +106,46 @@ public class IngestionStageTransactionCoordinator {
                                     String parseStatus,
                                     String indexStatus,
                                     int segmentCount,
-                                    int indexedSegmentCount) {
+                                    int indexedSegmentCount,
+                                    Long targetIndexGeneration) {
         if (!ingestionTaskRepository.transitionClaim(transition)) {
             return false;
         }
         if (asset != null) {
+            boolean indexFailure = transition.getExpectedExecutionStage()
+                    == IngestionExecutionStage.INDEX;
             // A concurrent delete is allowed to win. The item failure is still authoritative,
             // while an inactive asset must not be resurrected merely to record an error.
-            assetRepository.updateIngestionResult(
-                    transition.getKbId(),
-                    asset.getId(),
-                    parseStatus,
-                    indexStatus,
-                    segmentCount,
-                    indexedSegmentCount,
-                    transition.getErrorCode(),
-                    transition.getErrorMessage(),
-                    transition.getUpdatedBy(),
-                    transitionTime(transition));
+            Asset currentAsset = indexFailure
+                    ? assetRepository.findByIdForUpdate(
+                            transition.getKbId(), asset.getId()).orElse(null)
+                    : asset;
+            if (currentAsset != null
+                    && (!indexFailure || currentAsset.getDeletedAt() == null)) {
+                assetRepository.updateIngestionResult(
+                        transition.getKbId(),
+                        currentAsset.getId(),
+                        parseStatus,
+                        indexStatus,
+                        segmentCount,
+                        indexedSegmentCount,
+                        transition.getErrorCode(),
+                        transition.getErrorMessage(),
+                        transition.getUpdatedBy(),
+                        transitionTime(transition));
+                if (indexFailure
+                        && targetIndexGeneration != null
+                        && targetIndexGeneration > 0L
+                        && targetIndexGeneration
+                        != currentAsset.getActiveIndexGeneration()) {
+                    assetCleanupOutboxRecorder.generationRetired(
+                            transition.getKbId(),
+                            currentAsset.getId(),
+                            targetIndexGeneration,
+                            transition.getUpdatedBy(),
+                            transitionTime(transition));
+                }
+            }
         }
         artifactCleanupRecorder.terminalFailure(transition);
         return true;

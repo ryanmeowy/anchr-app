@@ -6,6 +6,7 @@ import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
+import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import org.junit.jupiter.api.Test;
@@ -26,8 +27,9 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +42,8 @@ class IngestionStageTransactionCoordinatorTest {
     private AssetRepository assetRepository;
     @Mock
     private IngestionArtifactCleanupRecorder artifactCleanupRecorder;
+    @Mock
+    private AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
 
     @Test
     void transitionAndUpdateAssetStatus_shouldRollbackWhenAssetWriteThrows() {
@@ -120,9 +124,124 @@ class IngestionStageTransactionCoordinatorTest {
                 .when(artifactCleanupRecorder).terminalFailure(failed);
 
         assertThatThrownBy(() -> coordinator.transitionFailed(
-                failed, null, "FAILED", "FAILED", 0, 0))
+                failed, null, "FAILED", "FAILED", 0, 0, null))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("outbox write failed");
+
+        assertThat(transactionManager.commits).isZero();
+        assertThat(transactionManager.rollbacks).isEqualTo(1);
+    }
+
+    @Test
+    void indexTerminalFailureShouldQueueInactiveTargetGenerationCleanup() {
+        IngestionStageTransactionCoordinator coordinator =
+                transactionalCoordinator(new RecordingTransactionManager());
+        IngestionClaimTransition failed = failedTransition(
+                IngestionExecutionStage.INDEX);
+        Asset asset = asset(1L, null);
+        when(ingestionTaskRepository.transitionClaim(failed)).thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+
+        boolean transitioned = coordinator.transitionFailed(
+                failed, asset, "FAILED", "FAILED", 4, 2, 2L);
+
+        assertThat(transitioned).isTrue();
+        verify(assetCleanupOutboxRecorder).generationRetired(
+                "kb-1", "asset-1", 2L, "user-a", failed.getUpdatedAt());
+        verify(artifactCleanupRecorder).terminalFailure(failed);
+    }
+
+    @Test
+    void indexTerminalFailureShouldNotQueueActiveGenerationCleanup() {
+        IngestionStageTransactionCoordinator coordinator =
+                transactionalCoordinator(new RecordingTransactionManager());
+        IngestionClaimTransition failed = failedTransition(
+                IngestionExecutionStage.INDEX);
+        Asset asset = asset(2L, null);
+        when(ingestionTaskRepository.transitionClaim(failed)).thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+
+        boolean transitioned = coordinator.transitionFailed(
+                failed, asset, "FAILED", "FAILED", 4, 2, 2L);
+
+        assertThat(transitioned).isTrue();
+        verify(assetCleanupOutboxRecorder, never()).generationRetired(
+                "kb-1", "asset-1", 2L, "user-a", failed.getUpdatedAt());
+    }
+
+    @Test
+    void nonIndexTerminalFailureShouldNotQueueGenerationCleanup() {
+        IngestionStageTransactionCoordinator coordinator =
+                transactionalCoordinator(new RecordingTransactionManager());
+        IngestionClaimTransition failed = failedTransition(
+                IngestionExecutionStage.EMBED);
+        Asset asset = asset(1L, null);
+        when(ingestionTaskRepository.transitionClaim(failed)).thenReturn(true);
+
+        boolean transitioned = coordinator.transitionFailed(
+                failed, asset, "FAILED", "FAILED", 4, 2, 2L);
+
+        assertThat(transitioned).isTrue();
+        verify(assetRepository, never()).findByIdForUpdate(
+                "kb-1", "asset-1");
+        verify(assetCleanupOutboxRecorder, never()).generationRetired(
+                "kb-1", "asset-1", 2L, "user-a", failed.getUpdatedAt());
+    }
+
+    @Test
+    void deletedAssetShouldNotQueueGenerationCleanup() {
+        IngestionStageTransactionCoordinator coordinator =
+                transactionalCoordinator(new RecordingTransactionManager());
+        IngestionClaimTransition failed = failedTransition(
+                IngestionExecutionStage.INDEX);
+        Asset asset = asset(1L, null);
+        Asset deletedAsset = asset(1L, LocalDateTime.now());
+        when(ingestionTaskRepository.transitionClaim(failed)).thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(deletedAsset));
+
+        boolean transitioned = coordinator.transitionFailed(
+                failed, asset, "FAILED", "FAILED", 4, 2, 2L);
+
+        assertThat(transitioned).isTrue();
+        verify(assetRepository, never()).updateIngestionResult(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+        verify(assetCleanupOutboxRecorder, never()).generationRetired(
+                "kb-1", "asset-1", 2L, "user-a", failed.getUpdatedAt());
+    }
+
+    @Test
+    void indexTerminalFailureShouldRollbackWhenGenerationCleanupCannotBeRecorded() {
+        RecordingTransactionManager transactionManager =
+                new RecordingTransactionManager();
+        IngestionStageTransactionCoordinator coordinator =
+                transactionalCoordinator(transactionManager);
+        IngestionClaimTransition failed = failedTransition(
+                IngestionExecutionStage.INDEX);
+        Asset asset = asset(1L, null);
+        when(ingestionTaskRepository.transitionClaim(failed)).thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        doThrow(new IllegalStateException("generation outbox write failed"))
+                .when(assetCleanupOutboxRecorder).generationRetired(
+                        "kb-1", "asset-1", 2L, "user-a",
+                        failed.getUpdatedAt());
+
+        assertThatThrownBy(() -> coordinator.transitionFailed(
+                failed, asset, "FAILED", "FAILED", 4, 2, 2L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("generation outbox write failed");
 
         assertThat(transactionManager.commits).isZero();
         assertThat(transactionManager.rollbacks).isEqualTo(1);
@@ -132,7 +251,8 @@ class IngestionStageTransactionCoordinatorTest {
             PlatformTransactionManager transactionManager) {
         IngestionStageTransactionCoordinator target =
                 new IngestionStageTransactionCoordinator(
-                        ingestionTaskRepository, assetRepository, artifactCleanupRecorder);
+                        ingestionTaskRepository, assetRepository,
+                        artifactCleanupRecorder, assetCleanupOutboxRecorder);
         TransactionInterceptor interceptor = new TransactionInterceptor(
                 transactionManager, new AnnotationTransactionAttributeSource());
         ProxyFactory proxyFactory = new ProxyFactory(target);
@@ -162,6 +282,25 @@ class IngestionStageTransactionCoordinatorTest {
                 .sourceRevision("v1:revision")
                 .updatedBy("user-a")
                 .updatedAt(now)
+                .build();
+    }
+
+    private IngestionClaimTransition failedTransition(
+            IngestionExecutionStage expectedStage) {
+        return transition().toBuilder()
+                .expectedExecutionStage(expectedStage)
+                .nextExecutionStage(IngestionExecutionStage.FAILED)
+                .status(IngestionTaskItemStatus.FAILED)
+                .build();
+    }
+
+    private Asset asset(long activeIndexGeneration,
+                        LocalDateTime deletedAt) {
+        return Asset.builder()
+                .id("asset-1")
+                .kbId("kb-1")
+                .activeIndexGeneration(activeIndexGeneration)
+                .deletedAt(deletedAt)
                 .build();
     }
 
