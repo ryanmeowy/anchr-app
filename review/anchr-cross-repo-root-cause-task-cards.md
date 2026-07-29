@@ -10,6 +10,8 @@
 
 > 初始审查不把当时的未提交变更视为 `main` 实现；本文当前 ANCHR-106B 的实施记录来自 `anchr-app` 的 `dev/clean-up` 工作区，同样不表示已经合并到 `main` 或发布。
 
+> 2026-07-29 起，ANCHR-201–206 的“当前事实”、范围和验收单独以 `anchr-app` 的 `dev/clean-up@4dfa6b31401c5dce0d8ed122cc913b7689d363d6` 为基线重写；不把工作区中仅新增的质量报告视为源码实现。其他任务仍遵守各自记录的审查或实施基线。
+
 任务拆分原则：
 
 1. 每张卡解决一个明确根因，不以局部重试、吞异常或前端兜底代替状态模型修复。
@@ -35,12 +37,12 @@
 | ANCHR-107 | 建立 Asset Segment generation 与 ES 写入幂等一致性 | 源码与本地回归已完成；待 V19 迁移、真实 ES 故障演练与部署验收 | P0 | L | app | 106B |
 | ANCHR-109 | 会话列表 keyset 分页与 Session 原子更新 | 已完成 | P1 | M | app、web | 可独立 |
 | ANCHR-110 | 文档内嵌图片制品化、独立 Segment 与跨模态检索 | 主体源码与本地回归已完成；失败 attempt 清理已接入既有 Outbox，待真实 OSS/ES、存量 reparse 与部署验收 | P1 | XL | app、docling、web | 104–106B、107、101B、101C |
-| ANCHR-201 | 建立架构适应度测试与依赖边界 | 待执行 | P1 | M | app | 101A–101C、102–107、109–110 稳定后 |
-| ANCHR-202 | REST DTO 与 SSE 传输协议退出 Application | 待执行 | P1 | XL | app | 201 |
-| ANCHR-203 | 用模块 Port 取代跨模块 Infrastructure 依赖 | 待执行 | P1 | L | app | 201、101B/101C、105–110 |
-| ANCHR-204 | 选择性富领域化与聚合边界收口 | 待执行 | P1 | L | app | 106B、107、109、202、203、205 |
-| ANCHR-205 | Outbox 从 KB Domain 拆为可靠消息模块 | 待执行 | P2 | M | app | 107、201、203 |
-| ANCHR-206 | 按用例拆分超大 Application Service | 待执行 | P2 | XL | app | 202–205 |
+| ANCHR-201 | 固化领域地图、状态所有权与交互决策 | 已完成 | P1 | S | app | 当前 clean-up 源码基线 |
+| ANCHR-202 | 能力提供方 API 与调用方 ACL | 已完成 | P1 | L | app | 201 |
+| ANCHR-203 | 收口 Knowledge Content 与 Retrieval 的一致性边界 | 已完成 | P1 | L | app | 201、202，且 101B/101C、106B、107、110 契约稳定 |
+| ANCHR-204 | 收口 Ask 剩余的 Knowledge/Retrieval 同步读取边界 | 已完成 | P1 | L | app | 201–203、109 |
+| ANCHR-205 | 收口 Activity、Provider/Storage 与专用 Outbox 支撑边界 | 源码与本地回归已完成；待真实 MySQL/OSS/ES 验收 | P2 | XL | app | 201–204、101C、107 |
+| ANCHR-206 | 按已稳定用例边界拆分超大 Application Service | 待执行 | P2 | XL | app | 203–205 |
 
 ## 任务边界与唯一归属
 
@@ -68,12 +70,12 @@
 | 107 | Asset `indexGeneration`、目标 generation 重写、MySQL/ES 可见性和清理事件 | 106B 的两表当前态边界与 106 的 INDEX stage；现有 outbox 能力 | physical index version、embedding profile、检索融合、Outbox 搬包 |
 | 109 | Session 列表 keyset cursor、title CAS、updatedAt 单调更新 | 现有消息/Agent 数据 | 消息历史分页、Agent Activity、Conversation DTO 分层 |
 | 110 | `EmbeddedImageArtifact` 契约、`DOCUMENT_IMAGE` Segment、图片对象随 Asset generation 清理、同字段分路召回、父文档聚合和图片命中预览 | 104 的默认关闭门禁；105/106 的稳定 Parse attempt 与 Docling job；106B 的 item 图片目录快照；107 的 generation/ID/事件；101B 的单向量 Policy；101C 的 profile 部署 | 图片专用生命周期、第二向量字段、模型部署状态机、通用 Docling attempt、通用 Outbox 搬包 |
-| 201 | ArchUnit/依赖图/违规基线 | 所有已稳定代码 | 移类、加 Port、修改业务行为 |
-| 202 | REST DTO 与 SSE 适配边界 | 201 的规则 | 领域聚合、跨模块 Port 全面治理、按用例拆大类 |
-| 203 | 剩余跨模块 Infrastructure 依赖的 Port/Adapter 迁移 | 101B–107、109–110 已确定的能力契约 | 重定义业务协议、改变状态机、拆分大 Service |
-| 204 | 将 106/106B/107/109 已稳定规则收口为领域行为 | 正确性卡的状态、CAS、持久化边界和 generation 语义 | 新增状态/字段/API、改变调度和检索结果 |
-| 205 | Outbox 技术模型的模块归属 | 107 已使用的发布/消费语义 | 修改表语义、重试/backoff、事件业务触发条件 |
-| 206 | 稳定边界内的机械职责拆分 | 202–205 的最终边界 | 新业务规则、协议/mapping/schema 修改、相关性调参 |
+| 201 | 领域地图、表/索引/状态所有权、七类交互方式及决策记录 | 当前 clean-up 源码与正确性卡的既有语义 | 引入 ArchUnit、移类、造 Port、修改业务行为 |
+| 202 | 真正跨领域调用的最小 Query/Command/Event contract；核心 HTTP/SSE 的传输适配边界 | 201 的领域地图与现有协议 | 全量 DTO 清洗、每个方法一个 Port、通用 command/event bus |
+| 203 | Knowledge Content 内部事务边界；其与 Retrieval 的写入、激活、查询和清理流程 | 101B/101C、106B、107、110 的 generation/profile/segment 语义；202 的 contract 形式 | 把 kb/ingestion 强拆为两个上下文、伪装跨库事务、重定义检索算法 |
+| 204 | Ask 对 Knowledge Content、Retrieval 的 scope/evidence 查询契约；Conversation/Agent 的内部生命周期边界 | 109 的 Session CAS；203 的可见性与检索契约 | 把 Agent 拆成独立上下文、跨域 Repository、改变工具/SSE/模型调用顺序 |
+| 205 | Activity 读模型、Capability 配置/Adapter、Knowledge Content 专用 Outbox 的合理归属 | 107 的清理事件和 101C 的 profile 部署语义；202–204 的公开能力 | 建通用事件平台、把简单配置富领域化、把所有通知升级为可靠消息 |
+| 206 | 稳定边界内的机械职责拆分 | 203–205 的最终边界与 202 的必要传输适配 | 新业务规则、协议/mapping/schema 修改、相关性调参 |
 
 ### 依赖交付契约
 
@@ -87,7 +89,7 @@
 - 106B 向 107 交付：两表中的 item 当前执行态和进入 `INDEX` phase 的 fenced context；107 只增加 generation、目标 generation 重写与索引激活一致性。
 - 106B 向 110 交付：当前 parse attempt 的稳定 Docling job 身份和图片目录快照；110 直接消费 `ParseResponse.images[]`，不新增 artifact registry、业务表或图片制品指针列。
 - 102 向 103/105/106 交付：通用 HTTP 错误信封；各业务卡只定义自己的 errorCode、retryable 和 accepted 语义。
-- 201 只建立守门规则；202–205 分别消除自己拥有的违规；206 最后在不改变行为的前提下拆分类。
+- 201 只记录业务边界和交互决策，不增加依赖检查插件；202 只为被 203–205 实际使用的跨领域调用建立最小契约；206 最后在不改变行为的前提下拆分类。
 
 ### 共享修改面与强制顺序
 
@@ -95,11 +97,11 @@
 |---|---|---|---|
 | Ingestion create/processor / 后续 stage handler | 101A、103、104、105、106、106B、107、101B、101C、110 | 101A → 104 → 105；102 → 103；两路汇合 → 106 → 106B → 107 → 101B → 101C → 110 | 图片分支/向量回写；创建幂等；关闭 STS 支线；Parse 协议；可恢复状态机；normalized execution/artifact 边界；Asset generation/目标重写；单向量 Policy；profile 部署；内嵌图片投影 |
 | `Segment` / `SegmentDocument` / mapping / bulk writer | 107、101B、101C、110 | 107 → 101B → 101C → 110 | Asset generation/目标重写 → 单向量投影契约 → 物理索引部署 → 内嵌图片 schema/回填 |
-| `UnifiedSearchServiceImpl` / ES repository | 107、101B、110、206 | 107 → 101B → 110 → 206 | active generation 过滤 → 同一模型与单向量字段 → 图片分路召回/父资产聚合 → 机械拆分 |
-| Search/Conversation result DTO 与 Preview | 110、202、206 | 110 → 202 → 206 | 图片命中与父文档预览语义 → DTO 边界迁移 → 机械拆分 |
-| Capability settings / `SegmentIndexManagerImpl` | 101C、203、206 | 101C → 203 → 206 | 延后启用与单实例重建 → 依赖倒置 → 机械拆分 |
-| `ConversationServiceImpl` / Session repository | 109、202、204、206 | 109 → 202 → 204 → 206 | keyset/CAS 结果 → DTO 边界 → 领域方法 → 机械拆分 |
-| Outbox publisher/processor | 107、205、206 | 107 → 205 → 206 | 事件产生语义 → 模块迁移 → 机械拆分 |
+| `RetrievalQueryServiceImpl` / ES repository | 107、101B、110、202、206 | 107 → 101B → 110 → 202 → 206 | active generation 过滤 → 同一模型与单向量字段 → 图片分路召回/父资产聚合 → Application API 迁移 → 机械拆分 |
+| Search/Conversation result DTO 与 Preview | 110、202、204、206 | 110 → 202 → 204 → 206 | 图片命中与父文档预览语义 → 最小 evidence contract → Ask 迁移 → 机械拆分 |
+| Capability settings / `SegmentIndexManagerImpl` | 101C、203、205、206 | 101C → 203 → 205 → 206 | 延后启用与单实例重建 → Retrieval 流程所有权 → 配置/Adapter 归位 → 机械拆分 |
+| `ConversationServiceImpl` / Session repository | 109、202、204、206 | 109 → 202 → 204 → 206 | keyset/CAS 结果 → 最小契约 → Ask 边界收口 → 机械拆分 |
+| Outbox publisher/processor | 107、203、205、206 | 107 → 203 → 205 → 206 | 事件产生语义 → 清理能力边界 → 专用设施归位 → 机械拆分 |
 
 同一修改面的相邻任务不得并行合并。前卡未合并时，后卡只能做设计或隔离 fixture；不得基于临时分支复制实现后再手工拼接。每张后卡的回归测试必须包含表中所有前置契约。
 
@@ -324,7 +326,7 @@ embeddingDimension
 - 已删除 V20 三张控制表及对应 migration、Repository、Mapper、deployment/lease/runtime snapshot/rollback API 代码。
 - `SegmentIndexWriteBarrier` 已恢复为单实例 `ReentrantReadWriteLock`：普通索引写使用读锁，完整 rebuild 使用写锁。
 - 设置页选择不同 profile 时只登记内存待重建目标；`ConfigDrivenEmbeddingAdapter` 可按目标 `configId` 打开尚未启用配置的 Session。
-- alias 切换后由 `ServingEmbeddingConfigActivator` 执行现有 `capability_config.select/disableAll` 并刷新本地缓存；激活异常会切回旧 alias。
+- alias 切换后由 `RetrievalCapabilityAcl → CapabilityServingConfigApi` 执行现有 `capability_config.select/disableAll` 并刷新本地缓存；激活异常会切回旧 alias。
 - Web 已删除 deployment/impact/rollback 字段与在线迁移文案，明确显示“重建期间索引写入不可用”，待重建目标不会被误判成已经 active 的 profile mismatch。
 - 启用中的 Embedding 配置若修改 `baseUrl/modelName/dimensions`，更新接口不再覆盖 active 行，而是返回一个新的禁用草稿；Web 使用返回的新 ID 走现有“选择目标配置 → pending rebuild → 确认重建”流程。只修改 API Key 时仍原地更新。
 - Java 主源码编译通过；新增定向测试覆盖“不提前启用”和“未 enabled 的目标配置可供重建”。使用项目既定 Byte Buddy javaagent 完成全仓回归：517 项测试，0 failure、0 error，27 项因本机无 Docker 跳过；真实 Elasticsearch alias/停写窗口尚未验收。
@@ -1047,7 +1049,7 @@ url / pageNo / blockId / alt
 - [`DoclingChunkMapper.java`](../src/main/java/com/anchr/core/ingestion/infrastructure/parser/DoclingChunkMapper.java)
 - [`IngestionTaskProcessorImpl.java`](../src/main/java/com/anchr/core/ingestion/application/impl/IngestionTaskProcessorImpl.java)
 - [`SegmentIndexManagerImpl.java`](../src/main/java/com/anchr/core/search/application/impl/SegmentIndexManagerImpl.java)
-- [`UnifiedSearchServiceImpl.java`](../src/main/java/com/anchr/core/search/application/impl/UnifiedSearchServiceImpl.java)
+- [`RetrievalQueryServiceImpl.java`](../src/main/java/com/anchr/core/search/application/impl/RetrievalQueryServiceImpl.java)
 - [`SegmentPreviewServiceImpl.java`](../src/main/java/com/anchr/core/search/application/impl/SegmentPreviewServiceImpl.java)
 - [`anchr-web/src/features/search/search-premium-page.tsx`](../../anchr-web/src/features/search/search-premium-page.tsx)
 
@@ -1230,273 +1232,474 @@ assetId → Asset.previewObjectKey/objectKey → 父 PDF/MD previewUrl
 
 ## DDD 与架构治理任务
 
-以下任务不替代 ANCHR-101A–101C、102–107、109–110 的正确性修复。它们负责把已经稳定的业务规则收口到明确的模块和领域边界中，避免新复杂度继续堆积在少数 Application Service。项目继续保持模块化单体，不拆微服务，也不对 settings、Dashboard、Token 等简单 CRUD 强行套富领域模型。
+以下任务以 `dev/clean-up@4dfa6b31` 的实际源码为准，不替代 ANCHR-101A–101C、102–107、109–110 的正确性责任。它们只把已经存在且已验证的规则收口到明确边界中。项目继续保持模块化单体，不拆微服务，也不对 Settings、Dashboard、Token 等简单 CRUD 强行套富领域模型。
 
-## ANCHR-201：建立架构适应度测试与依赖边界
+## ANCHR-201：固化领域地图、状态所有权与交互决策
 
-**目标：** 把当前口头约定变成 CI 可执行规则，阻止依赖继续反向扩散。
+**目标：** 先把当前业务已经形成的一致性边界写清楚，作为后续拆分的共同语言；不引入 ArchUnit，不用目录规则代替业务判断，也不要求一次性重排现有 package。
 
-### 当前根因
+**实施状态：已完成。** 决策基线见 [`docs/domain-boundaries-and-interactions.md`](../docs/domain-boundaries-and-interactions.md)。本卡只新增架构决策文档并更新任务状态，没有修改生产代码、Maven 依赖或 Spring wiring。
 
-源码目录已经按业务模块和 `interfaces/application/domain/infrastructure` 分层，但没有自动化约束。目前可确认：
+### 基于当前源码的领域地图
 
-- Conversation、Search、KB、Settings 的 Application 广泛导入 REST DTO；
-- Ingestion 和 Search Application 直接导入 Infrastructure 实现；
-- Domain 中存在 Spring `StringUtils` 和 `MultipartFile`；
-- 不存在 ArchUnit 规则，新的反向依赖不会被 CI 阻止。
+| 上下文 | 当前代码 | 拥有的状态/不变量 | 定位 |
+|---|---|---|---|
+| **Knowledge Content** | `kb` + `ingestion` | `knowledge_base`、`asset`、`ingestion_task`、`ingestion_task_item`；文档归属、去重、解析/索引执行、Asset active generation | 核心域；`kb` 与 `ingestion` 是同一上下文的 Catalog/Processing 子模块，不强拆 |
+| **Retrieval** | `search` | ES Segment 投影、物理索引/alias、召回、generation 可见性过滤、RRF、rerank、结果聚合与 Preview | 核心域 |
+| **Ask** | `conversation`（含 agent） | `conversation_session/turn`、`agent_task/run/step`；问答生命周期、证据消费、Agent 工具编排与两条流式协议的应用事件 | 核心域；Agent 保持内部子模块 |
+| **Activity** | 当前散落在 `kb` 的 Activity/Recent | `activity_event` 与 Recent read model | 支撑域/读模型，不是 KB 聚合的一部分 |
+| **Capability & Provider Configuration** | `settings` + `integration` 的配置、resolver、adapter | capability/storage 配置、serving provider 选择、外部模型/Docling/OSS client 适配 | 支撑域；保持事务脚本和 Adapter，不追求富领域模型 |
+| **Auth / Technical Kernel** | `auth` + `common` 的稳定技术原语 | token、请求用户上下文、错误信封、ID/时间等 | 横切设施，不伪装成业务领域 |
 
-典型源码：
+这张图刻意不把现有每个顶层 package 都定义成 bounded context。源码中 Ingestion 创建、重试和 finalize 会在同一业务事务内锁定/更新 Asset 与 Item；`kb ↔ ingestion` 因此首先是包归属不清，不是两个领域之间缺少 Port。
 
-- [`ConversationService.java`](../src/main/java/com/anchr/core/conversation/application/ConversationService.java)
-- [`SearchObjectStoragePort.java`](../src/main/java/com/anchr/core/search/domain/port/SearchObjectStoragePort.java)
-- [`IngestionIndexFinalizer.java`](../src/main/java/com/anchr/core/ingestion/application/impl/IngestionIndexFinalizer.java)
+### 聚合和一致性边界
 
-### 修复方案
+- `KnowledgeBase` 独立存在，不加载全部 Asset；`Asset` 独立持有删除状态和 active generation。
+- `IngestionTask` 是批次身份和创建幂等边界；计数/Items 列表是汇总查询。`IngestionTaskItem` 按 `itemId` 独立 claim、推进和重试，是实际执行一致性边界，不能塞回一个大 Task 聚合。
+- generation 预留、Item fenced 状态、Asset 行锁、generation 激活和清理事件由 Knowledge Content 的 Application Coordinator 协调；数据库 CAS/锁仍是并发真相。
+- `Segment` 是 Retrieval 的索引投影，不是 Asset 内部实体；`ConversationTurn` 是按 session 关联的追加记录；Agent Task/Run 各自按生命周期持久化，不并入 Session 大聚合。
+- Settings、Activity、Token、Dashboard 等不需要为了“DDD 完整”补齐 Aggregate/Repository/Factory 套件。
 
-1. 引入 `archunit-junit5`，建立以下硬规则：
-   - Domain 不得依赖 Spring Web、interfaces、application、infrastructure；
-   - Application 不得依赖 interfaces 和 infrastructure；
-   - Interfaces 只能通过 Application API 进入业务；
-   - 一个模块不得直接依赖另一模块的 infrastructure；
-   - integration/infrastructure 可以实现 Domain/Application Port，反向禁止。
-2. 对现存违规建立显式、逐文件的迁移清单；规则必须禁止新增违规，每完成后续任务就删除对应豁免。
-3. 输出模块依赖图并在 CI 中验证无循环。
-4. 本任务不移动业务类、不改变 Spring Bean，不与正确性修复混在同一 PR。
+### 跨领域交互模式
 
-### 边界
+| 模式 | 何时使用 | 当前项目的目标用法 | 禁止替代成 |
+|---|---|---|---|
+| 同上下文直接协作 | 同一事务、同一不变量 | Catalog 与 Processing 共同更新 Asset/Item；允许内部 Repository/Coordinator 协作 | 为 `kb` 与 `ingestion` 每次调用都套防腐 Port |
+| 同步 Query | 调用方立即需要只读事实 | Ask 查询 scope/文档引用；Retrieval 查询 active generation；Activity 查询 KB 名称 | 跨域 Repository、返回对方 Aggregate |
+| 同步 Command | 调用方必须知道结果才能继续本地状态迁移 | Knowledge Content 请求 Retrieval 写入目标 generation；Retrieval alias 切换后激活 serving profile | 通用 command bus、无结果的“伪异步” |
+| Application Process Coordinator | 一个流程跨 MySQL/ES/provider，且存在明确终态所有者 | Knowledge Content 拥有文档 generation 激活；Retrieval 拥有物理索引/profile 部署 | 宣称跨库 ACID、把编排塞入 Controller/定时器 |
+| 可靠 Integration Event | 本地事务已完成，副作用可延迟且必须重试 | Asset 删除/旧 generation 退休后清理 Retrieval 投影与对象 | 所有内部方法调用都事件化 |
+| after-commit best-effort 通知 | 丢失不影响业务正确性 | QUESTION/SEARCH/IMPORT/CITATION Activity | 为 Activity 建 Outbox 和全局事件平台 |
+| outbound capability port | 外部技术能力可替换或失败 | generation/embedding/rerank/Docling/storage；按消费用例定义 | 一个覆盖所有模型/存储方法的万能 Port |
 
-本卡只建立规则、依赖图和逐文件违规基线。发现违规时必须登记到 202–205 或对应正确性卡，不能为了让 ArchUnit 立即全绿而在本卡移动类、创建空壳 Port、扩大 ignore package 或修改业务流程。
+跨领域 Contract 只传不可变 ID、版本、generation、profile fingerprint 和 read snapshot，不传 Repository、MyBatis Record、REST DTO、Spring Web 类型或对方聚合。在 DDD 关系上，提供方的公开 Application API 是本模块化单体内的 Published Language；只有发生双向依赖或需要翻译外部协议时，消费方才增加防腐 Port，由组合层 Adapter 连接。业务上下文之间不建立 Shared Kernel。上述原则是设计评审清单，不做编译期强制规则。
+
+### 上下文之间的明确交互
+
+| 调用方向 | 模式 | 契约内容 | 结果/失败归属 |
+|---|---|---|---|
+| Knowledge Content 内 Catalog ↔ Processing | 同上下文直接协作 + 本地事务 | KB/Asset/Item、generation 预留与激活 | Knowledge Content；由 MySQL 锁/CAS 决定 |
+| Knowledge Content → Retrieval | 同步 Command + 本地防腐 Adapter | `GenerationIndexer` 传目标 generation snapshot，返回 write receipt | Retrieval 保证幂等写；Knowledge Content 决定是否激活 |
+| Retrieval → Knowledge Content | 同步 Query + 本地防腐 Adapter | `AssetGenerationLookup` 返回 scope、可见性和 active generation map | Knowledge Content 提供当前事实；Retrieval 据此过滤 |
+| Knowledge Content → Retrieval/Storage | Outbox Integration Event | AssetDeleted、AssetGenerationRetired 的 ID/generation | Knowledge Content 保证投递；各 handler 幂等清理 |
+| Ask → Knowledge Content | 同步 Query | 用户可见 KB、文档引用、active generation snapshot | Ask 处理 denied/not-found，不持有对方模型 |
+| Ask → Retrieval | 同步 Query | search/read request，返回 evidence/content snapshot | Retrieval 负责召回与证据构造；Ask 负责回答 |
+| Ask/Retrieval/Knowledge Content → Activity | after-commit best-effort | 已含 userId、resourceId 和展示 snapshot 的 Activity record | Activity 失败不回滚主流程 |
+| 各核心上下文 → Capability Adapter | outbound port | generation/embedding/rerank/parse/storage 用例请求 | 调用上下文决定超时、降级或失败语义 |
+| Capability → Retrieval → Capability | 同步部署流程 | 请求部署 desired profile；alias 成功后激活 serving profile | Retrieval 拥有物理索引终态，Capability 拥有 serving 配置 |
+
+### 交付物与验收
+
+- 在架构决策记录中保留上表、关键术语和每条现有跨域调用的目标模式；标明 `当前 → 目标 → 主责卡`。
+- 为 `active generation`、`physical index version`、`embedding profile` 分别定义所有者，禁止继续混称“版本”。
+- 对有争议的新调用先回答“状态归谁、是否需要立即结果、失败由谁恢复”，再决定 Query/Command/Event；不以 package 名判断。
+- 本卡不改生产代码、不增加 Maven 依赖、不新增空壳 Port；评审通过即完成。
+
+### 主要源码依据
+
+- [`IngestionApplicationServiceImpl.java`](../src/main/java/com/anchr/core/ingestion/application/impl/IngestionApplicationServiceImpl.java)：创建/重试会同时操作 KB、Asset、Item，证明它们共享业务一致性边界。
+- [`IngestionIndexFinalizer.java`](../src/main/java/com/anchr/core/ingestion/application/impl/IngestionIndexFinalizer.java)：ES 写入、generation 激活、Item 完成与清理事件的现有编排。
+- [`RetrievalQueryServiceImpl.java`](../src/main/java/com/anchr/core/search/application/impl/RetrievalQueryServiceImpl.java)：召回、active generation 过滤、融合、rerank 和聚合由 Retrieval 拥有。
+- [`ConversationRetrievalAcl.java`](../src/main/java/com/anchr/core/conversation/application/acl/ConversationRetrievalAcl.java)：Ask 将自己的检索语义翻译为 Retrieval Application Query/Result。
+- [`ActivityRecordServiceImpl.java`](../src/main/java/com/anchr/core/activity/application/impl/ActivityRecordServiceImpl.java) 与 [`OutboxEventProcessor.java`](../src/main/java/com/anchr/core/kb/application/impl/OutboxEventProcessor.java)：分别体现 best-effort Activity 与可靠清理事件的不同语义。
+- [`CapabilityConfigServiceImpl.java`](../src/main/java/com/anchr/core/settings/application/impl/CapabilityConfigServiceImpl.java)：配置 CRUD、client 刷新与索引部署目前混在同一服务。
+
+---
+
+## ANCHR-202：能力提供方 API 与调用方 ACL
+
+**目标：** 将本卡实际触及的跨领域直连收敛为“调用方 → 调用方 ACL → 提供方 Application API → 提供方实现”，只迁移 Ask/Retrieval/Knowledge Content 的查询链路，不提前实施 203–206。
+
+### 实施范围
+
+本卡只处理：
+
+- Ask → Retrieval；
+- Ask → Knowledge Content 的 KB scope；
+- Retrieval → Knowledge Content 的 KB scope、active generation 和 Preview 所需 KB/Document 查询；
+- 公共 Search 的 Retrieval API、Answer/Follow-up Application Result 和 REST DTO 适配；
+- 将 `SEARCH_EXECUTED` 的触发从 Retrieval 实现移到公共 Search Controller，保证 Ask 内部检索不记录公共搜索行为。
+
+明确不处理 Ingestion 索引写入、Agent Repository 直连、Activity API 重构、Capability、Outbox、SSE，也不修改数据库、Flyway、ES mapping、搜索参数、模型调用顺序或前端。
+
+### 已落地的交互方式
+
+```text
+Conversation ─→ ConversationKnowledgeAcl ─→ KnowledgeContentQueryApi
+Conversation ─→ ConversationRetrievalAcl ─→ RetrievalHitQueryApi
+
+Search REST ─→ SearchRestAssembler ─→ RetrievalPageQueryApi
+Retrieval ─→ SearchKnowledgeAcl ─→ KnowledgeContentQueryApi
+Preview ─→ SearchKnowledgeAcl ─→ KnowledgeContentQueryApi
+```
+
+1. Knowledge Content 公开 `KnowledgeContentQueryApi`，返回 `KnowledgeBaseSummary`、`DocumentSummary` 和 active generation map；接口只给通用事实，不接受 requested scope，也不执行 Conversation/Search 的求交规则。
+2. Conversation 与 Search 各自使用具体 ACL：`ConversationKnowledgeAcl`、`SearchKnowledgeAcl`。两者分别保持空 scope 返回全部 ACTIVE KB、指定 scope 求交、去空去重和请求顺序；不再共享 `KbScopeResolver`。
+3. Retrieval 公开 `RetrievalHitQueryApi` 与 `RetrievalPageQueryApi`，请求和返回均为 immutable Application records。原 `UnifiedSearchService` 删除，`RetrievalQueryServiceImpl` 保持原 BM25/KNN/RRF/rerank/generation gate/聚合/指标行为。
+4. `ConversationRetrievalAcl` 保留 `ConversationRetrievalOrchestrator` 入口，将 Ask 参数翻译为 `RetrievalHitQuery`，并将 hit/top chunk/anchor/explain 翻译回 Conversation candidate。Agent 仍通过该入口间接检索；其 Repository 直连留给 204。
+5. `SearchRestAssembler` 负责现有 `SearchQueryDTO/SearchPageDTO/SearchResultDTO/RetrievalInsightDTO/SearchAnswerDTO` 与 Application records 的边界映射。`SearchAnswerService` 和 `SearchFollowUpService` 只消费已返回的 `RetrievalHit`，不再自行调用 Retrieval。
+6. `SegmentPreviewServiceImpl` 继续拥有原错误转换、签名 URL、Activity 和 Preview DTO 构造，只通过 `SearchKnowledgeAcl` 查询 KB/Document 与 active generation。
+
+### 兼容边界
+
+- `POST /api/v1/search/kb` 的路径、method、认证、请求 JSON 和响应 JSON 保持不变；Preview、Conversation、Ingestion、Index、Activity 端点均未修改。
+- 未修改 `anchr-web`，因为没有端点或 JSON 协议变化。
+- 未增加 ArchUnit、通用 Bus、`RetrievalIndexApi` 或新的框架约束。
+- Activity 仍使用现有 `ActivityEventService`；其独立边界留给 205。SSE 留给 206，Ingestion → Retrieval 留给 203。
+
+### 实施与验证记录（2026-07-29）
+
+- 已删除 `UnifiedSearchService`、`KbScopeResolver`，并迁移原检索测试到 Application Result。
+- 202 目标测试通过：Knowledge Content API、两个 scope ACL、Conversation Retrieval ACL、generation gate、Preview、Answer、Follow-up、REST assembler、HTTP contract 和 Conversation 回归测试。
+- HTTP golden contract 固定验证 `POST /api/v1/search/kb`，同时验证 Retrieval 收到 rewritten query、Activity 收到原 `SearchQueryDTO`，且响应仍包含原有 item、rewrite、intent、insight 和 suggestedQuestions 字段。
+- `mvn -DskipTests compile` 与 `mvn -DskipTests test-compile` 通过。
+- 沙箱内全量测试因本地 socket 权限出现 20 个环境错误；在允许本机临时端口后复跑全量 `mvn test`，共 495 个测试，0 failure、0 error、30 skipped。跳过项为当前机器无 Docker 时的 Testcontainers 既有测试。
+- 本卡达到“目标测试、完整编译、HTTP golden contract 通过”的完成条件；真实 ES/数据库/对象存储部署验收不在本卡实施范围，不能由本地测试推断为生产验收。
+
+---
+
+## ANCHR-203：收口 Knowledge Content 与 Retrieval 的一致性边界
+
+**目标：** 让 Knowledge Content 拥有 Asset/Item/generation 的业务终态，让 Retrieval 拥有 ES 投影与索引拓扑；用显式流程处理 MySQL 与 ES 不能共同回滚的事实。
+
+### 当前事实与根因
+
+`IngestionIndexFinalizer` 当前在一个 `@Transactional` 方法中执行：删除目标 generation → ES bulk write → CAS 激活 Asset generation → 记录旧 generation 清理事件 → 完成 Item。ES 成功后即使 MySQL 回滚，ES 写入也不会回滚；因此这不是跨库事务，只是把远程副作用包在了数据库事务外观里。
+
+同时，Ingestion 直接使用 Search `Segment`、`SegmentRepository`、`SegmentBulkWriter` 和 REST `SegmentIndexStatusDTO`；Search 又通过 `AssetRepository/KnowledgeBaseService` 读取 active generation 与 scope。双方确有业务协作，但不应共享持久化模型。
+
+### 实施后的流程
+
+```text
+Knowledge Content                              Retrieval
+1. 既有短事务预留 target generation
+2. IngestionRetrievalAcl ───────────────────→ RetrievalGenerationIndexApi
+                                      replace 同一 target generation
+                                   ←────────── RetrievalGenerationWriteReceipt
+3. IngestionIndexFinalizer 短事务：重新锁定 Item/Asset
+   CAS 激活 target generation
+   完成 Item + 写入 generation-retired Outbox
+4. Outbox → KnowledgeRetrievalCleanupAcl ──→ RetrievalCleanupApi
+                                      幂等删除旧/失败 generation
+```
+
+1. 沿用 202 的轻量模式：提供方只暴露 Application API，调用方只增加一个具体 ACL；不再增加 `GenerationIndexer` 接口和本地 Adapter 空转层。
+2. Ingestion 使用自己的 immutable generation snapshot，经 `IngestionRetrievalAcl` 转成 Retrieval Published Language；不再构造 Search `Segment`，也不再调用 Search Repository、ES document、bulk writer 或 REST DTO。
+3. Retrieval 自己执行“删除同一 target generation 残留 → bulk 重写”，并返回 written count、index name 和 profile fingerprint。相同 generation 重放仍是覆盖，不是追加。
+4. `IngestionIndexFinalizer` 只执行短 MySQL 事务：复核 write receipt、锁 Item/Asset、校验 previous generation、CAS 激活、完成 Item，并写旧 generation 清理 Outbox；事务和行锁不再覆盖 ES 调用时间。
+5. ES 写入失败、部分成功、成功后 Item 状态变化或 Asset 删除时，未激活 generation 保持不可见，并由现有 `DELETE_ASSET_GENERATION` Outbox 可靠清理。只有数据库中的 active generation 与目标相等时才禁止清理，避免误删当前可见数据。
+6. Outbox 保留原事件、payload、对象图片清理、重试与保留策略，只把 ES 删除从直接调用 Search Repository 改为 `KnowledgeRetrievalCleanupAcl → RetrievalCleanupApi`。
+7. 202 已完成的 `SearchKnowledgeAcl → KnowledgeContentQueryApi` 继续承担 scope、active generation 和 Preview 查询；203 不重复改造查询链路。
+
+### 同上下文内部边界
+
+- 保留 `kb`/`ingestion` 现有 package 作为渐进子模块，不先做大规模搬包；允许一个 Knowledge Content transaction coordinator 同时使用 Asset 与 IngestionItem Repository。
+- 选择性把已经稳定的 `claim/advance/complete/fail/assign generation` 和 Asset 激活前置条件提炼为 Policy；数据库 CAS、行锁和受影响行数继续是最终并发门禁。
+- Task 汇总继续由 item 状态派生；worker 处理单个 Item 时不加载整个批次。
 
 ### 验收
 
-- 新增任何 Application → REST DTO 或 Domain → Spring Web 依赖时 CI 失败。
-- 当前违规清单有负责人和对应任务，不使用宽泛包级忽略。
-- 模块依赖图无循环。
-- 业务测试结果和运行时 Bean 数量不变。
+- ES 远程调用不再发生在持有 Item/Asset MySQL 事务期间；锁时长不包含 bulk write。
+- 故障测试覆盖 ES 全失败/部分成功、ES 成功后激活 CAS 失败、Asset 并发删除、worker 重放与旧 generation 清理；任何失败 generation 都不会变成 active。
+- Knowledge Content 不再调用 Search Repository/ES document；Retrieval 不再调用 Asset/KB Repository。
+- 文档成功、失败、重试、覆盖导入、active generation 可见性和 101B/101C/107/110 的既有行为不变。
+
+### 范围边界
+
+- 本卡只处理 generation 写入、短事务激活和 Retrieval 清理。
+- 不处理 Capability/profile 部署、Storage/StorageConfig、Activity、Agent、SSE 或 Application Service 拆分；分别保留给 204–206。
+- 不修改数据库、Flyway、ES mapping、索引参数、端点路径、HTTP method、认证、请求/响应 JSON 或前端。
+
+### 实施与验证记录（2026-07-29）
+
+- 新增 `RetrievalGenerationIndexApi`、`RetrievalCleanupApi` 及 immutable request/receipt/command records；调用方新增具体类 `IngestionRetrievalAcl` 和 `KnowledgeRetrievalCleanupAcl`，没有增加同义 ACL 接口。
+- 原 Ingestion `SegmentBulkWriter` 已归到 Retrieval 的 ES infrastructure；Ingestion generation 链路不再依赖 Search Repository、ES document 或 REST DTO。
+- 单元测试覆盖 generation snapshot 映射、边界校验、delete-before-write、同 generation 重放、bulk 部分失败、写入后激活顺序、receipt 校验、Item 状态变化、Asset 删除、active generation 防误删，以及 Outbox cleanup 重试。
+- 未修改任何 Controller、端点或 JSON，因此 `anchr-web` 无需改动。
+- `mvn -DskipTests compile` 通过；沙箱内全量测试仅因 20 个本机临时端口权限错误失败，在允许本机端口后复跑全量 514 项，0 failure、0 error、30 skipped。30 项仍是当前机器无 Docker 而跳过的 Testcontainers 测试，真实 MySQL/ES 故障演练与部署验收不能由本地结果替代。
 
 ---
 
-## ANCHR-202：REST DTO 与 SSE 传输协议退出 Application
+## ANCHR-204：收口 Ask 剩余的 Knowledge/Retrieval 同步读取边界
 
-**目标：** 让 Application 表达业务用例，而不是 HTTP/SSE 协议。
+**目标：** 202 已完成普通 Ask 的 KB scope 和检索 API；204 只收口剩余 Agent/异步文档总结直连，让 Ask 只看到自己的文档引用和证据模型，不接触 KB/Asset/Segment Repository、对方聚合或 Search REST DTO。
 
-### 当前根因
+### 实施前源码事实
 
-`ConversationService` 的参数和返回值全部是 `interfaces.rest.dto`，并直接返回 Spring `SseEmitter`。`UnifiedSearchService`、KB、Settings 等 Application API 也直接暴露 REST DTO。依赖方向实际变成：
+202 已稳定以下链路，本卡不重做：
 
 ```text
-interfaces → application → interfaces
+ConversationService → ConversationKnowledgeAcl → KnowledgeContentQueryApi
+普通 Ask / search_knowledge → ConversationRetrievalOrchestrator
+                           → ConversationRetrievalAcl
+                           → RetrievalHitQueryApi
 ```
 
-这让 Web 协议、序列化字段和业务用例无法独立演进。
+当前剩余直连不只在两个 Tool：
 
-### 修复方案
+1. `AgentRequestContextResolver` 直接使用 `KnowledgeBaseRepository + AssetRepository` 生成模型可见的 selected KB/Asset context。
+2. `AgentScopeGuard` 直接使用 `AssetRepository`，实现 assetId、完整文件名/标题解析以及 `PERMISSION_DENIED / AMBIGUOUS_DOCUMENT / DOCUMENT_NOT_FOUND` 转换。
+3. `FindDocumentsTool` 直接查询 Asset 元数据，再与现有 Retrieval hit 合并排序。
+4. `ReadDocumentTool` 直接按 active generation 分页读取 `SegmentRepository`。
+5. `AgentTaskProcessor` 的异步多文档总结也直接查询 Asset active generation 和 Segment page；原卡遗漏了这条链路。
+6. `ConversationMessagePipeline` 仍直接调用 Search 的 `CitationReasonGenerationService`；Pipeline、Agent state 和两个 Tool 仍引用 Search `SegmentType`。
+7. `ConversationResultCardMapper/ResultHitDTO` 仍复用 Search REST `PreviewAnchorDTO`，导致两个接口层共享 DTO 所有权。
 
-按模块引入 Application Command/Query/Result，不直接复用 REST DTO：
+Agent Task/Run/Step 与 Conversation Session/Turn 仍属于同一个 Ask 上下文。本卡不拆 Agent，不改变它们的生命周期。
+
+### 204A：Knowledge Content 文档引用能力
+
+沿用 202 的提供方 API + 调用方具体 ACL，不增加 `AgentKnowledgePort → Adapter → Provider API` 空转层：
 
 ```text
-REST RequestDTO → RestAssembler → Application Command
-Application Result → RestAssembler → REST ResponseDTO
+AgentRequestContextResolver / AgentScopeGuard / FindDocumentsTool
+  → ConversationKnowledgeAcl
+  → KnowledgeContentQueryApi
+  → Knowledge Content Repository 实现
 ```
 
-Conversation 优先拆分为：
+1. 复用现有 `listActiveKnowledgeBases()`、`findActiveDocument(kbId, assetId)`；只补真实缺口 `searchActiveDocuments(kbId, keyword, limit)`，返回 `DocumentSummary`，不接受 Agent 的 requested scope，也不抛 Agent 错误。
+2. 扩展现有具体类 `ConversationKnowledgeAcl`，不新增 `AgentKnowledgeAcl`。ACL 把 provider summary 转成 Ask 自己的 immutable `ConversationKnowledgeBaseReference / ConversationDocumentReference`；文档引用至少包含 id、kbId、fileName、title、fileType/mimeType 和 active generation。
+3. requested KB 求交、输入顺序、去空去重、显式 asset scope、完整文件名/标题精确匹配和错误语义仍由 Ask 保持；Knowledge Content 只回答“当前 ACTIVE 的事实”。
+4. `AgentRequestContextResolver` 保持 KB 50、Asset 20 的截断、名称清洗、selectionMode、count/truncated 字段和请求顺序。
+5. `AgentScopeGuard` 改为返回 Ask 文档引用，不再把 KB `Asset` 聚合交给 Tool。原有五类结果保持：空引用、唯一 ID、唯一名称、同名歧义、超出显式 scope/不存在。
+6. `FindDocumentsTool` 继续执行“元数据候选 + 现有 Retrieval hit 合并”，保持 limit、显式 asset 过滤、排序、snippet、matchedSegmentId 和 evidence 数量；不把文档发现改造成新的搜索算法。
 
-- `CreateConversationCommand`
-- `SendMessageCommand`
-- `ListConversationSessionsQuery`
-- `ConversationMessageResult`
-- `ConversationHistoryResult`
+### 204B：Retrieval 有序文档内容能力
 
-SSE 边界调整为：
+增加一个真实缺口，不复制 202 的 Hit API：
 
 ```text
-ConversationController
-→ ConversationStreamAdapter（持有 SseEmitter）
-→ ConversationMessageUseCase
-→ ConversationProgressListener（纯 Application 事件）
+ReadDocumentTool / AgentTaskProcessor
+  → ConversationRetrievalAcl
+  → RetrievalDocumentContentQueryApi
+  → Retrieval Segment Repository 实现
 ```
 
-Application 不再导入 `SseEmitter`，但 SSE 的事件名、顺序和 payload 保持 `trace/delta/citations/done/error` 兼容。
+1. 新增 `RetrievalDocumentContentQueryApi.query(RetrievalDocumentContentQuery)`；请求只包含 kbId、assetId、明确的 active generation、afterChunkOrder、afterSegmentId 和 limit。
+2. 返回 immutable `RetrievalDocumentChunk` 列表，字段只覆盖 Ask 阅读和 citation 所需的 segmentId、kbId、assetId、generation、assetType、segmentType、title、content、pageNo、chunkOrder、bbox、sourceRef；不暴露 `Segment`、embedding、ES document 或 Repository cursor object。
+3. 扩展现有具体类 `ConversationRetrievalAcl` 映射为 Ask 自己的 document chunk/evidence；不新增 `AgentRetrievalAcl`，也不让 Tool 直接使用 Retrieval Application records。
+4. `ReadDocumentTool` 仍先通过 `ConversationKnowledgeAcl`/`AgentScopeGuard` 获取当前 active generation，再读取 Retrieval。现有 Base64 cursor `chunkOrder:segmentId`、limit+1、最小 page size 10、最大输入 20、20,000 字符上限、nextCursor/hasMore JSON 和 filename `sourceRef` 保持不变。
+5. `AgentTaskProcessor` 在异步任务真正执行时重新验证每个文档仍 ACTIVE，并使用当时的 active generation；继续每页 20 条、续租、总 segment/字符限制和 `DOCUMENT_NOT_FOUND / DOCUMENT_TOO_LARGE / NO_DOCUMENT_CONTENT` 结果。不得信任任务 request JSON 中的 generation，也不得改变 map/reduce/finalize prompt、模型调用次数、citation 选择或完成事务。
+6. `search_knowledge` 和 `find_documents` 的内容召回继续走 202 的 `ConversationRetrievalOrchestrator`；不再新建同义 `KnowledgeSearchQuery`。
 
-Search 使用 `SearchCommand/SearchPageResult`；REST 层负责 DTO 与枚举/日期/cursor 的协议转换。KB 和 Settings 按调用复杂度逐步迁移，不一次性重写所有接口。
+### 204C：剩余 Published Language 与 DTO 所有权
 
-### 边界
+1. 将 `CitationReasonGenerationService` 收口为 Retrieval `application.api` 的窄 `RetrievalCitationReasonApi` 和 immutable records；Search Answer 直接消费 provider API，Ask 经 `ConversationRetrievalAcl` 调用。提示词、批量顺序、降级和 reason 回填行为不变。
+2. `IMAGE_VISUAL` 不能作为回答证据的规则保留，但由 Ask 自己的 evidence model/helper 判断；`ConversationMessagePipeline`、`AgentRunState`、`SearchKnowledgeTool`、`FindDocumentsTool` 不再 import Search Domain `SegmentType`。ACL 内只依赖 Retrieval `application.api` Published Language。
+3. `ResultHitDTO.anchor` 改为 Conversation 自有的同形 Anchor DTO，删除对 Search `PreviewAnchorDTO` 的复用；字段名、nullable、bbox 和最终 JSON 完全不变。
 
-本卡只改变 HTTP/SSE 传输对象与 Application 用例对象之间的适配位置。它可以增加 assembler、command/result 和 stream adapter，但不改变 URL/payload/event 顺序，不设计领域聚合（204），不治理跨模块 Infrastructure 依赖（203），也不把一个大 Service 按业务职责全面拆开（206）。
+### 硬边界与明确不做
 
-### 兼容与验收
+- 不修改任何端点路径、HTTP method、认证、请求 JSON、响应 JSON、SSE event 名称或字段；因此不修改 `anchr-web`。实施中若发现必须改变协议，立即停止并先确认。
+- 不重做 202 的普通 Ask scope、rewrite、Hit Query、结果卡排序和公共 Search；不修改 BM25、KNN、RRF、rerank、generation gate 或 Preview。
+- 不修改 Agent Tool 名称/描述/参数、工具选择与调用顺序、系统提示、预算、READ_LIMIT_REACHED、citation marker 或最终回答落库顺序。
+- 不修改 Agent Task claim/lease/retry/cancel、Run/Step trace、两条 SSE、断线恢复或 Session rename/touch/auto-title CAS；这些不是跨域读取问题。
+- 不处理 Activity、Capability/provider 配置、Storage、Outbox、数据库、Flyway、ES mapping 或索引写入；分别保留给 205/既有卡。
+- 不拆 `AgentWorkflowImpl`、`AgentTaskProcessor`、`ConversationServiceImpl` 大类；机械拆分类只归 206。
+- 不新增 Agent bounded context、微服务、Command/Event Bus、跨域缓存或最终一致 scope 投影。
 
-- HTTP URL、method、JSON 字段和 SSE 事件完全不变。
-- Controller contract test 对迁移前后响应做 golden comparison。
-- Application 包不再导入 `interfaces.rest.dto` 或 `SseEmitter`。
-- CLI、后台任务或测试可以直接调用用例接口而不构造 REST DTO。
+### 验收与测试
+
+- `conversation` 除 `application.acl → kb/search application.api` 外，不再 import KB/Asset/Segment Repository、KB/Search 聚合、Search Domain model 或 Search REST DTO。
+- Knowledge provider 测试覆盖 ACTIVE KB/document、metadata keyword/limit、missing；Conversation ACL 覆盖请求顺序、去重、显式 scope、ID/名称唯一匹配、歧义和错误映射。
+- Retrieval content API 测试覆盖 generation 条件、稳定 `(chunkOrder, segmentId)` 顺序、首/中/末页、空页、字段映射和重复请求。
+- `ReadDocumentTool` golden test 固定 cursor、limit、20,000 字符截断、nextCursor、sourceRef 和 evidence；`AgentTaskProcessor` 固定执行时二次 active 校验、分页/续租、上限错误和 citation 字段链。
+- `AgentRequestContextResolver`、`AgentScopeGuard`、`FindDocumentsTool`、`SearchKnowledgeTool`、普通 Ask pipeline、citation reason、result card/anchor 和异步总结 characterization tests 全量迁移，行为与模型输入不变。
+- 固定验证现有 Conversation/Agent HTTP 与两条 SSE golden contract；完整 `mvn compile/test` 通过，并单独报告无 Docker 的 Testcontainers 跳过项。
+
+### 实施与验证记录（2026-07-29）
+
+- 204A 已完成：`KnowledgeContentQueryApi` 补充通用的 ACTIVE 文档元数据查询；`ConversationKnowledgeAcl` 统一把提供方 summary 转成 Ask 自有文档引用。`AgentRequestContextResolver`、`AgentScopeGuard` 和 `FindDocumentsTool` 不再直接依赖 Knowledge Repository 或 `Asset` 聚合，原 scope、精确名称匹配、歧义和错误语义保持不变。
+- 204B 已完成：新增 `RetrievalDocumentContentQueryApi` 与 immutable query/chunk records；`ReadDocumentTool`、`AgentTaskProcessor` 经 `ConversationRetrievalAcl` 读取指定 active generation 的有序内容，不再直接依赖 `SegmentRepository` 或 `Segment`。cursor、limit、字符/segment 上限、执行时二次 ACTIVE 校验、续租、prompt 和 citation 流程未改。
+- 204C 已完成：citation reason 收口为 Retrieval Application API，Ask 经自身 ACL 调用；Ask 的 `IMAGE_VISUAL` evidence 判断不再引用 Search Domain `SegmentType`；结果卡 anchor 改为 Conversation 自有同形 DTO。Conversation 主源码中已无 KB/Search Domain model、Repository、Search REST DTO 或 Search Application impl 依赖。
+- 未修改任何 Controller、端点路径、HTTP method、认证、请求/响应 JSON 或 SSE 事件，也没有修改 `anchr-web`。Activity 直连按硬边界保留给 ANCHR-205。
+- 定向测试覆盖 provider/ACL 映射、文档 metadata、generation 有序内容、Agent scope、Read Document、异步总结相关路径、citation reason、visual evidence 和 result card；`mvn -DskipTests compile` 与 `test-compile` 通过。
+- 沙箱内全量测试仅因 20 个本机临时端口权限错误失败；允许本机端口后复跑全量 519 项，0 failure、0 error、30 skipped。30 项仍是当前机器无 Docker 而跳过的 Testcontainers 测试；本地结果不代表真实 MySQL/Elasticsearch/对象存储或部署验收。
+
+**实施状态：已完成。** 本卡的同步读取边界、目标回归、完整编译和现有协议回归均已通过；未提交、未合并、未发布。
 
 ---
 
-## ANCHR-203：用模块 Port 取代跨模块 Infrastructure 依赖
+## ANCHR-205：收口 Activity、Provider/Storage 与专用 Outbox 支撑边界
 
-**目标：** 保持模块化单体，但让跨模块协作通过明确能力契约完成。
+**目标：** 只处理 201–204 明确保留下来的支撑边界直连。Activity 拥有 `activity_event` 与 Recent 读模型；Capability 拥有模型/存储配置和 provider adapter；Knowledge Content 继续拥有 Asset/generation 清理 Outbox。三者都保持轻量事务脚本或 Adapter，不建设新的平台、富聚合或总线。
 
-### 当前根因
+本卡按真实修改面拆为 205A–205D。每个子卡必须能独立编译、测试和回滚；不能把四段合成一次大搬包。205 总体工作量按当前源码应为 XL，不再低估为一张 L 卡。
 
-Ingestion Application 同时依赖 KB Repository、Settings Repository、Docling Client、Parser Mapper、ES Bulk Writer；Search Application 也直接依赖 ES alias/document 实现。结果是 Application 既编排业务，又掌握外部技术细节，模块无法独立测试和演进。
+### 当前源码事实
 
-### 修复方案
+1. Activity 代码物理位于 `kb`，但 `activity_event`、Recent 去重/cursor 和 citation snapshot 不属于 KnowledgeBase 聚合。现有 `ActivityEventService` 还直接接收 Search REST DTO，`ActivityQueryServiceImpl` 直接读取 `KnowledgeBaseRepository`，`SegmentPreviewServiceImpl` 又直接消费 Activity 的 KB REST DTO。
+2. Conversation 的 QUESTION 记录已经发生在 Turn 事务提交后；公共 Search 和 Preview 没有主业务写事务。Ingestion 的 DOCUMENT_IMPORTED 记录仍位于创建事务内，虽然 recorder 捕获异常，数据库异常仍可能污染同一事务。现有 append 记录没有显式携带 userId，而是由 Activity 在执行时读取 `UserContextHolder`。
+3. Session 删除会同步删除对应 Activity；Asset 删除会同步删除该 Asset 的 citation Activity。这两条是用户可见清理，不等同于可丢失的 Recent append，不能统一改成 best-effort。
+4. `settings + integration` 已共同构成 Capability 上下文。`CapabilityResolver`、client factory/cache 和 `ConfigDriven*Adapter` 在该上下文内部读取配置不是跨领域错误；这些 Adapter 已经是 Conversation/Retrieval/Ingestion outbound Port 的防腐实现，不再额外套一层空接口。
+5. 205B 已收口 embedding 双向部署；205C 已收口 `AuthController/Ingestion/Outbox → StorageConfigRepository` 和 `IngestionTaskProcessorImpl → DoclingClient/StorageTokenIssuer`。Capability 的 Storage 配置只经 `StorageRuntimeApi` 暴露 location snapshot 与临时凭据。
+6. 205C 已让 `AssetPreviewServiceImpl` 和 Outbox 改用 Knowledge Content 自有 `KnowledgeObjectStoragePort`，并删除没有生产调用的 `SearchObjectStoragePort.uploadFile(MultipartFile)`。同一个 ConfigDriven Adapter 继续实现各调用方窄 Port。
+7. Outbox 已在 203 通过 `KnowledgeRetrievalCleanupAcl → RetrievalCleanupApi` 清理 ES。剩余的 `IngestionTaskRepository`、图片路径和 Asset/generation payload 都属于同一个 Knowledge Content，不需要再建 Ingestion provider API。
 
-在消费能力的模块内为“仍然存在的跨模块 Infrastructure 依赖”定义窄 Port；101B–107、109–110 为正确性修复已经引入的最小 Port 直接视为输入，不得复制一套同义接口。候选能力包括：
+### 205A：Activity Published Language、调用方 ACL 与物理归属（已完成，2026-07-29）
+
+调用链固定为：
 
 ```text
-DocumentParserPort
-AssetLifecyclePort
-SegmentIndexPort
-StorageCredentialProvider
-EmbeddingPort
-ParseArtifactStore
-IndexTopologyPort
+ConversationActivityAcl ─┐
+SearchActivityAcl ───────┼→ ActivityRecordApi → Activity 实现 → activity_event
+IngestionActivityAcl ────┤
+KnowledgeActivityAcl ────┘
+
+ActivityQueryApi → ActivityKnowledgeAcl → KnowledgeContentQueryApi
+ActivityController → ActivityQueryApi → 现有 Recent JSON
 ```
 
-规则：
+1. 在 Activity `application.api` 暴露 `ActivityRecordApi`、`ActivityQueryApi` 和 immutable records。记录模型按 QUESTION、SEARCH、IMPORT、CITATION 分开，字段覆盖现有 payload；不接收 `SearchQueryDTO`、Preview DTO、KB DTO、Repository model 或任意 `Map<String,Object>` 业务输入。
+2. `ConversationActivityAcl`、`SearchActivityAcl`、`IngestionActivityAcl`、`KnowledgeActivityAcl` 都是调用方 `application.acl` 的具体类，不再为 ACL 增加同义接口。它们负责把各自 DTO/model 转成 Activity record，并保持各调用方现有触发条件。
+3. append record 必须在主业务事务提交后或无主事务时 best-effort 执行。命令在调用方提前捕获 userId、resourceId、展示字段和时间快照；Activity 不再依赖调用线程里的 `UserContextHolder`。记录失败只丢 Recent，不回滚 Turn、Search、Preview 或 Ingestion Task。
+4. `deleteBySessionId` 与 `deleteCitationOpenedByAssetId` 作为 `ActivityRecordApi` 的同步维护命令保留在调用方现有 MySQL 事务中；失败继续阻止主删除提交，避免 Session/Asset 已删但其 Recent/citation 仍可见。不能把这两条误改成 best-effort。
+5. Activity 查询当前 KB 名称时，经具体类 `ActivityKnowledgeAcl` 调用 `KnowledgeContentQueryApi`。只在确有批量需要时补通用 `findActiveKnowledgeBases(ids)`；provider 只返回 ACTIVE 事实，不处理 Activity cursor/去重。
+6. Activity service/model/repository/mapper/REST DTO 从 `kb` 迁到顶层 `activity` package，ActivityController 仍保持原路径。只搬归属，不改 `activity_event` 表、Mapper SQL、payload key 或 Recent 算法。
+7. `SearchActivityAcl` 同时适配 Preview 的 citation record/fetch；Retrieval 不再依赖 Activity 的 REST DTO。ActivityController 负责把 Application Result 映射回现有 Recent DTO。
 
-1. Port 使用业务输入输出，不暴露 Elasticsearch Client、MyBatis Record、Spring `MultipartFile` 或 Docling HTTP DTO。
-2. 由 integration/infrastructure Adapter 实现 Port。
-3. `SearchObjectStoragePort.uploadFile(MultipartFile)` 改为接口层读取上传内容，再传业务无关的二进制输入对象。
-4. ANCHR-105/106 已确定的 Docling submit/get/ack 契约保持不变，本卡只消除调用方对具体 Client/DTO 的残余依赖。
-5. ANCHR-107 已确定的 generation 写入契约保持不变，本卡只替换 Application → ES writer 的直接依赖。
+**实施结果：**
 
-### 边界
+- 已增加 `ActivityRecordApi`、`ActivityQueryApi` 和 Activity 自有 immutable record；Provider Application API 不再接收 Search/Preview/KB REST DTO 或调用方 Domain model。
+- 已增加四个调用方具体 ACL。Ingestion 的 DOCUMENT_IMPORTED 在事务提交后追加，调用方提前捕获 userId/时间快照；append 全链路保持 best-effort。Session/Asset Activity 清理仍同步执行且异常不吞。
+- Activity service/domain/repository/MyBatis/REST DTO/Controller 已从 `kb` 迁到顶层 `activity`；表、SQL、payload key、Recent cursor/去重和 `/api/v1/activity/**` 协议未改。
+- Activity 查询 KB 名称已改为 `ActivityKnowledgeAcl → KnowledgeContentQueryApi.findActiveKnowledgeBases`；Search Preview 的 citation record/fetch 已改走 `SearchActivityAcl`。
+- 目标回归测试通过；显式加载 Mockito agent 后执行干净的完整 `mvn clean test`：456 tests、0 failures、0 errors、16 个无 Docker 的 MySQL/Testcontainers 用例跳过。
+- 205B、205C、205D 当时未执行；当前 205A–205D 均已完成，ANCHR-205 源码与本地回归已收口。
 
-本卡的完成标准是依赖方向改变、业务行为不变。不得借 Port 迁移重新设计 Docling 指纹、Ingestion 状态机、index generation 或 Retrieval Plan；这些变更必须回到各自主责卡。
+### 205B：Embedding 配置部署的双向 API（已完成，2026-07-29）
 
-### 验收
+只收口 Capability 与 Retrieval 的双向部署，不重写所有 AI Adapter：
 
-- Ingestion Application 不导入自身或其他模块的 infrastructure 类。
-- Search Application 不导入 ES document/alias manager。
-- Port 单测可使用内存 fake，失败、超时和部分成功可确定性复现。
-- Adapter 替换不改变现有 REST、数据库和 ES 协议。
+```text
+CapabilityConfigServiceImpl
+  → CapabilityRetrievalAcl
+  → RetrievalEmbeddingDeploymentApi
+  → Retrieval 物理索引重建与 alias 切换
+
+SegmentIndexManagerImpl
+  → RetrievalCapabilityAcl
+  → CapabilityServingConfigApi
+  → 激活 serving config + 刷新原 client cache
+```
+
+1. Retrieval 暴露 `RetrievalEmbeddingDeploymentApi` 和 immutable deployment request；Capability 暴露 `CapabilityServingConfigApi` 和 immutable activation command。双方都不传 `CapabilityConfig`、`EmbeddingProfile` Domain model、Repository 或 provider client。
+2. `CapabilityRetrievalAcl` 将 desired config 转成 Retrieval request；`RetrievalCapabilityAcl` 将 alias 成功结果转成 serving activation。ACL 使用具体类，不增加同义 Port/Adapter 接口。
+3. 保持当前选择语义：GENERATION/RERANK 立即选择；embedding profile 未变化时立即选择；profile 变化时只创建/保留 disabled desired config 并请求 Retrieval 部署；只有 alias 成功后才能激活新 serving config。任一步失败继续使用旧 serving config 和旧 alias。
+4. `CapabilityConfigServiceImpl` 不再注入 `SegmentIndexManager`；`SegmentIndexManagerImpl` 不再注入 integration 的 `ServingEmbeddingConfigActivator`。Index Controller 和 Retrieval 内部仍可继续使用现有 `SegmentIndexManager`，本卡不重写索引管理内部接口。
+5. Capability 内部用自己的 immutable profile snapshot/factory 计算 capability、model、dimension 和 fingerprint；`CapabilityConfigServiceImpl` 不再 import Retrieval `EmbeddingProfile`。现有 `CapabilityEmbeddingProfileProvider`、`CapabilityIndexDimensionProvider` 和 embedding Adapter 作为 Retrieval Port 的实现负责最后一跳映射，不把 Capability snapshot 暴露给 Retrieval 用例。
+6. `CapabilityResolver`、`ClientCacheManager`、`CapabilityClientFactory`、connection test 和 `ConfigDrivenGeneration/Embedding/Rerank/SpringAiAgentModelAdapter` 保持 Capability 内部实现。Adapter 可以继续在语义相同时实现多个调用方 Port；不为了“每域一个 Adapter”复制模型调用代码。
+7. 保持 optional wiring 和当前缺失能力/降级行为；不得把 optional embedding deployment 或 rerank/generation 能力改成启动期强依赖。
+
+**实施结果：**
+
+- Retrieval 已暴露 `RetrievalEmbeddingDeploymentApi`，Capability 已暴露 `CapabilityServingConfigApi`；两侧只交换 immutable Application record，不传 `CapabilityConfig`、`EmbeddingProfile`、Repository 或 provider client。
+- 已增加具体类 `CapabilityRetrievalAcl` 与 `RetrievalCapabilityAcl`。`CapabilityConfigServiceImpl` 不再依赖 `SegmentIndexManager` 或 Retrieval `EmbeddingProfile`；`SegmentIndexManagerImpl` 不再依赖 integration 的 `ServingEmbeddingConfigActivator`。
+- Capability 自有 `CapabilityEmbeddingProfileSnapshot/Factory` 保留原 fingerprint、dimension 和草稿判断算法；原 `CapabilityEmbeddingProfileProvider` 改为复用该工厂并只在 Adapter 边界映射为 Retrieval profile。
+- GENERATION/RERANK、相同 embedding profile 和 optional deployment 缺失时仍立即选择；不同 profile 只请求 Retrieval 创建待重建任务，不提前启用目标配置。
+- Retrieval 仍先切 alias，再经 `RetrievalCapabilityAcl` 激活 serving config 并刷新 embedding client cache；激活失败仍将 alias 切回旧索引，部署请求失败仍保留旧 serving 配置。
+- 未修改端点、HTTP/JSON/SSE、前端、数据库、ES mapping、物理索引命名、重建算法或 provider 调用参数；205C、205D 当前也已完成。
+- 目标测试通过；`mvn compile`、`test-compile` 通过；显式加载 Mockito agent 后完整 `mvn clean test` 通过：467 tests、0 failures、0 errors、16 个无 Docker 的 Testcontainers 用例跳过。
+
+### 205C：Storage 与 Docling 调用边界（已完成，2026-07-29）
+
+1. Capability 暴露窄 `StorageRuntimeApi`：查询当前 location snapshot，以及签发临时 STS credential。records 只包含 endpoint、bucket、region、prefix、临时 AK/SK/token/expiration 等当前调用确实需要的字段；不暴露 `StorageConfig`、Repository、加密密文或 `AesUtil`。
+2. 新增具体类 `AuthStorageAcl`、`IngestionStorageAcl`、`KnowledgeStorageAcl`。Auth `/sts`、Ingestion embedded-image target/credential 和 Outbox 图片前缀查询都经各自 ACL；调用方不直接读取 Settings Repository。
+3. Ingestion 拥有自己的 `IngestionStorageTarget`。它仍在单次处理开始时捕获 endpoint/bucket/basePath，在每次重提 Docling job 前重新签发临时凭据并校验 target 未变化；现有 requestId/sourceRevision、AAD、AES-GCM envelope、keyId、expiration 和失败语义完全不变。
+4. `IngestionDoclingAcl` 作为具体防腐层包装现有 `DoclingClient`，把 job/status/error/retry-after 映射为 Ingestion 自有 records/exception；不新建万能 Provider API，也不改变 submit/get/ack、恢复次数、轮询、超时或模型调用顺序。
+5. Knowledge Content 新增自己的 `KnowledgeObjectStoragePort`，只包含 Preview 签名和按前缀删除等真实用例；`AssetPreviewServiceImpl` 不再依赖 Search Port，Outbox 不再依赖 Ingestion Port。同一个 `ConfigDrivenStorageAdapter` 可以实现 Search/Ingestion/Knowledge 三个窄 Port，因为底层 OSS 语义相同。
+6. 删除没有生产调用的 `SearchObjectStoragePort.uploadFile(MultipartFile)` 及对应实现，不创建替代上传流程。其他 Port 不接收 `MultipartFile`。
+7. `StorageConfigService`、Settings REST CRUD/连接测试和 `ConfigDrivenStorageAdapter` 内部读取/解密配置仍属于 Capability 内部实现，不做无收益的 package/template 重写。
+
+**实施结果：**
+
+- Capability 已暴露 `StorageRuntimeApi`，只返回 immutable `StorageLocationSnapshot/StorageTemporaryCredential`；配置 Repository、加密密文、`AesUtil` 和 `StorageTokenIssuer` 仍留在 Capability 内部。
+- Auth 已改为 `AuthStorageAcl → StorageRuntimeApi`，固定保留 `GET /api/v1/auth/sts`、认证注解及原有八个 JSON 字段；配置缺失与签发失败仍沿用原错误分支。
+- Ingestion 已改为 `IngestionStorageAcl → StorageRuntimeApi`。`IngestionStorageTarget` 在单次处理开始时捕获 endpoint/bucket/basePath；每次重新 submit Docling 前重新签发凭据，并同时校验当前 location 与实际签发凭据的 target，变化时 fail-closed。
+- `IngestionDoclingAcl` 已包装 `DoclingClient`，把 job/error/failure kind/status/retry-after 映射为 Ingestion 自有 immutable records/exception；submit/get/ack、job 恢复次数、轮询、超时与 Retry-After 顺序未改。
+- Knowledge Content 已拥有 `KnowledgeObjectStoragePort`。Library Preview 不再依赖 Search Port；Outbox 图片清理经 `KnowledgeStorageAcl` 获取 prefix 并使用 Knowledge Port，claim/retry/payload/事件类型和 Retrieval 清理顺序未改。
+- `ConfigDrivenStorageAdapter` 继续作为同一个底层实现同时实现 Search/Ingestion/Knowledge 三个窄 Port；已删除无生产调用的 `SearchObjectStoragePort.uploadFile(MultipartFile)`，未增加替代上传流程。
+- 未修改 Settings CRUD、Storage 连接测试、端点、HTTP/JSON/SSE、前端、数据库、Outbox 表/调度、Docling contract、AAD、AES-GCM envelope、凭据有效期、对象前缀算法或模型调用；205D 当前也已完成。
+- 目标测试、`mvn compile` 与 `test-compile` 通过；显式加载 Mockito agent 后完整 `mvn clean test` 通过：484 tests、0 failures、0 errors、16 个无 Docker 的 Testcontainers 用例跳过。
+
+### 205D：Knowledge Content 专用 Outbox 收尾（已完成，2026-07-29）
+
+1. `outbox_event`、`AssetCleanupOutboxRecorder`、`OutboxEventProcessor`、`DELETE_ASSET`、`DELETE_ASSET_GENERATION` 继续由 Knowledge Content 拥有；不抽成独立 bounded context 或全局平台。
+2. 保持 Asset 删除/退休与 Outbox insert 的同一 MySQL 事务，保持表、type code、payload、aggregateId、lock token、`SKIP LOCKED`、lease、退避、最大重试、失败状态、清理 cron/时区和 90 天保留语义。
+3. Retrieval 删除继续复用 203 的 `KnowledgeRetrievalCleanupAcl`。图片清理由 `KnowledgeStorageAcl/KnowledgeObjectStoragePort` 完成，不再读取 Settings Repository；`IngestionTaskRepository` 与 `IngestionImagePaths` 属于同一 Knowledge Content，可直接协作，不再加跨域 API。
+4. 不把 `OutboxEvent` 改名或搬成 persistence envelope；这只是结构偏好，不是本卡的真实跨域问题。206 也不得借拆类改变 claim/retry 行为。
+
+**实施结果：**
+
+- 源码审计确认 Outbox 已完整归属 Knowledge Content：`OutboxEvent`/两类 type、Repository、Mapper/record/XML、`AssetCleanupOutboxRecorder` 与 `OutboxEventProcessor` 均位于 `kb`。Ingestion 直接使用 Recorder、Task Repository 与 `IngestionImagePaths` 是同一 bounded context 内部协作，不新增 API 或 ACL。
+- 因生产归属和调用链已经符合任务卡，本卡没有制造生产代码差异，也没有移动/改名 `OutboxEvent`、拆 Processor、增加 Outbox 平台或改数据库。205C 建立的 `KnowledgeStorageAcl/KnowledgeObjectStoragePort` 与 203 建立的 `KnowledgeRetrievalCleanupAcl/RetrievalCleanupApi` 原样复用。
+- 补充 Repository 验收，固定 claim 选中后使用同一个 lease token 标记、返回 PROCESSING snapshot，并验证 DONE/RETRY/FAILED 都携带 claim token；现有 MySQL `FOR UPDATE SKIP LOCKED` 并发 claim 测试继续保留。
+- 补充 Processor 验收，固定 poll batch/5 分钟 lease、图片成功但 Retrieval 失败后的幂等重试、Asset 全 generation 图片先清理再删 Retrieval、最大重试、90 天 retention、cleanup batch、cron 和 `Asia/Shanghai` 时区。
+- 既有 payload golden、Outbox 写入失败向外传播、Asset/Generation 短事务、active generation 不入清理队列、malformed payload 永久失败和 Storage 失败不提前删 Retrieval 的测试继续通过；新增 MySQL 用例验证 Asset 删除与 Outbox insert 同事务回滚。
+- 未修改端点、HTTP/JSON/SSE、前端、Flyway、`outbox_event`、Mapper SQL、type code、payload、aggregateId、重试阶梯、最大重试、清理配置、Storage/Retrieval 调用顺序或 generation 语义。
+- 目标测试、`mvn compile` 与 `test-compile` 通过；显式加载 Mockito agent 后完整 `mvn clean test` 通过：493 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。新增的真实 MySQL 同事务回滚用例也包含在这 17 个环境跳过项中。
+
+### 硬边界与明确不做
+
+- 不修改任何端点路径、HTTP method、认证角色、请求 JSON、响应 JSON、SSE、前端调用或前端类型。固定保留 `/api/v1/activity/**`、`/api/v1/settings/**` 和 `/api/v1/auth/sts`；如实施发现协议必须变化，立即停止并先确认，同时规划 `anchr-web` 修改。
+- 不修改数据库、Flyway、`activity_event`/`outbox_event` 表、MyBatis 查询语义、ES mapping、physical index 命名、alias/rebuild 算法、embedding fingerprint 或 generation 流程。
+- 不修改模型 prompt、generation/embedding/rerank 参数、Docling contract、加密算法、AAD、凭据有效期、重试/超时、调用顺序或 optional capability 的降级语义。
+- 不拆 `CapabilityConfigServiceImpl`、`IngestionTaskProcessorImpl`、`SegmentIndexManagerImpl` 或 `OutboxEventProcessor` 的大方法簇；纯机械拆分类留给 206。
+- 不新增 ArchUnit、通用 Event Bus/Command Bus、Mediator、第二张 Outbox 表、统一 `CapabilityPort`、统一 `StorageService` 或覆盖所有 provider 的万能 API。
+- 不为了目录对称拆开 `settings + integration`，不复制已有 ConfigDriven Adapter，不重写 Settings Application 与 REST DTO 的同上下文映射。
+
+### 测试与完成条件
+
+- 205A：四类 payload golden、显式 userId、Ingestion after-commit、append 失败不回滚、同步删除仍回滚、Recent limit/cursor/去重/一周窗口、malformed payload、citation anchor/chunks、KB 名称和四个 Activity HTTP contract 全部通过。
+- 205B：GENERATION/RERANK 选择、embedding 同 profile、不同 profile deployment、alias 成功激活、部署/激活失败保留旧 serving、cache refresh/invalidate、optional wiring、profile fingerprint/dimension 全部保持。
+- 205C：`/auth/sts` 原 JSON/error、Storage location snapshot、target change fail-closed、STS 字段、AAD/envelope、Docling submit/get/ack/retry-after、Preview URL/expiry、对象前缀删除和配置缺失错误全部保持。
+- 205D：同事务 Outbox insert、payload golden、claim/lease、并发 claim、幂等重复清理、active generation 防误删、图片/ES 部分失败重试、最大重试、cleanup cron/zone/retention 全部保持。
+- 运行各子卡目标测试、`mvn compile`、`test-compile` 和完整 `mvn test`；分别报告通过项、无 Docker 的 Testcontainers 跳过项、环境失败和仓库既有失败。只有 205A–205D 均通过且现有 HTTP golden contract 不变时，ANCHR-205 才标记完成。
+
+**ANCHR-205 总状态：源码与本地回归已完成。** 205A–205D 均已按 provider Application API + caller concrete ACL 或同一 bounded context 内部协作收口；现有 HTTP golden contract 未变。当前机器无 Docker，真实 MySQL `SKIP LOCKED`/同事务回滚、OSS 幂等删除和 Elasticsearch 清理仍需在集成环境验收，不把本地通过误报为生产验收。
 
 ---
 
-## ANCHR-204：选择性富领域化与聚合边界收口
+## ANCHR-206：按已稳定用例边界拆分超大 Application Service
 
-**目标：** 将真正复杂的不变量从 SQL 更新和 Application 条件分支收口到领域行为，同时避免全项目形式化 DDD。
-
-### 当前根因
-
-`IngestionTask`/`IngestionTaskItem` 只有字段；状态迁移散落在 Repository SQL。`ConversationSession` 使用 `@Data` 暴露所有 setter，只有 `touch()` 少量行为。索引 generation、文档覆盖、会话标题 CAS 等规则如果继续只存在于 Service/Mapper 中，会再次被其他入口绕过。
-
-### 聚合边界
-
-明确为：
-
-- `KnowledgeBase`：独立聚合，不加载全部 Asset；
-- `Asset`：独立聚合，持有 kbId 和 active index generation；
-- `IngestionTask`：独立聚合，TaskItem 在任务一致性边界内；
-- `ConversationSession`：独立聚合；
-- `ConversationTurn`：独立增长记录，以 sessionId 关联；
-- `AgentTask/AgentRun`：独立聚合，不塞入 ConversationSession；
-- `Segment`：搜索索引模型，不作为 Asset 内部实体集合加载。
-
-### 修复方案
-
-优先富领域化三组已确认规则：
-
-1. Ingestion 状态机：
-   - `claim/submitParse/observeParseResult/startEmbedding/startIndexing/complete/fail/scheduleRetry`；
-   - 方法内部校验 execution epoch、stage attempt、lease、前置状态和时间单调性；
-   - Repository 只做条件持久化，不自行决定状态跳转。
-2. Asset/index generation：
-   - `reserveGeneration/activateGeneration/markIndexFailed/softDelete`；
-   - 删除后不得激活新 generation。
-3. ConversationSession：
-   - `rename/touchIfNewer/applyAutoTitleIfUnchanged/delete`；
-   - 移除通用 setter，持久化重建使用受控工厂。
-
-settings、Dashboard、Token、普通查询继续保持事务脚本/CRUD，不强行富模型化。
-
-### 边界
-
-106、106B、107、109 先拥有并验证状态、持久化边界、generation、CAS 的真实业务语义和数据库条件更新；本卡只在不改变字段、状态枚举、错误码和并发结果的前提下，把这些既有规则移动到领域行为。若领域化暴露语义缺陷，退回对应正确性卡修复，不能在本卡顺手改变业务结果。
-
-### 验收
-
-- 合法和非法状态迁移均有纯单元测试。
-- `SUCCESS → RUNNING`、旧 execution epoch 写入、删除后激活、自动标题覆盖手工标题均被领域规则拒绝。
-- 领域模型不依赖 Spring、MyBatis、REST DTO。
-- Repository 条件更新结果与领域版本/lease 一致。
-
----
-
-## ANCHR-205：Outbox 从 KB Domain 拆为可靠消息模块
-
-**目标：** 保留现有可靠投递能力，同时把技术租约模型与 KB 领域语言分开。
-
-### 当前根因
-
-`OutboxEvent` 当前位于 KB Domain，却包含 `lockToken/lockedAt/nextRetryAt/retryCount/processedAt/lastError`。这些是可靠消息基础设施状态，不是 KnowledgeBase 或 Asset 的领域属性，也会阻碍 Ingestion/index generation 等其他模块复用 outbox。
-
-### 修复方案
-
-1. 新建 `integrationevent` 或 `common/outbox` 模块边界：
-   - application：发布、claim、完成、重试用例；
-   - domain：通用投递状态和重试策略；
-   - infrastructure：表、MyBatis Mapper、Scheduled Processor。
-2. KB/Asset 只产生业务事件：
-   - `AssetDeletedEvent`
-   - `AssetGenerationRetiredEvent`
-3. Application 在同一事务将业务事件转换成 Outbox Record。
-4. 表结构、claim token、`SKIP LOCKED`、backoff、保留期保持不变，先做边界移动而不是重写机制。
-5. ANCHR-107 的旧 generation 清理复用同一个发布接口。
-
-### 边界
-
-本卡是模块归属迁移，不是 Outbox v2。表字段、事件触发条件、claim/lease、backoff、失败分类、保留期和调度频率均保持不变；107 继续拥有 generation 事件何时产生，本卡只提供不依赖 KB package 的发布与消费实现。
-
-### 验收
-
-- KB Domain 不再出现 lock token、retry count 等投递字段。
-- 删除和 generation 清理仍与业务事务原子写入 outbox。
-- 现有失败重试、租约抢占和清理测试全部通过。
-- 其他模块可以发布事件而不依赖 KB package。
-
----
-
-## ANCHR-206：按用例拆分超大 Application Service
-
-**目标：** 在边界和领域规则稳定后，降低超大类的认知复杂度，不改变业务流程。
+**目标：** 在 203–205 的边界稳定后降低认知复杂度；只做可证明行为等价的职责迁移。
 
 ### 当前事实
 
-- `SegmentIndexManagerImpl` 约 1168 行；
-- `AgentWorkflowImpl` 约 921 行；
-- `ConversationServiceImpl` 约 894 行；
-- `UnifiedSearchServiceImpl` 约 885 行；
-- `IngestionApplicationServiceImpl` 与 `IngestionTaskProcessorImpl` 合计约 888 行。
+按 `dev/clean-up@4dfa6b31` 的物理行数：
 
-问题不只是行数，而是一个类同时承担编排、算法、协议、持久化协调、映射和指标。
+- `SegmentIndexManagerImpl` 1226 行；
+- `AgentWorkflowImpl` 921 行；
+- `ConversationServiceImpl` 945 行；
+- `RetrievalQueryServiceImpl` 约 900 行；
+- `IngestionApplicationServiceImpl` 629 行，`IngestionTaskProcessorImpl` 709 行，合计 1338 行。
+
+现有代码已经有 `ConversationMessageOrchestrator`、`ConversationMessagePipeline`、`IngestionStageTransactionCoordinator` 等局部拆分，不能忽略这些已有边界重新造一套同义类；剩余问题是主类仍同时承担用例编排、算法、协议/映射、持久化协调、生命周期状态和指标。
 
 ### 修复方案
 
-在 ANCHR-202–205 完成后按稳定职责拆分：
+在 characterization tests 保护下按现有方法簇机械提取：
 
-- Search：`HybridRecallUseCase`、`RrfFusionPolicy`、`RerankPolicy`、`SearchResultAggregator`、`SearchInsightFactory`；
-- Conversation：`SessionCommandService`、`ConversationHistoryQueryService`、`SendMessageUseCase`、`ConversationPersistenceCoordinator`、`ConversationTitlePolicy`；
-- Ingestion：`IngestionScheduler`、`ParseStageHandler`、`EmbeddingStageHandler`、`IndexStageHandler`、`IngestionFailurePolicy`；
-- Index management：alias topology、migration、validation、write barrier 分为独立用例/策略。
+- Search：`HybridRecallUseCase`、`RrfFusionPolicy`、generation visibility filter、`RerankPolicy`、`SearchResultAggregator`、`SearchInsightFactory`；
+- Conversation：Session command/query、Message use case、History query、Persistence coordinator、Title policy；沿用 204 已确定的两条 stream application event，不再次设计协议；
+- Agent：Decision loop、Action parser、Tool step executor、Evidence answer resolver、Presentation renderer；复用现有 `AgentRunFinalizer`、`AgentTraceRecorder`，不得创建同义组件；
+- Ingestion：Scheduler、Parse stage、Embedding stage、Index stage、Failure policy；复用现有 transaction coordinator 和 index finalizer；
+- Index management：lifecycle state、alias topology、mapping inspection、migration runner、validation/write barrier。
 
-RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spring，使用普通单元测试。主 Application Service 只保留用例编排。
-
-不把拆分类与业务逻辑修改放在同一个 commit；先用 characterization tests 锁定行为，再机械迁移，最后删除旧 facade 内实现。
+RRF、融合、rerank window、cursor codec、状态 transition 等纯逻辑不依赖 Spring。Facade 可以暂时保留稳定接口，但实现只能委托给明确用例/Policy；调用方迁移完成后删除重复实现。
 
 ### 边界
 
-本卡只能机械拆分 202–205 已经稳定的职责。不得新增 Port/领域状态/数据库字段，不得修改 ES mapping、模型调用顺序、RRF/Rerank 参数、cursor、SSE/REST 协议或 Outbox 策略。拆分过程中发现行为问题必须另开或退回主责卡，不能以“顺手清理”为由混入。
+不得新增 Port、领域状态或数据库字段，不得修改 ES mapping、模型提示、工具/模型调用顺序、RRF/Rerank 参数、cursor、HTTP/SSE、Outbox 策略或 optional capability 的降级语义。optional injection 的去留由 202/205 的 capability 契约决定，206 不得以“清理构造器”为由把可选能力变成必选能力。
 
 ### 验收
 
-- REST/SSE/任务状态和模型调用顺序与迁移前一致。
-- 主用例类只依赖 Command/Result、Domain Policy 和 Port。
-- 纯算法和状态规则无需 Spring Context 即可测试。
-- 删除旧兼容构造器、optional field injection 和跨层 null 兼容分支。
+- HTTP/SSE、任务状态、事务边界、模型/工具调用顺序和指标标签与迁移前一致。
+- 每个被拆主类先有 method-cluster characterization test，再迁移实现；不得只以行数下降作为完成标准。
+- 主用例类只依赖当前用例真正需要的 Contract、Policy 和 capability；不为满足形式上的四层模板增加转发类。
+- 新旧实现不存在双写、双调度、重复模型调用或重复指标；旧 facade 中的重复实现和仅为迁移存在的兼容构造器被删除。
 
 ---
 
@@ -1583,27 +1786,29 @@ RRF、分数融合、cursor codec、状态迁移等纯逻辑类不得依赖 Spri
 
 先完成 Docling/app 契约和存量 reparse 影子验证，再开放后端召回与前端 hit type。110 不新增第二向量字段，不绕开 101C 直接切换物理索引。
 
-### Wave 9–14：DDD 与架构治理，严格串行
+### Wave 9–14：DDD 与架构治理，按真实协作链推进
 
 ```text
-201 架构适应度规则
- → 202 REST DTO/SSE 边界
- → 203 模块 Port/Adapter
- → 205 Outbox 模块迁移
- → 204 既有规则领域化
- → 206 Application Service 机械拆分
+201 领域地图、状态所有权与交互决策（文档）
+ → 202 仅建立后续会用到的最小 Query/Command/Event contract
+ → 203 Knowledge Content ↔ Retrieval
+ → 204 Ask ↔ Knowledge Content / Retrieval
+ → 205A Activity ─┐
+   205B Capability ├→ 206 超大 Service 机械拆分
+   205C 专用 Outbox ┘
 ```
 
-205 先于 204，使领域化后的 Asset/Ingestion 只产生业务事件，不重新引入 KB Outbox 技术模型。206 必须最后执行。不在 101A–101C、102–107、109–110 的正确性 PR 中顺手搬包或拆类。
+201 可以基于当前 clean-up 快照立即评审，不增加依赖或生产类。202 不追求 DTO/import 全量清零，只给 203–205 的真实调用铺路。203 优先解决 ES 写入位于 MySQL 事务内和 Repository 交叉使用的问题；204 随后统一普通 Ask 与 Agent Tool 的 scope/evidence 边界。205A/B/C 可拆成独立 PR，但都必须保留 203/204 的公开能力和现有兼容行为。206 最后执行，不在正确性 PR 中顺手搬包、补齐四层模板或拆大类。
 
 ### 总关键路径
 
 ```text
-Wave 0
-├─ 101A → 104 → 105 ┐
-│                    ├→ 106 → 106B → 107 → 101B → 101C → 110 ┐
-├─ 102  → 103 ──────┘                                        ├→ 201 → 202 → 203 → 205 → 204 → 206
-└─ 109 ──────────────────────────────────────────────────────┘
+dev/clean-up@4dfa6b31 源码快照
+ → 201 → 202 → 203 → 204 → 205A/205B/205C → 206
+
+106B/107 的 Item/generation/Outbox 语义 ───────→ 203/205C
+101C 的 profile 部署语义 ─────────────────────→ 203/205B
+109 的 Session CAS 语义 ───────────────────────→ 204
 ```
 
 ## 跨项目验证矩阵
@@ -1628,6 +1833,9 @@ Wave 0
 | 内嵌图片删除/重解析（110） | item 稳定图片目录、既有清理事件、对账 | 无陈旧缩略图 | 同 attempt object key 幂等 |
 | 500 个会话 | keyset、同时间戳 | 自动/手动加载 | 不涉及 |
 | 重命名与消息并发 | CAS、时间单调 | 标题不回退 | 不涉及 |
+| Knowledge Content → Retrieval generation 写入（203） | ES 写入位于 DB 事务外；激活前二次 fence；失败 generation 不可见且可清理 | 搜索结果不出现未激活 generation | 不改变 Parse contract |
+| Ask → Knowledge/Retrieval 查询（204） | 普通 Ask 与 Agent Tool 共享 scope/evidence contract | 两条 SSE、citation、Preview 与任务恢复回归 | 不涉及 |
+| Activity/Capability/Outbox 支撑边界（205） | Activity 不回滚主事务；profile 失败保留旧 serving；清理幂等重放 | Recent 与配置页面协议不变 | Docling/Storage capability contract 不变 |
 
 ## 完成定义
 
