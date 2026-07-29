@@ -31,6 +31,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -275,6 +277,27 @@ class IngestionApplicationServiceImplTest {
     }
 
     @Test
+    void createTask_shouldSubmitOnlyOnceAfterCommitWhenSynchronizationIsActive() {
+        IngestionApplicationService.IngestionCreateCommand command =
+                command(DedupeStrategy.SKIP, IngestionSourceType.UPLOAD, "hash-new");
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            IngestionTask task = service.createTask("kb-1", command).task();
+
+            verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
+            List<TransactionSynchronization> synchronizations =
+                    TransactionSynchronizationManager.getSynchronizations();
+            assertThat(synchronizations).hasSize(1);
+
+            synchronizations.getFirst().afterCommit();
+
+            verify(ingestionTaskProcessor).submit("kb-1", task.getId(), "user-a");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
     void createTask_sameNormalizedRequest_shouldReplayWithoutRepeatingWrites() {
         when(ingestionTaskRepository.findByClientRequestId("user-a", "request-1"))
                 .thenAnswer(invocation -> Optional.ofNullable(savedTask.get()));
@@ -493,6 +516,17 @@ class IngestionApplicationServiceImplTest {
     }
 
     @Test
+    void listTasks_shouldKeepDefaultMaximumAndExplicitLimits() {
+        service.listTasks("kb-1", IngestionTaskStatus.PENDING, 0);
+        service.listTasks("kb-1", IngestionTaskStatus.PENDING, 101);
+        service.listTasks("kb-1", IngestionTaskStatus.PENDING, 7);
+
+        verify(ingestionTaskRepository).list("kb-1", IngestionTaskStatus.PENDING, 20);
+        verify(ingestionTaskRepository).list("kb-1", IngestionTaskStatus.PENDING, 100);
+        verify(ingestionTaskRepository).list("kb-1", IngestionTaskStatus.PENDING, 7);
+    }
+
+    @Test
     void retryItem_shouldAllocateANewTargetGeneration() {
         IngestionTaskItem failedItem = failedItem("item-1", 3);
         savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
@@ -516,6 +550,38 @@ class IngestionApplicationServiceImplTest {
         verify(ingestionTaskRepository)
                 .refreshSummary(eq("kb-1"), eq("task-1"), eq("user-a"), any(LocalDateTime.class));
         verify(ingestionTaskProcessor).submit("kb-1", "task-1", "user-a");
+    }
+
+    @Test
+    void retryItem_shouldSubmitOnlyOnceAfterCommitWhenSynchronizationIsActive() {
+        IngestionTaskItem failedItem = failedItem("item-1", 3);
+        savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
+                .status(IngestionTaskStatus.FAILED)
+                .items(List.of(failedItem))
+                .build());
+        when(ingestionTaskRepository.findRetryItem("kb-1", "task-1", "item-1"))
+                .thenReturn(Optional.of(failedItem));
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-item-1"))
+                .thenReturn(3L);
+        when(ingestionTaskRepository.resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq(4L),
+                any(LocalDateTime.class)))
+                .thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.retryItem("kb-1", "task-1", "item-1");
+
+            verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
+            List<TransactionSynchronization> synchronizations =
+                    TransactionSynchronizationManager.getSynchronizations();
+            assertThat(synchronizations).hasSize(1);
+
+            synchronizations.getFirst().afterCommit();
+
+            verify(ingestionTaskProcessor).submit("kb-1", "task-1", "user-a");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test

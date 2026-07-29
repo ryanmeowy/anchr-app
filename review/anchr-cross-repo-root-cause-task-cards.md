@@ -42,7 +42,7 @@
 | ANCHR-203 | 收口 Knowledge Content 与 Retrieval 的一致性边界 | 已完成 | P1 | L | app | 201、202，且 101B/101C、106B、107、110 契约稳定 |
 | ANCHR-204 | 收口 Ask 剩余的 Knowledge/Retrieval 同步读取边界 | 已完成 | P1 | L | app | 201–203、109 |
 | ANCHR-205 | 收口 Activity、Provider/Storage 与专用 Outbox 支撑边界 | 源码与本地回归已完成；待真实 MySQL/OSS/ES 验收 | P2 | XL | app | 201–204、101C、107 |
-| ANCHR-206 | 按已稳定用例边界拆分超大 Application Service | 待执行 | P2 | XL | app | 203–205 |
+| ANCHR-206 | 按已稳定用例边界拆分超大 Application Service | 206A–206D 源码与本地回归已完成；206E–206F 待执行 | P2 | XXL | app | 203–205 |
 
 ## 任务边界与唯一归属
 
@@ -1664,42 +1664,198 @@ SegmentIndexManagerImpl
 
 ## ANCHR-206：按已稳定用例边界拆分超大 Application Service
 
-**目标：** 在 203–205 的边界稳定后降低认知复杂度；只做可证明行为等价的职责迁移。
+**目标：** 在 202–205 的跨领域边界已经稳定后，只在各自 bounded context 内按真实方法簇降低认知复杂度。206 不再设计领域边界，不再新增跨领域能力，只做能够由现有 characterization/contract tests 证明行为等价的职责迁移。
 
-### 当前事实
+本卡按当前真实修改面拆为 206A–206F。每个子卡必须独立编译、测试、回滚和验收；一次只执行一张，前一张未完成时不把后一张顺带实现。206 总体涉及 5,359 行主类源码，工作量按 XXL 管理，不再把六条高风险链包装成一次 XL 重构。
 
-按 `dev/clean-up@4dfa6b31` 的物理行数：
+### 实施前源码事实
 
-- `SegmentIndexManagerImpl` 1226 行；
-- `AgentWorkflowImpl` 921 行；
-- `ConversationServiceImpl` 945 行；
-- `RetrievalQueryServiceImpl` 约 900 行；
-- `IngestionApplicationServiceImpl` 629 行，`IngestionTaskProcessorImpl` 709 行，合计 1338 行。
+本节以 `dev/clean-up@a766e84e` 为 206 实施前基线：
 
-现有代码已经有 `ConversationMessageOrchestrator`、`ConversationMessagePipeline`、`IngestionStageTransactionCoordinator` 等局部拆分，不能忽略这些已有边界重新造一套同义类；剩余问题是主类仍同时承担用例编排、算法、协议/映射、持久化协调、生命周期状态和指标。
+- `RetrievalQueryServiceImpl` 924 行，同时承担召回编排、generation gate、RRF、rerank、结果映射、父 Asset 聚合、facet/insight 和指标；
+- `ConversationServiceImpl` 945 行，同时承担 Session command/query、消息执行与持久化、History query/DTO 映射、cursor、Activity、异步提交和消息 SSE JSON 组装；
+- `AgentWorkflowImpl` 921 行，同时承担 decision loop、Action JSON 解析、Tool 调用编排、Evidence finalizer、最终展示生成、trace/progress 和失败收口；
+- `IngestionApplicationServiceImpl` 627 行，承担创建/幂等/去重、维护任务、人工重试、查询和 after-commit 调度；
+- `IngestionTaskProcessorImpl` 693 行，承担 poll/dispatch、Parse、Embedding、Index 前处理、provider retry/backoff 和失败收口；
+- `SegmentIndexManagerImpl` 1,249 行，承担内存生命周期、创建/重建 claim、ES mapping/alias 检查、数据迁移、write barrier、失败回滚和 Capability 激活。
 
-### 修复方案
+当前已经存在且必须复用的协作者包括：
 
-在 characterization tests 保护下按现有方法簇机械提取：
+- Retrieval 的 `SearchKnowledgeAcl`、`QueryEmbeddingService` 和公开 Hit/Page API；
+- Conversation 的 `ConversationMessageOrchestrator`、`ConversationMessagePipeline`、`ConversationTurnCodec`、`ConversationRetrievalTraceBuilder`；
+- Agent 的 `AgentToolExecutor`、`AgentRunFinalizer`、`AgentTraceRecorder`、`AgentRequestContextResolver`；
+- Ingestion 的 `IngestionCreateTransactionRunner`、`IngestionStageTransactionCoordinator`、`IngestionIndexFinalizer` 和 203/205C ACL；
+- Index 的 `SegmentIndexAliasManager`、`SegmentIndexWriteBarrier` 和 `RetrievalCapabilityAcl`。
 
-- Search：`HybridRecallUseCase`、`RrfFusionPolicy`、generation visibility filter、`RerankPolicy`、`SearchResultAggregator`、`SearchInsightFactory`；
-- Conversation：Session command/query、Message use case、History query、Persistence coordinator、Title policy；沿用 204 已确定的两条 stream application event，不再次设计协议；
-- Agent：Decision loop、Action parser、Tool step executor、Evidence answer resolver、Presentation renderer；复用现有 `AgentRunFinalizer`、`AgentTraceRecorder`，不得创建同义组件；
-- Ingestion：Scheduler、Parse stage、Embedding stage、Index stage、Failure policy；复用现有 transaction coordinator 和 index finalizer；
-- Index management：lifecycle state、alias topology、mapping inspection、migration runner、validation/write barrier。
+不得为这些已有职责再创建同义的 Port、Manager、Coordinator 或 Facade。`AgentTaskStreamService` 已经是独立的后台任务 SSE 组件，206 不重写它；`OutboxEventProcessor` 的归属和 claim/retry 算法已经由 205D 固定，也不进入 206。
 
-RRF、融合、rerank window、cursor codec、状态 transition 等纯逻辑不依赖 Spring。Facade 可以暂时保留稳定接口，但实现只能委托给明确用例/Policy；调用方迁移完成后删除重复实现。
+### 206A：Retrieval 查询内部算法拆分（源码与本地回归已完成，2026-07-29）
 
-### 边界
+只处理 `RetrievalQueryServiceImpl`，不同时修改 Search REST、Conversation ACL、Preview、Answer、Follow-up 或索引管理。
 
-不得新增 Port、领域状态或数据库字段，不得修改 ES mapping、模型提示、工具/模型调用顺序、RRF/Rerank 参数、cursor、HTTP/SSE、Outbox 策略或 optional capability 的降级语义。optional injection 的去留由 202/205 的 capability 契约决定，206 不得以“清理构造器”为由把可选能力变成必选能力。
+1. `RetrievalQueryServiceImpl` 继续实现现有 `RetrievalHitQueryApi/RetrievalPageQueryApi`，保留为用例编排入口。
+2. 按当前方法簇提取少量具体协作者：
+   - RRF 累积、权重和候选排序；
+   - rerank window、provider 调用和分数归一化；
+   - `RetrievalHit/TopChunk/Explain` 映射与父 Asset 聚合；
+   - facet/insight 组装。
+3. generation 批量查询仍经 `SearchKnowledgeAcl`，召回仍经 `SegmentRepository`，预览签名仍经 `SearchObjectStoragePort`；不得再加一层接口。
+4. 保持 TEXT/IMAGE 分路召回、RRF 公式、rank constant、alpha/beta、recall topK、rerank window、失败降级、diversify 顺序、limit、聚合键、topChunks、anchor/explain、facet/insight 和全部指标名称/标签/记录时点。
+5. 新协作者优先为无 Spring 的 package-private 具体类或纯 Policy；只有确实需要现有 Port 的协作者才作为 Spring bean，不为单一实现新增接口。
 
-### 验收
+**完成条件：** Hit/Page API records 无变化；公共 Search 和 Ask 的结果顺序、分数、预览、citation 输入、explain/facet/insight golden 全部一致；不存在新旧两套融合或 rerank 路径。
 
-- HTTP/SSE、任务状态、事务边界、模型/工具调用顺序和指标标签与迁移前一致。
-- 每个被拆主类先有 method-cluster characterization test，再迁移实现；不得只以行数下降作为完成标准。
-- 主用例类只依赖当前用例真正需要的 Contract、Policy 和 capability；不为满足形式上的四层模板增加转发类。
-- 新旧实现不存在双写、双调度、重复模型调用或重复指标；旧 facade 中的重复实现和仅为迁移存在的兼容构造器被删除。
+**实施结果：**
+
+- `RetrievalQueryServiceImpl` 继续是唯一 Hit/Page 用例入口，保留三路召回、`SearchKnowledgeAcl` scope/generation gate、Repository/Embedding 调用顺序和最终 limit 编排；主类由 924 行降至 305 行，但完成判断不以行数为依据。
+- 提取四个同 package、无新增接口的具体协作者：`RetrievalRrfFusionPolicy` 负责 RRF 与每 Asset/SegmentType 前三条 diversify；`RetrievalRerankPolicy` 负责 window、provider、分数融合、指标与原序 fallback；`RetrievalResultAssembler` 负责 Hit/Explain/TopChunk/Preview 和父 Asset 聚合；`RetrievalPageAssembler` 负责 facet/insight。它们不是 Spring Bean，由唯一 Service 直接持有，没有第二条执行路径。
+- generation 批量事实仍只经 `SearchKnowledgeAcl`，TEXT/IMAGE 召回仍只经 `SegmentRepository`，DOCUMENT_IMAGE Preview 仍只经可选 `SearchObjectStoragePort`；没有新增 provider API、ACL、Port、Facade 或缓存。
+- 固定并验证 RRF 公式和三层 tie-breaker、文本 highlight 优先、三路 vector 标记、diversify 顺序、rerank window/tail、alpha/beta 归一化、无效 provider index、model/empty fallback 指标、原始 TopChunk、Preview fail-open、父 Asset MIXED 聚合、facet 顺序、相关性阈值、CAPTION 不计入既有 hit-source distribution，以及空可见 scope 在 embedding/ES 前短路。
+- 现有 `RetrievalQueryTopChunkMappingTest` 已从反射主类私有方法迁到明确协作者；新增完整 Page query characterization，固定 `scope → embedding → text recall → text vector → image vector → generation → rerank` 的调用顺序、route filter 和 Page projection。Search Controller/REST assembler、Conversation Retrieval 相关回归继续通过。
+- 未修改 Hit/Page API records、Search/Ask/Preview/Answer/Follow-up 调用方、端点、HTTP/JSON/SSE、前端、ES mapping、RRF/Rerank 参数、generation 规则、预览协议、指标名称/标签或外部调用顺序。
+- `test-compile`、206A 目标测试和 Search/Retrieval/Conversation Retrieval 扩展回归通过。沙箱内完整测试因 20 个临时 HTTP Server 无端口权限而得到 503 tests、0 failure、20 environment errors、17 skipped；允许本机端口后相同 `mvn clean test` 通过：503 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。当前结果不替代真实 Elasticsearch 召回/相关性和部署验收。
+
+### 206B：Conversation 用例拆分与消息 SSE 传输归位（源码与本地回归已完成，2026-07-29）
+
+只处理 `ConversationServiceImpl` 和 `POST /api/v1/conversations/{sessionId}/messages/stream` 的内部适配，不处理 Agent 决策算法和后台 Agent Task SSE。
+
+1. 按现有方法簇拆出同一 Ask 上下文内的具体协作者：
+   - Session create/get/list/rename/delete 与 session cursor；
+   - Message execute/persist、自动标题 CAS/touch、Agent Task after-commit submit 和 Activity；
+   - History get/list、active task 批量加载与 Turn DTO 映射。
+2. `ConversationService` 可以在迁移期保留为 Controller facade，但只能委托；若拆分后只剩无意义转发，则在同一子卡内让 Controller 直接依赖明确用例并删除 facade，禁止两套入口长期并存。
+3. `SseEmitter`、异步 executor、断线识别、event name 和 JSON payload 组装迁到 `interfaces.rest` 的具体消息流适配器；Application 继续使用现有 `ConversationProgressListener` 和普通消息执行结果，不新增通用 Event Bus。
+4. 固定保留 `trace/delta/citations/done/error` 的名称、顺序、2 KB padding、120 秒 timeout、响应头、断线后继续完成并落库、最终 citation-normalized answer 才对外发送，以及 Runtime Snapshot 发布时点。
+5. `AgentTaskStreamService`、`GET /api/v1/agent/tasks/{taskId}/stream`、task/delta/answer_reset/done 协议和 11 分钟 timeout 全部原样保留，只做回归验证。
+6. Session keyset cursor、title CAS、updatedAt 单调更新、Turn 事务、Session 删除同步清理、QUESTION best-effort Activity、DTO 字段和指标不得改变。
+
+**完成条件：** Application 不再持有消息 SSE 的 Spring MVC 传输细节；同步消息与流式消息仍共用唯一 Message use case；两条 SSE 和全部 Conversation HTTP golden contract 完全不变。若发现必须修改端点、method、认证、请求/响应 JSON 或 SSE 字段，立即停止并请求确认，同时规划 `anchr-web` 修改。
+
+**实施结果：**
+
+- `ConversationServiceImpl` 保留为唯一 Controller facade，只委托 `ConversationSessionUseCase`、`ConversationMessageUseCase`、`ConversationHistoryQuery` 三个同一 Ask 上下文内的具体用例；主类由 945 行收敛为 77 行，没有保留旧方法体或第二条执行路径。
+- Session 用例独立拥有 create/get/list/rename/delete、稳定 keyset cursor 和 DTO 映射；删除事务仍由 facade 的原 `@Transactional(rollbackFor = Exception.class)` 包住，cancel、Session 删除、Agent records 删除和 Activity 同步删除顺序未改。
+- Message 用例独立拥有 scope/answer mode 规范化、Orchestrator 调用、Turn/Agent Task 构造、TransactionTemplate 持久化、自动标题 CAS/touch、after-commit submit、QUESTION Activity、response/trace 和指标。同步 HTTP 与消息 SSE 注入并调用同一个 singleton Message use case。
+- History 用例独立拥有 get/list、`beforeTurnId`、limit+1、稳定 chronological mapping、PROCESSING task 批量查询、legacy answer status/fallback 恢复和原有分阶段指标；增加小型具体 `ConversationAgentTaskDtoAssembler` 复用 Agent Task DTO 映射，未增加接口或跨域层。
+- `ConversationService` 不再暴露 `SseEmitter`。新增 REST 层具体 `ConversationMessageStreamAdapter`，拥有 120 秒 emitter、stream executor、UserContext 传播、断线识别、2 KB trace padding、48 字符 answer chunk、event/payload 组装和 Runtime Snapshot 发布。Controller 仅把原 stream 入口委托给该 adapter。
+- `ConversationProgressListener` 只补内部 `onExecutionStarted(turnId, runId)` default callback，让 REST adapter 在 Message use case 读取 Session/执行模型前发送原首个 trace；turn/run ID 前缀、生成次数和后续 Orchestrator 入参保持不变，不建立 Event Bus。
+- 固定并验证消息 SSE 的 `trace → delta → citations → done` 顺序、initial trace turnId 与最终落库 Turn 一致、done `sessionUpdatedAt` 取持久化 Session、只发送 citation-normalized 最终答案、断线后业务继续完成。`AgentTaskStreamService`、`GET /api/v1/agent/tasks/{taskId}/stream`、task/delta/answer_reset/done 和 11 分钟 timeout 未修改，只做回归。
+- 未修改任何端点路径、HTTP method、认证、请求/响应 JSON、SSE event 名称/字段/顺序、前端、Session/Turn/Task Repository、Mapper SQL、事务时点、模型/Tool 调用、Activity 语义、指标名称/标签或 Agent Workflow。
+- `mvn compile`、`test-compile`、Conversation 主流程、Session cursor、History、Message persistence、Conversation Controller SSE 和后台 Agent Task SSE 目标回归通过；允许本机临时端口后完整 `mvn clean test` 通过：503 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。真实 MySQL 并发/回滚、部署代理缓冲与浏览器断线恢复仍需集成环境验收。
+
+### 206C：Agent Workflow 内部职责拆分（源码与本地回归已完成，2026-07-29）
+
+只处理 `AgentWorkflowImpl`，不修改 Conversation 持久化、Tool contract、异步 Agent Task 生命周期或 SSE adapter。
+
+1. 复用现有 `AgentToolExecutor/AgentRunFinalizer/AgentTraceRecorder/AgentRequestContextResolver`，不创建同义 executor、finalizer、recorder 或 context service。
+2. 只提取三个已经清晰稳定的方法簇：
+   - Action JSON/fence/answer type 解析与 protocol error 计数；
+   - Evidence finalizer 输入、输出解析和无证据/校验失败结果；
+   - 最终 Presentation 生成、stream 完整性校验和 presentation step 记录。
+3. decision loop、预算控制、取消检查和 progress/trace 的总体编排继续由 `AgentWorkflowImpl` 持有；等三个方法簇迁移稳定后再评估是否仍有拆 loop 的真实收益，不在本子卡预造第二层 orchestrator。
+4. system/finalizer/presentation prompt 必须逐字符保持；模型调用次数和顺序、Tool 顺序、最大 step、READ_LIMIT、protocol retry、evidence 截断、citation marker、fallback 文案、trace JSON、指标和 terminal status 全部保持。
+5. 提取类为 Ask 内部具体类；不新增 Agent bounded context、跨域 API、接口层或消息总线。
+
+**完成条件：** 相同模型/Tool fixture 产生相同请求序列、trace steps、progress、citation、answer/fallback 和终态；无重复模型调用、Tool 调用或 trace 写入。
+
+**实施结果：**
+
+- `AgentWorkflowImpl` 继续是唯一 Workflow 入口和 decision loop 编排者，保留预算控制、取消检查、模型决策、Tool 顺序、READ_LIMIT、最终回答校验、终态与 trace finish；主类由 921 行收敛为 618 行，没有第二条 loop 或模型/Tool 执行路径。
+- 提取三个同 package、无 Spring 注解、无新增接口的具体协作者：`AgentActionProtocol` 负责 JSON/fence/action/answerType 解析以及连续 protocol error 计数、阈值指标和 reset；`AgentEvidenceFinalizer` 负责证据裁剪与 JSON、最多两次 evidence finalizer 调用、输出校验、usage/trace/progress；`AgentFinalPresentation` 负责最终 stream 调用、完整性校验、answer reset、usage 和 presentation step。
+- 三个协作者由唯一 `AgentWorkflowImpl` 构造并直接持有，继续复用原 `ConversationGenerationPort`、`AgentTraceRecorder`、`AgentProperties`、`ObjectMapper` 和 `MeterRegistry`；未新增 Bean、Port、Manager、Facade、消息总线或 Agent bounded context。
+- `SYSTEM_PROMPT` 保留在 Workflow；Evidence finalizer 与 Presentation prompt 只移动归属。三个 prompt 均与 206C 前基线逐字节比较且 SHA-256 一致；temperature、max tokens、bounded timeout、模型调用次数和顺序未改。
+- 固定并验证 fenced JSON final、Tool calls 顺序和 arguments 编码、protocol retry/fallback 阈值与合法 Tool 后 reset；原有 Workflow characterization 继续覆盖决策事件、模型失败、READ_LIMIT 后 evidence finalization、引用校验、NO_EVIDENCE、两次 protocol fallback、流式 Presentation、citation draft 跳过二次生成、Tool result 截断和取消。
+- Agent Workflow、Tool、Trace、Request Context、异步 Agent Task 调度/超时、后台 Task SSE、Conversation Orchestrator、消息用例和消息 SSE 目标回归通过；未修改 Conversation 持久化、Tool contract、异步 Agent Task 生命周期、任何端点、HTTP/JSON/SSE、前端、指标名称/标签或 terminal status。
+- `mvn compile`、`test-compile`、目标测试和允许本机临时端口后的完整 `mvn clean test` 通过：506 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。真实模型/Tool provider、持久化 trace、取消竞争和部署 SSE 仍需集成环境验收。
+
+### 206D：Ingestion 命令与查询用例拆分（源码与本地回归已完成，2026-07-29）
+
+只处理 `IngestionApplicationServiceImpl`，不修改 worker、阶段执行、Docling、Embedding 或 Retrieval 写入。
+
+1. 按当前入口拆出：
+   - 创建、请求规范化、requestHash、clientRequestId replay/conflict 和 dedupe；
+   - reparse/reembed 维护任务与人工 retry；
+   - task get/list 查询和 limit。
+2. `IngestionApplicationService` 在 Controller contract 稳定期间可以保留为薄 facade；不得把同一命令同时留在 facade 和新用例中执行。
+3. 继续复用 `IngestionCreateTransactionRunner`，保持 task/items/Asset 创建、overwrite、Outbox insert 的现有事务边界；继续复用唯一 `IngestionTaskProcessor` 做 after-commit submit。
+4. 保持 clientRequestId/requestHash、SKIP/OVERWRITE/VERSION、批量上限、状态投影、错误码、Activity after-commit、任务提交时点和现有 REST DTO/JSON。
+5. Knowledge Content 内部 Repository 直连是同一 bounded context 协作，不借拆分类新增 Knowledge API/ACL。
+
+**完成条件：** create/replay/conflict/dedupe/maintenance/retry/query fixtures 与迁移前一致；没有重复创建、重复 Outbox、事务内 Activity 或重复 submit。
+
+**实施结果：**
+
+- `IngestionApplicationServiceImpl` 保留为唯一 Controller-facing facade，构造并委托创建、维护/重试、查询三个同 package 具体用例；主类由 627 行收敛为 107 行，不保留旧命令实现或第二条执行路径。
+- `IngestionTaskCreateUseCase` 独立拥有请求规范化、50 项上限、sourceType/dedupe 默认值、requestHash、clientRequestId replay/conflict、并发唯一键 winner read、SKIP/OVERWRITE/VERSION、Asset/Item/Task 创建、Activity、KB stats 和 after-commit submit；继续复用唯一 `IngestionCreateTransactionRunner` 的 REQUIRES_NEW write/read。
+- `IngestionTaskMaintenanceUseCase` 独立拥有 reparse/reembed、文档悲观锁、下一 target generation 分配、单项/批量 failed retry、summary refresh、状态更新和 after-commit submit；四个原 `@Transactional` 入口继续保留在 Spring facade 上。
+- `IngestionTaskQuery` 独立拥有 get/list、默认 20/最大 100 limit、task missing 映射和 creator + exact KB 的 clientRequestId acceptance recovery；归档 KB 的既有 replay/recovery 语义不变。
+- 增加无依赖、无 Spring 注解的纯 `IngestionTaskFactory`，由创建与维护用例共享原 Task count/status/finishedAt 投影；四个新类均未新增接口、Port、Manager、Coordinator、Facade 或跨领域 API，Knowledge Content Repository 仍是同一 bounded context 内部协作。
+- 固定并验证无 clientRequestId 的每次创建、规范化 replay、payload/KB/order conflict、并发唯一键 winner、非幂等 duplicate 原样抛出、SKIP/OVERWRITE/VERSION、维护任务 projection、retry generation、状态竞争、查询 limit，以及创建和人工 retry 在事务同步存在时只注册一次 after-commit submit。
+- 未修改 `IngestionTaskProcessorImpl`、Parse/Embedding/Index 阶段、203/205C ACL、数据库/Mapper、Outbox、任何端点、HTTP/JSON、SSE 或前端；Worker、阶段事务、Index finalizer、Storage/Docling/Retrieval ACL、Repository/Mapper 和 REST Controller 只做扩展回归。
+- `mvn compile`、`test-compile`、目标测试和允许本机临时端口后的完整 `mvn clean test` 通过：509 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。真实 MySQL REQUIRES_NEW/唯一键竞争/事务回滚、after-commit 调度饱和和部署 Worker 仍需集成环境验收。
+
+### 206E：Ingestion Worker 阶段执行拆分
+
+只处理 `IngestionTaskProcessorImpl`，必须在 206D 完成并稳定后执行；不修改任务表、状态机或调度模型。
+
+1. poll、restart recovery、local dispatch set、executor rejection 和单 item 总体编排继续由 Processor 持有。
+2. 只按真实阶段提取：
+   - Parse：source URL、Storage target/credential、Docling submit/poll/ack 和 chunk 映射；
+   - Embedding：projection、provider pacing/retry/backoff 和 segment embedding；
+   - 失败分类与错误转换。
+3. Index 激活继续复用 `IngestionIndexFinalizer`，短事务 transition 继续复用 `IngestionStageTransactionCoordinator`，不得再造 `IndexStageExecutor` 或事务 coordinator。
+4. 保持 claim/lease/claimVersion、restart fail、batch/concurrency、Parse timeout/poll、Docling Retry-After、ACK 时点、Embedding 限速/重试、target generation、阶段顺序、失败 Outbox 和 KB stats 刷新。
+5. 203 的 `IngestionRetrievalAcl`、205C 的 `IngestionStorageAcl/IngestionDoclingAcl` 原样复用；不得绕过 ACL，也不得增加提供方 API。
+
+**完成条件：** Parse → Embedding → Index 的状态、事务、外部调用和失败序列与迁移前一致；没有双调度、双 ACK、双 embedding、双 index 或 active generation 误清理。
+
+### 206F：Retrieval 物理索引生命周期拆分
+
+最后执行，只处理 `SegmentIndexManagerImpl`；这是 206 风险最高的子卡，不能与 206A 或 Capability 配置改动合并。
+
+1. `SegmentIndexManagerImpl` 继续持有唯一 `AtomicReference` 状态、operation lock、create/rebuild claim 和公开 `SegmentIndexManager/RetrievalEmbeddingDeploymentApi` 入口。
+2. 按当前方法簇提取：
+   - mapping/profile 与 alias topology inspection；
+   - settings/mapping 加载和物理索引创建；
+   - scroll → projection/embedding → bulk write → count validation 的 migration runner；
+   - status DTO 组装。
+3. 继续复用 `SegmentIndexAliasManager`、`SegmentIndexWriteBarrier` 和 `RetrievalCapabilityAcl`；不得创建第二套 alias manager、状态仓库或 deployment API。
+4. 保持单实例内存状态、启动检查、15 秒 topology refresh、物理索引命名、mapping meta、scroll/bulk size、embedding session、限速重试、write barrier、alias 切换顺序、Capability 激活/cache refresh、失败回切与 target index 清理。
+5. 不新增持久化 deployment 状态、分布式 lease、增量追平或新索引协议；这些不是机械拆分。
+
+**完成条件：** create/retry/prepare/request/confirm/status 并发 characterization tests 全部保持；真实 Elasticsearch 验证 mapping、全量迁移、count、alias 切换、激活失败回切和失败索引清理。没有真实 ES 验证时只能报告源码与本地回归完成，不能把 206F 标为生产验收完成。
+
+### 统一硬边界
+
+- 不新增或修改跨领域 Application API、ACL、Port、领域状态、数据库字段、Flyway、Mapper SQL、ES mapping 和物理索引协议；202–205 的边界直接复用。
+- 不修改任何端点路径、HTTP method、认证角色、请求 JSON、响应 JSON、SSE event 名称/字段/顺序或前端类型。若发现确实必须改变，立即停止并先确认；得到确认后必须同步修改并验证 `anchr-web`。
+- 不修改 RRF/Rerank、cursor、generation、Ingestion 状态 transition、模型 prompt、Tool schema/顺序、Outbox claim/retry/cleanup、optional capability 降级或 Storage/Docling contract。
+- 不引入 ArchUnit、通用 Event Bus/Command Bus/Mediator、统一 Facade、每类一个接口或只为目录对称存在的空层。
+- 不拆 `OutboxEventProcessor`、`AgentTaskStreamService`、`ConversationMessagePipeline`、`IngestionStageTransactionCoordinator`、`IngestionIndexFinalizer`、`SegmentIndexAliasManager` 等已经边界清晰的组件，除非实施时发现可复现缺陷并先另行确认。
+- 不以行数、类数量或 package 对称作为验收标准；只以职责唯一、旧实现删除和行为等价作为验收标准。
+
+### 执行顺序与验收
+
+固定顺序：
+
+```text
+206A Retrieval
+  → 206B Conversation/SSE
+  → 206C Agent
+  → 206D Ingestion Application
+  → 206E Ingestion Worker
+  → 206F Segment Index
+```
+
+每个子卡均执行：
+
+1. 先补当前方法簇 characterization test，再移动生产实现；
+2. 目标测试、`mvn compile`、`test-compile` 和完整 `mvn test`；
+3. 对涉及链路复跑现有 HTTP/SSE JSON golden、指标和外部调用顺序验证；
+4. 分别报告通过项、无 Docker 的 Testcontainers 跳过项、真实 MySQL/ES/OSS/Docling 未验收项和仓库既有失败；
+5. 确认旧方法体、临时兼容构造器和双路径已删除后，才标记该子卡完成。
+
+只有 206A–206F 均完成源码迁移、完整本地回归和各自要求的真实环境验收后，ANCHR-206 才能标记完成。任一子卡发现需要改变业务行为、协议或前序边界时，停止 206，把问题返回对应正确性卡或先请求新的决策。
 
 ---
 
