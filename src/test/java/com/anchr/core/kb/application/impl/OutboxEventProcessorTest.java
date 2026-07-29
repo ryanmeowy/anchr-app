@@ -7,10 +7,9 @@ import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.kb.application.acl.KnowledgeRetrievalCleanupAcl;
-import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
+import com.anchr.core.kb.application.acl.KnowledgeStorageAcl;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
-import com.anchr.core.settings.domain.model.StorageConfig;
-import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,9 +44,9 @@ class OutboxEventProcessorTest {
     @Mock
     private IngestionTaskRepository ingestionTaskRepository;
     @Mock
-    private IngestionObjectStoragePort objectStoragePort;
+    private KnowledgeObjectStoragePort objectStoragePort;
     @Mock
-    private StorageConfigRepository storageConfigRepository;
+    private KnowledgeStorageAcl knowledgeStorageAcl;
 
     private OutboxEventProcessor processor;
 
@@ -59,7 +58,7 @@ class OutboxEventProcessorTest {
                 new ObjectMapper(),
                 ingestionTaskRepository,
                 objectStoragePort,
-                storageConfigRepository);
+                knowledgeStorageAcl);
         ReflectionTestUtils.setField(processor, "maxAttempts", 10);
     }
 
@@ -202,7 +201,8 @@ class OutboxEventProcessorTest {
                 OutboxEventType.DELETE_ASSET_GENERATION,
                 0,
                 generationPayload(4L));
-        when(storageConfigRepository.find()).thenReturn(Optional.of(storageConfig()));
+        when(knowledgeStorageAcl.findConfiguredPrefix())
+                .thenReturn(Optional.of("embedded"));
         when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any()))
                 .thenReturn(true);
 
@@ -221,7 +221,8 @@ class OutboxEventProcessorTest {
                 OutboxEventType.DELETE_ASSET_GENERATION,
                 0,
                 generationPayload(4L));
-        when(storageConfigRepository.find()).thenReturn(Optional.of(storageConfig()));
+        when(knowledgeStorageAcl.findConfiguredPrefix())
+                .thenReturn(Optional.of("embedded"));
         doThrow(new IllegalStateException("OSS unavailable"))
                 .when(objectStoragePort).deleteObjectsByPrefix(
                         "embedded/ingestion/assets/asset-1/generations/4/images/");
@@ -236,10 +237,6 @@ class OutboxEventProcessorTest {
         verify(outboxEventRepository).markRetry(
                 eq(1L), eq("claim-1"), eq(1), any(), eq("OSS unavailable"), any());
         verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());
-    }
-
-    private StorageConfig storageConfig() {
-        return StorageConfig.builder().prefix("embedded").build();
     }
 
     private OutboxEvent event(int retryCount, String payload) {

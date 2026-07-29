@@ -12,13 +12,13 @@ import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URL;
 import java.util.Date;
@@ -30,7 +30,10 @@ import java.util.List;
 @Slf4j
 @Primary
 @Service
-public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, IngestionObjectStoragePort {
+public class ConfigDrivenStorageAdapter implements
+        SearchObjectStoragePort,
+        IngestionObjectStoragePort,
+        KnowledgeObjectStoragePort {
 
     private static final long SHORT_VALIDITY_MS = 60_000L;
     private static final long MEDIUM_VALIDITY_MS = 300_000L;
@@ -49,23 +52,6 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     // ── SearchObjectStoragePort ──────────────────────────────────────────
 
     @Override
-    public String uploadFile(MultipartFile file) {
-        StorageConfig config = loadConfig();
-        String fileName = (config.getPrefix() != null ? config.getPrefix() : "temp/")
-                + System.currentTimeMillis() + "_" + file.getOriginalFilename();
-        OSS client = buildClient(config);
-        try {
-            client.putObject(config.getBucket(), fileName, file.getInputStream());
-            return fileName;
-        } catch (Exception e) {
-            log.error("Failed to upload file to OSS: {}", e.getMessage(), e);
-            throw new BusinessException(ApiError.INTERNAL_ERROR, "Failed to upload file to object storage.", e);
-        } finally {
-            client.shutdown();
-        }
-    }
-
-    @Override
     public String buildAiImageInput(String objectKey, AiInputValidity validity) {
         long duration = validity == AiInputValidity.SHORT ? SHORT_VALIDITY_MS : MEDIUM_VALIDITY_MS;
         return buildProcessedImageUrl(objectKey, duration);
@@ -77,8 +63,18 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
     }
 
     @Override
-    public SignedObjectUrl buildPreviewUrl(String objectKey) {
+    public SearchObjectStoragePort.SignedObjectUrl buildPreviewUrl(String objectKey) {
         return buildSignedObjectUrl(objectKey, SHORT_VALIDITY_MS);
+    }
+
+    // ── KnowledgeObjectStoragePort ──────────────────────────────────────
+
+    @Override
+    public KnowledgeObjectStoragePort.SignedObjectUrl signPreviewUrl(String objectKey) {
+        SearchObjectStoragePort.SignedObjectUrl signed =
+                buildSignedObjectUrl(objectKey, SHORT_VALIDITY_MS);
+        return new KnowledgeObjectStoragePort.SignedObjectUrl(
+                signed.url(), signed.expiresAt());
     }
 
     // ── IngestionObjectStoragePort ───────────────────────────────────────
@@ -142,11 +138,14 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
         return buildSignedObjectUrl(objectKey, durationMs, EMBEDDING_IMAGE_PROCESS).url();
     }
 
-    private SignedObjectUrl buildSignedObjectUrl(String objectKey, long durationMs) {
+    private SearchObjectStoragePort.SignedObjectUrl buildSignedObjectUrl(
+            String objectKey,
+            long durationMs
+    ) {
         return buildSignedObjectUrl(objectKey, durationMs, null);
     }
 
-    private SignedObjectUrl buildSignedObjectUrl(
+    private SearchObjectStoragePort.SignedObjectUrl buildSignedObjectUrl(
             String objectKey,
             long durationMs,
             String process
@@ -162,7 +161,8 @@ public class ConfigDrivenStorageAdapter implements SearchObjectStoragePort, Inge
                 request.setProcess(process);
             }
             URL url = client.generatePresignedUrl(request);
-            return new SignedObjectUrl(url.toString(), expiresAt);
+            return new SearchObjectStoragePort.SignedObjectUrl(
+                    url.toString(), expiresAt);
         } catch (Exception e) {
             log.error("Failed to sign URL for {}: {}", objectKey, e.getMessage());
             throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);

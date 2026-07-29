@@ -1,7 +1,5 @@
 package com.anchr.core.search.domain.port;
 
-import org.springframework.web.multipart.MultipartFile;
-
 /**
  * Domain port for object storage operations used by search.
  */
@@ -17,11 +15,6 @@ public interface SearchObjectStoragePort {
         SHORT,
         MEDIUM
     }
-
-    /**
-     * Upload image file and return object key.
-     */
-    String uploadFile(MultipartFile file);
 
     /**
      * Build temporary AI input URL for image understanding and embedding.

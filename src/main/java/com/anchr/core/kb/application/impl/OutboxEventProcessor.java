@@ -6,10 +6,10 @@ import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.ingestion.application.impl.IngestionImagePaths;
-import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.kb.application.acl.KnowledgeRetrievalCleanupAcl;
-import com.anchr.core.settings.domain.repository.StorageConfigRepository;
+import com.anchr.core.kb.application.acl.KnowledgeStorageAcl;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -39,8 +39,8 @@ public class OutboxEventProcessor {
     private final KnowledgeRetrievalCleanupAcl knowledgeRetrievalCleanupAcl;
     private final ObjectMapper objectMapper;
     private final IngestionTaskRepository ingestionTaskRepository;
-    private final IngestionObjectStoragePort objectStoragePort;
-    private final StorageConfigRepository storageConfigRepository;
+    private final KnowledgeObjectStoragePort objectStoragePort;
+    private final KnowledgeStorageAcl knowledgeStorageAcl;
 
     @Value("${app.outbox.batch-size:20}")
     private int batchSize;
@@ -108,12 +108,13 @@ public class OutboxEventProcessor {
     }
 
     private void cleanupIngestionImages(String assetId, List<Long> generations) {
-        var storageConfig = storageConfigRepository.find().orElse(null);
-        if (storageConfig == null || generations == null) return;
+        String configuredPrefix = knowledgeStorageAcl.findConfiguredPrefix()
+                .orElse(null);
+        if (configuredPrefix == null || generations == null) return;
         for (Long generation : generations) {
             if (generation == null || generation < 1L) continue;
             objectStoragePort.deleteObjectsByPrefix(IngestionImagePaths.imagePrefix(
-                    storageConfig.getPrefix(), assetId, generation));
+                    configuredPrefix, assetId, generation));
         }
     }
 

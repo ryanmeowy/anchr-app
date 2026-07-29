@@ -81,12 +81,6 @@ class SegmentIndexMigrationValidationTest {
     void rebuildShouldPresignObjectKeysButKeepStableDirectUrls() {
         SearchObjectStoragePort storage = new SearchObjectStoragePort() {
             @Override
-            public String uploadFile(
-                    org.springframework.web.multipart.MultipartFile file) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
             public String buildAiImageInput(
                     String objectKey,
                     AiInputValidity validity

@@ -7,8 +7,16 @@ import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
+import com.anchr.core.ingestion.application.acl.IngestionDoclingAcl;
 import com.anchr.core.ingestion.application.acl.IngestionRetrievalAcl;
+import com.anchr.core.ingestion.application.acl.IngestionStorageAcl;
+import com.anchr.core.ingestion.application.model.IngestionDoclingException;
+import com.anchr.core.ingestion.application.model.IngestionDoclingFailureKind;
+import com.anchr.core.ingestion.application.model.IngestionDoclingJob;
+import com.anchr.core.ingestion.application.model.IngestionDoclingJobError;
 import com.anchr.core.ingestion.application.model.IngestionIndexSegment;
+import com.anchr.core.ingestion.application.model.IngestionStorageCredential;
+import com.anchr.core.ingestion.application.model.IngestionStorageTarget;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
@@ -17,11 +25,6 @@ import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
 import com.anchr.core.integration.ai.client.AiClient;
-import com.anchr.core.integration.ai.client.DoclingClient;
-import com.anchr.core.integration.ai.client.DoclingClient.DoclingClientException;
-import com.anchr.core.integration.ai.client.DoclingClient.DoclingJob;
-import com.anchr.core.integration.ai.client.DoclingClient.DoclingJobError;
-import com.anchr.core.integration.storage.StorageTokenIssuer;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
@@ -31,8 +34,6 @@ import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy.Profile;
 import com.anchr.core.search.domain.model.SegmentType;
-import com.anchr.core.settings.domain.model.StorageConfig;
-import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -87,14 +88,13 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final IngestionEmbeddingPort embeddingPort;
     private final AesUtil aesUtil;
-    private final StorageTokenIssuer storageTokenIssuer;
     private final IngestionIndexFinalizer ingestionIndexFinalizer;
     private final IngestionRetrievalAcl ingestionRetrievalAcl;
     private final IngestionStageTransactionCoordinator transactionCoordinator;
     private final IngestionObjectStoragePort objectStoragePort;
-    private final StorageConfigRepository storageConfigRepository;
+    private final IngestionStorageAcl ingestionStorageAcl;
     private final DoclingChunkMapper doclingChunkMapper;
-    private final DoclingClient doclingClient;
+    private final IngestionDoclingAcl ingestionDoclingAcl;
     private final ObjectMapper objectMapper;
     private final IdGen idGen;
 
@@ -251,11 +251,11 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private ParseRunContext createParseContext(IngestionTaskItem item, Asset asset) {
         long generation = requireTargetIndexGeneration(item);
-        StorageConfig storageConfig = embeddedImageUploadEnabled
-                ? storageConfigRepository.find().orElse(null) : null;
+        IngestionStorageTarget storageTarget = embeddedImageUploadEnabled
+                ? ingestionStorageAcl.findTarget(asset.getId(), generation).orElse(null)
+                : null;
         IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
-                asset, embeddedImageUploadEnabled, storageConfig,
-                asset.getId(), generation).validated();
+                asset, embeddedImageUploadEnabled, storageTarget).validated();
         return new ParseRunContext(
                 IngestionParseIdentity.requestId(item.getTaskId(), item.getId(), generation),
                 IngestionParseIdentity.sourceRevision(asset),
@@ -270,12 +270,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         String jobId = null;
         while (Instant.now().isBefore(deadline)) {
             try {
-                DoclingJob job;
+                IngestionDoclingJob job;
                 if (!StringUtils.hasText(jobId)) {
-                    job = doclingClient.submitJob(buildParseRequest(context, asset));
+                    job = ingestionDoclingAcl.submitJob(buildParseRequest(context, asset));
                     jobId = job.jobId();
                 } else {
-                    job = doclingClient.getJob(jobId, context.requestId());
+                    job = ingestionDoclingAcl.getJob(jobId, context.requestId());
                 }
                 switch (job.normalizedStatus()) {
                     case "succeeded" -> {
@@ -300,15 +300,15 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                             ApiError.TEXT_PARSE_FAILED,
                             "Docling returned unknown job status: " + clip(job.status(), 128));
                 }
-            } catch (DoclingClientException failure) {
-                if (failure.kind() == DoclingClient.FailureKind.NOT_FOUND
+            } catch (IngestionDoclingException failure) {
+                if (failure.kind() == IngestionDoclingFailureKind.NOT_FOUND
                         && recoveries < effectiveProviderMaxRetries()) {
                     jobId = null;
                     recoveries++;
                     sleep(retryDelay(recoveries));
                     continue;
                 }
-                if (failure.kind() == DoclingClient.FailureKind.TRANSIENT
+                if (failure.kind() == IngestionDoclingFailureKind.TRANSIENT
                         && recoveries < effectiveProviderMaxRetries()) {
                     recoveries++;
                     sleep(positiveDuration(failure.retryAfter())
@@ -333,20 +333,13 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private Map<String, String> buildEncryptedOssCredentials(ParseRunContext context) {
         IngestionParseRequestTemplate template = context.template();
         if (template.ossTarget() == null) return null;
-        StorageConfig config = storageConfigRepository.find()
-                .orElseThrow(() -> new BusinessException(
-                        ApiError.INTERNAL_ERROR,
-                        "Docling image output requires storage configuration."));
-        if (!template.targets(config, context.assetId(), context.targetGeneration())) {
-            throw new BusinessException(
-                    ApiError.INTERNAL_ERROR,
-                    "Storage output target changed during document processing.");
-        }
         try {
-            String accessKey = aesUtil.decrypt(config.getAccessKeyEnc());
-            String secretKey = aesUtil.decrypt(config.getSecretKeyEnc());
-            Map<String, Object> token = storageTokenIssuer.issueToken(
-                    config, accessKey, secretKey);
+            IngestionStorageCredential credential =
+                    ingestionStorageAcl.issueTemporaryCredential(
+                            template.ossTarget(),
+                            context.assetId(),
+                            context.targetGeneration());
+            Map<String, Object> token = credential.toCredentialMap();
             String aad = String.join("\n",
                     context.requestId(), template.ossTarget().bucket(),
                     template.ossTarget().basePath(), template.ossTarget().endpoint());
@@ -553,7 +546,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
     }
 
-    private boolean isRetryable(DoclingJobError error) {
+    private boolean isRetryable(IngestionDoclingJobError error) {
         if (error == null || !StringUtils.hasText(error.code())) return false;
         String code = error.code().trim().toUpperCase(Locale.ROOT);
         return "QUEUE_TIMEOUT".equals(code)
@@ -561,7 +554,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                 || "SOURCE_DOWNLOAD_ERROR".equals(code);
     }
 
-    private BusinessException doclingJobFailure(DoclingJobError error) {
+    private BusinessException doclingJobFailure(IngestionDoclingJobError error) {
         String message = error == null
                 ? "Docling job failed."
                 : "Docling job failed [" + clip(error.code(), 80) + "]: "
@@ -571,8 +564,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
     private void acknowledgeFailedJob(String jobId) {
         try {
-            doclingClient.ackJob(jobId);
-        } catch (DoclingClientException exception) {
+            ingestionDoclingAcl.ackJob(jobId);
+        } catch (IngestionDoclingException exception) {
             throw new BusinessException(
                     ApiError.TEXT_PARSE_FAILED,
                     "Failed to release the unsuccessful Docling job: " + exception.getMessage(),
@@ -583,7 +576,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private void acknowledgeBestEffort(String jobId) {
         if (!StringUtils.hasText(jobId)) return;
         try {
-            doclingClient.ackJob(jobId);
+            ingestionDoclingAcl.ackJob(jobId);
         } catch (RuntimeException exception) {
             log.warn("Docling ACK failed after ingestion terminal state, jobId={}: {}",
                     jobId, exception.getMessage());

@@ -1,13 +1,10 @@
 package com.anchr.core.auth.interfaces.rest;
 
+import com.anchr.core.auth.application.acl.AuthStorageAcl;
 import com.anchr.core.auth.interfaces.rest.dto.TokenValidationDTO;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
-import com.anchr.core.common.util.AesUtil;
-import com.anchr.core.integration.storage.StorageTokenIssuer;
-import com.anchr.core.settings.domain.model.StorageConfig;
-import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -44,9 +41,7 @@ import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 public class AuthController {
 
     private final StringRedisTemplate redisTemplate;
-    private final StorageConfigRepository storageConfigRepository;
-    private final AesUtil aesUtil;
-    private final StorageTokenIssuer storageTokenIssuer;
+    private final AuthStorageAcl authStorageAcl;
     private final ObjectMapper objectMapper;
 
     @Value("${app.security.admin-secret}")
@@ -234,12 +229,10 @@ public class AuthController {
     @RequireAuth(roles = {"ADMIN", "USER"})
     @GetMapping("/sts")
     public Result<Map<String, Object>> getStsToken() {
-        StorageConfig config = storageConfigRepository.find()
-                .orElseThrow(() -> new RuntimeException("Object storage is not configured."));
+        authStorageAcl.requireConfigured();
         try {
-            String accessKey = aesUtil.decrypt(config.getAccessKeyEnc());
-            String secretKey = aesUtil.decrypt(config.getSecretKeyEnc());
-            return Result.success(storageTokenIssuer.issueToken(config, accessKey, secretKey));
+            return Result.success(
+                    authStorageAcl.issueUploadCredential().toResponseMap());
         } catch (Exception e) {
             log.error("Failed to issue STS token", e);
             return Result.error(ApiError.AUTH_STS_FETCH_FAILED);

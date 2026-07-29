@@ -1,8 +1,8 @@
 package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.model.ParseRequest;
+import com.anchr.core.ingestion.application.model.IngestionStorageTarget;
 import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.settings.domain.model.StorageConfig;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -15,7 +15,7 @@ class IngestionParseRequestTemplateTest {
     @Test
     void templateRebuildsV3RequestWithRuntimeUrlAndCredentials() {
         IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
-                asset(), true, storageConfig(), "asset-1", 1);
+                asset(), true, storageTarget());
 
         ParseRequest request = template.toRequest(
                 "task-1:item-1:1",
@@ -37,7 +37,7 @@ class IngestionParseRequestTemplateTest {
     @Test
     void disabledEmbeddedImagesDoNotCaptureStorageTargetOrRequireCredentials() {
         IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
-                asset(), false, storageConfig(), "asset-1", 1);
+                asset(), false, storageTarget());
 
         ParseRequest request = template.toRequest(
                 "task-1:item-1:1",
@@ -50,16 +50,10 @@ class IngestionParseRequestTemplateTest {
     }
 
     @Test
-    void inMemoryOutputTargetRejectsChangedStorageConfiguration() {
+    void inMemoryOutputTargetRequiresRuntimeCredentials() {
         IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
-                asset(), true, storageConfig(), "asset-1", 1);
-        StorageConfig changed = StorageConfig.builder()
-                .endpoint("oss.example.test")
-                .bucket("another-bucket")
-                .prefix("embedded/")
-                .build();
+                asset(), true, storageTarget());
 
-        assertThat(template.targets(changed, "asset-1", 1)).isFalse();
         assertThatThrownBy(() -> template.toRequest(
                 "task-1:item-1:1",
                 "v1:revision",
@@ -76,11 +70,11 @@ class IngestionParseRequestTemplateTest {
                 .build();
     }
 
-    private StorageConfig storageConfig() {
-        return StorageConfig.builder()
-                .endpoint("oss.example.test")
-                .bucket("bucket-a")
-                .prefix("embedded/")
-                .build();
+    private IngestionStorageTarget storageTarget() {
+        return new IngestionStorageTarget(
+                "oss.example.test",
+                "bucket-a",
+                "embedded/ingestion/assets/asset-1/generations/1/images/",
+                IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT);
     }
 }

@@ -1,6 +1,9 @@
 package com.anchr.core.integration.storage;
 
 import com.anchr.core.common.util.AesUtil;
+import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
+import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -24,8 +27,14 @@ class ConfigDrivenStorageAdapterSpringWiringTest {
             context.register(ConfigDrivenStorageAdapter.class);
             context.refresh();
 
-            assertThat(context.getBean(ConfigDrivenStorageAdapter.class))
-                    .isNotNull();
+            ConfigDrivenStorageAdapter adapter =
+                    context.getBean(ConfigDrivenStorageAdapter.class);
+            assertThat(context.getBean(SearchObjectStoragePort.class))
+                    .isSameAs(adapter);
+            assertThat(context.getBean(IngestionObjectStoragePort.class))
+                    .isSameAs(adapter);
+            assertThat(context.getBean(KnowledgeObjectStoragePort.class))
+                    .isSameAs(adapter);
         }
     }
 }

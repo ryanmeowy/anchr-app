@@ -1,8 +1,8 @@
 package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.model.ParseRequest;
+import com.anchr.core.ingestion.application.model.IngestionStorageTarget;
 import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.settings.domain.model.StorageConfig;
 import org.springframework.util.StringUtils;
 
 import java.util.Map;
@@ -17,7 +17,7 @@ public record IngestionParseRequestTemplate(
         int contractVersion,
         String fileName,
         ParseRequest.Options options,
-        StableOssTarget ossTarget
+        IngestionStorageTarget ossTarget
 ) {
 
     static final int LEGACY_DOCLING_CONTRACT_VERSION = 2;
@@ -25,21 +25,12 @@ public record IngestionParseRequestTemplate(
 
     static IngestionParseRequestTemplate capture(Asset asset,
                                                  boolean includeEmbeddedImages,
-                                                 StorageConfig storageConfig,
-                                                 String assetId,
-                                                 long targetGeneration) {
+                                                 IngestionStorageTarget storageTarget) {
         if (asset == null || !StringUtils.hasText(asset.getFileName())) {
             throw new IllegalArgumentException("Asset file name is required for a Docling request.");
         }
-        StableOssTarget target = null;
-        if (includeEmbeddedImages && storageConfig != null) {
-            target = new StableOssTarget(
-                    requireText(storageConfig.getEndpoint(), "OSS endpoint"),
-                    requireText(storageConfig.getBucket(), "OSS bucket"),
-                    IngestionImagePaths.imagePrefix(
-                            storageConfig.getPrefix(), assetId, targetGeneration),
-                    IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT);
-        }
+        IngestionStorageTarget target =
+                includeEmbeddedImages ? storageTarget : null;
         return new IngestionParseRequestTemplate(
                 includeEmbeddedImages
                         ? EMBEDDED_IMAGE_CONTRACT_VERSION
@@ -63,7 +54,11 @@ public record IngestionParseRequestTemplate(
                 throw new IllegalStateException(
                         "Embedded-image output requires Docling contract version 3.");
             }
-            ossTarget.validated();
+            if (!IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT.equals(
+                    ossTarget.objectKeyLayout())) {
+                throw new IllegalStateException(
+                        "Unsupported embedded-image object key layout.");
+            }
         }
         return this;
     }
@@ -95,39 +90,6 @@ public record IngestionParseRequestTemplate(
                 .options(options)
                 .oss(oss)
                 .build();
-    }
-
-    boolean targets(StorageConfig storageConfig,
-                    String assetId,
-                    long targetGeneration) {
-        if (ossTarget == null) {
-            return true;
-        }
-        if (storageConfig == null
-                || !ossTarget.endpoint().equals(storageConfig.getEndpoint())
-                || !ossTarget.bucket().equals(storageConfig.getBucket())) {
-            return false;
-        }
-        return IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT.equals(
-                ossTarget.objectKeyLayout())
-                && ossTarget.basePath().equals(IngestionImagePaths.imagePrefix(
-                        storageConfig.getPrefix(), assetId, targetGeneration));
-    }
-
-    public record StableOssTarget(String endpoint, String bucket, String basePath,
-                                  String objectKeyLayout) {
-
-        private StableOssTarget validated() {
-            requireText(endpoint, "OSS endpoint");
-            requireText(bucket, "OSS bucket");
-            if (basePath == null) {
-                throw new IllegalStateException("OSS base path is missing from the request template.");
-            }
-            if (!IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT.equals(objectKeyLayout)) {
-                throw new IllegalStateException("Unsupported embedded-image object key layout.");
-            }
-            return this;
-        }
     }
 
     private static String requireText(String value, String fieldName) {

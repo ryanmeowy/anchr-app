@@ -8,8 +8,8 @@ import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.application.support.AssetPreviewAccessCache;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
 import com.anchr.core.kb.interfaces.rest.dto.AssetPreviewDTO;
-import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -22,7 +22,7 @@ import org.springframework.util.StringUtils;
 public class AssetPreviewServiceImpl implements AssetPreviewService {
 
     private final KnowledgeBaseService knowledgeBaseService;
-    private final SearchObjectStoragePort objectStoragePort;
+    private final KnowledgeObjectStoragePort objectStoragePort;
     private final AssetPreviewAccessCache previewAccessCache;
 
     @Override
@@ -75,7 +75,8 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
 
     private SignedAccess sign(String objectKey) {
         try {
-            SearchObjectStoragePort.SignedObjectUrl signed = objectStoragePort.buildPreviewUrl(objectKey);
+            KnowledgeObjectStoragePort.SignedObjectUrl signed =
+                    objectStoragePort.signPreviewUrl(objectKey);
             if (signed == null || !StringUtils.hasText(signed.url())) {
                 throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);
             }

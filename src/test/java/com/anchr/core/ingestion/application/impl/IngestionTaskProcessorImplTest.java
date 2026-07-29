@@ -5,7 +5,13 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
+import com.anchr.core.ingestion.application.acl.IngestionDoclingAcl;
 import com.anchr.core.ingestion.application.acl.IngestionRetrievalAcl;
+import com.anchr.core.ingestion.application.acl.IngestionStorageAcl;
+import com.anchr.core.ingestion.application.model.IngestionDoclingJob;
+import com.anchr.core.ingestion.application.model.IngestionDoclingJobError;
+import com.anchr.core.ingestion.application.model.IngestionStorageCredential;
+import com.anchr.core.ingestion.application.model.IngestionStorageTarget;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
@@ -14,14 +20,11 @@ import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
-import com.anchr.core.integration.ai.client.DoclingClient;
-import com.anchr.core.integration.storage.StorageTokenIssuer;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.application.api.model.RetrievalGenerationWriteReceipt;
-import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,9 +35,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -50,14 +55,13 @@ class IngestionTaskProcessorImplTest {
     @Mock private KnowledgeBaseRepository knowledgeBaseRepository;
     @Mock private IngestionEmbeddingPort embeddingPort;
     @Mock private AesUtil aesUtil;
-    @Mock private StorageTokenIssuer storageTokenIssuer;
     @Mock private IngestionIndexFinalizer finalizer;
     @Mock private IngestionRetrievalAcl ingestionRetrievalAcl;
     @Mock private IngestionStageTransactionCoordinator coordinator;
     @Mock private IngestionObjectStoragePort objectStoragePort;
-    @Mock private StorageConfigRepository storageConfigRepository;
+    @Mock private IngestionStorageAcl ingestionStorageAcl;
     @Mock private DoclingChunkMapper chunkMapper;
-    @Mock private DoclingClient doclingClient;
+    @Mock private IngestionDoclingAcl ingestionDoclingAcl;
     @Mock private IdGen idGen;
 
     private IngestionTaskProcessorImpl processor;
@@ -67,9 +71,9 @@ class IngestionTaskProcessorImplTest {
         Executor direct = Runnable::run;
         processor = new IngestionTaskProcessorImpl(
                 direct, repository, assetRepository, knowledgeBaseRepository,
-                embeddingPort, aesUtil, storageTokenIssuer, finalizer,
+                embeddingPort, aesUtil, finalizer,
                 ingestionRetrievalAcl, coordinator,
-                objectStoragePort, storageConfigRepository, chunkMapper, doclingClient,
+                objectStoragePort, ingestionStorageAcl, chunkMapper, ingestionDoclingAcl,
                 new ObjectMapper(), idGen);
         ReflectionTestUtils.setField(processor, "parsePollInterval", Duration.ofMillis(1));
         ReflectionTestUtils.setField(processor, "parseTimeout", Duration.ofSeconds(2));
@@ -98,8 +102,8 @@ class IngestionTaskProcessorImplTest {
         when(coordinator.advanceAndUpdateAssetStatus(
                 any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
-        when(doclingClient.submitJob(any())).thenReturn(
-                new DoclingClient.DoclingJob(
+        when(ingestionDoclingAcl.submitJob(any())).thenReturn(
+                new IngestionDoclingJob(
                         "job-1", "task-1:item-1:1", "succeeded", response, null));
         when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of(chunk));
         when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
@@ -119,7 +123,7 @@ class IngestionTaskProcessorImplTest {
         var order = org.mockito.Mockito.inOrder(ingestionRetrievalAcl, finalizer);
         order.verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
         order.verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
-        verify(doclingClient).ackJob("job-1");
+        verify(ingestionDoclingAcl).ackJob("job-1");
         verify(repository, never()).advanceRunningItem(any(), any(), any(), any(), any(),
                 anyInt(), any());
     }
@@ -136,11 +140,11 @@ class IngestionTaskProcessorImplTest {
         when(coordinator.advanceAndUpdateAssetStatus(
                 any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
-        when(doclingClient.submitJob(any()))
-                .thenReturn(new DoclingClient.DoclingJob(
+        when(ingestionDoclingAcl.submitJob(any()))
+                .thenReturn(new IngestionDoclingJob(
                         "failed", "task-1:item-1:1", "failed", null,
-                        new DoclingClient.DoclingJobError("INTERNAL_ERROR", "retry")))
-                .thenReturn(new DoclingClient.DoclingJob(
+                        new IngestionDoclingJobError("INTERNAL_ERROR", "retry")))
+                .thenReturn(new IngestionDoclingJob(
                         "job-2", "task-1:item-1:1", "succeeded", response, null));
         when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of());
         when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of(
@@ -155,8 +159,8 @@ class IngestionTaskProcessorImplTest {
 
         processor.processItem(item);
 
-        verify(doclingClient, org.mockito.Mockito.times(2)).submitJob(any());
-        verify(doclingClient).ackJob("failed");
+        verify(ingestionDoclingAcl, org.mockito.Mockito.times(2)).submitJob(any());
+        verify(ingestionDoclingAcl).ackJob("failed");
         verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
         verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
     }
@@ -180,8 +184,8 @@ class IngestionTaskProcessorImplTest {
         when(coordinator.advanceAndUpdateAssetStatus(
                 any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
-        when(doclingClient.submitJob(any())).thenReturn(
-                new DoclingClient.DoclingJob(
+        when(ingestionDoclingAcl.submitJob(any())).thenReturn(
+                new IngestionDoclingJob(
                         "job-1", "task-1:item-1:1", "succeeded", response, null));
         when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of(chunk));
         when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
@@ -199,7 +203,88 @@ class IngestionTaskProcessorImplTest {
                         failed.getStage() == IngestionStage.INDEX),
                 eq(asset), eq(ApiError.SEARCH_BACKEND_UNAVAILABLE),
                 any(), eq("FAILED"), eq("FAILED"));
-        verify(doclingClient, never()).ackJob("job-1");
+        verify(ingestionDoclingAcl, never()).ackJob("job-1");
+    }
+
+    @Test
+    void processItem_withEmbeddedImages_shouldKeepTargetAadAndCredentialEnvelope() {
+        ReflectionTestUtils.setField(processor, "embeddedImageUploadEnabled", true);
+        IngestionTaskItem item = runningItem();
+        Asset asset = asset();
+        ParseResponse response = response();
+        Chunk chunk = Chunk.builder()
+                .segmentId("segment-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .chunkText("hello")
+                .segmentType(SegmentType.TEXT_CHUNK)
+                .build();
+        IngestionStorageTarget target = new IngestionStorageTarget(
+                "https://oss",
+                "bucket",
+                "embedded/ingestion/assets/asset-1/generations/1/images/",
+                IngestionImagePaths.DOCLING_OBJECT_KEY_LAYOUT);
+        when(coordinator.ensureTargetIndexGeneration(item)).thenReturn(item);
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(coordinator.updateAssetStatus(any(), eq(asset), any(), any()))
+                .thenReturn(true);
+        when(coordinator.advanceAndUpdateAssetStatus(
+                any(), any(), anyInt(), eq(asset), any(), any()))
+                .thenReturn(true);
+        when(ingestionStorageAcl.findTarget("asset-1", 1L))
+                .thenReturn(Optional.of(target));
+        when(ingestionStorageAcl.issueTemporaryCredential(
+                target, "asset-1", 1L)).thenReturn(
+                new IngestionStorageCredential(
+                        "https://oss", "bucket", "cn-test", "embedded/",
+                        "temp-ak", "temp-sk", "token", "expiry"));
+        when(aesUtil.encryptAead(
+                any(),
+                eq("task-1:item-1:1\nbucket\n"
+                        + "embedded/ingestion/assets/asset-1/generations/1/images/\n"
+                        + "https://oss")))
+                .thenReturn(new AesUtil.AeadEnvelope("nonce", "cipher", "tag"));
+        when(objectStoragePort.buildDownloadUrl("objects/a.pdf"))
+                .thenReturn("https://source");
+        when(ingestionDoclingAcl.submitJob(any())).thenReturn(
+                new IngestionDoclingJob(
+                        "job-1", "task-1:item-1:1", "succeeded", response, null));
+        when(chunkMapper.toTextChunks(asset, response, 1L))
+                .thenReturn(List.of(chunk));
+        when(chunkMapper.toDocumentImageChunks(asset, response, 1L))
+                .thenReturn(List.of());
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.embed("hello", "text")).thenReturn(List.of(0.1f));
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+                .thenReturn(receipt());
+        when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
+                .thenReturn(true);
+        org.mockito.ArgumentCaptor<com.anchr.core.common.model.ParseRequest> request =
+                org.mockito.ArgumentCaptor.forClass(
+                        com.anchr.core.common.model.ParseRequest.class);
+
+        processor.processItem(item);
+
+        verify(ingestionDoclingAcl).submitJob(request.capture());
+        assertThat(request.getValue().contractVersion()).isEqualTo(3);
+        assertThat(request.getValue().oss().endpoint()).isEqualTo("https://oss");
+        assertThat(request.getValue().oss().bucket()).isEqualTo("bucket");
+        assertThat(request.getValue().oss().basePath()).isEqualTo(
+                "embedded/ingestion/assets/asset-1/generations/1/images/");
+        assertThat(request.getValue().oss().encryptedCredentials())
+                .containsExactlyInAnyOrderEntriesOf(Map.of(
+                        "version", "1",
+                        "keyId", "app-security-v1",
+                        "nonce", "nonce",
+                        "ciphertext", "cipher",
+                        "tag", "tag",
+                        "expiration", "expiry"));
+        var order = org.mockito.Mockito.inOrder(
+                ingestionStorageAcl, ingestionDoclingAcl);
+        order.verify(ingestionStorageAcl)
+                .issueTemporaryCredential(target, "asset-1", 1L);
+        order.verify(ingestionDoclingAcl).submitJob(any());
     }
 
     @Test
@@ -218,7 +303,7 @@ class IngestionTaskProcessorImplTest {
         verify(coordinator).failRunning(
                 eq(item), eq(asset), eq(com.anchr.core.common.exception.ApiError.INTERNAL_ERROR),
                 any(), eq("FAILED"), eq("FAILED"));
-        verify(doclingClient, never()).submitJob(any());
+        verify(ingestionDoclingAcl, never()).submitJob(any());
     }
 
     private IngestionTaskItem runningItem() {
