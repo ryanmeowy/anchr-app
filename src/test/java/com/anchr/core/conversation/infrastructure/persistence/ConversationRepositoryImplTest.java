@@ -2,6 +2,7 @@ package com.anchr.core.conversation.infrastructure.persistence;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationSession;
+import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationSessionStatus;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
@@ -43,10 +44,10 @@ class ConversationRepositoryImplTest {
         session.setKbScope(List.of("kb_1", "kb_2"));
         session.setAssetScope(List.of("asset_1"));
 
-        repository.saveSession(session);
+        repository.createSession(session);
 
         ArgumentCaptor<ConversationSessionRecord> captor = ArgumentCaptor.forClass(ConversationSessionRecord.class);
-        verify(mapper).upsertSession(captor.capture());
+        verify(mapper).insertSession(captor.capture());
         assertThat(captor.getValue().getKbScope()).isEqualTo("[\"kb_1\",\"kb_2\"]");
         assertThat(captor.getValue().getAssetScope()).isEqualTo("[\"asset_1\"]");
 
@@ -62,14 +63,37 @@ class ConversationRepositoryImplTest {
     }
 
     @Test
-    void shouldPreserveMapperOrderingAndBoundLimits() {
+    void sessionPage_shouldMapKeysetPositionAndBoundLimitPlusOne() {
         ConversationSessionRecord first = record("cvs_2", 2_000L);
         ConversationSessionRecord second = record("cvs_1", 1_000L);
-        when(mapper.findRecentSessions("single_user", 200)).thenReturn(List.of(first, second));
+        long beforeTimestamp = 3_000L;
+        LocalDateTime beforeUpdatedAt = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(beforeTimestamp), ZoneId.systemDefault());
+        when(mapper.findSessionPage("single_user", beforeUpdatedAt, "cvs_3", 51))
+                .thenReturn(List.of(first, second));
 
-        assertThat(repository.findRecentSessions("single_user", 999))
+        assertThat(repository.findSessionPage(
+                "single_user", new ConversationSessionPosition("cvs_3", beforeTimestamp), 999))
                 .extracting(ConversationSession::getSessionId)
                 .containsExactly("cvs_2", "cvs_1");
+        verify(mapper).findSessionPage("single_user", beforeUpdatedAt, "cvs_3", 51);
+    }
+
+    @Test
+    void sessionMetadataUpdates_shouldMapTimesAndPreserveAutoTitleCasResult() {
+        long timestamp = 1_700_000_000_123L;
+        LocalDateTime time = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(timestamp), ZoneId.systemDefault());
+        when(mapper.updateAutoTitleIfUnchanged("cvs_1", null, "auto", time)).thenReturn(1);
+
+        repository.renameSession("cvs_1", "manual", timestamp);
+        repository.touchSessionIfNewer("cvs_1", timestamp);
+        boolean updated = repository.updateAutoTitleIfUnchanged("cvs_1", null, "auto", timestamp);
+
+        verify(mapper).renameSession("cvs_1", "manual", time);
+        verify(mapper).touchSessionIfNewer("cvs_1", time);
+        verify(mapper).updateAutoTitleIfUnchanged("cvs_1", null, "auto", time);
+        assertThat(updated).isTrue();
     }
 
     @Test

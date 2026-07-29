@@ -4,6 +4,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,19 +22,25 @@ public interface AssetMapper {
     Optional<AssetRecord> findByIdForUpdate(@Param("kbId") String kbId,
                                             @Param("assetId") String assetId);
 
+    List<AssetRecord> findActiveIndexGenerations(
+            @Param("assetIds") Collection<String> assetIds);
+
     List<AssetRecord> listActive(@Param("kbId") String kbId,
                                  @Param("keyword") String keyword,
                                  @Param("fileType") String fileType,
+                                 @Param("availabilityStatus") String availabilityStatus,
                                  @Param("limit") int limit,
                                  @Param("offset") int offset);
 
     long countActive(@Param("kbId") String kbId,
                      @Param("keyword") String keyword,
-                     @Param("fileType") String fileType);
+                     @Param("fileType") String fileType,
+                     @Param("availabilityStatus") String availabilityStatus);
 
     long sumActiveSegments(@Param("kbId") String kbId,
                            @Param("keyword") String keyword,
-                           @Param("fileType") String fileType);
+                           @Param("fileType") String fileType,
+                           @Param("availabilityStatus") String availabilityStatus);
 
     AssetHealthStatsRecord healthStats(@Param("kbId") String kbId);
 
@@ -62,6 +69,17 @@ public interface AssetMapper {
                               @Param("errorMessage") String errorMessage,
                               @Param("updatedBy") String updatedBy,
                               @Param("updatedAt") LocalDateTime updatedAt);
+
+    int activateIndexGeneration(@Param("kbId") String kbId,
+                                @Param("assetId") String assetId,
+                                @Param("expectedActiveGeneration") long expectedActiveGeneration,
+                                @Param("targetGeneration") long targetGeneration,
+                                @Param("parseStatus") String parseStatus,
+                                @Param("indexStatus") String indexStatus,
+                                @Param("segmentCount") int segmentCount,
+                                @Param("indexedSegmentCount") int indexedSegmentCount,
+                                @Param("updatedBy") String updatedBy,
+                                @Param("updatedAt") LocalDateTime updatedAt);
 
     int markDeleted(@Param("kbId") String kbId,
                     @Param("assetId") String assetId,

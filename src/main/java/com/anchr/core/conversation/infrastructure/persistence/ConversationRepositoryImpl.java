@@ -1,13 +1,13 @@
 package com.anchr.core.conversation.infrastructure.persistence;
 
-import com.anchr.core.common.application.context.UserContextHolder;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationSession;
+import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationSessionStatus;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,7 +25,7 @@ public class ConversationRepositoryImpl implements ConversationRepository {
 
     private static final int MAX_RECENT_LIMIT = 100;
     private static final int MAX_HISTORY_PAGE_QUERY_LIMIT = 101;
-    private static final int MAX_SESSION_LIST_LIMIT = 200;
+    private static final int MAX_SESSION_PAGE_QUERY_LIMIT = 51;
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {
     };
 
@@ -33,11 +33,11 @@ public class ConversationRepositoryImpl implements ConversationRepository {
     private final ObjectMapper objectMapper;
 
     @Override
-    public void saveSession(ConversationSession session) {
+    public void createSession(ConversationSession session) {
         if (session == null || !StringUtils.hasText(session.getSessionId())) {
             throw new IllegalArgumentException("sessionId cannot be empty");
         }
-        mapper.upsertSession(toSessionRecord(session));
+        mapper.insertSession(toSessionRecord(session));
     }
 
     @Override
@@ -54,14 +54,49 @@ public class ConversationRepositoryImpl implements ConversationRepository {
     }
 
     @Override
-    public List<ConversationSession> findRecentSessions(String userId, int limit) {
+    public List<ConversationSession> findSessionPage(String userId,
+                                                     ConversationSessionPosition before,
+                                                     int limit) {
         if (!StringUtils.hasText(userId)) {
             return List.of();
         }
-        int boundedLimit = Math.max(1, Math.min(limit, MAX_SESSION_LIST_LIMIT));
-        return mapper.findRecentSessions(userId, boundedLimit).stream()
+        int boundedLimit = Math.max(1, Math.min(limit, MAX_SESSION_PAGE_QUERY_LIMIT));
+        LocalDateTime beforeUpdatedAt = before == null ? null : toLocalDateTime(before.updatedAt());
+        String beforeSessionId = before == null ? null : before.sessionId();
+        return mapper.findSessionPage(userId, beforeUpdatedAt, beforeSessionId, boundedLimit).stream()
                 .map(this::toSessionDomain)
                 .toList();
+    }
+
+    @Override
+    public void renameSession(String sessionId, String title, long renamedAt) {
+        if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(title)) {
+            throw new IllegalArgumentException("sessionId and title cannot be empty");
+        }
+        mapper.renameSession(sessionId, title, toLocalDateTime(renamedAt));
+    }
+
+    @Override
+    public void touchSessionIfNewer(String sessionId, long requestStartedAt) {
+        if (!StringUtils.hasText(sessionId)) {
+            throw new IllegalArgumentException("sessionId cannot be empty");
+        }
+        mapper.touchSessionIfNewer(sessionId, toLocalDateTime(requestStartedAt));
+    }
+
+    @Override
+    public boolean updateAutoTitleIfUnchanged(String sessionId,
+                                              String expectedTitle,
+                                              String generatedTitle,
+                                              long requestStartedAt) {
+        if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(generatedTitle)) {
+            throw new IllegalArgumentException("sessionId and generatedTitle cannot be empty");
+        }
+        return mapper.updateAutoTitleIfUnchanged(
+                sessionId,
+                expectedTitle,
+                generatedTitle,
+                toLocalDateTime(requestStartedAt)) > 0;
     }
 
     @Override

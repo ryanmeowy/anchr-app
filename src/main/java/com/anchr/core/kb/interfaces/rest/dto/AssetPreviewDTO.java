@@ -27,6 +27,5 @@ public class AssetPreviewDTO {
     int segmentCount;
     String previewType;
     String previewUrl;
-    String thumbnailUrl;
     Long expiresAt;
 }

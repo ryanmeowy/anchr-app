@@ -1,5 +1,7 @@
 package com.anchr.core.ingestion.interfaces.rest;
 
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.UploadCleanupContract;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.ingestion.application.IngestionApplicationService;
@@ -10,9 +12,16 @@ import com.anchr.core.ingestion.interfaces.rest.dto.IngestionTaskCreateRequestDT
 import com.anchr.core.ingestion.interfaces.rest.dto.IngestionTaskDTO;
 import com.anchr.core.ingestion.interfaces.rest.dto.IngestionTaskListDTO;
 import com.anchr.core.ingestion.interfaces.rest.dto.IngestionTaskSummaryDTO;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,11 +43,18 @@ public class KnowledgeBaseIngestionController {
     private final IngestionApplicationService ingestionApplicationService;
 
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @UploadCleanupContract(safeBusinessErrors = {
+            ApiError.INVALID_REQUEST,
+            ApiError.KNOWLEDGE_BASE_NOT_FOUND
+    })
     @PostMapping("/ingestion-tasks")
-    public Result<IngestionTaskDTO> createTask(@PathVariable @NotBlank String kbId,
-                                               @Valid @RequestBody IngestionTaskCreateRequestDTO request) {
-        return Result.success(IngestionTaskDTO.from(
-                ingestionApplicationService.createTask(kbId, toCommand(request))));
+    public ResponseEntity<Result<IngestionTaskDTO>> createTask(
+            @PathVariable @NotBlank String kbId,
+            @Valid @RequestBody IngestionTaskCreateRequestDTO request) {
+        var createResult = ingestionApplicationService.createTask(kbId, toCommand(request));
+        HttpStatus status = createResult.created() ? HttpStatus.CREATED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(Result.success(
+                status.value(), IngestionTaskDTO.from(createResult.task())));
     }
 
     @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
@@ -59,6 +75,20 @@ public class KnowledgeBaseIngestionController {
     public Result<IngestionTaskDTO> getTask(@PathVariable @NotBlank String kbId,
                                             @PathVariable @NotBlank String taskId) {
         return Result.success(IngestionTaskDTO.from(ingestionApplicationService.getTask(kbId, taskId)));
+    }
+
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    @GetMapping("/ingestion-tasks/by-client-request/{clientRequestId}")
+    public ResponseEntity<Result<IngestionTaskDTO>> getTaskByClientRequestId(
+            @PathVariable @NotBlank String kbId,
+            @PathVariable @NotBlank @Size(max = 128) @Pattern(regexp = "[A-Za-z0-9._:-]+")
+            String clientRequestId,
+            HttpServletResponse servletResponse) {
+        servletResponse.setHeader(HttpHeaders.CACHE_CONTROL, CacheControl.noStore().getHeaderValue());
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(Result.success(IngestionTaskDTO.from(
+                        ingestionApplicationService.getTaskByClientRequestId(kbId, clientRequestId))));
     }
 
     @RequireAuth(roles = {"ADMIN", "USER"})
@@ -94,6 +124,7 @@ public class KnowledgeBaseIngestionController {
 
     private IngestionApplicationService.IngestionCreateCommand toCommand(IngestionTaskCreateRequestDTO request) {
         return new IngestionApplicationService.IngestionCreateCommand(
+                request.getClientRequestId(),
                 request.getSourceType(),
                 request.getDedupeStrategy(),
                 request.getItems().stream().map(this::toCommand).toList());
@@ -107,7 +138,6 @@ public class KnowledgeBaseIngestionController {
                 item.getMimeType(),
                 item.getSizeBytes(),
                 item.getObjectKey(),
-                item.getFileHash(),
-                item.getSourceUrl());
+                item.getFileHash());
     }
 }

@@ -22,13 +22,19 @@ public interface SegmentRepository {
 
     List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter);
 
+    List<SegmentHit> vectorSearch(
+            List<Float> queryVector, int topK, float similarity, SearchFilter filter);
+
     Optional<Segment> findBySegmentId(String segmentId);
 
     List<Segment> listByAssetId(String kbId,
                                 String assetId,
+                                long activeIndexGeneration,
                                 Integer afterChunkOrder,
                                 String afterSegmentId,
                                 int limit);
 
     void deleteByAssetId(String assetId);
+
+    void deleteByAssetGeneration(String assetId, long indexGeneration);
 }

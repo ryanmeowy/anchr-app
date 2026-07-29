@@ -54,6 +54,8 @@ class OutboxMysqlIntegrationTest {
             assertThat(columnExists(connection, "outbox_event", "lock_token")).isTrue();
             assertThat(indexExists(connection, "outbox_event", "idx_outbox_poll")).isTrue();
             assertThat(indexExists(connection, "outbox_event", "idx_outbox_locked")).isTrue();
+            assertThat(columnExists(connection, "asset", "active_index_generation")).isTrue();
+            assertThat(columnExists(connection, "asset_index_change", "revision")).isFalse();
         }
     }
 
@@ -104,6 +106,36 @@ class OutboxMysqlIntegrationTest {
         }
     }
 
+    @Test
+    void assetDeleteAndOutboxInsertShouldRollbackTogether() throws Exception {
+        insertAsset();
+        try (Connection transaction = connection()) {
+            transaction.setAutoCommit(false);
+            try (PreparedStatement statement = transaction.prepareStatement(
+                    "update asset set deleted_at = now(), updated_at = now() "
+                            + "where id = 1001 and kb_id = 2001")) {
+                assertThat(statement.executeUpdate()).isEqualTo(1);
+            }
+            insertOutboxEvent(transaction, "1001");
+            transaction.rollback();
+        }
+
+        try (Connection verification = connection()) {
+            try (Statement statement = verification.createStatement();
+                 ResultSet result = statement.executeQuery(
+                         "select deleted_at from asset where id = 1001")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getObject("deleted_at")).isNull();
+            }
+            try (Statement statement = verification.createStatement();
+                 ResultSet result = statement.executeQuery(
+                         "select count(*) from outbox_event")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getInt(1)).isZero();
+            }
+        }
+    }
+
     private long claimOne(Connection connection) throws Exception {
         try (PreparedStatement statement = connection.prepareStatement("""
                 select id
@@ -124,12 +156,20 @@ class OutboxMysqlIntegrationTest {
     }
 
     private void insertOutboxEvent(String assetId) throws Exception {
-        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement("""
+        try (Connection connection = connection()) {
+            insertOutboxEvent(connection, assetId);
+        }
+    }
+
+    private void insertOutboxEvent(Connection connection, String assetId)
+            throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
                 insert into outbox_event (
                     event_type, aggregate_type, aggregate_id, payload, status,
                     retry_count, created_by, created_at, updated_at
                 ) values (
-                    'DOCUMENT_INDEX_DELETE_REQUESTED', 'ASSET', ?, json_object('assetId', ?),
+                    'DELETE_ASSET', 'ASSET', ?,
+                    json_object('kbId', '2001', 'assetId', ?),
                     'PENDING', 0, 'test', now(), now()
                 )
                 """)) {

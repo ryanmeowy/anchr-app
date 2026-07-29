@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
 
 /**
  * Coordinates normal index writes with an in-process index rebuild.
@@ -20,6 +21,16 @@ public class SegmentIndexWriteBarrier {
 
     public void withWritePermit(Runnable action) {
         runWithLock(lock.readLock(), action);
+    }
+
+    public <T> T withWritePermit(Supplier<T> action) {
+        Lock targetLock = lock.readLock();
+        targetLock.lock();
+        try {
+            return action.get();
+        } finally {
+            targetLock.unlock();
+        }
     }
 
     public void withExclusiveRebuildPermit(Runnable action) {

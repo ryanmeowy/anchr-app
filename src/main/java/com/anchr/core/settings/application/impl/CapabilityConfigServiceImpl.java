@@ -11,6 +11,9 @@ import com.anchr.core.integration.ai.client.MultiEmbeddingClient;
 import com.anchr.core.integration.ai.client.RerankClient;
 import com.anchr.core.integration.ai.client.TextEmbeddingClient;
 import com.anchr.core.settings.application.CapabilityConfigService;
+import com.anchr.core.settings.application.acl.CapabilityRetrievalAcl;
+import com.anchr.core.settings.application.model.CapabilityEmbeddingProfileSnapshot;
+import com.anchr.core.settings.application.support.CapabilityEmbeddingProfileFactory;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.model.EmbedParamEnum;
 import com.anchr.core.settings.domain.model.ModelTypeEnum;
@@ -21,6 +24,7 @@ import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestReque
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResultDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -44,6 +48,12 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     private final CapabilityClientFactory clientFactory;
     private final CapabilityResolver configResolver;
     private final ClientCacheManager clientCacheManager;
+    private CapabilityRetrievalAcl capabilityRetrievalAcl;
+
+    @Autowired(required = false)
+    void setCapabilityRetrievalAcl(CapabilityRetrievalAcl capabilityRetrievalAcl) {
+        this.capabilityRetrievalAcl = capabilityRetrievalAcl;
+    }
 
     @Override
     public List<CapabilityConfigDTO> get(String capability) {
@@ -101,11 +111,15 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         verifyEmbedModel(capability, request);
         CapabilityConfig existing = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Config not found: " + id));
+        if (!capability.equals(existing.getCapability())) {
+            throw new IllegalArgumentException(
+                    "Config " + id + " does not belong to capability " + capability);
+        }
         String apiKeyEnc = existing.getApiKeyEnc();
         if (StringUtils.hasText(request.getApiKey())) {
             apiKeyEnc = aesUtil.encrypt(request.getApiKey());
         }
-        CapabilityConfig config = CapabilityConfig.builder()
+        CapabilityConfig proposed = CapabilityConfig.builder()
                 .id(id)
                 .capability(capability)
                 .baseUrl(request.getBaseUrl())
@@ -116,9 +130,38 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
                 .updatedBy(UserContextHolder.get().userId())
                 .updatedAt(LocalDateTime.now())
                 .build();
-        CapabilityConfig updated = repository.update(config);
+        if (requiresEmbeddingDraft(existing, proposed)) {
+            CapabilityConfig draft = CapabilityConfig.builder()
+                    .id(idGen.nextId())
+                    .capability(proposed.getCapability())
+                    .baseUrl(proposed.getBaseUrl())
+                    .apiKeyEnc(proposed.getApiKeyEnc())
+                    .modelName(proposed.getModelName())
+                    .extraConfig(proposed.getExtraConfig())
+                    .enabled(false)
+                    .updatedBy(proposed.getUpdatedBy())
+                    .updatedAt(proposed.getUpdatedAt())
+                    .build();
+            CapabilityConfig saved = repository.insert(draft);
+            return CapabilityConfigDTO.from(saved, maskApiKey(saved.getApiKeyEnc()));
+        }
+        CapabilityConfig updated = repository.update(proposed);
         refreshSlot(capability);
         return CapabilityConfigDTO.from(updated, maskApiKey(updated.getApiKeyEnc()));
+    }
+
+    private boolean requiresEmbeddingDraft(CapabilityConfig existing,
+                                           CapabilityConfig proposed) {
+        if (!existing.isEnabled() || !isEmbeddingCapability(existing.getCapability())) {
+            return false;
+        }
+        Optional<CapabilityEmbeddingProfileSnapshot> current =
+                CapabilityEmbeddingProfileFactory.create(existing);
+        Optional<CapabilityEmbeddingProfileSnapshot> next =
+                CapabilityEmbeddingProfileFactory.create(proposed);
+        return current.isEmpty()
+                || next.isEmpty()
+                || !current.get().fingerprint().equals(next.get().fingerprint());
     }
 
     @Override
@@ -186,6 +229,24 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
 
     @Override
     public void select(String capability, Long id) {
+        if (isEmbeddingCapability(capability) && capabilityRetrievalAcl != null) {
+            CapabilityConfig selected = repository.findById(id)
+                    .filter(config -> capability.equals(config.getCapability()))
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Embedding config not found: " + id));
+            CapabilityEmbeddingProfileSnapshot target =
+                    CapabilityEmbeddingProfileFactory.create(selected)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Embedding config does not define a valid profile"));
+            CapabilityEmbeddingProfileSnapshot active = configResolver
+                    .activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
+                    .flatMap(CapabilityEmbeddingProfileFactory::create)
+                    .orElse(null);
+            if (active != null && !active.fingerprint().equals(target.fingerprint())) {
+                capabilityRetrievalAcl.requestDeployment(target);
+                return;
+            }
+        }
         repository.select(capability, id);
         // embedding types are mutually exclusive
         if (ModelTypeEnum.EMBEDDING.name().equals(capability)) {
@@ -196,6 +257,11 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         // Both EMBEDDING and MULTI_EMBEDDING map to the EMBEDDING slot, so a single
         // refresh covers the mutual-exclusion toggle as well as GENERATION/RERANK.
         refreshSlot(capability);
+    }
+
+    private boolean isEmbeddingCapability(String capability) {
+        return ModelTypeEnum.EMBEDDING.name().equals(capability)
+                || ModelTypeEnum.MULTI_EMBEDDING.name().equals(capability);
     }
 
     @Override

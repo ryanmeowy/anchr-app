@@ -2,6 +2,7 @@ package com.anchr.core.kb.infrastructure.persistence;
 
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
@@ -10,7 +11,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -38,20 +42,45 @@ public class AssetRepositoryImpl implements AssetRepository {
     }
 
     @Override
-    public List<Asset> listActive(String kbId, String keyword, String fileType, int limit, int offset) {
-        return mapper.listActive(kbId, keyword, fileType, limit, offset).stream()
+    public Map<String, Long> findActiveIndexGenerations(Collection<String> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Long> generations = new LinkedHashMap<>();
+        for (AssetRecord record : mapper.findActiveIndexGenerations(assetIds)) {
+            generations.put(record.getId(), defaultLong(record.getActiveIndexGeneration()));
+        }
+        return Map.copyOf(generations);
+    }
+
+    @Override
+    public List<Asset> listActive(
+            String kbId,
+            String keyword,
+            String fileType,
+            DocumentAvailabilityStatus availabilityStatus,
+            int limit,
+            int offset
+    ) {
+        return mapper.listActive(
+                        kbId, keyword, fileType, availabilityCode(availabilityStatus), limit, offset)
+                .stream()
                 .map(this::toDomain)
                 .toList();
     }
 
     @Override
-    public long countActive(String kbId, String keyword, String fileType) {
-        return mapper.countActive(kbId, keyword, fileType);
+    public long countActive(String kbId, String keyword, String fileType,
+                            DocumentAvailabilityStatus availabilityStatus) {
+        return mapper.countActive(
+                kbId, keyword, fileType, availabilityCode(availabilityStatus));
     }
 
     @Override
-    public long sumActiveSegments(String kbId, String keyword, String fileType) {
-        return mapper.sumActiveSegments(kbId, keyword, fileType);
+    public long sumActiveSegments(String kbId, String keyword, String fileType,
+                                  DocumentAvailabilityStatus availabilityStatus) {
+        return mapper.sumActiveSegments(
+                kbId, keyword, fileType, availabilityCode(availabilityStatus));
     }
 
     @Override
@@ -109,6 +138,18 @@ public class AssetRepositoryImpl implements AssetRepository {
     }
 
     @Override
+    public boolean activateIndexGeneration(String kbId, String assetId,
+                                           long expectedActiveGeneration, long targetGeneration,
+                                           String parseStatus, String indexStatus, int segmentCount,
+                                           int indexedSegmentCount,
+                                           String updatedBy, LocalDateTime updatedAt) {
+        return mapper.activateIndexGeneration(
+                kbId, assetId, expectedActiveGeneration, targetGeneration,
+                parseStatus, indexStatus, segmentCount, indexedSegmentCount,
+                updatedBy, updatedAt) == 1;
+    }
+
+    @Override
     public boolean markDeleted(String kbId, String assetId,
                                String updatedBy, LocalDateTime updatedAt) {
         return mapper.markDeleted(kbId, assetId, updatedBy, updatedAt) > 0;
@@ -126,16 +167,13 @@ public class AssetRepositoryImpl implements AssetRepository {
                 .fileHash(record.getFileHash())
                 .versionGroupId(record.getVersionGroupId())
                 .versionNo(record.getVersionNo())
-                .previousAssetId(record.getPreviousAssetId())
                 .objectKey(record.getObjectKey())
                 .previewObjectKey(record.getPreviewObjectKey())
-                .thumbnailKey(record.getThumbnailKey())
-                .sourceUrl(record.getSourceUrl())
                 .parseStatus(parseStatus(record.getParseStatus()))
                 .indexStatus(indexStatus(record.getIndexStatus()))
                 .segmentCount(defaultInt(record.getSegmentCount()))
                 .indexedSegmentCount(defaultInt(record.getIndexedSegmentCount()))
-                .embeddingProfile(record.getEmbeddingProfile())
+                .activeIndexGeneration(defaultLong(record.getActiveIndexGeneration()))
                 .errorCode(record.getErrorCode())
                 .errorMessage(record.getErrorMessage())
                 .createdBy(record.getCreatedBy())
@@ -158,16 +196,13 @@ public class AssetRepositoryImpl implements AssetRepository {
         record.setFileHash(asset.getFileHash());
         record.setVersionGroupId(asset.getVersionGroupId());
         record.setVersionNo(asset.getVersionNo());
-        record.setPreviousAssetId(asset.getPreviousAssetId());
         record.setObjectKey(asset.getObjectKey());
         record.setPreviewObjectKey(asset.getPreviewObjectKey());
-        record.setThumbnailKey(asset.getThumbnailKey());
-        record.setSourceUrl(asset.getSourceUrl());
         record.setParseStatus(asset.getParseStatus().name());
         record.setIndexStatus(asset.getIndexStatus().name());
         record.setSegmentCount(asset.getSegmentCount());
         record.setIndexedSegmentCount(asset.getIndexedSegmentCount());
-        record.setEmbeddingProfile(asset.getEmbeddingProfile());
+        record.setActiveIndexGeneration(asset.getActiveIndexGeneration());
         record.setErrorCode(asset.getErrorCode());
         record.setErrorMessage(asset.getErrorMessage());
         record.setCreatedBy(asset.getCreatedBy());
@@ -186,8 +221,16 @@ public class AssetRepositoryImpl implements AssetRepository {
         return status == null ? DocumentIndexStatus.PENDING : DocumentIndexStatus.valueOf(status);
     }
 
+    private String availabilityCode(DocumentAvailabilityStatus status) {
+        return status == null ? null : status.name();
+    }
+
     private int defaultInt(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private long defaultLong(Long value) {
+        return value == null ? 0L : value;
     }
 
     private int toInt(Long value) {

@@ -1,12 +1,12 @@
 package com.anchr.core.conversation.application.agent.tool;
 
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.agent.AgentExecutionContext;
 import com.anchr.core.conversation.application.agent.AgentTool;
 import com.anchr.core.conversation.application.agent.AgentToolResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.kb.domain.repository.AssetRepository;
+import com.anchr.core.conversation.application.model.ConversationDocumentReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -26,7 +26,7 @@ import java.util.Map;
 public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
     public record Input(@NotBlank @Size(max = 500) String query, @Min(1) @Max(10) Integer limit) {}
 
-    private final AssetRepository assetRepository;
+    private final ConversationKnowledgeAcl conversationKnowledgeAcl;
     private final ConversationRetrievalOrchestrator retrievalOrchestrator;
     private final ObjectMapper objectMapper;
 
@@ -40,9 +40,10 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
     public AgentToolResult execute(Input input, AgentExecutionContext context) {
         int limit = input.limit() == null ? 5 : input.limit();
         LinkedHashMap<String, DocumentMatch> matches = new LinkedHashMap<>();
-        for (String kbId : context.kbIds()) {
-            for (Asset asset : assetRepository.listActive(kbId, input.query().trim(), null, limit, 0)) {
-                if (allowed(asset.getId(), context)) matches.putIfAbsent(asset.getId(), new DocumentMatch(asset));
+        for (ConversationDocumentReference asset : conversationKnowledgeAcl
+                .searchActiveDocuments(context.kbIds(), input.query().trim(), limit)) {
+            if (allowed(asset.id(), context)) {
+                matches.putIfAbsent(asset.id(), new DocumentMatch(asset));
             }
         }
         var retrieved = retrievalOrchestrator.retrieve(input.query().trim(), 10, context.kbIds(),
@@ -50,7 +51,9 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
         List<ConversationRetrievalCandidate> evidence = new ArrayList<>();
         for (ConversationRetrievalCandidate candidate : retrieved.getTopCandidates()) {
             if (!StringUtils.hasText(candidate.getAssetId()) || !allowed(candidate.getAssetId(), context)) continue;
-            evidence.add(candidate);
+            if (candidate.isCitableEvidence()) {
+                evidence.add(candidate);
+            }
             DocumentMatch match = matches.computeIfAbsent(candidate.getAssetId(), id -> load(candidate, context));
             if (match != null) match.add(candidate);
         }
@@ -66,11 +69,10 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
     }
 
     private DocumentMatch load(ConversationRetrievalCandidate candidate, AgentExecutionContext context) {
-        for (String kbId : context.kbIds()) {
-            Asset asset = assetRepository.findActiveById(kbId, candidate.getAssetId()).orElse(null);
-            if (asset != null) return new DocumentMatch(asset);
-        }
-        return null;
+        return conversationKnowledgeAcl.findActiveDocument(
+                context.kbIds(), candidate.getAssetId())
+                .map(DocumentMatch::new)
+                .orElse(null);
     }
 
     private boolean allowed(String assetId, AgentExecutionContext context) {
@@ -78,12 +80,12 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
     }
 
     private static final class DocumentMatch {
-        private final Asset asset;
+        private final ConversationDocumentReference asset;
         private double score = 1.0D;
         private String segmentId = "";
         private String snippet = "";
 
-        private DocumentMatch(Asset asset) { this.asset = asset; }
+        private DocumentMatch(ConversationDocumentReference asset) { this.asset = asset; }
         private void add(ConversationRetrievalCandidate value) {
             score = Math.max(score, value.getScore() == null ? 0.0D : value.getScore());
             if (segmentId.isEmpty()) segmentId = value.getSegmentId() == null ? "" : value.getSegmentId();
@@ -93,9 +95,9 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
             }
         }
         private Map<String, Object> view() {
-            return Map.of("assetId", asset.getId(), "kbId", asset.getKbId(),
-                    "fileName", asset.getFileName() == null ? "" : asset.getFileName(), "title", asset.getTitle() == null ? "" : asset.getTitle(),
-                    "fileType", asset.getFileType() == null ? "" : asset.getFileType(), "segmentCount", asset.getSegmentCount(),
+            return Map.of("assetId", asset.id(), "kbId", asset.kbId(),
+                    "fileName", asset.fileName() == null ? "" : asset.fileName(), "title", asset.title() == null ? "" : asset.title(),
+                    "fileType", asset.fileType() == null ? "" : asset.fileType(), "segmentCount", asset.segmentCount(),
                     "matchedSegmentId", segmentId, "matchSnippet", snippet);
         }
     }

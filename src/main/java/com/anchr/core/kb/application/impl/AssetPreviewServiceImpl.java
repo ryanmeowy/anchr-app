@@ -8,8 +8,8 @@ import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.application.support.AssetPreviewAccessCache;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
 import com.anchr.core.kb.interfaces.rest.dto.AssetPreviewDTO;
-import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -22,7 +22,7 @@ import org.springframework.util.StringUtils;
 public class AssetPreviewServiceImpl implements AssetPreviewService {
 
     private final KnowledgeBaseService knowledgeBaseService;
-    private final SearchObjectStoragePort objectStoragePort;
+    private final KnowledgeObjectStoragePort objectStoragePort;
     private final AssetPreviewAccessCache previewAccessCache;
 
     @Override
@@ -50,7 +50,6 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
                 .segmentCount(asset.getSegmentCount())
                 .previewType(asset.getFileType())
                 .previewUrl(access.previewUrl())
-                .thumbnailUrl(access.thumbnailUrl())
                 .expiresAt(access.expiresAt())
                 .build();
     }
@@ -58,12 +57,8 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
     private AssetPreviewAccessCache.AssetPreviewAccess buildAndCacheAccess(
             Asset asset, String accessTokenHash) {
         SignedAccess preview = resolvePreview(asset);
-        SignedAccess thumbnail = StringUtils.hasText(asset.getThumbnailKey())
-                ? sign(asset.getThumbnailKey().trim())
-                : null;
-        Long expiresAt = earliestExpiry(preview.expiresAt(), thumbnail == null ? null : thumbnail.expiresAt());
         AssetPreviewAccessCache.AssetPreviewAccess access = new AssetPreviewAccessCache.AssetPreviewAccess(
-                preview.url(), thumbnail == null ? null : thumbnail.url(), expiresAt);
+                preview.url(), preview.expiresAt());
         previewAccessCache.save(asset.getId(), accessTokenHash, access);
         return access;
     }
@@ -75,15 +70,13 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
         if (StringUtils.hasText(asset.getObjectKey())) {
             return sign(asset.getObjectKey().trim());
         }
-        if (isHttpUrl(asset.getSourceUrl())) {
-            return new SignedAccess(asset.getSourceUrl().trim(), null);
-        }
         throw new BusinessException(ApiError.DOCUMENT_PREVIEW_NOT_AVAILABLE);
     }
 
     private SignedAccess sign(String objectKey) {
         try {
-            SearchObjectStoragePort.SignedObjectUrl signed = objectStoragePort.buildPreviewUrl(objectKey);
+            KnowledgeObjectStoragePort.SignedObjectUrl signed =
+                    objectStoragePort.signPreviewUrl(objectKey);
             if (signed == null || !StringUtils.hasText(signed.url())) {
                 throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);
             }
@@ -101,17 +94,6 @@ public class AssetPreviewServiceImpl implements AssetPreviewService {
             throw new BusinessException(ApiError.UNAUTHORIZED, "Authenticated token context is required.");
         }
         return accessTokenHash;
-    }
-
-    private Long earliestExpiry(Long first, Long second) {
-        if (first == null) return second;
-        if (second == null) return first;
-        return Math.min(first, second);
-    }
-
-    private boolean isHttpUrl(String value) {
-        return StringUtils.hasText(value)
-                && (value.trim().startsWith("http://") || value.trim().startsWith("https://"));
     }
 
     private record SignedAccess(String url, Long expiresAt) {

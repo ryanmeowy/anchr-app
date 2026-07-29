@@ -3,13 +3,13 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.model.BboxInfo;
-import com.anchr.core.kb.application.ActivityEventService;
-import com.anchr.core.kb.application.ActivityQueryService;
-import com.anchr.core.kb.application.KnowledgeBaseService;
-import com.anchr.core.kb.domain.model.KnowledgeBase;
-import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
+import com.anchr.core.kb.application.api.model.DocumentSummary;
+import com.anchr.core.kb.application.api.model.KnowledgeBaseSummary;
+import com.anchr.core.search.application.acl.SearchActivityAcl;
+import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
@@ -27,8 +27,10 @@ import java.util.Optional;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -41,11 +43,9 @@ class SegmentPreviewServiceImplTest {
     @Mock
     private SearchObjectStoragePort objectStoragePort;
     @Mock
-    private ActivityEventService activityEventService;
+    private SearchActivityAcl activityEventService;
     @Mock
-    private ActivityQueryService activityQueryService;
-    @Mock
-    private KnowledgeBaseService knowledgeBaseService;
+    private SearchKnowledgeAcl searchKnowledgeAcl;
 
     private SegmentPreviewServiceImpl service;
 
@@ -58,9 +58,11 @@ class SegmentPreviewServiceImplTest {
                 objectStoragePort,
                 previewAccessCache,
                 activityEventService,
-                activityQueryService,
-                knowledgeBaseService);
-        when(knowledgeBaseService.get(anyString())).thenReturn(KnowledgeBase.builder().id("kb-1").name("KB").build());
+                searchKnowledgeAcl);
+        lenient().when(searchKnowledgeAcl.findActiveKnowledgeBase(anyString()))
+                .thenReturn(Optional.of(new KnowledgeBaseSummary("kb-1", "KB", "ACTIVE")));
+        lenient().when(searchKnowledgeAcl.findActiveDocument(anyString(), anyString()))
+                .thenReturn(Optional.of(document("asset-1", null, null, null, 0L)));
     }
 
     @AfterEach
@@ -77,15 +79,16 @@ class SegmentPreviewServiceImplTest {
 
         assertThat(result.getContent()).isEqualTo("Original content");
         assertThat(result.getCitationContext().getCitationReason()).isEqualTo("预先生成的引用理由");
-        ArgumentCaptor<ActivityEventService.CitationContext> captor =
-                ArgumentCaptor.forClass(ActivityEventService.CitationContext.class);
-        verify(activityEventService).recordCitationOpened(captor.capture());
-        assertThat(captor.getValue().snippet()).isEqualTo("Original content");
-        assertThat(captor.getValue().citationReason()).isEqualTo("预先生成的引用理由");
-        assertThat(captor.getValue().anchor().getPageNo()).isEqualTo(2);
-        assertThat(captor.getValue().anchor().getChunkOrder()).isEqualTo(7);
-        assertThat(captor.getValue().anchor().getBbox()).hasSize(1);
-        assertThat(captor.getValue().chunks()).extracting(CitationChunkSnapshotDTO::getSegmentId)
+        ArgumentCaptor<com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO> previewCaptor =
+                ArgumentCaptor.forClass(com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO.class);
+        ArgumentCaptor<PreviewRequestDTO> requestCaptor = ArgumentCaptor.forClass(PreviewRequestDTO.class);
+        verify(activityEventService).recordCitationOpened(previewCaptor.capture(), requestCaptor.capture());
+        assertThat(previewCaptor.getValue().getContent()).isEqualTo("Original content");
+        assertThat(previewCaptor.getValue().getCitationContext().getCitationReason()).isEqualTo("预先生成的引用理由");
+        assertThat(previewCaptor.getValue().getAnchor().getPageNo()).isEqualTo(2);
+        assertThat(previewCaptor.getValue().getAnchor().getChunkOrder()).isEqualTo(7);
+        assertThat(previewCaptor.getValue().getAnchor().getBbox()).hasSize(1);
+        assertThat(requestCaptor.getValue().getCitationInfo().getChunks()).extracting(CitationChunkSnapshotDTO::getSegmentId)
                 .containsExactly("seg-1", "seg-2");
     }
 
@@ -124,13 +127,8 @@ class SegmentPreviewServiceImplTest {
                 .imageWidth(1200)
                 .imageHeight(1600)
                 .build();
-        when(activityQueryService.fetchCitationsById("record-1")).thenReturn(RecentCitationDTO.builder()
-                .recordId("record-1")
-                .segmentId("seg-1")
-                .citationReason("历史引用理由")
-                .citationIndex("1")
-                .anchor(persistedAnchor)
-                .build());
+        when(activityEventService.findCitationById("record-1")).thenReturn(new SearchActivityAcl.CitationSnapshot(
+                null, null, null, "1", "历史引用理由", null, persistedAnchor));
         PreviewRequestDTO request = new PreviewRequestDTO();
         request.setRecordId("record-1");
 
@@ -140,7 +138,7 @@ class SegmentPreviewServiceImplTest {
         assertThat(result.getAnchor().getPageNo()).isEqualTo(9);
         assertThat(result.getAnchor().getChunkOrder()).isEqualTo(42);
         assertThat(result.getCitationContext().getCitationReason()).isEqualTo("历史引用理由");
-        verifyNoInteractions(activityEventService);
+        verify(activityEventService).findCitationById("record-1");
     }
 
     @Test
@@ -175,6 +173,57 @@ class SegmentPreviewServiceImplTest {
         verify(objectStoragePort).buildPreviewUrl("documents/shared.pdf");
     }
 
+    @Test
+    void documentImageShouldUseAssetForDocumentPreviewAndSourceRefForImagePreview() {
+        Segment segment = Segment.builder()
+                .segmentId("seg-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .assetType("PDF")
+                .segmentType(SegmentType.DOCUMENT_IMAGE)
+                .title("Architecture")
+                .contentText("architecture diagram")
+                .sourceRef("embedded/architecture.png")
+                .build();
+        DocumentSummary asset = document(
+                "asset-1", "design.pdf", "documents/design.pdf", "previews/design.pdf", 0L);
+        long expiresAt = System.currentTimeMillis() + 120_000L;
+        when(segmentRepository.findBySegmentId("seg-1"))
+                .thenReturn(Optional.of(segment));
+        when(searchKnowledgeAcl.findActiveDocument("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(objectStoragePort.buildPreviewUrl("previews/design.pdf"))
+                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
+                        "https://preview/document", expiresAt));
+        when(objectStoragePort.buildPreviewUrl("embedded/architecture.png"))
+                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
+                        "https://preview/image", expiresAt));
+
+        var result = service.getSegmentPreview("seg-1", new PreviewRequestDTO());
+
+        assertThat(result.getFileName()).isEqualTo("design.pdf");
+        assertThat(result.getPreviewUrl()).isEqualTo("https://preview/document");
+        assertThat(result.getImagePreviewUrl()).isEqualTo("https://preview/image");
+        assertThat(result.getSourceRef()).isEqualTo("embedded/architecture.png");
+    }
+
+    @Test
+    void oldGenerationShouldNotBePreviewable() {
+        Segment segment = segment("Old content", null, "Old title").toBuilder()
+                .indexGeneration(3L)
+                .build();
+        when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(segment));
+        when(searchKnowledgeAcl.findActiveDocument("kb-1", "asset-1")).thenReturn(
+                Optional.of(document("asset-1", null, null, null, 4L)));
+
+        assertThatThrownBy(() -> service.getSegmentPreview("seg-1", new PreviewRequestDTO()))
+                .isInstanceOf(com.anchr.core.common.exception.BusinessException.class)
+                .extracting(error -> ((com.anchr.core.common.exception.BusinessException) error).getError())
+                .isEqualTo(com.anchr.core.common.exception.ApiError.SEGMENT_NOT_FOUND);
+
+        verifyNoInteractions(objectStoragePort, activityEventService);
+    }
+
     private Segment segment(String content, String ocr, String title) {
         return Segment.builder()
                 .segmentId("seg-1")
@@ -190,6 +239,13 @@ class SegmentPreviewServiceImplTest {
                         .bbox(BboxInfo.Bbox.builder().l(10).t(20).r(30).b(40).build())
                         .build()))
                 .build();
+    }
+
+    private DocumentSummary document(String id, String fileName, String objectKey,
+                                     String previewObjectKey, long generation) {
+        return new DocumentSummary(
+                id, "kb-1", fileName, null, null, null,
+                objectKey, previewObjectKey, generation, 0);
     }
 
     private PreviewRequestDTO request() {

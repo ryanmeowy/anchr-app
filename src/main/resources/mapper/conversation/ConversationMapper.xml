@@ -38,14 +38,12 @@
         <result property="createdAt" column="created_at"/>
     </resultMap>
 
-    <insert id="upsertSession" parameterType="com.anchr.core.conversation.infrastructure.persistence.ConversationSessionRecord">
+    <insert id="insertSession" parameterType="com.anchr.core.conversation.infrastructure.persistence.ConversationSessionRecord">
         insert into conversation_session (
           session_id, user_id, title, status, kb_scope, asset_scope, created_at, updated_at
         ) values (
           #{sessionId}, #{userId}, #{title}, #{status}, #{kbScope}, #{assetScope}, #{createdAt}, #{updatedAt}
-        ) on duplicate key update
-          user_id = values(user_id), title = values(title), status = values(status),
-          kb_scope = values(kb_scope), asset_scope = values(asset_scope), updated_at = values(updated_at)
+        )
     </insert>
 
     <select id="findSession" resultMap="SessionMap">
@@ -59,14 +57,44 @@
         for update
     </select>
 
-    <select id="findRecentSessions" resultMap="SessionMap">
+    <select id="findSessionPage" resultMap="SessionMap">
         select session_id, user_id, title, status, kb_scope, asset_scope, created_at, updated_at
         from conversation_session
         where user_id = #{userId}
           and deleted_at is null
+        <if test="beforeUpdatedAt != null and beforeSessionId != null">
+          and (
+            updated_at &lt; #{beforeUpdatedAt}
+            or (updated_at = #{beforeUpdatedAt} and session_id &lt; #{beforeSessionId})
+          )
+        </if>
         order by updated_at desc, session_id desc
         limit #{limit}
     </select>
+
+    <update id="renameSession">
+        update conversation_session
+        set title = #{title},
+            updated_at = greatest(timestampadd(microsecond, 1000, updated_at), #{renamedAt})
+        where session_id = #{sessionId}
+          and deleted_at is null
+    </update>
+
+    <update id="touchSessionIfNewer">
+        update conversation_session
+        set updated_at = greatest(timestampadd(microsecond, 1000, updated_at), #{requestStartedAt})
+        where session_id = #{sessionId}
+          and deleted_at is null
+    </update>
+
+    <update id="updateAutoTitleIfUnchanged">
+        update conversation_session
+        set title = #{generatedTitle},
+            updated_at = greatest(timestampadd(microsecond, 1000, updated_at), #{requestStartedAt})
+        where session_id = #{sessionId}
+          and deleted_at is null
+          and title &lt;=> #{expectedTitle}
+    </update>
 
     <update id="softDeleteTurns">
         update conversation_turn set deleted_at = current_timestamp(3)

@@ -13,10 +13,11 @@ public class IngestionTaskItemRecord {
     private String id;
     private String taskId;
     private String kbId;
+    private String taskCreatedBy;
     private String assetId;
+    private Long targetIndexGeneration;
     private String fileName;
     private String fileHash;
-    private String sourceUrl;
     private String stage;
     private String status;
     private Integer progress;

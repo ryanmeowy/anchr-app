@@ -9,6 +9,8 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ParseRequest(
         String requestId,
+        Integer contractVersion,
+        String sourceRevision,
         String sourceUrl,
         String fileName,
         Options options,
@@ -23,10 +25,16 @@ public record ParseRequest(
             Boolean validateTextQuality,
             Integer chunkMinTokens,
             Integer chunkMaxTokens,
-            Boolean useNativeChunker
+            Boolean useNativeChunker,
+            Boolean includeEmbeddedImages
     ) {
         public static Options chunkModel() {
-            return new Options("chunks", true, true, true, true, 200, 500, true);
+            return chunkModel(false);
+        }
+
+        public static Options chunkModel(boolean includeEmbeddedImages) {
+            return new Options("chunks", true, true, true, true, 200, 500, true,
+                    includeEmbeddedImages);
         }
     }
 
@@ -34,6 +42,7 @@ public record ParseRequest(
             String endpoint,
             String bucket,
             String basePath,
+            String objectKeyLayout,
             Map<String, String> encryptedCredentials
     ) {}
 

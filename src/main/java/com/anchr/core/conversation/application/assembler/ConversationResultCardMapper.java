@@ -1,7 +1,7 @@
 package com.anchr.core.conversation.application.assembler;
 
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ResultAnchorDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import org.springframework.stereotype.Component;
@@ -95,17 +95,17 @@ public class ConversationResultCardMapper {
         return hit;
     }
 
-    private PreviewAnchorDTO toAnchor(ConversationRetrievalCandidate candidate) {
+    private ResultAnchorDTO toAnchor(ConversationRetrievalCandidate candidate) {
         ConversationRetrievalCandidate.Anchor source = candidate.getAnchor();
         if (source == null && candidate.getPageNo() == null) {
             return null;
         }
         if (source == null) {
-            return PreviewAnchorDTO.builder()
+            return ResultAnchorDTO.builder()
                     .pageNo(candidate.getPageNo())
                     .build();
         }
-        return PreviewAnchorDTO.builder()
+        return ResultAnchorDTO.builder()
                 .pageNo(source.getPageNo() == null ? candidate.getPageNo() : source.getPageNo())
                 .chunkOrder(source.getChunkOrder())
                 .bbox(source.getBbox())
@@ -142,6 +142,10 @@ public class ConversationResultCardMapper {
     }
 
     private String resolveFileName(ConversationRetrievalCandidate candidate) {
+        if ("DOCUMENT_IMAGE".equalsIgnoreCase(candidate.getSegmentType())
+                && StringUtils.hasText(candidate.getTitle())) {
+            return candidate.getTitle().trim();
+        }
         if (!StringUtils.hasText(candidate.getSourceRef())) {
             return null;
         }

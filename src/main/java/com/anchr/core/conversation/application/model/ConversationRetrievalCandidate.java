@@ -18,6 +18,8 @@ import java.util.List;
 @AllArgsConstructor
 public class ConversationRetrievalCandidate {
 
+    private static final String INTERNAL_IMAGE_VISUAL = "IMAGE_VISUAL";
+
     private String segmentId;
     private String kbId;
     private String assetId;
@@ -35,6 +37,12 @@ public class ConversationRetrievalCandidate {
     private Integer pageNo;
     private Anchor anchor;
     private Explain explain;
+
+    /** Asset-level visual projection is useful for ranking, but not quotable evidence. */
+    public boolean isCitableEvidence() {
+        return segmentType == null
+                || !INTERNAL_IMAGE_VISUAL.equalsIgnoreCase(segmentType.trim());
+    }
 
     @Data
     @Builder

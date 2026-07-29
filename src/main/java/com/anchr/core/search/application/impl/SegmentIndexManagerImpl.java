@@ -1,6 +1,7 @@
 package com.anchr.core.search.application.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.ClearScrollRequest;
@@ -14,8 +15,13 @@ import co.elastic.clients.elasticsearch.indices.IndexSettings;
 import co.elastic.clients.elasticsearch.indices.get_mapping.IndexMappingRecord;
 import co.elastic.clients.json.JsonData;
 import com.anchr.core.common.config.SegmentIndexConfig;
+import com.anchr.core.common.util.IdGen;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.application.acl.RetrievalCapabilityAcl;
+import com.anchr.core.search.application.api.RetrievalEmbeddingDeploymentApi;
+import com.anchr.core.search.application.api.model.RetrievalEmbeddingDeploymentRequest;
+import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
 import com.anchr.core.search.domain.port.EmbeddingProfileProvider;
@@ -28,6 +34,7 @@ import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocum
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -43,6 +50,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -56,7 +64,7 @@ import java.util.function.Supplier;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class SegmentIndexManagerImpl implements SegmentIndexManager {
+public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEmbeddingDeploymentApi {
 
     private static final String SETTINGS_PATH = "es-settings.json";
     private static final String MAPPING_PATH = "es-kb-segment-mapping.json";
@@ -78,11 +86,18 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private final EmbeddingProfileProvider embeddingProfileProvider;
     private final SearchEmbeddingPort embeddingPort;
     private final SearchObjectStoragePort storagePort;
+    private final IdGen idGen;
 
     @Qualifier("indexInitExecutor")
     private final Executor indexInitExecutor;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
     private final SegmentIndexAliasManager aliasManager;
+    private RetrievalCapabilityAcl retrievalCapabilityAcl;
+
+    @Autowired(required = false)
+    void setRetrievalCapabilityAcl(RetrievalCapabilityAcl retrievalCapabilityAcl) {
+        this.retrievalCapabilityAcl = retrievalCapabilityAcl;
+    }
 
     // Instance-level lock; use a distributed lock for multi-instance deployments.
     private final ReentrantLock indexOpLock = new ReentrantLock();
@@ -401,10 +416,37 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     }
 
     @Override
+    public String requestRebuild(EmbeddingProfile targetProfile) {
+        if (targetProfile == null) {
+            throw new IllegalArgumentException("Target embedding profile is required");
+        }
+        SegmentIndexState current = stateRef.get();
+        if (Objects.equals(
+                current.actualProfileFingerprint(), targetProfile.fingerprint())) {
+            return null;
+        }
+        String reason = "Embedding model switch requested: "
+                + Objects.toString(current.actualModel(), "unknown")
+                + " -> " + targetProfile.modelName();
+        return createPendingRebuildTask(reason, targetProfile);
+    }
+
+    @Override
+    public String requestDeployment(RetrievalEmbeddingDeploymentRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Target embedding deployment is required");
+        }
+        return requestRebuild(new EmbeddingProfile(
+                request.configId(),
+                request.capability(),
+                request.modelName(),
+                request.dimension(),
+                request.fingerprint()));
+    }
+
+    @Override
     public boolean confirmRebuild(String taskId) {
-        EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
-                .orElse(null);
-        RebuildClaim claim = tryClaimRebuild(taskId, expectedProfile);
+        RebuildClaim claim = tryClaimRebuild(taskId);
         if (claim == null) {
             log.warn("Rebuild confirm: task not found or mismatched, taskId={}", taskId);
             return false;
@@ -419,7 +461,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
     }
 
-    private RebuildClaim tryClaimRebuild(String taskId, EmbeddingProfile expectedProfile) {
+    private RebuildClaim tryClaimRebuild(String taskId) {
         while (true) {
             SegmentIndexState current = stateRef.get();
             PendingRebuildState pending = current.pendingRebuild();
@@ -428,8 +470,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     || !pending.taskId().equals(taskId)) {
                 return null;
             }
-            if (!pendingRebuildStillNeeded(current, expectedProfile)) {
-                clearObsoletePendingRebuild(current, expectedProfile);
+            if (!pendingRebuildStillNeeded(current)) {
+                clearObsoletePendingRebuild(current);
                 return null;
             }
             SegmentIndexState claimed = current.claimRebuild();
@@ -512,7 +554,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private record MigrationDocument(String id, SegmentDocument document) {
     }
 
-    private record MigrationResult(long sourceCount, long migratedCount, long targetCount) {
+    private record MigrationResult(long sourceCount, long processedCount, long targetCount) {
     }
 
     private void doRebuild(EmbeddingProfile targetProfile, EmbeddingSession embeddingSession)
@@ -547,11 +589,11 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             // 5. alias 原子切换到新索引
             log.info("Rebuild: switching alias from [{}] to [{}]",
                     oldPhysicalIndex, newPhysicalIndex);
-            aliasManager.switchAliases(oldPhysicalIndex, newPhysicalIndex);
+            switchAliasesAndActivate(oldPhysicalIndex, newPhysicalIndex, targetProfile);
 
             stateRef.updateAndGet(current -> current.withRebuildProgress(
                     new RebuildProgressState(
-                            migration.migratedCount(), migration.sourceCount(), "COMPLETED")));
+                            migration.processedCount(), migration.sourceCount(), "COMPLETED")));
 
             // Keep the old physical index as a rollback snapshot. Cleanup must be explicit.
             log.info("Rebuild: old index [{}] retained for rollback; new index [{}] has {} documents",
@@ -564,6 +606,24 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
     }
 
+    void switchAliasesAndActivate(
+            String oldPhysicalIndex,
+            String newPhysicalIndex,
+            EmbeddingProfile targetProfile
+    ) throws Exception {
+        aliasManager.switchAliases(oldPhysicalIndex, newPhysicalIndex);
+        try {
+            if (retrievalCapabilityAcl != null) {
+                retrievalCapabilityAcl.activateServingProfile(targetProfile);
+            }
+        } catch (Exception activationFailure) {
+            aliasManager.switchAliases(newPhysicalIndex, oldPhysicalIndex);
+            throw new IllegalStateException(
+                    "Embedding config activation failed after alias switch",
+                    activationFailure);
+        }
+    }
+
     private MigrationResult migrateData(
             String oldIndex,
             String newIndex,
@@ -571,7 +631,11 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             EmbeddingProfile targetProfile,
             EmbeddingSession embeddingSession
     ) throws Exception {
-        long migrated = 0;
+        long processed = 0;
+        long projected = 0;
+        SegmentRebuildProjectionPlanner projectionPlanner =
+                new SegmentRebuildProjectionPlanner(
+                        targetProfile.capability(), idGen::nextIdStr);
         stateRef.updateAndGet(current -> current.withRebuildProgress(
                 new RebuildProgressState(0, totalDocs, "MIGRATING")));
 
@@ -581,6 +645,16 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     SearchRequest.of(s -> s
                             .index(oldIndex)
                             .size(SCROLL_BATCH_SIZE)
+                            .sort(sort -> sort.field(field -> field
+                                    .field("assetId").order(SortOrder.Asc)))
+                            .sort(sort -> sort.field(field -> field
+                                    .field("indexGeneration").order(SortOrder.Asc)
+                                    .missing("_first")))
+                            .sort(sort -> sort.field(field -> field
+                                    .field("segmentType").order(SortOrder.Desc)
+                                    .missing("_last")))
+                            .sort(sort -> sort.field(field -> field
+                                    .field("segmentId").order(SortOrder.Asc)))
                             .scroll(t -> t.time(SCROLL_KEEP_ALIVE_MINUTES + "m"))),
                     SegmentDocument.class);
 
@@ -589,14 +663,16 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
             while (!hits.isEmpty()) {
                 List<MigrationDocument> batch = prepareMigrationBatch(
-                        hits, targetProfile, embeddingSession);
+                        hits, targetProfile, embeddingSession, projectionPlanner);
                 writeMigrationBatch(newIndex, batch);
 
-                migrated += batch.size();
-                long migratedCount = migrated;
+                processed += hits.size();
+                projected += batch.size();
+                long processedCount = processed;
                 stateRef.updateAndGet(current -> current.withRebuildProgress(
-                        new RebuildProgressState(migratedCount, totalDocs, "MIGRATING")));
-                log.info("Rebuild: migrated {}/{} documents", migrated, totalDocs);
+                        new RebuildProgressState(processedCount, totalDocs, "MIGRATING")));
+                log.info("Rebuild: processed {}/{} source documents, projected {} target documents",
+                        processed, totalDocs, projected);
 
                 String currentScrollId = scrollId;
                 ScrollResponse<SegmentDocument> scrollResponse = esClient.scroll(
@@ -612,20 +688,21 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
         esClient.indices().refresh(r -> r.index(newIndex));
         long targetDocs = esClient.count(c -> c.index(newIndex)).count();
-        validateMigrationCounts(totalDocs, migrated, targetDocs);
+        validateMigrationCounts(totalDocs, processed, projected, targetDocs);
 
-        long migratedCount = migrated;
+        long processedCount = processed;
         stateRef.updateAndGet(current -> current.withRebuildProgress(
-                new RebuildProgressState(migratedCount, totalDocs, "SWITCHING_ALIAS")));
-        log.info("Rebuild: data migration validated, source={}, migrated={}, target={}",
-                totalDocs, migrated, targetDocs);
-        return new MigrationResult(totalDocs, migrated, targetDocs);
+                new RebuildProgressState(processedCount, totalDocs, "SWITCHING_ALIAS")));
+        log.info("Rebuild: data migration validated, source={}, projected={}, target={}",
+                totalDocs, projected, targetDocs);
+        return new MigrationResult(totalDocs, processed, targetDocs);
     }
 
     private List<MigrationDocument> prepareMigrationBatch(
             List<Hit<SegmentDocument>> hits,
             EmbeddingProfile targetProfile,
-            EmbeddingSession embeddingSession
+            EmbeddingSession embeddingSession,
+            SegmentRebuildProjectionPlanner projectionPlanner
     ) {
         List<MigrationDocument> batch = new ArrayList<>(hits.size());
         for (Hit<SegmentDocument> hit : hits) {
@@ -633,9 +710,9 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 throw new IllegalStateException("Rebuild source contains a document without _source");
             }
             SegmentDocument document = hit.source();
-            String documentId = StringUtils.hasText(document.getSegmentId())
-                    ? document.getSegmentId()
-                    : hit.id();
+            String documentId = StringUtils.hasText(hit.id())
+                    ? hit.id()
+                    : document.getSegmentId();
             if (!StringUtils.hasText(documentId)) {
                 throw new IllegalStateException("Rebuild source contains a document without an id");
             }
@@ -643,12 +720,28 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 document.setSegmentId(documentId);
             }
 
-            sleepUninterruptibly(EMBEDDING_CALL_INTERVAL_MS);
-            List<Float> embedding = computeNewEmbedding(
-                    document, documentId, targetProfile, embeddingSession);
-            validateEmbedding(documentId, embedding, targetProfile.dimension());
-            document.setEmbedding(embedding);
-            batch.add(new MigrationDocument(documentId, document));
+            List<SegmentRebuildProjectionPlanner.PlannedDocument> planned =
+                    projectionPlanner.plan(documentId, document);
+            for (SegmentRebuildProjectionPlanner.PlannedDocument target : planned) {
+                EmbeddingProjection projection = target.projection();
+                if (projection != null) {
+                    sleepUninterruptibly(EMBEDDING_CALL_INTERVAL_MS);
+                    String source = projection.inputType()
+                            == EmbeddingProjection.InputType.IMAGE
+                            ? resolveRebuildImageInput(projection.source())
+                            : projection.source();
+                    List<Float> embedding = callEmbeddingWithRetry(
+                            () -> embeddingSession.embed(
+                                    source, projection.inputType().requestValue()),
+                            target.id(),
+                            projection.inputType().requestValue());
+                    validateEmbedding(
+                            target.id(), embedding, targetProfile.dimension());
+                    target.document().setEmbedding(embedding);
+                }
+                batch.add(new MigrationDocument(
+                        target.id(), target.document()));
+            }
         }
         return batch;
     }
@@ -688,34 +781,18 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         return item.id() + "=" + item.error().reason();
     }
 
-    private List<Float> computeNewEmbedding(
-            SegmentDocument doc,
-            String documentId,
-            EmbeddingProfile targetProfile,
-            EmbeddingSession embeddingSession
-    ) {
-        boolean image = "IMAGE".equalsIgnoreCase(doc.getAssetType());
-        boolean targetSupportsImage = "MULTI_EMBEDDING".equalsIgnoreCase(targetProfile.capability());
-        if (image && targetSupportsImage) {
-            if (!StringUtils.hasText(doc.getThumbnail())) {
-                throw new IllegalStateException(
-                        "Rebuild IMAGE document " + documentId + " has no thumbnail");
-            }
-            String imageUrl = storagePort.buildAiImageInput(doc.getThumbnail(),
-                    SearchObjectStoragePort.AiInputValidity.SHORT);
-            return callEmbeddingWithRetry(
-                    () -> embeddingSession.embed(imageUrl, "image"), documentId, "image");
-        }
-
-        String text = StringUtils.hasText(doc.getContentText())
-                ? doc.getContentText()
-                : doc.getOcrText();
-        if (!StringUtils.hasText(text)) {
+    String resolveRebuildImageInput(String stableSource) {
+        if (!StringUtils.hasText(stableSource)) {
             throw new IllegalStateException(
-                    "Rebuild document " + documentId + " has no text content for embedding");
+                    "Rebuild IMAGE_VISUAL has no stable original image source.");
         }
-        return callEmbeddingWithRetry(
-                () -> embeddingSession.embed(text, "text"), documentId, "text");
+        String normalized = stableSource.trim();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            return normalized;
+        }
+        return storagePort.buildAiImageInput(
+                normalized, SearchObjectStoragePort.AiInputValidity.SHORT);
     }
 
     static void validateEmbedding(String documentId, List<Float> embedding, int expectedDim) {
@@ -783,12 +860,19 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         }
     }
 
-    static void validateMigrationCounts(long sourceDocs, long migratedDocs, long targetDocs) {
-        if (sourceDocs != migratedDocs || sourceDocs != targetDocs) {
+    static void validateMigrationCounts(
+            long sourceDocs,
+            long processedSourceDocs,
+            long projectedTargetDocs,
+            long actualTargetDocs
+    ) {
+        if (sourceDocs != processedSourceDocs
+                || projectedTargetDocs != actualTargetDocs) {
             throw new IllegalStateException(
                     "Rebuild document count mismatch: source=" + sourceDocs
-                            + ", migrated=" + migratedDocs
-                            + ", target=" + targetDocs);
+                            + ", processed=" + processedSourceDocs
+                            + ", projected=" + projectedTargetDocs
+                            + ", target=" + actualTargetDocs);
         }
     }
 
@@ -837,9 +921,9 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     @Override
     public SegmentIndexStatusDTO status() {
-        EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
+        EmbeddingProfile activeProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
                 .orElse(null);
-        return status(expectedProfile);
+        return status(activeProfile);
     }
 
     private SegmentIndexStatusDTO status(EmbeddingProfile expectedProfile) {
@@ -849,23 +933,26 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 IndexInspection inspection = inspectIndex(false, current.readIndex());
                 current = mergeInspection(inspection);
             }
-            current = clearObsoletePendingRebuild(current, expectedProfile);
-            return toStatusDto(current, expectedProfile);
+            current = clearObsoletePendingRebuild(current);
+            return toStatusDto(current, effectiveExpectedProfile(current, expectedProfile));
         }
 
         IndexInspection inspection = inspectIndex(true, null);
         lastAliasTopologyRefreshMs.set(System.currentTimeMillis());
         SegmentIndexState updated = mergeInspection(inspection);
-        updated = clearObsoletePendingRebuild(updated, expectedProfile);
-        return toStatusDto(updated, expectedProfile);
+        updated = clearObsoletePendingRebuild(updated);
+        return toStatusDto(updated, effectiveExpectedProfile(updated, expectedProfile));
     }
 
-    private SegmentIndexState clearObsoletePendingRebuild(
-            SegmentIndexState observed,
-            EmbeddingProfile expectedProfile
-    ) {
+    private EmbeddingProfile effectiveExpectedProfile(
+            SegmentIndexState state, EmbeddingProfile activeProfile) {
+        return state.pendingRebuild() == null
+                ? activeProfile : state.pendingRebuild().targetProfile();
+    }
+
+    private SegmentIndexState clearObsoletePendingRebuild(SegmentIndexState observed) {
         SegmentIndexState current = observed;
-        while (hasObsoletePendingRebuild(current, expectedProfile)) {
+        while (hasObsoletePendingRebuild(current)) {
             PendingRebuildState pending = current.pendingRebuild();
             SegmentIndexState updated = current.withoutPendingRebuild(
                     preserveAliasTopologyError(current.lastError()));
@@ -873,7 +960,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                 log.info("Pending rebuild task cleared: taskId={}, targetFingerprint={}, expectedFingerprint={}, reason={}",
                         pending.taskId(),
                         pending.targetProfile().fingerprint(),
-                        expectedProfile == null ? null : expectedProfile.fingerprint(),
+                        current.actualProfileFingerprint(),
                         pending.reason());
                 return updated;
             }
@@ -882,32 +969,22 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         return current;
     }
 
-    private boolean hasObsoletePendingRebuild(
-            SegmentIndexState state,
-            EmbeddingProfile expectedProfile
-    ) {
+    private boolean hasObsoletePendingRebuild(SegmentIndexState state) {
         return state.status() == SegmentIndexStatus.READY
                 && state.pendingRebuild() != null
-                && !pendingRebuildStillNeeded(state, expectedProfile);
+                && !pendingRebuildStillNeeded(state);
     }
 
-    private boolean pendingRebuildStillNeeded(
-            SegmentIndexState state,
-            EmbeddingProfile expectedProfile
-    ) {
+    private boolean pendingRebuildStillNeeded(SegmentIndexState state) {
         PendingRebuildState pending = state.pendingRebuild();
-        if (pending == null || expectedProfile == null) {
+        if (pending == null) {
             return false;
         }
-        if (!Objects.equals(
-                pending.targetProfile().fingerprint(),
-                expectedProfile.fingerprint())) {
-            return false;
-        }
-        return !Objects.equals(state.actualDim(), expectedProfile.dimension())
+        EmbeddingProfile targetProfile = pending.targetProfile();
+        return !Objects.equals(state.actualDim(), targetProfile.dimension())
                 || !Objects.equals(
                 state.actualProfileFingerprint(),
-                expectedProfile.fingerprint());
+                targetProfile.fingerprint());
     }
 
     private String preserveAliasTopologyError(String lastError) {
@@ -1112,6 +1189,10 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
 
     @Override
     public String prepareRebuild() {
+        PendingRebuildState requested = stateRef.get().pendingRebuild();
+        if (requested != null) {
+            return requested.taskId();
+        }
         EmbeddingProfile expectedProfile = embeddingProfileProvider.getActiveEmbeddingProfile()
                 .orElse(null);
         if (expectedProfile == null) {
@@ -1134,7 +1215,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
         if (s.getActualDim().equals(expectedProfile.dimension())) {
             if (Objects.equals(
                     s.getActualProfileFingerprint(), expectedProfile.fingerprint())) {
-                clearObsoletePendingRebuild(stateRef.get(), expectedProfile);
+                clearObsoletePendingRebuild(stateRef.get());
                 log.info("Prepare rebuild: dimensions and model match, no rebuild needed");
                 return null;
             }

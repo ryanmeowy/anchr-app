@@ -5,6 +5,7 @@ package com.anchr.core.kb.domain.model;
  */
 public enum OutboxEventType {
     DELETE_ASSET,
+    DELETE_ASSET_GENERATION,
     UNKNOWN;
 
     public static OutboxEventType fromCode(String code) {

@@ -1,12 +1,14 @@
 package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.application.SearchAnswerService;
-import com.anchr.core.search.application.CitationReasonGenerationService;
-import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.search.interfaces.rest.dto.SearchAnswerDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
+import com.anchr.core.search.application.api.RetrievalCitationReasonApi;
+import com.anchr.core.search.application.api.model.RetrievalExplain;
+import com.anchr.core.search.application.api.model.RetrievalHit;
+import com.anchr.core.search.application.api.model.RetrievalTopChunk;
+import com.anchr.core.search.application.api.model.SearchAnswerRequest;
+import com.anchr.core.search.application.api.model.SearchAnswerResult;
+import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
+import com.anchr.core.search.domain.model.SegmentType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -17,9 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Extractive search answer service grounded by returned segments.
- */
+/** Extractive search answer service grounded by already returned retrieval hits. */
 @Service
 @RequiredArgsConstructor
 public class SearchAnswerServiceImpl implements SearchAnswerService {
@@ -27,244 +27,178 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
     private static final int ASSET_CITATION_LIMIT = 3;
     private static final int CHUNK_LIMIT_PER_ASSET = 3;
 
-    private final UnifiedSearchService unifiedSearchService;
-    private final CitationReasonGenerationService citationReasonGenerationService;
+    private final RetrievalCitationReasonApi retrievalCitationReasonApi;
 
     @Override
-    public SearchAnswerDTO answer(SearchQueryDTO query) {
-        return answer(query, unifiedSearchService.search(query));
-    }
-
-    @Override
-    public SearchAnswerDTO answer(SearchQueryDTO query, List<SearchResultDTO> existingResults) {
-        List<SearchResultDTO> results = existingResults != null ? existingResults : List.of();
-        List<SearchAnswerDTO.CitationDTO> citations = buildCitations(results);
+    public SearchAnswerResult answer(SearchAnswerRequest request, List<RetrievalHit> existingResults) {
+        List<RetrievalHit> results = existingResults == null ? List.of() : List.copyOf(existingResults);
+        List<SearchAnswerResult.Citation> citations = buildCitations(results);
         if (citations.isEmpty()) {
-            return SearchAnswerDTO.builder()
-                    .answer(null)
-                    .citations(List.of())
-                    .results(results)
-                    .answerTrace(SearchAnswerDTO.AnswerTraceDTO.builder()
-                            .mode(resolveAnswerMode(query))
-                            .grounded(false)
-                            .fallbackReason("NO_ENOUGH_EVIDENCE")
-                            .build())
-                    .build();
+            return new SearchAnswerResult(
+                    null, List.of(), results,
+                    new SearchAnswerResult.AnswerTrace(resolveAnswerMode(request), false, "NO_ENOUGH_EVIDENCE"));
         }
         String answer = buildAnswer(citations);
-        enrichCitationReasons(query, answer, citations);
-        return SearchAnswerDTO.builder()
-                .answer(answer)
-                .citations(citations)
-                .results(results)
-                .answerTrace(SearchAnswerDTO.AnswerTraceDTO.builder()
-                        .mode(resolveAnswerMode(query))
-                        .grounded(true)
-                        .build())
-                .build();
+        citations = enrichCitationReasons(request, answer, citations);
+        return new SearchAnswerResult(
+                answer, citations, results,
+                new SearchAnswerResult.AnswerTrace(resolveAnswerMode(request), true, null));
     }
 
-    private void enrichCitationReasons(SearchQueryDTO query,
-                                       String answer,
-                                       List<SearchAnswerDTO.CitationDTO> citations) {
-        CitationReasonGenerationService.Request request = new CitationReasonGenerationService.Request(
-                query == null ? null : query.getQuery(),
+    private List<SearchAnswerResult.Citation> enrichCitationReasons(
+            SearchAnswerRequest request,
+            String answer,
+            List<SearchAnswerResult.Citation> citations) {
+        RetrievalCitationReasonRequest generationRequest = new RetrievalCitationReasonRequest(
+                request == null ? null : request.question(),
                 null,
                 answer,
-                citations.stream().map(citation -> new CitationReasonGenerationService.CitationGroup(
-                        citation.getCitationIndex(),
-                        citation.getAssetId(),
-                        citation.getChunks().stream().map(chunk -> new CitationReasonGenerationService.CitationChunk(
-                                chunk.getSegmentId(),
-                                chunk.getContent(),
-                                chunk.getWhy() == null ? null : chunk.getWhy().getScore(),
-                                chunk.getWhy() == null ? List.of() : chunk.getWhy().getHitSources(),
-                                chunk.getWhy() == null ? null : chunk.getWhy().getMatchSummary()
+                citations.stream().map(citation -> new RetrievalCitationReasonRequest.CitationGroup(
+                        citation.citationIndex(),
+                        citation.assetId(),
+                        citation.chunks().stream().map(chunk -> new RetrievalCitationReasonRequest.CitationChunk(
+                                chunk.segmentId(), chunk.content(),
+                                chunk.why() == null ? null : chunk.why().score(),
+                                chunk.why() == null ? List.of() : chunk.why().hitSources(),
+                                chunk.why() == null ? null : chunk.why().matchSummary()
                         )).toList()
-                )).toList()
-        );
-        Map<String, String> reasons = citationReasonGenerationService.generate(request);
-        for (SearchAnswerDTO.CitationDTO citation : citations) {
-            for (SearchAnswerDTO.CitationChunkDTO chunk : citation.getChunks()) {
-                if (chunk.getWhy() == null || !StringUtils.hasText(chunk.getSegmentId())) {
-                    continue;
-                }
-                String reason = reasons.get(chunk.getSegmentId());
-                if (StringUtils.hasText(reason)) {
-                    chunk.getWhy().setReason(reason);
-                }
-            }
-        }
+                )).toList());
+        Map<String, String> reasons = retrievalCitationReasonApi.generate(generationRequest);
+        return citations.stream().map(citation -> new SearchAnswerResult.Citation(
+                citation.citationIndex(), citation.assetId(), citation.kbId(), citation.fileName(),
+                citation.chunks().stream().map(chunk -> {
+                    String reason = StringUtils.hasText(chunk.segmentId()) ? reasons.get(chunk.segmentId()) : null;
+                    SearchAnswerResult.CitationWhy why = chunk.why();
+                    if (why != null && StringUtils.hasText(reason)) why = why.withReason(reason);
+                    return new SearchAnswerResult.CitationChunk(
+                            chunk.segmentId(), chunk.pageNo(), chunk.chunkOrder(), chunk.title(),
+                            chunk.content(), chunk.snippet(), chunk.anchor(), why);
+                }).toList())).toList();
     }
 
-    private List<SearchAnswerDTO.CitationDTO> buildCitations(List<SearchResultDTO> results) {
-        if (results == null || results.isEmpty()) {
-            return List.of();
-        }
+    private List<SearchAnswerResult.Citation> buildCitations(List<RetrievalHit> results) {
+        if (results.isEmpty()) return List.of();
         List<CitationSource> sources = new ArrayList<>();
-        for (SearchResultDTO result : results) {
-            if (result == null) {
-                continue;
-            }
-            if (result.getTopChunks() == null || result.getTopChunks().isEmpty()) {
+        for (RetrievalHit result : results) {
+            if (result == null) continue;
+            if (result.topChunks() == null || result.topChunks().isEmpty()) {
                 sources.add(new CitationSource(result, null));
-                continue;
+            } else {
+                result.topChunks().stream()
+                        .filter(java.util.Objects::nonNull)
+                        .map(topChunk -> new CitationSource(result, topChunk))
+                        .forEach(sources::add);
             }
-            result.getTopChunks().stream()
-                    .filter(java.util.Objects::nonNull)
-                    .map(topChunk -> new CitationSource(result, topChunk))
-                    .forEach(sources::add);
         }
         sources.sort(Comparator.comparing(
                 source -> source.score() == null ? 0.0D : source.score(),
                 Comparator.reverseOrder()));
 
-        Map<String, SearchAnswerDTO.CitationDTO> groups = new LinkedHashMap<>();
+        Map<String, CitationGroup> groups = new LinkedHashMap<>();
         for (CitationSource source : sources) {
-            if (!StringUtils.hasText(source.segmentId()) || !StringUtils.hasText(source.snippet())) {
-                continue;
-            }
-            String assetKey = StringUtils.hasText(source.result().getAssetId())
-                    ? source.result().getAssetId()
-                    : "segment:" + source.segmentId();
-            SearchAnswerDTO.CitationDTO group = groups.get(assetKey);
+            if (SegmentType.isImageVisual(source.segmentType())
+                    || !StringUtils.hasText(source.segmentId())
+                    || !StringUtils.hasText(source.snippet())) continue;
+            String assetKey = StringUtils.hasText(source.result().assetId())
+                    ? source.result().assetId() : "segment:" + source.segmentId();
+            CitationGroup group = groups.get(assetKey);
             if (group == null) {
-                if (groups.size() >= ASSET_CITATION_LIMIT) {
-                    continue;
-                }
-                group = SearchAnswerDTO.CitationDTO.builder()
-                        .citationIndex(groups.size() + 1)
-                        .assetId(source.result().getAssetId())
-                        .kbId(source.result().getKbId())
-                        .fileName(resolveFileName(source.sourceRef()))
-                        .chunks(new ArrayList<>())
-                        .build();
+                if (groups.size() >= ASSET_CITATION_LIMIT) continue;
+                group = new CitationGroup(
+                        groups.size() + 1, source.result().assetId(), source.result().kbId(),
+                        resolveFileName(source), new ArrayList<>());
                 groups.put(assetKey, group);
             }
-            if (group.getChunks().size() < CHUNK_LIMIT_PER_ASSET
-                    && group.getChunks().stream().noneMatch(chunk -> source.segmentId().equals(chunk.getSegmentId()))) {
-                group.getChunks().add(SearchAnswerDTO.CitationChunkDTO.builder()
-                        .segmentId(source.segmentId())
-                        .pageNo(source.pageNo())
-                        .chunkOrder(source.chunkOrder())
-                        .title(source.title())
-                        .content(source.content())
-                        .snippet(source.snippet())
-                        .anchor(source.anchor())
-                        .why(buildCitationWhy(source.result(), source.score()))
-                        .build());
+            if (group.chunks().size() < CHUNK_LIMIT_PER_ASSET
+                    && group.chunks().stream().noneMatch(chunk -> source.segmentId().equals(chunk.segmentId()))) {
+                group.chunks().add(new SearchAnswerResult.CitationChunk(
+                        source.segmentId(), source.pageNo(), source.chunkOrder(), source.title(),
+                        source.content(), source.snippet(), source.anchor(),
+                        buildCitationWhy(source.explain(), source.score())));
             }
         }
-        Comparator<SearchAnswerDTO.CitationChunkDTO> documentOrder = Comparator
-                .comparing(SearchAnswerDTO.CitationChunkDTO::getPageNo, Comparator.nullsLast(Integer::compareTo))
-                .thenComparing(SearchAnswerDTO.CitationChunkDTO::getChunkOrder, Comparator.nullsLast(Integer::compareTo))
-                .thenComparing(SearchAnswerDTO.CitationChunkDTO::getSegmentId, Comparator.nullsLast(String::compareTo));
-        groups.values().forEach(group -> group.getChunks().sort(documentOrder));
-        return new ArrayList<>(groups.values());
+        Comparator<SearchAnswerResult.CitationChunk> documentOrder = Comparator
+                .comparing(SearchAnswerResult.CitationChunk::pageNo, Comparator.nullsLast(Integer::compareTo))
+                .thenComparing(SearchAnswerResult.CitationChunk::chunkOrder, Comparator.nullsLast(Integer::compareTo))
+                .thenComparing(SearchAnswerResult.CitationChunk::segmentId, Comparator.nullsLast(String::compareTo));
+        return groups.values().stream().map(group -> {
+            group.chunks().sort(documentOrder);
+            return new SearchAnswerResult.Citation(
+                    group.citationIndex(), group.assetId(), group.kbId(), group.fileName(), group.chunks());
+        }).toList();
     }
 
-    private String buildAnswer(List<SearchAnswerDTO.CitationDTO> citations) {
+    private String buildAnswer(List<SearchAnswerResult.Citation> citations) {
         StringBuilder builder = new StringBuilder("根据当前检索结果，可以参考以下证据：");
-        for (SearchAnswerDTO.CitationDTO citation : citations) {
-            String evidence = citation.getChunks().stream()
-                    .map(SearchAnswerDTO.CitationChunkDTO::getSnippet)
+        for (SearchAnswerResult.Citation citation : citations) {
+            String evidence = citation.chunks().stream()
+                    .map(SearchAnswerResult.CitationChunk::snippet)
                     .filter(StringUtils::hasText)
                     .limit(CHUNK_LIMIT_PER_ASSET)
                     .reduce((left, right) -> left + "；" + right)
                     .orElse("");
-            builder.append(System.lineSeparator())
-                    .append("[")
-                    .append(citation.getCitationIndex())
-                    .append("] ")
-                    .append(evidence);
+            builder.append(System.lineSeparator()).append("[")
+                    .append(citation.citationIndex()).append("] ").append(evidence);
         }
         return builder.toString();
     }
 
-    private String resolveAnswerMode(SearchQueryDTO query) {
-        return query == null || !StringUtils.hasText(query.getAnswerMode()) ? "STRICT" : query.getAnswerMode().trim();
+    private String resolveAnswerMode(SearchAnswerRequest request) {
+        return request == null || !StringUtils.hasText(request.answerMode())
+                ? "STRICT" : request.answerMode().trim();
     }
 
-    private SearchAnswerDTO.CitationWhy buildCitationWhy(SearchResultDTO result, Double score) {
-        SearchExplainDTO explain = result.getExplain();
-        List<String> hitSources = explain != null && explain.getHitSources() != null
-                ? List.copyOf(explain.getHitSources()) : List.of();
-        SearchAnswerDTO.CitationWhy.MatchedBy matchedBy = null;
-        if (explain != null && explain.getMatchedBy() != null) {
-            SearchExplainDTO.MatchedBy mb = explain.getMatchedBy();
-            matchedBy = SearchAnswerDTO.CitationWhy.MatchedBy.builder()
-                    .vector(mb.isVector())
-                    .title(mb.isTitle())
-                    .content(mb.isContent())
-                    .ocr(mb.isOcr())
-                    .build();
+    private SearchAnswerResult.CitationWhy buildCitationWhy(RetrievalExplain explain, Double score) {
+        List<String> hitSources = explain == null ? List.of() : explain.hitSources();
+        SearchAnswerResult.CitationWhy.MatchedBy matchedBy = null;
+        if (explain != null && explain.matchedBy() != null) {
+            RetrievalExplain.MatchedBy source = explain.matchedBy();
+            matchedBy = new SearchAnswerResult.CitationWhy.MatchedBy(
+                    source.vector(), source.title(), source.content(), source.ocr());
         }
-        String matchSummary = SearchAnswerDTO.CitationWhy.buildSummary(score, hitSources, matchedBy);
-        return SearchAnswerDTO.CitationWhy.builder()
-                .score(score)
-                .hitSources(hitSources)
-                .matchedBy(matchedBy)
-                .matchSummary(matchSummary)
-                .build();
+        return new SearchAnswerResult.CitationWhy(
+                score, hitSources, matchedBy,
+                SearchAnswerResult.CitationWhy.buildSummary(score, hitSources, matchedBy), null);
     }
 
-    private String resolveFileName(String sourceRef) {
-        if (!StringUtils.hasText(sourceRef)) {
-            return null;
-        }
+    private String resolveFileName(CitationSource source) {
+        if (SegmentType.DOCUMENT_IMAGE.name().equals(source.segmentType())
+                && StringUtils.hasText(source.title())) return source.title().trim();
+        String sourceRef = source.sourceRef();
+        if (!StringUtils.hasText(sourceRef)) return null;
         String trimmed = sourceRef.trim();
         int queryIndex = trimmed.indexOf('?');
         String path = queryIndex >= 0 ? trimmed.substring(0, queryIndex) : trimmed;
         int slashIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-        if (slashIndex < 0 || slashIndex == path.length() - 1) {
-            return path;
-        }
-        return path.substring(slashIndex + 1);
+        return slashIndex < 0 || slashIndex == path.length() - 1 ? path : path.substring(slashIndex + 1);
     }
 
-    private record CitationSource(SearchResultDTO result, SearchResultDTO.TopChunk topChunk) {
+    private record CitationGroup(
+            Integer citationIndex, String assetId, String kbId, String fileName,
+            List<SearchAnswerResult.CitationChunk> chunks) {
+    }
 
-        private String segmentId() {
-            return topChunk == null ? result.getSegmentId() : topChunk.getSegmentId();
-        }
-
-        private String snippet() {
-            return topChunk == null ? result.getSnippet() : topChunk.getSnippet();
-        }
-
+    private record CitationSource(RetrievalHit result, RetrievalTopChunk topChunk) {
+        private String segmentId() { return topChunk == null ? result.segmentId() : topChunk.segmentId(); }
+        private String segmentType() { return topChunk == null ? result.segmentType() : topChunk.segmentType(); }
+        private String snippet() { return topChunk == null ? result.snippet() : topChunk.snippet(); }
         private String content() {
-            if (topChunk != null && StringUtils.hasText(topChunk.getContent())) {
-                return topChunk.getContent();
-            }
-            return result.getContent();
+            return topChunk != null && StringUtils.hasText(topChunk.content()) ? topChunk.content() : result.content();
         }
-
-        private String title() {
-            return topChunk == null ? result.getTitle() : topChunk.getTitle();
-        }
-
-        private Double score() {
-            return topChunk == null ? result.getScore() : topChunk.getScore();
-        }
-
-        private Integer pageNo() {
-            return topChunk == null ? result.getPageNo() : topChunk.getPageNo();
-        }
-
+        private String title() { return topChunk == null ? result.title() : topChunk.title(); }
+        private Double score() { return topChunk == null ? result.score() : topChunk.score(); }
+        private RetrievalExplain explain() { return topChunk == null ? result.explain() : topChunk.explain(); }
+        private Integer pageNo() { return topChunk == null ? result.pageNo() : topChunk.pageNo(); }
         private Integer chunkOrder() {
-            SearchResultDTO.Anchor anchor = topChunk == null ? result.getAnchor() : topChunk.getAnchor();
-            return anchor == null ? null : anchor.getChunkOrder();
+            var anchor = topChunk == null ? result.anchor() : topChunk.anchor();
+            return anchor == null ? null : anchor.chunkOrder();
         }
-
-        private SearchResultDTO.Anchor anchor() {
-            return topChunk == null ? result.getAnchor() : topChunk.getAnchor();
+        private com.anchr.core.search.application.api.model.RetrievalAnchor anchor() {
+            return topChunk == null ? result.anchor() : topChunk.anchor();
         }
-
         private String sourceRef() {
-            if (topChunk != null && StringUtils.hasText(topChunk.getSourceRef())) {
-                return topChunk.getSourceRef();
-            }
-            return result.getSourceRef();
+            return topChunk != null && StringUtils.hasText(topChunk.sourceRef())
+                    ? topChunk.sourceRef() : result.sourceRef();
         }
     }
 }

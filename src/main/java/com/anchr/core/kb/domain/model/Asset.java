@@ -22,16 +22,13 @@ public class Asset {
     String fileHash;
     String versionGroupId;
     Integer versionNo;
-    String previousAssetId;
     String objectKey;
     String previewObjectKey;
-    String thumbnailKey;
-    String sourceUrl;
     DocumentParseStatus parseStatus;
     DocumentIndexStatus indexStatus;
     int segmentCount;
     int indexedSegmentCount;
-    String embeddingProfile;
+    long activeIndexGeneration;
     String errorCode;
     String errorMessage;
     String createdBy;

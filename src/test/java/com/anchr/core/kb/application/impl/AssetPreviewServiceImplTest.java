@@ -10,7 +10,7 @@ import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
-import com.anchr.core.search.domain.port.SearchObjectStoragePort;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +33,7 @@ class AssetPreviewServiceImplTest {
     @Mock
     private KnowledgeBaseService knowledgeBaseService;
     @Mock
-    private SearchObjectStoragePort objectStoragePort;
+    private KnowledgeObjectStoragePort objectStoragePort;
 
     private AssetPreviewServiceImpl service;
 
@@ -58,23 +58,19 @@ class AssetPreviewServiceImplTest {
         Asset asset = assetBuilder()
                 .previewObjectKey("preview/document.pdf")
                 .objectKey("original/document.pdf")
-                .thumbnailKey("thumbnail/document.png")
                 .build();
         long previewExpiry = System.currentTimeMillis() + 120_000L;
-        long thumbnailExpiry = previewExpiry - 10_000L;
         when(knowledgeBaseService.getDocument("kb-1", "asset-1")).thenReturn(asset);
-        when(objectStoragePort.buildPreviewUrl("preview/document.pdf"))
-                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl("https://preview", previewExpiry));
-        when(objectStoragePort.buildPreviewUrl("thumbnail/document.png"))
-                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl("https://thumbnail", thumbnailExpiry));
+        when(objectStoragePort.signPreviewUrl("preview/document.pdf"))
+                .thenReturn(new KnowledgeObjectStoragePort.SignedObjectUrl(
+                        "https://preview", previewExpiry));
 
         var result = service.getPreview("kb-1", "asset-1");
 
         assertThat(result.getPreviewUrl()).isEqualTo("https://preview");
-        assertThat(result.getThumbnailUrl()).isEqualTo("https://thumbnail");
-        assertThat(result.getExpiresAt()).isEqualTo(thumbnailExpiry);
+        assertThat(result.getExpiresAt()).isEqualTo(previewExpiry);
         assertThat(result.getVersionNo()).isEqualTo(3);
-        verify(objectStoragePort, never()).buildPreviewUrl("original/document.pdf");
+        verify(objectStoragePort, never()).signPreviewUrl("original/document.pdf");
     }
 
     @Test
@@ -86,8 +82,9 @@ class AssetPreviewServiceImplTest {
                 .build();
         long expiresAt = System.currentTimeMillis() + 120_000L;
         when(knowledgeBaseService.getDocument("kb-1", "asset-1")).thenReturn(asset);
-        when(objectStoragePort.buildPreviewUrl("original/document.pdf"))
-                .thenReturn(new SearchObjectStoragePort.SignedObjectUrl("https://original", expiresAt));
+        when(objectStoragePort.signPreviewUrl("original/document.pdf"))
+                .thenReturn(new KnowledgeObjectStoragePort.SignedObjectUrl(
+                        "https://original", expiresAt));
 
         var result = service.getPreview("kb-1", "asset-1");
 
@@ -95,20 +92,6 @@ class AssetPreviewServiceImplTest {
         assertThat(result.getParseStatus()).isEqualTo("PENDING");
         assertThat(result.getIndexStatus()).isEqualTo("PENDING");
         assertThat(result.getExpiresAt()).isEqualTo(expiresAt);
-    }
-
-    @Test
-    void getPreview_shouldUseDirectHttpSourceWithoutSigning() {
-        Asset asset = assetBuilder()
-                .sourceUrl("https://docs.example.com/document.md")
-                .build();
-        when(knowledgeBaseService.getDocument("kb-1", "asset-1")).thenReturn(asset);
-
-        var result = service.getPreview("kb-1", "asset-1");
-
-        assertThat(result.getPreviewUrl()).isEqualTo("https://docs.example.com/document.md");
-        assertThat(result.getExpiresAt()).isNull();
-        verifyNoInteractions(objectStoragePort);
     }
 
     @Test

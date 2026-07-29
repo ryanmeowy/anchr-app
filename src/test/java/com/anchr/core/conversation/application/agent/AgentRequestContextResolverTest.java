@@ -1,10 +1,9 @@
 package com.anchr.core.conversation.application.agent;
 
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
+import com.anchr.core.conversation.application.model.ConversationDocumentReference;
+import com.anchr.core.conversation.application.model.ConversationKnowledgeBaseReference;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
-import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.kb.domain.model.KnowledgeBase;
-import com.anchr.core.kb.domain.repository.AssetRepository;
-import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -15,22 +14,15 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class AgentRequestContextResolverTest {
-    private final KnowledgeBaseRepository knowledgeBases = mock(KnowledgeBaseRepository.class);
-    private final AssetRepository assets = mock(AssetRepository.class);
-    private final AgentRequestContextResolver resolver = new AgentRequestContextResolver(knowledgeBases, assets);
+    private final ConversationKnowledgeAcl knowledgeAcl = mock(ConversationKnowledgeAcl.class);
+    private final AgentRequestContextResolver resolver = new AgentRequestContextResolver(knowledgeAcl);
 
     @Test
     void shouldResolveSelectedAssetsFromActiveAuthorizedKnowledgeBases() {
-        KnowledgeBase kb = KnowledgeBase.builder().id("kb-1").name("论文库").build();
-        Asset asset = Asset.builder()
-                .id("asset-1")
-                .kbId("kb-1")
-                .fileName("RAG 总结.pdf")
-                .title("RAG 总结")
-                .mimeType("application/pdf")
-                .build();
-        when(knowledgeBases.listActiveByIds(List.of("kb-1"))).thenReturn(List.of(kb));
-        when(assets.findActiveById("kb-1", "asset-1")).thenReturn(Optional.of(asset));
+        var kb = new ConversationKnowledgeBaseReference("kb-1", "论文库");
+        var asset = document("asset-1", "kb-1", "RAG 总结.pdf", "RAG 总结");
+        when(knowledgeAcl.resolveVisibleKnowledgeBases(List.of("kb-1"))).thenReturn(List.of(kb));
+        when(knowledgeAcl.findActiveDocument(List.of("kb-1"), "asset-1")).thenReturn(Optional.of(asset));
 
         AgentRequestContext context = resolver.resolve(run(List.of("kb-1"), List.of("asset-1")));
 
@@ -54,7 +46,7 @@ class AgentRequestContextResolverTest {
 
     @Test
     void shouldNotExposeAssetsOutsideResolvedKnowledgeBaseScope() {
-        when(knowledgeBases.listActiveByIds(List.of("kb-1"))).thenReturn(List.of());
+        when(knowledgeAcl.resolveVisibleKnowledgeBases(List.of("kb-1"))).thenReturn(List.of());
 
         AgentRequestContext context = resolver.resolve(run(List.of("kb-1"), List.of("asset-outside")));
 
@@ -68,5 +60,10 @@ class AgentRequestContextResolverTest {
         request.setKbIds(kbIds);
         request.setAssetIdList(assetIds);
         return new AgentRunRequest("run", "turn", "session", "single_user", request);
+    }
+
+    private ConversationDocumentReference document(String id, String kbId, String fileName, String title) {
+        return new ConversationDocumentReference(
+                id, kbId, fileName, title, "PDF", "application/pdf", 7L, 3);
     }
 }

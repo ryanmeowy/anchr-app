@@ -3,14 +3,14 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.application.context.UserContextHolder;
-import com.anchr.core.kb.application.ActivityEventService;
-import com.anchr.core.kb.application.ActivityQueryService;
-import com.anchr.core.kb.application.KnowledgeBaseService;
-import com.anchr.core.kb.domain.model.KnowledgeBase;
-import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
+import com.anchr.core.kb.application.api.model.DocumentSummary;
+import com.anchr.core.kb.application.api.model.KnowledgeBaseSummary;
 import com.anchr.core.search.application.SegmentPreviewService;
+import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
+import com.anchr.core.search.application.acl.SearchActivityAcl;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
@@ -33,9 +33,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private final SegmentRepository kbSegmentRepository;
     private final SearchObjectStoragePort objectStoragePort;
     private final PreviewAccessCache previewAccessCache;
-    private final ActivityEventService activityEventService;
-    private final ActivityQueryService  activityQueryService;
-    private final KnowledgeBaseService knowledgeBaseService;
+    private final SearchActivityAcl searchActivityAcl;
+    private final SearchKnowledgeAcl searchKnowledgeAcl;
 
     @Override
     public PreviewSegmentDTO getSegmentPreview(String segmentId, PreviewRequestDTO request) {
@@ -45,6 +44,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
+        requireActiveSegment(segment);
         PreviewSegmentDTO preview = toPreview(segment, accessTokenHash, request);
         if (!StringUtils.hasText(request.getRecordId()) && request.getCitationInfo() != null) {
             recordCitationOpened(preview, request);
@@ -60,25 +60,49 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        previewAccessCache.evict(segment.getAssetId(), accessTokenHash);
+        requireActiveSegment(segment);
+        DocumentSummary parentAsset = resolveParentAsset(segment);
+        previewAccessCache.evict(
+                cacheIdentity(segment.getAssetId(), previewSourceRef(segment, parentAsset)),
+                accessTokenHash);
+        previewAccessCache.evict(
+                cacheIdentity(segment.getAssetId(), segment.getSourceRef()),
+                accessTokenHash);
         return getSegmentPreview(segmentId, request);
     }
 
+    private void requireActiveSegment(Segment segment) {
+        DocumentSummary asset = searchKnowledgeAcl
+                .findActiveDocument(segment.getKbId(), segment.getAssetId())
+                .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
+        if (segment.getIndexGeneration() != asset.activeIndexGeneration()) {
+            throw new BusinessException(ApiError.SEGMENT_NOT_FOUND);
+        }
+    }
+
     private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash, PreviewRequestDTO request) {
-        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(segment, accessTokenHash);
+        KnowledgeBaseSummary knowledgeBase = searchKnowledgeAcl.findActiveKnowledgeBase(segment.getKbId())
+                .orElseThrow(() -> new BusinessException(ApiError.KNOWLEDGE_BASE_NOT_FOUND));
+        DocumentSummary parentAsset = resolveParentAsset(segment);
+        PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(
+                segment, parentAsset, accessTokenHash);
+        PreviewAccessCache.PreviewAccess imagePreviewAccess = buildImagePreviewAccess(
+                segment, accessTokenHash);
         PreviewInfo previewInfo = fetchCitationInfo(request);
 
         return PreviewSegmentDTO.builder()
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
                 .kbId(segment.getKbId())
-                .kbName(Optional.of(knowledgeBaseService.get(segment.getKbId())).map(KnowledgeBase::getName).orElse(null))
+                .kbName(knowledgeBase.name())
                 .assetType(segment.getAssetType())
                 .segmentType(toCode(segment.getSegmentType()))
-                .fileName(resolveFileName(segment))
+                .fileName(resolveFileName(segment, parentAsset))
                 .previewType(segment.getAssetType())
                 .previewUrl(previewAccess.url())
                 .expiresAt(previewAccess.expiresAt())
+                .imagePreviewUrl(imagePreviewAccess.url())
+                .imagePreviewExpiresAt(imagePreviewAccess.expiresAt())
                 .sourceRef(segment.getSourceRef())
                 .thumbnail(segment.getThumbnail())
                 .title(segment.getTitle())
@@ -95,15 +119,15 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     private PreviewInfo fetchCitationInfo(PreviewRequestDTO request) {
         if (StringUtils.hasText(request.getRecordId())) {
-            RecentCitationDTO recentCitationDTO = activityQueryService.fetchCitationsById(request.getRecordId());
+            SearchActivityAcl.CitationSnapshot recentCitationDTO = searchActivityAcl.findCitationById(request.getRecordId());
             return PreviewInfo.builder()
-                    .sourceType(recentCitationDTO.getSourceType())
-                    .sourceId(recentCitationDTO.getSourceId())
-                    .sessionId(recentCitationDTO.getSessionId())
-                    .citationIndex(recentCitationDTO.getCitationIndex())
-                    .reason(recentCitationDTO.getCitationReason())
-                    .question(recentCitationDTO.getQuestion())
-                    .anchor(recentCitationDTO.getAnchor())
+                    .sourceType(recentCitationDTO.sourceType())
+                    .sourceId(recentCitationDTO.sourceId())
+                    .sessionId(recentCitationDTO.sessionId())
+                    .citationIndex(recentCitationDTO.citationIndex())
+                    .reason(recentCitationDTO.citationReason())
+                    .question(recentCitationDTO.question())
+                    .anchor(recentCitationDTO.anchor())
                     .build();
         }
 
@@ -125,25 +149,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                        String reason, String question, PreviewAnchorDTO anchor){}
 
     private void recordCitationOpened(PreviewSegmentDTO preview, PreviewRequestDTO request) {
-        PreviewSegmentDTO.CitationContextDTO citationContext = preview.getCitationContext();
-        PreviewRequestDTO.CitationInfo citationInfo = request.getCitationInfo();
-        ActivityEventService.CitationContext cxt = ActivityEventService.CitationContext.builder()
-                .segmentId(preview.getSegmentId())
-                .assetId(preview.getAssetId())
-                .kbId(preview.getKbId())
-                .fileName(preview.getFileName())
-                .title(preview.getTitle())
-                .snippet(preview.getContent())
-                .citationIndex(citationInfo.getCitationIndex())
-                .citationReason(citationContext.getCitationReason())
-                .sourceId(request.getSourceId())
-                .sessionId(request.getSessionId())
-                .sourceType(request.getSourceType())
-                .question(request.getQuestion())
-                .anchor(preview.getAnchor())
-                .chunks(citationInfo.getChunks())
-                .build();
-        activityEventService.recordCitationOpened(cxt);
+        searchActivityAcl.recordCitationOpened(preview, request);
     }
 
     private PreviewAnchorDTO toAnchor(Segment segment) {
@@ -176,8 +182,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .build();
     }
 
-    private PreviewAccessCache.PreviewAccess buildPreviewAccess(Segment segment, String accessTokenHash) {
-        String sourceRef = segment.getSourceRef();
+    private PreviewAccessCache.PreviewAccess buildPreviewAccess(
+            Segment segment, DocumentSummary parentAsset, String accessTokenHash) {
+        String sourceRef = previewSourceRef(segment, parentAsset);
         if (!StringUtils.hasText(sourceRef)) {
             return new PreviewAccessCache.PreviewAccess(null, null);
         }
@@ -187,7 +194,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         }
         String assetId = segment.getAssetId();
         if (StringUtils.hasText(assetId)) {
-            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(assetId, accessTokenHash);
+            String identity = cacheIdentity(assetId, normalizedSourceRef);
+            Optional<PreviewAccessCache.PreviewAccess> cached = previewAccessCache.find(identity, accessTokenHash);
             if (cached.isPresent()) {
                 return cached.get();
             }
@@ -205,9 +213,62 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 signedObjectUrl.expiresAt()
         );
         if (StringUtils.hasText(assetId)) {
-            previewAccessCache.save(assetId, accessTokenHash, previewAccess);
+            previewAccessCache.save(cacheIdentity(assetId, normalizedSourceRef), accessTokenHash, previewAccess);
         }
         return previewAccess;
+    }
+
+    private PreviewAccessCache.PreviewAccess buildImagePreviewAccess(
+            Segment segment, String accessTokenHash) {
+        if (segment.getSegmentType() != SegmentType.DOCUMENT_IMAGE
+                || !StringUtils.hasText(segment.getSourceRef())) {
+            return new PreviewAccessCache.PreviewAccess(null, null);
+        }
+        String sourceRef = segment.getSourceRef().trim();
+        if (isDirectUrl(sourceRef)) {
+            return new PreviewAccessCache.PreviewAccess(sourceRef, null);
+        }
+        String identity = cacheIdentity(segment.getAssetId(), sourceRef);
+        Optional<PreviewAccessCache.PreviewAccess> cached =
+                previewAccessCache.find(identity, accessTokenHash);
+        if (cached.isPresent()) return cached.get();
+        String objectKey = resolveObjectKey(sourceRef);
+        SearchObjectStoragePort.SignedObjectUrl signed = signPreviewUrl(objectKey);
+        if (signed == null || !StringUtils.hasText(signed.url())) {
+            throw new BusinessException(ApiError.PREVIEW_URL_SIGN_FAILED);
+        }
+        PreviewAccessCache.PreviewAccess access =
+                new PreviewAccessCache.PreviewAccess(signed.url(), signed.expiresAt());
+        previewAccessCache.save(identity, accessTokenHash, access);
+        return access;
+    }
+
+    private DocumentSummary resolveParentAsset(Segment segment) {
+        if (segment == null || segment.getSegmentType() != SegmentType.DOCUMENT_IMAGE) {
+            return null;
+        }
+        return searchKnowledgeAcl.findActiveDocument(segment.getKbId(), segment.getAssetId())
+                .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
+    }
+
+    private String previewSourceRef(Segment segment, DocumentSummary parentAsset) {
+        if (parentAsset == null) {
+            return segment == null ? null : segment.getSourceRef();
+        }
+        if (StringUtils.hasText(parentAsset.previewObjectKey())) {
+            return parentAsset.previewObjectKey().trim();
+        }
+        if (StringUtils.hasText(parentAsset.objectKey())) {
+            return parentAsset.objectKey().trim();
+        }
+        return null;
+    }
+
+    private String cacheIdentity(String assetId, String objectIdentity) {
+        if (!StringUtils.hasText(assetId) || !StringUtils.hasText(objectIdentity)) {
+            return null;
+        }
+        return assetId.trim() + ":object:" + objectIdentity.trim();
     }
 
     private String currentAccessTokenHash() {
@@ -250,7 +311,10 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return segment.getTitle();
     }
 
-    private String resolveFileName(Segment segment) {
+    private String resolveFileName(Segment segment, DocumentSummary parentAsset) {
+        if (parentAsset != null && StringUtils.hasText(parentAsset.fileName())) {
+            return parentAsset.fileName().trim();
+        }
         if (StringUtils.hasText(segment.getSourceRef())) {
             String sourceRef = segment.getSourceRef().trim();
             int queryIndex = sourceRef.indexOf('?');

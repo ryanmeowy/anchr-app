@@ -11,48 +11,53 @@ import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * MyBatis implementation for ingestion task repository.
- */
+/** MyBatis implementation backed only by ingestion_task and ingestion_task_item. */
 @Repository
 @RequiredArgsConstructor
 public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
+
+    private static final String SCHEDULER_USER = "ingestion-scheduler";
 
     private final IngestionTaskMapper mapper;
 
     @Override
     public void save(IngestionTask task) {
-        mapper.insertTask(toRecord(task));
-        if (task.getItems() == null) {
-            return;
-        }
-        for (IngestionTaskItem item : task.getItems()) {
-            mapper.insertItem(toRecord(item));
-        }
+        List<IngestionTaskItemRecord> items = task.getItems() == null
+                ? List.of() : task.getItems().stream().map(this::toRecord).toList();
+        mapper.insertTask(toRecord(task, resolveTaskDedupeStrategy(task)));
+        items.forEach(mapper::insertItem);
     }
 
     @Override
     public Optional<IngestionTask> findById(String kbId, String taskId) {
-        Optional<IngestionTaskRecord> task = mapper.findTask( kbId, taskId);
-        return task.map(record -> toDomain(record, mapper.listItems(taskId)));
+        return mapper.findTask(kbId, taskId)
+                .map(record -> toDomain(record, mapper.listItems(taskId)));
+    }
+
+    @Override
+    public Optional<IngestionTask> findByClientRequestId(String createdBy, String clientRequestId) {
+        return mapper.findTaskByClientRequestId(createdBy, clientRequestId)
+                .map(record -> toDomain(record, mapper.listItems(record.getId())));
     }
 
     @Override
     public List<IngestionTask> list(String kbId, IngestionTaskStatus status, int limit) {
-        String statusValue = status == null ? null : status.name();
-        return mapper.listTasks( kbId, statusValue, limit).stream()
+        return mapper.listTasks(kbId, status == null ? null : status.name(), positiveLimit(limit))
+                .stream()
                 .map(record -> toDomain(record, mapper.listItems(record.getId())))
                 .toList();
     }
 
     @Override
     public List<IngestionTask> listRecent(int limit) {
-        return mapper.listRecentTasks(limit).stream()
+        return mapper.listRecentTasks(positiveLimit(limit)).stream()
                 .map(record -> toDomain(record, List.of()))
                 .toList();
     }
@@ -63,56 +68,137 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     @Override
-    public List<IngestionTaskItem> listFailedItems( String kbId, String taskId) {
+    public List<IngestionTaskItem> listFailedItems(String kbId, String taskId) {
         return mapper.listFailedItems(kbId, taskId).stream().map(this::toDomain).toList();
     }
 
     @Override
-    public Optional<IngestionTaskItem> findItem( String kbId, String taskId, String itemId) {
+    public List<IngestionTaskItem> listRunningItems() {
+        return mapper.listRunningItems().stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public Optional<IngestionTaskItem> findItem(String kbId, String taskId, String itemId) {
         return mapper.findItem(kbId, taskId, itemId).map(this::toDomain);
     }
 
     @Override
-    public boolean resetFailedItem(String kbId, String taskId,
-                                   String itemId, LocalDateTime updatedAt) {
-        return mapper.resetFailedItem(kbId, taskId, itemId, updatedAt) > 0;
+    public Optional<IngestionTaskItem> findRetryItem(
+            String kbId, String taskId, String itemId) {
+        return mapper.findRetryItem(kbId, taskId, itemId).map(this::toDomain);
     }
 
     @Override
-    public boolean resetFailedItems(String kbId, String taskId, LocalDateTime updatedAt) {
-        return mapper.resetFailedItems(kbId, taskId, updatedAt) > 0;
+    public List<String> listPendingItemIds(int limit) {
+        return mapper.listPendingItemIds(positiveLimit(limit));
     }
 
     @Override
-    public boolean markItemRunning(String kbId, String taskId, String itemId,
-                                   String stage, int progress, LocalDateTime updatedAt) {
-        return mapper.markItemRunning(kbId, taskId, itemId, stage, progress, updatedAt) > 0;
+    public List<String> listPendingItemIds(String taskId, int limit) {
+        return mapper.listPendingItemIdsByTask(taskId, positiveLimit(limit));
     }
 
     @Override
-    public boolean markItemSuccess(String kbId, String taskId, String itemId,
-                                   String stage, int progress, LocalDateTime updatedAt) {
-        return mapper.markItemSuccess(kbId, taskId, itemId, stage, progress, updatedAt) > 0;
+    @Transactional(rollbackFor = Exception.class)
+    public Optional<IngestionTaskItem> claimPending(String itemId) {
+        if (mapper.claimPending(itemId) != 1) {
+            return Optional.empty();
+        }
+        IngestionTaskItemRecord claimed = mapper.findRunningItem(itemId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Claimed ingestion item disappeared before commit."));
+        mapper.refreshSummary(claimed.getKbId(), claimed.getTaskId(),
+                updatedBy(claimed), claimed.getUpdatedAt());
+        return Optional.of(toDomain(claimed));
     }
 
     @Override
-    public boolean markItemFailed(String kbId, String taskId, String itemId,
-                                  String stage, int progress, String errorCode, String errorMessage,
-                                  LocalDateTime updatedAt) {
-        return mapper.markItemFailed( kbId, taskId, itemId, stage, progress,
-                errorCode, errorMessage, updatedAt) > 0;
+    public boolean advanceRunningItem(String kbId, String taskId, String itemId,
+                                      IngestionStage expectedStage, IngestionStage nextStage,
+                                      int progress, LocalDateTime updatedAt) {
+        return mapper.advanceRunningItem(kbId, taskId, itemId,
+                expectedStage.name(), nextStage.name(), progress, updatedAt) == 1;
     }
 
     @Override
-    public void refreshSummary(String kbId, String taskId, String updatedBy, LocalDateTime updatedAt) {
-        mapper.refreshSummary(kbId, taskId, updatedBy, updatedAt);
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean isRunningForUpdate(String itemId, IngestionStage expectedStage) {
+        return mapper.findRunningItemForUpdate(itemId, expectedStage.name()).isPresent();
     }
 
-    private IngestionTaskRecord toRecord(IngestionTask task) {
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean completeRunningItem(String kbId, String taskId, String itemId,
+                                       IngestionStage expectedStage,
+                                       String updatedBy, LocalDateTime updatedAt) {
+        if (mapper.completeRunningItem(
+                kbId, taskId, itemId, expectedStage.name(), updatedAt) != 1) {
+            return false;
+        }
+        mapper.refreshSummary(kbId, taskId, fallbackUser(updatedBy), updatedAt);
+        return true;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean failRunningItem(String kbId, String taskId, String itemId,
+                                   IngestionStage expectedStage, int progress,
+                                   String errorCode, String errorMessage,
+                                   String updatedBy, LocalDateTime updatedAt) {
+        if (mapper.failRunningItem(kbId, taskId, itemId, expectedStage.name(),
+                progress, errorCode, errorMessage, updatedAt) != 1) {
+            return false;
+        }
+        mapper.refreshSummary(kbId, taskId, fallbackUser(updatedBy), updatedAt);
+        return true;
+    }
+
+    @Override
+    public boolean resetFailedItem(String kbId, String taskId, String itemId,
+                                   long nextTargetIndexGeneration,
+                                   LocalDateTime updatedAt) {
+        return mapper.resetFailedItem(
+                kbId, taskId, itemId, nextTargetIndexGeneration, updatedAt) == 1;
+    }
+
+    @Override
+    public long findMaxTargetIndexGeneration(String assetId) {
+        Long value = mapper.findMaxTargetIndexGeneration(assetId);
+        return value == null ? 0L : Math.max(0L, value);
+    }
+
+    @Override
+    public List<Long> listTargetIndexGenerations(String assetId) {
+        return mapper.listTargetIndexGenerations(assetId);
+    }
+
+    @Override
+    public Optional<Long> findTargetIndexGeneration(String itemId, String assetId) {
+        return mapper.findTargetIndexGeneration(itemId, assetId);
+    }
+
+    @Override
+    public boolean assignTargetIndexGeneration(String itemId, String assetId,
+                                               long targetIndexGeneration,
+                                               LocalDateTime updatedAt) {
+        return mapper.assignTargetIndexGeneration(
+                itemId, assetId, targetIndexGeneration, updatedAt) == 1;
+    }
+
+    @Override
+    public void refreshSummary(String kbId, String taskId,
+                               String updatedBy, LocalDateTime updatedAt) {
+        mapper.refreshSummary(kbId, taskId, fallbackUser(updatedBy), updatedAt);
+    }
+
+    private IngestionTaskRecord toRecord(IngestionTask task, DedupeStrategy strategy) {
         IngestionTaskRecord record = new IngestionTaskRecord();
         record.setId(task.getId());
         record.setKbId(task.getKbId());
         record.setSourceType(task.getSourceType().name());
+        record.setClientRequestId(task.getClientRequestId());
+        record.setRequestHash(task.getRequestHash());
+        record.setDedupeStrategy(strategy == null ? null : strategy.name());
         record.setStatus(task.getStatus().name());
         record.setTotalCount(task.getTotalCount());
         record.setSuccessCount(task.getSuccessCount());
@@ -131,15 +217,18 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         record.setId(item.getId());
         record.setTaskId(item.getTaskId());
         record.setKbId(item.getKbId());
+        record.setTaskCreatedBy(item.getTaskCreatedBy());
         record.setAssetId(item.getAssetId());
+        record.setTargetIndexGeneration(item.getTargetIndexGeneration());
         record.setFileName(item.getFileName());
         record.setFileHash(item.getFileHash());
-        record.setSourceUrl(item.getSourceUrl());
         record.setStage(item.getStage().name());
         record.setStatus(item.getStatus().name());
         record.setProgress(item.getProgress());
-        record.setDedupeStrategy(item.getDedupeStrategy() == null ? null : item.getDedupeStrategy().name());
-        record.setDedupeResult(item.getDedupeResult() == null ? null : item.getDedupeResult().name());
+        record.setDedupeStrategy(item.getDedupeStrategy() == null
+                ? null : item.getDedupeStrategy().name());
+        record.setDedupeResult(item.getDedupeResult() == null
+                ? null : item.getDedupeResult().name());
         record.setDuplicateAssetId(item.getDuplicateAssetId());
         record.setErrorCode(item.getErrorCode());
         record.setErrorMessage(item.getErrorMessage());
@@ -149,11 +238,14 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
         return record;
     }
 
-    private IngestionTask toDomain(IngestionTaskRecord record, List<IngestionTaskItemRecord> itemRecords) {
+    private IngestionTask toDomain(IngestionTaskRecord record,
+                                   List<IngestionTaskItemRecord> items) {
         return IngestionTask.builder()
                 .id(record.getId())
                 .kbId(record.getKbId())
                 .sourceType(IngestionSourceType.valueOf(record.getSourceType()))
+                .clientRequestId(record.getClientRequestId())
+                .requestHash(record.getRequestHash())
                 .status(IngestionTaskStatus.valueOf(record.getStatus()))
                 .totalCount(defaultInt(record.getTotalCount()))
                 .successCount(defaultInt(record.getSuccessCount()))
@@ -164,7 +256,7 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())
                 .finishedAt(record.getFinishedAt())
-                .items(itemRecords == null ? List.of() : itemRecords.stream().map(this::toDomain).toList())
+                .items(items == null ? List.of() : items.stream().map(this::toDomain).toList())
                 .build();
     }
 
@@ -173,10 +265,11 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .id(record.getId())
                 .taskId(record.getTaskId())
                 .kbId(record.getKbId())
+                .taskCreatedBy(record.getTaskCreatedBy())
                 .assetId(record.getAssetId())
+                .targetIndexGeneration(record.getTargetIndexGeneration())
                 .fileName(record.getFileName())
                 .fileHash(record.getFileHash())
-                .sourceUrl(record.getSourceUrl())
                 .stage(IngestionStage.valueOf(record.getStage()))
                 .status(IngestionTaskItemStatus.valueOf(record.getStatus()))
                 .progress(defaultInt(record.getProgress()))
@@ -191,12 +284,39 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .build();
     }
 
+    private DedupeStrategy resolveTaskDedupeStrategy(IngestionTask task) {
+        DedupeStrategy result = null;
+        if (task.getItems() == null) return null;
+        for (IngestionTaskItem item : task.getItems()) {
+            if (item == null || item.getDedupeStrategy() == null) continue;
+            if (result != null && result != item.getDedupeStrategy()) {
+                throw new IllegalArgumentException(
+                        "All ingestion items in one task must use the same dedupe strategy.");
+            }
+            result = item.getDedupeStrategy();
+        }
+        return result;
+    }
+
     private DedupeResult parseDedupeResult(String value) {
         return value == null ? null : DedupeResult.valueOf(value);
     }
 
     private DedupeStrategy parseDedupeStrategy(String value) {
         return value == null ? null : DedupeStrategy.valueOf(value);
+    }
+
+    private String updatedBy(IngestionTaskItemRecord record) {
+        return fallbackUser(record.getTaskCreatedBy());
+    }
+
+    private String fallbackUser(String value) {
+        return value == null || value.isBlank() ? SCHEDULER_USER : value;
+    }
+
+    private int positiveLimit(int limit) {
+        if (limit < 1) throw new IllegalArgumentException("limit must be positive");
+        return limit;
     }
 
     private int defaultInt(Integer value) {

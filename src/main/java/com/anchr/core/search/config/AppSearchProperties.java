@@ -14,6 +14,7 @@ public class AppSearchProperties {
 
     private final Rrf rrf = new Rrf();
     private final Rerank rerank = new Rerank();
+    private final VectorRoutes vectorRoutes = new VectorRoutes();
 
     @Data
     public static class Rrf {
@@ -32,5 +33,13 @@ public class AppSearchProperties {
         private int windowMax = 80;
         private double fusionAlpha = 0.6d;
         private double fusionBeta = 0.4d;
+    }
+
+    @Data
+    public static class VectorRoutes {
+        private int textTopK = 80;
+        private int documentImageTopK = 40;
+        private float textSimilarity = 0.75f;
+        private float documentImageSimilarity = 0.70f;
     }
 }

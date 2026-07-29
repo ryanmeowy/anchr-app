@@ -1,6 +1,8 @@
 package com.anchr.core.search.interfaces.rest;
 
 import com.anchr.core.common.infrastructure.RequireAuth;
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.interfaces.rest.dto.IndexRebuildConfirmRequest;
@@ -33,7 +35,9 @@ public class IndexController {
     public Result<Boolean> retry() {
         boolean accepted = segmentIndexManager.retryCreate();
         if (!accepted) {
-            return Result.error("Retry conditions not met: index status must be NOT_READY and active embedding configured");
+            throw new BusinessException(
+                    ApiError.INDEX_OPERATION_CONFLICT,
+                    "Retry conditions not met: index status must be NOT_READY and active embedding configured");
         }
         return Result.success(true);
     }
@@ -42,11 +46,13 @@ public class IndexController {
     @PostMapping("/rebuild/confirm")
     public Result<Boolean> confirmRebuild(@RequestBody IndexRebuildConfirmRequest request) {
         if (request.getTaskId() == null || request.getTaskId().isBlank()) {
-            return Result.error("taskId is required");
+            throw new BusinessException(ApiError.INVALID_REQUEST, "taskId is required");
         }
         boolean accepted = segmentIndexManager.confirmRebuild(request.getTaskId());
         if (!accepted) {
-            return Result.error("Rebuild confirm failed: task not found, or another operation is in progress");
+            throw new BusinessException(
+                    ApiError.INDEX_OPERATION_CONFLICT,
+                    "Rebuild confirm failed: task not found, or another operation is in progress");
         }
         return Result.success(true);
     }
@@ -58,7 +64,7 @@ public class IndexController {
             String taskId = segmentIndexManager.prepareRebuild();
             return Result.success(taskId);
         } catch (IllegalStateException e) {
-            return Result.error(e.getMessage());
+            throw new BusinessException(ApiError.INDEX_OPERATION_CONFLICT, e.getMessage(), e);
         }
     }
 }

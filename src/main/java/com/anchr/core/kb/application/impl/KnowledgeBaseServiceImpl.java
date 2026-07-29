@@ -6,24 +6,19 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
+import com.anchr.core.kb.application.acl.KnowledgeActivityAcl;
+import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
-import com.anchr.core.kb.domain.model.DocumentIndexDeletePayload;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealth;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealthScore;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
-import com.anchr.core.kb.domain.model.OutboxEvent;
-import com.anchr.core.kb.domain.model.OutboxEventStatus;
-import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
 import com.anchr.core.kb.domain.repository.AssetRepository;
-import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.kb.domain.repository.OutboxEventRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,10 +42,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final AssetRepository assetRepository;
-    private final ActivityEventRepository activityEventRepository;
-    private final OutboxEventRepository outboxEventRepository;
+    private final KnowledgeActivityAcl knowledgeActivityAcl;
+    private final AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
     private final IdGen idGen;
-    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -176,8 +170,14 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    public DocumentPagedResult listDocuments(String kbId, String keyword, String fileType,
-                                             Integer page, Integer size) {
+    public DocumentPagedResult listDocuments(
+            String kbId,
+            String keyword,
+            String fileType,
+            DocumentAvailabilityStatus availabilityStatus,
+            Integer page,
+            Integer size
+    ) {
         String id = requireId(kbId, "kbId");
         get(id);
         PageBounds bounds = normalizePage(page, size, DEFAULT_DOCUMENT_SIZE);
@@ -186,10 +186,13 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 ? fileType.trim().toUpperCase(Locale.ROOT)
                 : null;
         return new DocumentPagedResult(
-                assetRepository.listActive(id, normalizedKeyword, normalizedFileType,
-                        bounds.size(), bounds.offset()),
-                assetRepository.countActive(id, normalizedKeyword, normalizedFileType),
-                assetRepository.sumActiveSegments(id, normalizedKeyword, normalizedFileType),
+                assetRepository.listActive(
+                        id, normalizedKeyword, normalizedFileType,
+                        availabilityStatus, bounds.size(), bounds.offset()),
+                assetRepository.countActive(
+                        id, normalizedKeyword, normalizedFileType, availabilityStatus),
+                assetRepository.sumActiveSegments(
+                        id, normalizedKeyword, normalizedFileType, availabilityStatus),
                 bounds.page(),
                 bounds.size());
     }
@@ -210,24 +213,21 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         RequestUserContext context = UserContextHolder.get();
         get(kbId);
         LocalDateTime now = LocalDateTime.now();
+        assetRepository.findByIdForUpdate(kbId, assetId)
+                .filter(candidate -> candidate.getDeletedAt() == null)
+                .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
         boolean deleted = assetRepository.markDeleted(
                 kbId, assetId, context.userId(), now);
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
-        activityEventRepository.deleteCitationOpenedByAssetId(context.userId(), assetId);
+        knowledgeActivityAcl.deleteCitationOpenedByAssetId(context.userId(), assetId);
         knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), false);
-        outboxEventRepository.save(OutboxEvent.builder()
-                .eventType(OutboxEventType.DELETE_ASSET)
-                .aggregateType("ASSET")
-                .aggregateId(assetId)
-                .payload(toJson(new DocumentIndexDeletePayload(kbId, assetId)))
-                .status(OutboxEventStatus.PENDING)
-                .retryCount(0)
-                .createdBy(context.userId())
-                .createdAt(now)
-                .updatedAt(now)
-                .build());
+        assetCleanupOutboxRecorder.assetDeleted(
+                kbId,
+                assetId,
+                context.userId(),
+                now);
     }
 
     private String requireId(String id, String fieldName) {
@@ -250,14 +250,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
-    }
-
-    private String toJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            throw new BusinessException(ApiError.INTERNAL_ERROR, "Failed to serialize outbox event payload.", e);
-        }
     }
 
     private PageBounds normalizePage(Integer page, Integer size, int defaultSize) {

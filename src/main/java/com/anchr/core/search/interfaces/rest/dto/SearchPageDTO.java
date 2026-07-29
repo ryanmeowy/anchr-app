@@ -16,7 +16,6 @@ public class SearchPageDTO implements Serializable {
 
     private List<SearchResultDTO> items;
     private long total;
-    private String nextCursor;
     private Map<String, List<FacetItemDTO>> facets;
     private SearchAnswerDTO answer;
     private String rewrittenQuery;

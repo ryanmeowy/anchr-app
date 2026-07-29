@@ -43,8 +43,6 @@ public class SearchQueryDTO {
 
     private DateRange dateRange;
 
-    private String cursor;
-
     @Size(max = 32, message = "sort length cannot exceed 32")
     private String sort;
 

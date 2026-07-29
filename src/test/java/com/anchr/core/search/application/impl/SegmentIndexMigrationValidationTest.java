@@ -2,17 +2,12 @@ package com.anchr.core.search.application.impl;
 
 import co.elastic.clients.json.JsonData;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
-import com.anchr.core.search.domain.port.SearchEmbeddingPort.EmbeddingSession;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
-import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,13 +41,15 @@ class SegmentIndexMigrationValidationTest {
     }
 
     @Test
-    void validateMigrationCountsShouldRequireExactMatch() {
+    void validateMigrationCountsShouldAllowProfileProjectionToChangeDocumentCount() {
         assertDoesNotThrow(() ->
-                SegmentIndexManagerImpl.validateMigrationCounts(10, 10, 10));
+                SegmentIndexManagerImpl.validateMigrationCounts(10, 10, 12, 12));
+        assertDoesNotThrow(() ->
+                SegmentIndexManagerImpl.validateMigrationCounts(10, 10, 8, 8));
         assertThrows(IllegalStateException.class, () ->
-                SegmentIndexManagerImpl.validateMigrationCounts(10, 9, 9));
+                SegmentIndexManagerImpl.validateMigrationCounts(10, 9, 12, 12));
         assertThrows(IllegalStateException.class, () ->
-                SegmentIndexManagerImpl.validateMigrationCounts(10, 10, 9));
+                SegmentIndexManagerImpl.validateMigrationCounts(10, 10, 12, 11));
     }
 
     @Test
@@ -81,111 +78,14 @@ class SegmentIndexMigrationValidationTest {
     }
 
     @Test
-    void rebuildEmbeddingShouldFallbackToOcrTextWhenContentTextIsMissing() throws Exception {
-        SegmentDocument doc = new SegmentDocument();
-        doc.setAssetType("PDF");
-        doc.setOcrText("ocr content");
-        AtomicReference<String> embeddedSource = new AtomicReference<>();
-        AtomicReference<String> embeddedSourceType = new AtomicReference<>();
-
-        List<Float> embedding = computeNewEmbedding(doc, textProfile(), (source, sourceType) -> {
-            embeddedSource.set(source);
-            embeddedSourceType.set(sourceType);
-            return List.of(0.1f, 0.2f);
-        }, null);
-
-        assertEquals(List.of(0.1f, 0.2f), embedding);
-        assertEquals("ocr content", embeddedSource.get());
-        assertEquals("text", embeddedSourceType.get());
-    }
-
-    @Test
-    void rebuildImageEmbeddingShouldFallbackToTextWhenTargetProfileDoesNotSupportImage() throws Exception {
-        SegmentDocument doc = new SegmentDocument();
-        doc.setAssetType("IMAGE");
-        doc.setOcrText("image ocr content");
-        AtomicReference<String> embeddedSource = new AtomicReference<>();
-        AtomicReference<String> embeddedSourceType = new AtomicReference<>();
-
-        computeNewEmbedding(doc, textProfile(), (source, sourceType) -> {
-            embeddedSource.set(source);
-            embeddedSourceType.set(sourceType);
-            return List.of(0.1f, 0.2f);
-        }, objectStoragePort());
-
-        assertEquals("image ocr content", embeddedSource.get());
-        assertEquals("text", embeddedSourceType.get());
-    }
-
-    @Test
-    void rebuildImageEmbeddingShouldUseImageWhenTargetProfileSupportsImage() throws Exception {
-        SegmentDocument doc = new SegmentDocument();
-        doc.setAssetType("IMAGE");
-        doc.setThumbnail("thumb-key");
-        AtomicReference<String> embeddedSource = new AtomicReference<>();
-        AtomicReference<String> embeddedSourceType = new AtomicReference<>();
-
-        computeNewEmbedding(doc, multiProfile(), (source, sourceType) -> {
-            embeddedSource.set(source);
-            embeddedSourceType.set(sourceType);
-            return List.of(0.1f, 0.2f);
-        }, objectStoragePort());
-
-        assertEquals("ai://thumb-key", embeddedSource.get());
-        assertEquals("image", embeddedSourceType.get());
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Float> computeNewEmbedding(
-            SegmentDocument doc,
-            EmbeddingProfile profile,
-            EmbeddingSession embeddingSession,
-            SearchObjectStoragePort objectStoragePort
-    ) throws Exception {
-        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
-                null,
-                null,
-                null,
-                null,
-                objectStoragePort,
-                Runnable::run,
-                null,
-                null);
-        Method method = SegmentIndexManagerImpl.class.getDeclaredMethod(
-                "computeNewEmbedding",
-                SegmentDocument.class,
-                String.class,
-                EmbeddingProfile.class,
-                EmbeddingSession.class);
-        method.setAccessible(true);
-        try {
-            return (List<Float>) method.invoke(manager, doc, "segment-1", profile, embeddingSession);
-        } catch (InvocationTargetException e) {
-            if (e.getCause() instanceof Exception cause) {
-                throw cause;
-            }
-            throw e;
-        }
-    }
-
-    private EmbeddingProfile textProfile() {
-        return new EmbeddingProfile(42L, "EMBEDDING", "text-model", 2, "text-fingerprint");
-    }
-
-    private EmbeddingProfile multiProfile() {
-        return new EmbeddingProfile(43L, "MULTI_EMBEDDING", "multi-model", 2, "multi-fingerprint");
-    }
-
-    private SearchObjectStoragePort objectStoragePort() {
-        return new SearchObjectStoragePort() {
+    void rebuildShouldPresignObjectKeysButKeepStableDirectUrls() {
+        SearchObjectStoragePort storage = new SearchObjectStoragePort() {
             @Override
-            public String uploadFile(org.springframework.web.multipart.MultipartFile file) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public String buildAiImageInput(String objectKey, AiInputValidity validity) {
-                return "ai://" + objectKey;
+            public String buildAiImageInput(
+                    String objectKey,
+                    AiInputValidity validity
+            ) {
+                return "signed://" + objectKey;
             }
 
             @Override
@@ -198,5 +98,18 @@ class SegmentIndexMigrationValidationTest {
                 throw new UnsupportedOperationException();
             }
         };
+        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
+                null, null, null, null, storage,
+                null,
+                Runnable::run, null, null);
+
+        assertEquals(
+                "signed://images/photo.png",
+                manager.resolveRebuildImageInput("images/photo.png"));
+        assertEquals(
+                "https://cdn.example.test/photo.png",
+                manager.resolveRebuildImageInput(
+                        "https://cdn.example.test/photo.png"));
     }
+
 }

@@ -5,9 +5,7 @@ import lombok.Value;
 
 import java.time.LocalDateTime;
 
-/**
- * A single file or URL in an ingestion task.
- */
+/** One business item in an ingestion task. */
 @Value
 @Builder(toBuilder = true)
 public class IngestionTaskItem {
@@ -15,10 +13,11 @@ public class IngestionTaskItem {
     String id;
     String taskId;
     String kbId;
+    String taskCreatedBy;
     String assetId;
+    Long targetIndexGeneration;
     String fileName;
     String fileHash;
-    String sourceUrl;
     IngestionStage stage;
     IngestionTaskItemStatus status;
     int progress;

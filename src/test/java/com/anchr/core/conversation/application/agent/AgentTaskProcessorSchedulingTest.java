@@ -1,11 +1,13 @@
 package com.anchr.core.conversation.application.agent;
 
+import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
 import com.anchr.core.conversation.config.AgentProperties;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
@@ -13,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class AgentTaskProcessorSchedulingTest {
 
@@ -81,10 +84,12 @@ class AgentTaskProcessorSchedulingTest {
                 null,
                 null,
                 null,
+                null,
                 properties,
                 null,
                 null,
-                executor);
+                executor,
+                mock(AgentRuntimeSnapshotService.class));
     }
 
     private static final class TestTaskRepository implements AgentTaskRepository {
@@ -99,6 +104,9 @@ class AgentTaskProcessorSchedulingTest {
 
         @Override public void save(AgentTask task) { }
         @Override public Optional<AgentTask> findById(String taskId) { return Optional.empty(); }
+        @Override public List<AgentTask> findByIds(Collection<String> taskIds) {
+            return List.of();
+        }
         @Override public List<AgentTask> findBySessionId(String sessionId) { return List.of(); }
         @Override public List<AgentTask> findClaimable(long now, int limit) { return List.of(); }
         @Override public boolean saveClaimed(AgentTask task, String expectedLeaseOwner) { return false; }

@@ -8,6 +8,9 @@
         <id property="id" column="id"/>
         <result property="kbId" column="kb_id"/>
         <result property="sourceType" column="source_type"/>
+        <result property="clientRequestId" column="client_request_id"/>
+        <result property="requestHash" column="request_hash"/>
+        <result property="dedupeStrategy" column="dedupe_strategy"/>
         <result property="status" column="status"/>
         <result property="totalCount" column="total_count"/>
         <result property="successCount" column="success_count"/>
@@ -24,10 +27,11 @@
         <id property="id" column="id"/>
         <result property="taskId" column="task_id"/>
         <result property="kbId" column="kb_id"/>
+        <result property="taskCreatedBy" column="task_created_by"/>
         <result property="assetId" column="asset_id"/>
+        <result property="targetIndexGeneration" column="target_index_generation"/>
         <result property="fileName" column="file_name"/>
         <result property="fileHash" column="file_hash"/>
-        <result property="sourceUrl" column="source_url"/>
         <result property="stage" column="stage"/>
         <result property="status" column="status"/>
         <result property="progress" column="progress"/>
@@ -42,205 +46,253 @@
     </resultMap>
 
     <sql id="IngestionTaskColumns">
-        id, kb_id, source_type, status, total_count, success_count,
-        failure_count, running_count, created_by, updated_by, created_at, updated_at, finished_at
+        id, kb_id, source_type, client_request_id, request_hash, dedupe_strategy,
+        status, total_count, success_count, failure_count, running_count,
+        created_by, updated_by, created_at, updated_at, finished_at
     </sql>
 
-    <sql id="IngestionTaskItemColumns">
-        id, task_id, kb_id, asset_id, file_name, file_hash, source_url, stage, status,
-        progress, dedupe_strategy, dedupe_result, duplicate_asset_id,
-        error_code, error_message, created_at, updated_at, finished_at
+    <sql id="JoinedItemColumns">
+        iti.id, iti.task_id, it.kb_id, it.created_by as task_created_by,
+        iti.asset_id, iti.target_index_generation, iti.file_name, iti.file_hash,
+        iti.stage, iti.status, iti.progress, it.dedupe_strategy,
+        iti.dedupe_result, iti.duplicate_asset_id, iti.error_code, iti.error_message,
+        iti.created_at, iti.updated_at, iti.finished_at
     </sql>
 
     <insert id="insertTask" parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskRecord">
         insert into ingestion_task (
-            <include refid="IngestionTaskColumns"/>
+            id, kb_id, source_type, client_request_id, request_hash, dedupe_strategy,
+            status, total_count, success_count, failure_count, running_count,
+            created_by, updated_by, created_at, updated_at, finished_at
         ) values (
-            #{id}, #{kbId}, #{sourceType}, #{status}, #{totalCount}, #{successCount},
-            #{failureCount}, #{runningCount}, #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{finishedAt}
+            #{id}, #{kbId}, #{sourceType}, #{clientRequestId}, #{requestHash}, #{dedupeStrategy},
+            #{status}, #{totalCount}, #{successCount}, #{failureCount}, #{runningCount},
+            #{createdBy}, #{updatedBy}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
     </insert>
 
     <insert id="insertItem" parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskItemRecord">
         insert into ingestion_task_item (
-            <include refid="IngestionTaskItemColumns"/>
+            id, task_id, asset_id, target_index_generation, file_name, file_hash,
+            stage, status, progress, dedupe_result, duplicate_asset_id,
+            error_code, error_message, created_at, updated_at, finished_at
         ) values (
-            #{id}, #{taskId}, #{kbId}, #{assetId}, #{fileName}, #{fileHash}, #{sourceUrl}, #{stage}, #{status},
-            #{progress}, #{dedupeStrategy}, #{dedupeResult}, #{duplicateAssetId},
+            #{id}, #{taskId}, #{assetId}, #{targetIndexGeneration}, #{fileName}, #{fileHash},
+            #{stage}, #{status}, #{progress}, #{dedupeResult}, #{duplicateAssetId},
             #{errorCode}, #{errorMessage}, #{createdAt}, #{updatedAt}, #{finishedAt}
         )
     </insert>
 
     <select id="findTask" resultMap="IngestionTaskRecordMap">
-        select
-            <include refid="IngestionTaskColumns"/>
+        select <include refid="IngestionTaskColumns"/>
         from ingestion_task
-        where id = #{taskId}
-          and kb_id = #{kbId}
+        where id = #{taskId} and kb_id = #{kbId}
+    </select>
+
+    <select id="findTaskByClientRequestId" resultMap="IngestionTaskRecordMap">
+        select <include refid="IngestionTaskColumns"/>
+        from ingestion_task
+        where created_by = #{createdBy} and client_request_id = #{clientRequestId}
+        limit 1
     </select>
 
     <select id="listTasks" resultMap="IngestionTaskRecordMap">
-        select
-            <include refid="IngestionTaskColumns"/>
+        select <include refid="IngestionTaskColumns"/>
         from ingestion_task
         where kb_id = #{kbId}
-        <if test="status != null and status != ''">
-          and status = #{status}
-        </if>
+        <if test="status != null and status != ''">and status = #{status}</if>
         order by created_at desc, id desc
         limit #{limit}
     </select>
 
     <select id="listRecentTasks" resultMap="IngestionTaskRecordMap">
-        select
-            <include refid="IngestionTaskColumns"/>
+        select <include refid="IngestionTaskColumns"/>
         from ingestion_task
         order by created_at desc, id desc
         limit #{limit}
     </select>
 
     <select id="listItems" resultMap="IngestionTaskItemRecordMap">
-        select
-            <include refid="IngestionTaskItemColumns"/>
-        from ingestion_task_item
-        where task_id = #{taskId}
-        order by created_at asc, id asc
-    </select>
-
-    <select id="listFailedItems" resultMap="IngestionTaskItemRecordMap">
-        select
-            iti.id, iti.task_id, iti.kb_id, iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
-            iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result, iti.duplicate_asset_id,
-            iti.error_code, iti.error_message,
-            iti.created_at, iti.updated_at, iti.finished_at
+        select <include refid="JoinedItemColumns"/>
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        where it.kb_id = #{kbId}
-          and it.id = #{taskId}
-          and iti.status = 'FAILED'
+        where iti.task_id = #{taskId}
         order by iti.created_at asc, iti.id asc
     </select>
 
-    <select id="findItem" resultMap="IngestionTaskItemRecordMap">
-        select
-            iti.id, iti.task_id, iti.kb_id, iti.asset_id, iti.file_name, iti.file_hash, iti.source_url,
-            iti.stage, iti.status, iti.progress, iti.dedupe_strategy, iti.dedupe_result, iti.duplicate_asset_id,
-            iti.error_code, iti.error_message,
-            iti.created_at, iti.updated_at, iti.finished_at
+    <select id="listFailedItems" resultMap="IngestionTaskItemRecordMap">
+        select <include refid="JoinedItemColumns"/>
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        where it.kb_id = #{kbId}
-          and it.id = #{taskId}
-          and iti.id = #{itemId}
+        where it.kb_id = #{kbId} and iti.task_id = #{taskId}
+          and iti.status = 'FAILED' and iti.asset_id is not null
+        order by iti.created_at asc, iti.id asc
     </select>
+
+    <select id="listRunningItems" resultMap="IngestionTaskItemRecordMap">
+        select <include refid="JoinedItemColumns"/>
+        from ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        where iti.status = 'RUNNING'
+        order by iti.id asc
+    </select>
+
+    <select id="findItem" resultMap="IngestionTaskItemRecordMap">
+        select <include refid="JoinedItemColumns"/>
+        from ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        where it.kb_id = #{kbId} and iti.task_id = #{taskId} and iti.id = #{itemId}
+    </select>
+
+    <select id="findRetryItem" resultMap="IngestionTaskItemRecordMap">
+        select <include refid="JoinedItemColumns"/>
+        from ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        where it.kb_id = #{kbId} and iti.task_id = #{taskId}
+          and iti.id = #{itemId} and iti.status = 'FAILED'
+          and iti.asset_id is not null
+        for update
+    </select>
+
+    <select id="listPendingItemIds" resultType="java.lang.String">
+        select id from ingestion_task_item
+        where status = 'PENDING'
+        order by id asc
+        limit #{limit}
+    </select>
+
+    <select id="listPendingItemIdsByTask" resultType="java.lang.String">
+        select id from ingestion_task_item
+        where task_id = #{taskId} and status = 'PENDING'
+        order by id asc
+        limit #{limit}
+    </select>
+
+    <update id="claimPending">
+        update ingestion_task_item
+        set stage = 'PARSE', status = 'RUNNING', progress = greatest(progress, 20),
+            error_code = null, error_message = null,
+            updated_at = current_timestamp(6), finished_at = null
+        where id = #{itemId} and status = 'PENDING'
+    </update>
+
+    <select id="findRunningItem" resultMap="IngestionTaskItemRecordMap">
+        select <include refid="JoinedItemColumns"/>
+        from ingestion_task_item iti
+        inner join ingestion_task it on it.id = iti.task_id
+        where iti.id = #{itemId} and iti.status = 'RUNNING'
+    </select>
+
+    <update id="advanceRunningItem">
+        update ingestion_task_item
+        set stage = #{nextStage}, progress = greatest(progress, #{progress}),
+            error_code = null, error_message = null, updated_at = #{updatedAt}
+        where id = #{itemId} and task_id = #{taskId}
+          and status = 'RUNNING' and stage = #{expectedStage}
+          and exists (
+              select 1 from ingestion_task it
+              where it.id = ingestion_task_item.task_id and it.kb_id = #{kbId}
+          )
+    </update>
+
+    <select id="findRunningItemForUpdate" resultType="java.lang.String">
+        select id from ingestion_task_item
+        where id = #{itemId} and status = 'RUNNING' and stage = #{expectedStage}
+        for update
+    </select>
+
+    <update id="completeRunningItem">
+        update ingestion_task_item
+        set stage = 'ASKABLE', status = 'SUCCESS', progress = 100,
+            error_code = null, error_message = null,
+            updated_at = #{updatedAt}, finished_at = #{updatedAt}
+        where id = #{itemId} and task_id = #{taskId}
+          and status = 'RUNNING' and stage = #{expectedStage}
+          and exists (
+              select 1 from ingestion_task it
+              where it.id = ingestion_task_item.task_id and it.kb_id = #{kbId}
+          )
+    </update>
+
+    <update id="failRunningItem">
+        update ingestion_task_item
+        set status = 'FAILED', progress = greatest(progress, #{progress}),
+            error_code = #{errorCode}, error_message = #{errorMessage},
+            updated_at = #{updatedAt}, finished_at = #{updatedAt}
+        where id = #{itemId} and task_id = #{taskId}
+          and status = 'RUNNING' and stage = #{expectedStage}
+          and exists (
+              select 1 from ingestion_task it
+              where it.id = ingestion_task_item.task_id and it.kb_id = #{kbId}
+          )
+    </update>
 
     <update id="resetFailedItem">
         update ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
-        set iti.stage = 'UPLOAD',
-            iti.status = 'PENDING',
-            iti.progress = 0,
-            iti.error_code = null,
-            iti.error_message = null,
-            iti.updated_at = #{updatedAt},
-            iti.finished_at = null
-        where it.kb_id = #{kbId}
-          and it.id = #{taskId}
-          and iti.id = #{itemId}
-          and iti.status = 'FAILED'
+        set iti.stage = 'UPLOAD', iti.status = 'PENDING', iti.progress = 0,
+            iti.target_index_generation = #{nextTargetIndexGeneration},
+            iti.error_code = null, iti.error_message = null,
+            iti.updated_at = #{updatedAt}, iti.finished_at = null
+        where it.kb_id = #{kbId} and it.id = #{taskId}
+          and iti.id = #{itemId} and iti.status = 'FAILED'
+          and iti.asset_id is not null
     </update>
 
-    <update id="resetFailedItems">
-        update ingestion_task_item iti
-        inner join ingestion_task it on it.id = iti.task_id
-        set iti.stage = 'UPLOAD',
-            iti.status = 'PENDING',
-            iti.progress = 0,
-            iti.error_code = null,
-            iti.error_message = null,
-            iti.updated_at = #{updatedAt},
-            iti.finished_at = null
-        where it.kb_id = #{kbId}
-          and it.id = #{taskId}
-          and iti.status = 'FAILED'
-    </update>
+    <select id="findMaxTargetIndexGeneration" resultType="java.lang.Long">
+        select coalesce(max(target_index_generation), 0)
+        from ingestion_task_item
+        where asset_id = #{assetId}
+    </select>
 
-    <update id="markItemRunning">
-        update ingestion_task_item iti
-        inner join ingestion_task it on it.id = iti.task_id
-        set iti.stage = #{stage},
-            iti.status = 'RUNNING',
-            iti.progress = #{progress},
-            iti.error_code = null,
-            iti.error_message = null,
-            iti.updated_at = #{updatedAt},
-            iti.finished_at = null
-        where it.kb_id = #{kbId}
-          and it.id = #{taskId}
-          and iti.id = #{itemId}
-    </update>
+    <select id="listTargetIndexGenerations" resultType="java.lang.Long">
+        select distinct target_index_generation
+        from ingestion_task_item
+        where asset_id = #{assetId} and target_index_generation is not null
+        order by target_index_generation asc
+    </select>
 
-    <update id="markItemSuccess">
-        update ingestion_task_item iti
-        inner join ingestion_task it on it.id = iti.task_id
-        set iti.stage = #{stage},
-            iti.status = 'SUCCESS',
-            iti.progress = #{progress},
-            iti.error_code = null,
-            iti.error_message = null,
-            iti.updated_at = #{updatedAt},
-            iti.finished_at = #{updatedAt}
-        where it.kb_id = #{kbId}
-          and it.id = #{taskId}
-          and iti.id = #{itemId}
-    </update>
+    <select id="findTargetIndexGeneration" resultType="java.lang.Long">
+        select target_index_generation
+        from ingestion_task_item
+        where id = #{itemId} and asset_id = #{assetId}
+    </select>
 
-    <update id="markItemFailed">
-        update ingestion_task_item iti
-        inner join ingestion_task it on it.id = iti.task_id
-        set iti.stage = #{stage},
-            iti.status = 'FAILED',
-            iti.progress = #{progress},
-            iti.error_code = #{errorCode},
-            iti.error_message = #{errorMessage},
-            iti.updated_at = #{updatedAt},
-            iti.finished_at = #{updatedAt}
-        where it.kb_id = #{kbId}
-          and it.id = #{taskId}
-          and iti.id = #{itemId}
+    <update id="assignTargetIndexGeneration">
+        update ingestion_task_item
+        set target_index_generation = #{targetIndexGeneration}, updated_at = #{updatedAt}
+        where id = #{itemId} and asset_id = #{assetId}
+          and target_index_generation is null and status = 'RUNNING'
     </update>
 
     <update id="refreshSummary">
-            update ingestion_task it
-            join (
-                select task_id,
-                    count(1) as total_count,
-                    sum(case when status in ('SUCCESS', 'SKIPPED') then 1 else 0 end) as success_count,
-                    sum(case when status = 'FAILED' then 1 else 0 end) as failure_count,
-                    sum(case when status = 'RUNNING' then 1 else 0 end) as running_count,
-                    sum(case when status = 'PENDING' then 1 else 0 end) as pending_count
-                from ingestion_task_item
-                where task_id = #{taskId}
-                group by task_id
-            ) s on it.id = s.task_id
-            set
-                it.total_count = s.total_count,
-                it.success_count = s.success_count,
-                it.failure_count = s.failure_count,
-                it.running_count = s.running_count,
-                it.status = case
-                    when s.running_count > 0 then 'RUNNING'
-                    when s.pending_count > 0 then 'PENDING'
-                    when s.failure_count = s.total_count then 'FAILED'
-                    when s.success_count = s.total_count then 'SUCCESS'
-                    else 'PARTIAL_SUCCESS'
-                end,
-                it.updated_by = #{updatedBy},
-                it.updated_at = #{updatedAt},
-                it.finished_at = case
-                    when s.running_count + s.pending_count > 0 then null
-                    else #{updatedAt}
-                end
-            where it.kb_id = #{kbId}
+        update ingestion_task it
+        join (
+            select task_id,
+                count(1) as total_count,
+                sum(case when status in ('SUCCESS', 'SKIPPED') then 1 else 0 end) as success_count,
+                sum(case when status = 'FAILED' then 1 else 0 end) as failure_count,
+                sum(case when status = 'RUNNING' then 1 else 0 end) as running_count,
+                sum(case when status = 'PENDING' then 1 else 0 end) as pending_count
+            from ingestion_task_item
+            where task_id = #{taskId}
+            group by task_id
+        ) s on it.id = s.task_id
+        set it.total_count = s.total_count,
+            it.success_count = s.success_count,
+            it.failure_count = s.failure_count,
+            it.running_count = s.running_count,
+            it.status = case
+                when s.running_count &gt; 0 then 'RUNNING'
+                when s.pending_count &gt; 0 then 'PENDING'
+                when s.failure_count = s.total_count then 'FAILED'
+                when s.success_count = s.total_count then 'SUCCESS'
+                else 'PARTIAL_SUCCESS'
+            end,
+            it.updated_by = #{updatedBy}, it.updated_at = #{updatedAt},
+            it.finished_at = case
+                when s.running_count + s.pending_count &gt; 0 then null else #{updatedAt}
+            end
+        where it.id = #{taskId} and it.kb_id = #{kbId}
     </update>
 </mapper>

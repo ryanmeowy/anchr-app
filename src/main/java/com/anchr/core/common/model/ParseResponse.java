@@ -1,5 +1,6 @@
 package com.anchr.core.common.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -34,7 +35,23 @@ public record ParseResponse(
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Image(String url, Integer pageNo, String alt, String blockId) {}
+    public record Image(
+            Integer artifactVersion,
+            String blockId,
+            String imageObjectKey,
+            String uploadStatus,
+            Integer pageNo,
+            List<BboxInfo> bboxes,
+            Integer imageWidth,
+            Integer imageHeight,
+            String mimeType,
+            String contentHash,
+            String alt,
+            String caption,
+            String contextText,
+            String ocrText,
+            String url
+    ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Warning(String code, String message, String blockId) {}
@@ -43,5 +60,11 @@ public record ParseResponse(
     public record BboxInfo(int pageNo, Bbox bbox){}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Bbox(double l, double t, double r, double b, @JsonProperty("coord_origin") String coordOrigin){}
+    public record Bbox(
+            double l,
+            double t,
+            double r,
+            double b,
+            @JsonProperty("coordOrigin") @JsonAlias("coord_origin") String coordOrigin
+    ) {}
 }

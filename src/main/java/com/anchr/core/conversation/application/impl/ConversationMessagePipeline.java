@@ -2,6 +2,7 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
+import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
@@ -10,6 +11,7 @@ import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
+import com.anchr.core.conversation.application.model.ConversationCitationReasonRequest;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
@@ -19,7 +21,6 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageReques
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
-import com.anchr.core.search.application.CitationReasonGenerationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -41,7 +42,7 @@ public class ConversationMessagePipeline {
     private final ConversationResultCardMapper conversationResultCardMapper;
     private final AnswerGenerationService answerGenerationService;
     private final ConversationTurnCodec conversationTurnCodec;
-    private final CitationReasonGenerationService citationReasonGenerationService;
+    private final ConversationRetrievalAcl conversationRetrievalAcl;
 
     public ConversationMessagePipelineResult execute(String sessionId, ConversationMessageRequestDTO request) {
         return execute(sessionId, request, ConversationProgressListener.NOOP);
@@ -74,6 +75,7 @@ public class ConversationMessagePipeline {
         List<ConversationRetrievalCandidate> answerCandidates = retrievalResult.getTopCandidates()
                 .stream()
                 .filter(candidate -> isTraceableCandidate(candidate, resultCardSegmentIds))
+                .filter(ConversationRetrievalCandidate::isCitableEvidence)
                 .limit(ANSWER_CITATION_LIMIT)
                 .toList();
         List<ConversationCitation> candidateCitations = conversationCitationMapper.mapFromSearchResults(answerCandidates);
@@ -119,14 +121,14 @@ public class ConversationMessagePipeline {
             return;
         }
         List<ConversationTurnDTO.CitationDTO> groups = conversationTurnCodec.toCitationDTOs(citations);
-        CitationReasonGenerationService.Request reasonRequest = new CitationReasonGenerationService.Request(
+        ConversationCitationReasonRequest reasonRequest = new ConversationCitationReasonRequest(
                 question,
                 rewrittenQuery,
                 answer,
-                groups.stream().map(group -> new CitationReasonGenerationService.CitationGroup(
+                groups.stream().map(group -> new ConversationCitationReasonRequest.CitationGroup(
                         group.getCitationIndex(),
                         group.getAssetId(),
-                        group.getChunks().stream().map(chunk -> new CitationReasonGenerationService.CitationChunk(
+                        group.getChunks().stream().map(chunk -> new ConversationCitationReasonRequest.CitationChunk(
                                 chunk.getSegmentId(),
                                 chunk.getContent(),
                                 chunk.getWhy() == null ? null : chunk.getWhy().getScore(),
@@ -135,7 +137,7 @@ public class ConversationMessagePipeline {
                         )).toList()
                 )).toList()
         );
-        Map<String, String> reasons = citationReasonGenerationService.generate(reasonRequest);
+        Map<String, String> reasons = conversationRetrievalAcl.generateCitationReasons(reasonRequest);
         for (ConversationCitation citation : citations) {
             if (citation == null || citation.getWhy() == null || !StringUtils.hasText(citation.getSegmentId())) {
                 continue;

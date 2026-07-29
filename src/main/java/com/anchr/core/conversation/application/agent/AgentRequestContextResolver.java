@@ -1,18 +1,15 @@
 package com.anchr.core.conversation.application.agent;
 
-import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.kb.domain.model.KnowledgeBase;
-import com.anchr.core.kb.domain.repository.AssetRepository;
-import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
+import com.anchr.core.conversation.application.model.ConversationDocumentReference;
+import com.anchr.core.conversation.application.model.ConversationKnowledgeBaseReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Resolves client-provided IDs back to active server-side resources before
@@ -25,37 +22,34 @@ public class AgentRequestContextResolver {
     private static final int MAX_CONTEXT_ASSETS = 20;
     private static final int MAX_NAME_LENGTH = 300;
 
-    private final KnowledgeBaseRepository knowledgeBaseRepository;
-    private final AssetRepository assetRepository;
+    private final ConversationKnowledgeAcl conversationKnowledgeAcl;
 
     public AgentRequestContext resolve(AgentRunRequest request) {
         List<String> requestedKbIds = normalizedIds(request.request().getKbIds());
         List<String> requestedAssetIds = normalizedIds(request.request().getAssetIdList());
 
-        Map<String, KnowledgeBase> activeKnowledgeBases = new LinkedHashMap<>();
-        for (KnowledgeBase knowledgeBase : knowledgeBaseRepository.listActiveByIds(requestedKbIds)) {
-            activeKnowledgeBases.put(knowledgeBase.getId(), knowledgeBase);
-        }
-        List<String> authorizedKbIds = requestedKbIds.stream()
-                .filter(activeKnowledgeBases::containsKey)
+        List<ConversationKnowledgeBaseReference> activeKnowledgeBases =
+                conversationKnowledgeAcl.resolveVisibleKnowledgeBases(requestedKbIds);
+        List<String> authorizedKbIds = activeKnowledgeBases.stream()
+                .map(ConversationKnowledgeBaseReference::id)
                 .toList();
 
-        List<Asset> resolvedAssets = resolveAssets(requestedAssetIds, authorizedKbIds);
-        List<AgentRequestContext.KnowledgeBaseRef> knowledgeBases = authorizedKbIds.stream()
+        List<ConversationDocumentReference> resolvedAssets = resolveAssets(
+                requestedAssetIds, authorizedKbIds);
+        List<AgentRequestContext.KnowledgeBaseRef> knowledgeBases = activeKnowledgeBases.stream()
                 .limit(MAX_CONTEXT_KNOWLEDGE_BASES)
-                .map(activeKnowledgeBases::get)
                 .map(kb -> new AgentRequestContext.KnowledgeBaseRef(
-                        kb.getId(), safeText(kb.getName())))
+                        kb.id(), safeText(kb.name())))
                 .toList();
         List<AgentRequestContext.AssetRef> assets = resolvedAssets.stream()
                 .limit(MAX_CONTEXT_ASSETS)
                 .map(asset -> new AgentRequestContext.AssetRef(
-                        asset.getId(),
-                        asset.getKbId(),
-                        safeText(asset.getFileName()),
-                        safeText(asset.getTitle()),
-                        safeText(StringUtils.hasText(asset.getMimeType())
-                                ? asset.getMimeType() : asset.getFileType())))
+                        asset.id(),
+                        asset.kbId(),
+                        safeText(asset.fileName()),
+                        safeText(asset.title()),
+                        safeText(StringUtils.hasText(asset.mimeType())
+                                ? asset.mimeType() : asset.fileType())))
                 .toList();
 
         return new AgentRequestContext(
@@ -72,15 +66,12 @@ public class AgentRequestContextResolver {
         );
     }
 
-    private List<Asset> resolveAssets(List<String> assetIds, List<String> kbIds) {
-        List<Asset> assets = new ArrayList<>();
+    private List<ConversationDocumentReference> resolveAssets(
+            List<String> assetIds, List<String> kbIds) {
+        List<ConversationDocumentReference> assets = new ArrayList<>();
         for (String assetId : assetIds) {
-            Asset resolved = null;
-            for (String kbId : kbIds) {
-                resolved = assetRepository.findActiveById(kbId, assetId).orElse(null);
-                if (resolved != null) break;
-            }
-            if (resolved != null) assets.add(resolved);
+            conversationKnowledgeAcl.findActiveDocument(kbIds, assetId)
+                    .ifPresent(assets::add);
         }
         return assets;
     }

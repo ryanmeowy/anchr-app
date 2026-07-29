@@ -1,6 +1,8 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
+import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.*;
@@ -10,13 +12,10 @@ import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
-import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -44,7 +43,8 @@ public class AgentTaskProcessor {
     private final AgentTaskRepository taskRepository;
     private final ConversationRepository conversationRepository;
     private final AgentTraceRepository traceRepository;
-    private final SegmentRepository segmentRepository;
+    private final ConversationKnowledgeAcl conversationKnowledgeAcl;
+    private final ConversationRetrievalAcl conversationRetrievalAcl;
     private final ConversationGenerationPort generationPort;
     private final ConversationCitationMapper citationMapper;
     private final ConversationTurnCodec turnCodec;
@@ -53,8 +53,7 @@ public class AgentTaskProcessor {
     private final TransactionTemplate transactionTemplate;
     private final AgentTaskStreamService taskStreamService;
     @Qualifier("agentTaskExecutor") private final Executor executor;
-    @Autowired(required = false)
-    private AgentRuntimeSnapshotService runtimeSnapshotService;
+    private final AgentRuntimeSnapshotService runtimeSnapshotService;
     private final String owner = UUID.randomUUID().toString();
     private final Map<String, Thread> runningThreads = new ConcurrentHashMap<>();
     private final Set<String> scheduledTaskIds = ConcurrentHashMap.newKeySet();
@@ -155,20 +154,27 @@ public class AgentTaskProcessor {
     private List<EvidenceText> readAll(AgentTask task, SummaryRequest request, long deadline) {
         List<EvidenceText> result = new ArrayList<>(); int chars = 0;
         for (AssetRef asset : request.assets()) {
+            var document = conversationKnowledgeAcl
+                    .findActiveDocument(List.of(asset.kbId()), asset.assetId())
+                    .orElseThrow(() -> new PermanentTaskException(
+                            "DOCUMENT_NOT_FOUND", "文档不存在或已删除"));
             Integer order = null; String segmentId = null;
             while (true) {
                 ensureActive(task, deadline);
-                List<Segment> page = segmentRepository.listByAssetId(asset.kbId(), asset.assetId(), order, segmentId, 20);
+                List<ConversationRetrievalCandidate> page = conversationRetrievalAcl
+                        .readDocument(document, order, segmentId, 20);
                 if (page.isEmpty()) break;
-                for (Segment segment : page) {
-                    String text = text(segment); if (!StringUtils.hasText(text)) continue;
+                for (ConversationRetrievalCandidate candidate : page) {
+                    String text = candidate.getContent(); if (!StringUtils.hasText(text)) continue;
                     if (result.size() >= properties.getSummaryMaxSegments() || chars + text.length() > properties.getSummaryMaxChars()) {
                         throw new PermanentTaskException("DOCUMENT_TOO_LARGE", "文档超过 V1 总结限制，请缩小文档范围");
                     }
                     chars += text.length();
-                    result.add(new EvidenceText(candidate(segment, asset.fileName(), text), text));
+                    result.add(new EvidenceText(candidate, text));
                 }
-                Segment last = page.getLast(); order = last.getChunkOrder(); segmentId = last.getSegmentId();
+                ConversationRetrievalCandidate last = page.getLast();
+                order = last.getAnchor() == null ? null : last.getAnchor().getChunkOrder();
+                segmentId = last.getSegmentId();
                 if (page.size() < 20) break;
                 renew(task);
             }
@@ -252,10 +258,9 @@ public class AgentTaskProcessor {
         long started = System.currentTimeMillis();
         ConversationGenerationResult result;
         try {
-            result = generationPort.generateWithUsage(messages, options);
-            if (result == null) {
-                result = new ConversationGenerationResult(generationPort.generate(messages, options), 0, 0);
-            }
+            result = Objects.requireNonNull(
+                    generationPort.generateWithUsage(messages, options),
+                    "Conversation generation returned no result.");
         } catch (RuntimeException e) {
             recordGenerationUsage(task, 0, 0, System.currentTimeMillis() - started, null, false);
             throw e;
@@ -395,11 +400,9 @@ public class AgentTaskProcessor {
         long started = System.currentTimeMillis();
         ConversationGenerationResult result;
         try {
-            result = generationPort.generateWithUsage(messages, options);
-            // Keep test/custom ports that have not implemented usage reporting compatible.
-            if (result == null) {
-                result = new ConversationGenerationResult(generationPort.generate(messages, options), 0, 0);
-            }
+            result = Objects.requireNonNull(
+                    generationPort.generateWithUsage(messages, options),
+                    "Conversation generation returned no result.");
         } catch (RuntimeException e) {
             recordGenerationUsage(task, 0, 0, System.currentTimeMillis() - started, null, false);
             throw e;
@@ -509,11 +512,11 @@ public class AgentTaskProcessor {
         step.setCompletionTokens(existing==null?0:existing.getCompletionTokens());
         step.setLatencyMs("RUNNING".equals(status)?0:Math.max(0,now-createdAt));step.setErrorCode(errorCode);step.setCreatedAt(createdAt);
         try{traceRepository.saveStep(step);}catch(Exception e){log.warn("Agent task stage trace failed, taskId={}, stage={}",task.getTaskId(),stage,e);}
-        if(runtimeSnapshotService!=null)runtimeSnapshotService.publishActivity(task.getRunId());
+        runtimeSnapshotService.publishActivity(task.getRunId());
     }
 
     private void publishRuntimeTask(AgentTask task){
-        if(runtimeSnapshotService!=null&&task!=null)runtimeSnapshotService.publishTask(task.getRunId(),task);
+        if(task!=null)runtimeSnapshotService.publishTask(task.getRunId(),task);
     }
 
     private void recordGenerationUsage(AgentTask task,int promptTokens,int completionTokens,
@@ -564,8 +567,6 @@ public class AgentTaskProcessor {
 
     private SummaryRequest parseRequest(String json) throws Exception {JsonNode root=objectMapper.readTree(json);List<AssetRef> assets=new ArrayList<>();for(JsonNode n:root.path("assets"))assets.add(new AssetRef(n.path("assetId").asText(),n.path("kbId").asText(),n.path("fileName").asText()));return new SummaryRequest(assets,root.path("instruction").asText(),root.path("language").asText("中文"));}
 
-    private ConversationRetrievalCandidate candidate(Segment s,String file,String text){return ConversationRetrievalCandidate.builder().segmentId(s.getSegmentId()).kbId(s.getKbId()).assetId(s.getAssetId()).assetType(s.getAssetType()).segmentType(s.getSegmentType()==null?null:s.getSegmentType().name()).sourceRef(file).title(s.getTitle()).content(text).pageNo(s.getPageNo()).anchor(ConversationRetrievalCandidate.Anchor.builder().pageNo(s.getPageNo()).chunkOrder(s.getChunkOrder()).bbox(s.getBbox()).build()).build();}
-    private String text(Segment s){return StringUtils.hasText(s.getContentText())?s.getContentText():StringUtils.hasText(s.getOcrText())?s.getOcrText():"";}
     private record AssetRef(String assetId,String kbId,String fileName){} private record SummaryRequest(List<AssetRef> assets,String instruction,String language){} private record EvidenceText(ConversationRetrievalCandidate candidate,String text){}
     private static class TaskCancelledException extends RuntimeException {}
     private static class PermanentTaskException extends RuntimeException {private final String code;private PermanentTaskException(String code,String message){super(message);this.code=code;}}

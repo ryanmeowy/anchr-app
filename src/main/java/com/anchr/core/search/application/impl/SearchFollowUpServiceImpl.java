@@ -1,8 +1,10 @@
 package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.application.SearchFollowUpService;
+import com.anchr.core.search.application.api.model.RetrievalHit;
+import com.anchr.core.search.application.api.model.RetrievalTopChunk;
+import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchGenerationPort;
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -35,14 +37,18 @@ public class SearchFollowUpServiceImpl implements SearchFollowUpService {
     private final MeterRegistry meterRegistry;
 
     @Override
-    public List<String> generate(String query, List<SearchResultDTO> results) {
+    public List<String> generate(String query, List<RetrievalHit> results) {
         meterRegistry.counter("search.followup.count").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             if (!StringUtils.hasText(query) || results == null || results.isEmpty()) {
                 return List.of();
             }
-            String prompt = buildPrompt(query.trim(), results);
+            List<FollowUpContext> contexts = collectContexts(results);
+            if (contexts.isEmpty()) {
+                return List.of();
+            }
+            String prompt = buildPrompt(query.trim(), contexts);
             String raw = generationPort.generateText(prompt);
             List<String> questions = parseQuestions(raw);
             return questions.size() > 3 ? questions.subList(0, 3) : questions;
@@ -57,27 +63,74 @@ public class SearchFollowUpServiceImpl implements SearchFollowUpService {
         }
     }
 
-    private String buildPrompt(String query, List<SearchResultDTO> results) {
+    private List<FollowUpContext> collectContexts(
+            List<RetrievalHit> results
+    ) {
+        List<FollowUpContext> contexts = new ArrayList<>();
+        for (RetrievalHit result : results) {
+            if (result == null) {
+                continue;
+            }
+            if (result.topChunks() == null
+                    || result.topChunks().isEmpty()) {
+                addContext(
+                        contexts,
+                        result.segmentType(),
+                        result.snippet(),
+                        result.score());
+            } else {
+                for (RetrievalTopChunk chunk : result.topChunks()) {
+                    if (chunk != null) {
+                        addContext(
+                                contexts,
+                                chunk.segmentType(),
+                                chunk.snippet(),
+                                chunk.score());
+                    }
+                    if (contexts.size() >= MAX_CONTEXT_RESULTS) {
+                        break;
+                    }
+                }
+            }
+            if (contexts.size() >= MAX_CONTEXT_RESULTS) {
+                break;
+            }
+        }
+        return List.copyOf(contexts);
+    }
+
+    private void addContext(
+            List<FollowUpContext> contexts,
+            String segmentType,
+            String snippet,
+            Double score
+    ) {
+        if (contexts.size() >= MAX_CONTEXT_RESULTS
+                || SegmentType.isImageVisual(segmentType)
+                || !StringUtils.hasText(snippet)) {
+            return;
+        }
+        contexts.add(new FollowUpContext(snippet, score));
+    }
+
+    private String buildPrompt(
+            String query,
+            List<FollowUpContext> contexts
+    ) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是知识库搜索助手。基于用户的搜索问题，生成 3 个推荐追问，帮助用户深入探索。\n");
         sb.append("用户问题：").append(query).append("\n\n");
         sb.append("检索结果摘要：\n");
         int count = 0;
-        for (SearchResultDTO r : results) {
+        for (FollowUpContext context : contexts) {
             if (count >= MAX_CONTEXT_RESULTS) {
                 break;
             }
-            if (r == null) {
-                continue;
-            }
-            String snippet = r.getSnippet();
-            if (!StringUtils.hasText(snippet)) {
-                continue;
-            }
+            String snippet = context.snippet();
             if (snippet.length() > MAX_SNIPPET_CHARS) {
                 snippet = snippet.substring(0, MAX_SNIPPET_CHARS);
             }
-            Double score = r.getScore();
+            Double score = context.score();
             sb.append("- [").append(count + 1).append("]");
             if (score != null) {
                 sb.append(" (score: ").append(String.format(Locale.ROOT, "%.2f", score)).append(")");
@@ -91,6 +144,9 @@ public class SearchFollowUpServiceImpl implements SearchFollowUpService {
         sb.append("3) 每个追问 ≤30 字，简洁自然\n");
         sb.append("4) 只输出 JSON 数组：[\"追问1\", \"追问2\", \"追问3\"]");
         return sb.toString();
+    }
+
+    private record FollowUpContext(String snippet, Double score) {
     }
 
     private List<String> parseQuestions(String raw) {

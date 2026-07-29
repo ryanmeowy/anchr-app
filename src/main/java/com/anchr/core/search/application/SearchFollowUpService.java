@@ -1,6 +1,6 @@
 package com.anchr.core.search.application;
 
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
+import com.anchr.core.search.application.api.model.RetrievalHit;
 
 import java.util.List;
 
@@ -16,5 +16,5 @@ public interface SearchFollowUpService {
      * @param results the top search results for context
      * @return up to 3 follow-up questions, empty list on failure
      */
-    List<String> generate(String query, List<SearchResultDTO> results);
+    List<String> generate(String query, List<RetrievalHit> results);
 }

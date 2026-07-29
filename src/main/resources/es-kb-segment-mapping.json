@@ -9,6 +9,9 @@
     "assetId": {
       "type": "keyword"
     },
+    "indexGeneration": {
+      "type": "long"
+    },
     "assetType": {
       "type": "keyword"
     },

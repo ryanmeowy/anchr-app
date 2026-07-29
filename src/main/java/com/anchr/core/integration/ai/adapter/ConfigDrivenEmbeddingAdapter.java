@@ -8,6 +8,7 @@ import com.anchr.core.integration.ai.client.EmbeddingClient;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
+import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,12 +16,14 @@ import com.google.common.collect.Lists;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * OpenAI-compatible embedding adapter backed by capability_config.
@@ -36,6 +39,14 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
     private final ClientCacheManager cacheManager;
     private final CapabilityClientFactory clientFactory;
     private final CapabilityResolver configResolver;
+    private final Map<String, ClientCacheManager.ResolvedClient> profileClients =
+            new ConcurrentHashMap<>();
+    private CapabilityConfigRepository capabilityConfigRepository;
+
+    @Autowired(required = false)
+    void setCapabilityConfigRepository(CapabilityConfigRepository repository) {
+        this.capabilityConfigRepository = repository;
+    }
 
     public List<Float> embed(String source, String sourceType) {
         return embed(resolveActiveClient(), source, sourceType);
@@ -43,16 +54,35 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
 
     @Override
     public EmbeddingSession openSession(EmbeddingProfile profile) {
-        ClientCacheManager.ResolvedClient resolved = resolveActiveClient();
-        CapabilityConfig config = resolved.config();
-        EmbeddingProfile activeProfile = CapabilityEmbeddingProfileProvider.createProfile(config)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Active embedding configuration has no valid profile"));
-        if (!activeProfile.fingerprint().equals(profile.fingerprint())) {
-            throw new IllegalStateException(
-                    "Active embedding configuration changed before rebuild session started");
+        if (profile == null) {
+            throw new IllegalArgumentException("Embedding profile is required");
         }
+        ClientCacheManager.ResolvedClient resolved = profileClients.computeIfAbsent(
+                profile.fingerprint(), ignored -> resolveProfileClient(profile));
         return (source, sourceType) -> embed(resolved, source, sourceType);
+    }
+
+    private ClientCacheManager.ResolvedClient resolveProfileClient(EmbeddingProfile profile) {
+        if (capabilityConfigRepository == null || profile.configId() == null) {
+            ClientCacheManager.ResolvedClient active = resolveActiveClient();
+            requireMatchingProfile(active.config(), profile);
+            return active;
+        }
+        CapabilityConfig config = capabilityConfigRepository.findById(profile.configId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Embedding config is unavailable: " + profile.configId()));
+        requireMatchingProfile(config, profile);
+        return new ClientCacheManager.ResolvedClient(clientFactory.build(config), config);
+    }
+
+    private void requireMatchingProfile(CapabilityConfig config, EmbeddingProfile expected) {
+        EmbeddingProfile actual = CapabilityEmbeddingProfileProvider.createProfile(config)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Embedding configuration has no valid profile"));
+        if (!actual.fingerprint().equals(expected.fingerprint())) {
+            throw new IllegalStateException(
+                    "Embedding configuration changed before rebuild started");
+        }
     }
 
     private ClientCacheManager.ResolvedClient resolveActiveClient() {

@@ -48,6 +48,24 @@ class ConversationCitationMapperTest {
     }
 
     @Test
+    void documentImageCitationShouldKeepTheParentDocumentTitle() {
+        ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
+                .segmentId("image-1")
+                .assetId("asset-1")
+                .segmentType("DOCUMENT_IMAGE")
+                .title("guide.pdf")
+                .sourceRef("embedded/diagram.png")
+                .build();
+
+        var citations = new ConversationCitationMapper()
+                .mapFromSearchResults(List.of(candidate));
+
+        assertThat(citations).singleElement()
+                .extracting(ConversationCitation::getFileName)
+                .isEqualTo("guide.pdf");
+    }
+
+    @Test
     void codec_shouldGroupMultipleUsedChunksByAssetAndSortThemInDocumentOrder() {
         ConversationTurnCodec codec = new ConversationTurnCodec(new ObjectMapper());
 

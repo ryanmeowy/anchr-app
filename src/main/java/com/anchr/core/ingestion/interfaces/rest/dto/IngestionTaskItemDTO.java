@@ -17,7 +17,6 @@ public class IngestionTaskItemDTO {
     String assetId;
     String fileName;
     String fileHash;
-    String sourceUrl;
     String stage;
     String status;
     int progress;
@@ -35,7 +34,6 @@ public class IngestionTaskItemDTO {
                 .assetId(item.getAssetId())
                 .fileName(item.getFileName())
                 .fileHash(item.getFileHash())
-                .sourceUrl(item.getSourceUrl())
                 .stage(item.getStage().name())
                 .status(item.getStatus().name())
                 .progress(item.getProgress())

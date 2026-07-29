@@ -1,10 +1,15 @@
 package com.anchr.core.kb.application.impl;
 
 import com.anchr.core.kb.domain.model.DocumentIndexDeletePayload;
+import com.anchr.core.kb.domain.model.DocumentIndexGenerationDeletePayload;
 import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
-import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.ingestion.application.impl.IngestionImagePaths;
+import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
+import com.anchr.core.kb.application.acl.KnowledgeRetrievalCleanupAcl;
+import com.anchr.core.kb.application.acl.KnowledgeStorageAcl;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -31,8 +36,11 @@ public class OutboxEventProcessor {
     private static final List<Long> RETRY_DELAYS_MINUTES = List.of(1L, 5L, 30L, 120L, 720L, 1440L);
 
     private final OutboxEventRepository outboxEventRepository;
-    private final SegmentRepository segmentRepository;
+    private final KnowledgeRetrievalCleanupAcl knowledgeRetrievalCleanupAcl;
     private final ObjectMapper objectMapper;
+    private final IngestionTaskRepository ingestionTaskRepository;
+    private final KnowledgeObjectStoragePort objectStoragePort;
+    private final KnowledgeStorageAcl knowledgeStorageAcl;
 
     @Value("${app.outbox.batch-size:20}")
     private int batchSize;
@@ -63,12 +71,29 @@ public class OutboxEventProcessor {
 
     void process(OutboxEvent event) {
         try {
-            if (event.getEventType() != OutboxEventType.DELETE_ASSET) {
-                failPermanently(event, "Unsupported outbox event type: " + event.getEventType());
-                return;
+            switch (event.getEventType()) {
+                case DELETE_ASSET -> {
+                    DocumentIndexDeletePayload payload = readDeletePayload(event);
+                    cleanupIngestionImages(
+                            payload.assetId(),
+                            ingestionTaskRepository.listTargetIndexGenerations(payload.assetId()));
+                    knowledgeRetrievalCleanupAcl.deleteAsset(
+                            payload.kbId(), payload.assetId());
+                }
+                case DELETE_ASSET_GENERATION -> {
+                    DocumentIndexGenerationDeletePayload payload =
+                            readGenerationDeletePayload(event);
+                    cleanupIngestionImages(payload.assetId(), List.of(payload.indexGeneration()));
+                    knowledgeRetrievalCleanupAcl.deleteGeneration(
+                            payload.kbId(), payload.assetId(), payload.indexGeneration());
+                }
+                case UNKNOWN -> {
+                    failPermanently(
+                            event,
+                            "Unsupported outbox event type: " + event.getEventType());
+                    return;
+                }
             }
-            DocumentIndexDeletePayload payload = readDeletePayload(event);
-            segmentRepository.deleteByAssetId(payload.assetId());
             boolean updated = outboxEventRepository.markDone(
                     event.getId(), event.getLockToken(), LocalDateTime.now());
             if (!updated) {
@@ -82,7 +107,21 @@ public class OutboxEventProcessor {
         }
     }
 
-    @Scheduled(cron = "${app.outbox.cleanup-cron:0 0 3 * * *}")
+    private void cleanupIngestionImages(String assetId, List<Long> generations) {
+        String configuredPrefix = knowledgeStorageAcl.findConfiguredPrefix()
+                .orElse(null);
+        if (configuredPrefix == null || generations == null) return;
+        for (Long generation : generations) {
+            if (generation == null || generation < 1L) continue;
+            objectStoragePort.deleteObjectsByPrefix(IngestionImagePaths.imagePrefix(
+                    configuredPrefix, assetId, generation));
+        }
+    }
+
+    @Scheduled(
+            cron = "${app.outbox.cleanup-cron:0 0 3 * * *}" ,
+            zone = "Asia/Shanghai"
+    )
     public void cleanupDoneEvents() {
         LocalDateTime processedBefore = LocalDateTime.now().minusDays(retentionDays);
         int deleted = outboxEventRepository.deleteDoneBefore(processedBefore, cleanupBatchSize);
@@ -104,6 +143,29 @@ public class OutboxEventProcessor {
             return new DocumentIndexDeletePayload(payload.kbId().trim(), payload.assetId().trim());
         } catch (JsonProcessingException | IllegalArgumentException e) {
             throw new PermanentEventException("Invalid document index delete payload.", e);
+        }
+    }
+
+    private DocumentIndexGenerationDeletePayload readGenerationDeletePayload(
+            OutboxEvent event) {
+        try {
+            DocumentIndexGenerationDeletePayload payload = objectMapper.readValue(
+                    event.getPayload(), DocumentIndexGenerationDeletePayload.class);
+            if (payload == null
+                    || !StringUtils.hasText(payload.kbId())
+                    || !StringUtils.hasText(payload.assetId())
+                    || payload.indexGeneration() < 0L
+                    || !payload.assetId().trim().equals(event.getAggregateId())) {
+                throw new PermanentEventException(
+                        "Invalid document index generation delete payload.");
+            }
+            return new DocumentIndexGenerationDeletePayload(
+                    payload.kbId().trim(),
+                    payload.assetId().trim(),
+                    payload.indexGeneration());
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            throw new PermanentEventException(
+                    "Invalid document index generation delete payload.", e);
         }
     }
 

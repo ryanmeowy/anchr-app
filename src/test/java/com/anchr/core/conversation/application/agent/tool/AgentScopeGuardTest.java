@@ -1,10 +1,10 @@
 package com.anchr.core.conversation.application.agent.tool;
 
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.agent.AgentBudget;
 import com.anchr.core.conversation.application.agent.AgentExecutionContext;
 import com.anchr.core.conversation.application.agent.AgentToolException;
-import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.kb.domain.repository.AssetRepository;
+import com.anchr.core.conversation.application.model.ConversationDocumentReference;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -16,24 +16,24 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class AgentScopeGuardTest {
-    private final AssetRepository repository = mock(AssetRepository.class);
-    private final AgentScopeGuard guard = new AgentScopeGuard(repository);
+    private final ConversationKnowledgeAcl knowledgeAcl = mock(ConversationKnowledgeAcl.class);
+    private final AgentScopeGuard guard = new AgentScopeGuard(knowledgeAcl);
 
     @Test
     void shouldResolveUniqueFileNameInsideAuthorizedKnowledgeBases() {
-        Asset asset = asset("asset-1", "kb-1", "经验报告.pdf", "经验报告");
-        when(repository.findActiveById("kb-1", "经验报告.pdf")).thenReturn(Optional.empty());
-        when(repository.listActive("kb-1", "经验报告.pdf", null, 50, 0)).thenReturn(List.of(asset));
+        var asset = asset("asset-1", "kb-1", "经验报告.pdf", "经验报告");
+        when(knowledgeAcl.findActiveDocument(List.of("kb-1"), "经验报告.pdf")).thenReturn(Optional.empty());
+        when(knowledgeAcl.searchActiveDocuments(List.of("kb-1"), "经验报告.pdf", 50)).thenReturn(List.of(asset));
 
-        Asset resolved = guard.requireAsset("《经验报告.pdf》", context(List.of()));
+        ConversationDocumentReference resolved = guard.requireAsset("《经验报告.pdf》", context(List.of()));
 
-        assertThat(resolved.getId()).isEqualTo("asset-1");
+        assertThat(resolved.id()).isEqualTo("asset-1");
     }
 
     @Test
     void shouldReportDocumentNotFoundInsteadOfPermissionWhenReferenceIsInvalid() {
-        when(repository.findActiveById("kb-1", "segment-123")).thenReturn(Optional.empty());
-        when(repository.listActive("kb-1", "segment-123", null, 50, 0)).thenReturn(List.of());
+        when(knowledgeAcl.findActiveDocument(List.of("kb-1"), "segment-123")).thenReturn(Optional.empty());
+        when(knowledgeAcl.searchActiveDocuments(List.of("kb-1"), "segment-123", 50)).thenReturn(List.of());
 
         assertThatThrownBy(() -> guard.requireAsset("segment-123", context(List.of())))
                 .isInstanceOfSatisfying(AgentToolException.class,
@@ -42,8 +42,8 @@ class AgentScopeGuardTest {
 
     @Test
     void shouldKeepPermissionDeniedForAssetOutsideExplicitRequestScope() {
-        Asset asset = asset("asset-outside", "kb-1", "outside.pdf", "outside");
-        when(repository.findActiveById("kb-1", "asset-outside")).thenReturn(Optional.of(asset));
+        var asset = asset("asset-outside", "kb-1", "outside.pdf", "outside");
+        when(knowledgeAcl.findActiveDocument(List.of("kb-1"), "asset-outside")).thenReturn(Optional.of(asset));
 
         assertThatThrownBy(() -> guard.requireAsset("asset-outside", context(List.of("asset-allowed"))))
                 .isInstanceOfSatisfying(AgentToolException.class,
@@ -55,7 +55,7 @@ class AgentScopeGuardTest {
                 new AgentBudget(12, 8, System.currentTimeMillis() + 10_000));
     }
 
-    private Asset asset(String id, String kbId, String fileName, String title) {
-        return Asset.builder().id(id).kbId(kbId).fileName(fileName).title(title).build();
+    private ConversationDocumentReference asset(String id, String kbId, String fileName, String title) {
+        return new ConversationDocumentReference(id, kbId, fileName, title, "PDF", "application/pdf", 7L, 3);
     }
 }

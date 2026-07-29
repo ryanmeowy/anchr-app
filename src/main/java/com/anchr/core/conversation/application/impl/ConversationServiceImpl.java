@@ -24,6 +24,7 @@ import com.anchr.core.conversation.application.model.ConversationMessagePipeline
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.AgentTaskStatus;
 import com.anchr.core.conversation.domain.model.ConversationSession;
+import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
@@ -38,11 +39,11 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
-import com.anchr.core.kb.application.ActivityEventService;
-import com.anchr.core.search.application.KbScopeResolver;
+import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -56,13 +57,15 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -75,13 +78,19 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class ConversationServiceImpl implements ConversationService {
 
     private static final int DEFAULT_TURN_LIMIT = 20;
     private static final int MAX_TURN_LIMIT = 100;
     private static final int DEFAULT_SESSION_LIST_LIMIT = 20;
     private static final int MAX_SESSION_LIST_LIMIT = 50;
+    private static final int SESSION_LIST_CURSOR_VERSION = 1;
+    private static final int MAX_SESSION_LIST_CURSOR_LENGTH = 1_024;
+    private static final long MAX_SESSION_CURSOR_UPDATED_AT = LocalDateTime.of(
+                    9999, 12, 31, 23, 59, 59, 999_000_000)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli();
     private static final int AUTO_TITLE_MAX_LENGTH = 128;
     private static final String SSE_TRACE_PADDING = " ".repeat(2_048);
     private static final String SINGLE_USER_ID = "single_user";
@@ -90,36 +99,54 @@ public class ConversationServiceImpl implements ConversationService {
     private final ConversationMessageOrchestrator conversationMessageOrchestrator;
     private final ConversationTurnCodec conversationTurnCodec;
     private final ConversationRetrievalTraceBuilder conversationRetrievalTraceBuilder;
-    private final KbScopeResolver kbScopeResolver;
+    private final ConversationKnowledgeAcl conversationKnowledgeAcl;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
-    private final ActivityEventService activityEventService;
+    private final ConversationActivityAcl conversationActivityAcl;
     private final AgentTaskRepository agentTaskRepository;
     private final TransactionTemplate transactionTemplate;
-    @Qualifier("streamEventExecutor")
     private final Executor streamExecutor;
-    @Autowired(required = false)
-    private AgentRunFinalizer agentRunFinalizer;
-    @Autowired(required = false)
-    private AgentTaskProcessor agentTaskProcessor;
-    @Autowired(required = false)
-    private AgentConversationCleanupService agentConversationCleanupService;
-    @Autowired(required = false)
-    private AgentRuntimeSnapshotService agentRuntimeSnapshotService;
 
-    /** Compatibility constructor for legacy unit tests that exercise only the traditional path. */
+    private final AgentRunFinalizer agentRunFinalizer;
+    private final AgentTaskProcessor agentTaskProcessor;
+    private final AgentConversationCleanupService agentConversationCleanupService;
+    private final AgentRuntimeSnapshotService agentRuntimeSnapshotService;
+
+    @Autowired
     public ConversationServiceImpl(ConversationRepository conversationRepository,
                                    ConversationMessageOrchestrator conversationMessageOrchestrator,
                                    ConversationTurnCodec conversationTurnCodec,
                                    ConversationRetrievalTraceBuilder conversationRetrievalTraceBuilder,
-                                   KbScopeResolver kbScopeResolver,
+                                   ConversationKnowledgeAcl conversationKnowledgeAcl,
                                    ObjectMapper objectMapper,
                                    MeterRegistry meterRegistry,
-                                   ActivityEventService activityEventService,
-                                   Executor streamExecutor) {
-        this(conversationRepository, conversationMessageOrchestrator, conversationTurnCodec,
-                conversationRetrievalTraceBuilder, kbScopeResolver, objectMapper, meterRegistry,
-                activityEventService, null, null, streamExecutor);
+                                   ConversationActivityAcl conversationActivityAcl,
+                                   AgentTaskRepository agentTaskRepository,
+                                   TransactionTemplate transactionTemplate,
+                                   @Qualifier("streamEventExecutor") Executor streamExecutor,
+                                   AgentRunFinalizer agentRunFinalizer,
+                                   AgentTaskProcessor agentTaskProcessor,
+                                   AgentConversationCleanupService agentConversationCleanupService,
+                                   AgentRuntimeSnapshotService agentRuntimeSnapshotService) {
+        this.conversationRepository = Objects.requireNonNull(conversationRepository);
+        this.conversationMessageOrchestrator =
+                Objects.requireNonNull(conversationMessageOrchestrator);
+        this.conversationTurnCodec = Objects.requireNonNull(conversationTurnCodec);
+        this.conversationRetrievalTraceBuilder =
+                Objects.requireNonNull(conversationRetrievalTraceBuilder);
+        this.conversationKnowledgeAcl = Objects.requireNonNull(conversationKnowledgeAcl);
+        this.objectMapper = Objects.requireNonNull(objectMapper);
+        this.meterRegistry = Objects.requireNonNull(meterRegistry);
+        this.conversationActivityAcl = Objects.requireNonNull(conversationActivityAcl);
+        this.agentTaskRepository = Objects.requireNonNull(agentTaskRepository);
+        this.transactionTemplate = Objects.requireNonNull(transactionTemplate);
+        this.streamExecutor = Objects.requireNonNull(streamExecutor);
+        this.agentRunFinalizer = Objects.requireNonNull(agentRunFinalizer);
+        this.agentTaskProcessor = Objects.requireNonNull(agentTaskProcessor);
+        this.agentConversationCleanupService =
+                Objects.requireNonNull(agentConversationCleanupService);
+        this.agentRuntimeSnapshotService =
+                Objects.requireNonNull(agentRuntimeSnapshotService);
     }
 
     @Override
@@ -132,8 +159,8 @@ public class ConversationServiceImpl implements ConversationService {
                 title,
                 now
         );
-        session.setKbScope(kbScopeResolver.resolveVisibleKbIds(request.getKbIds()));
-        conversationRepository.saveSession(session);
+        session.setKbScope(conversationKnowledgeAcl.resolveVisibleKbIds(request.getKbIds()));
+        conversationRepository.createSession(session);
         meterRegistry.counter("conversation.created.count").increment();
         return toSessionDto(session);
     }
@@ -147,46 +174,42 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public ConversationSessionListDTO listSessions(Integer limit, String cursor) {
         int boundedLimit = normalizeSessionListLimit(limit);
-        int offset = decodeSessionListCursor(cursor);
-        List<ConversationSession> sessions = conversationRepository.findRecentSessions(
+        ConversationSessionPosition before = decodeSessionListCursor(cursor);
+        List<ConversationSession> candidates = conversationRepository.findSessionPage(
                 SINGLE_USER_ID,
-                offset + boundedLimit + 1
+                before,
+                boundedLimit + 1
         );
-        List<ConversationSession> page = sessions.stream()
-                .skip(offset)
+        boolean hasMore = candidates.size() > boundedLimit;
+        List<ConversationSession> page = candidates.stream()
                 .limit(boundedLimit)
                 .toList();
 
         ConversationSessionListDTO response = new ConversationSessionListDTO();
         response.setItems(page.stream().map(this::toSessionDto).toList());
-        if (sessions.size() > offset + boundedLimit) {
-            response.setNextCursor(encodeSessionListCursor(offset + boundedLimit));
+        if (hasMore && !page.isEmpty()) {
+            ConversationSession last = page.getLast();
+            response.setNextCursor(encodeSessionListCursor(
+                    new ConversationSessionPosition(last.getSessionId(), last.getUpdatedAt())));
         }
         return response;
     }
 
     @Override
     public ConversationSessionDTO renameSession(String sessionId, ConversationRenameRequestDTO request) {
-        ConversationSession session = loadSessionOrThrow(sessionId);
         long now = System.currentTimeMillis();
-        session.setTitle(request.getTitle().trim());
-        session.touch(now);
-        conversationRepository.saveSession(session);
-        return toSessionDto(session);
+        conversationRepository.renameSession(sessionId, request.getTitle().trim(), now);
+        return toSessionDto(loadSessionOrThrow(sessionId));
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteSession(String sessionId) {
         loadSessionOrThrow(sessionId);
-        if (agentConversationCleanupService != null) {
-            agentConversationCleanupService.cancelRunning(sessionId);
-        }
+        agentConversationCleanupService.cancelRunning(sessionId);
         conversationRepository.deleteSession(sessionId);
-        if (agentConversationCleanupService != null) {
-            agentConversationCleanupService.deleteRecords(sessionId);
-        }
-        activityEventService.deleteBySessionId(sessionId);
+        agentConversationCleanupService.deleteRecords(sessionId);
+        conversationActivityAcl.deleteBySessionId(sessionId);
     }
 
     @Override
@@ -211,8 +234,9 @@ public class ConversationServiceImpl implements ConversationService {
                                                                   String turnId,
                                                                   String runId) {
         ConversationSession session = loadSessionOrThrow(sessionId);
-        boolean autoGenerateTitle = shouldAutoGenerateTitle(session.getSessionId(), session.getTitle());
-        long now = System.currentTimeMillis();
+        String titleAtRequestStart = session.getTitle();
+        boolean autoGenerateTitle = shouldAutoGenerateTitle(session.getSessionId(), titleAtRequestStart);
+        long requestStartedAt = System.currentTimeMillis();
         applyConversationScope(session, request);
         AnswerMode answerMode = resolveAnswerMode(request);
         request.setAnswerMode(answerMode.name());
@@ -241,33 +265,38 @@ public class ConversationServiceImpl implements ConversationService {
         turn.setWorkflowVersion(executionResult.workflowVersion());
         turn.setExecutionMode(executionResult.executionMode().name());
         turn.setAgentTaskId(executionResult.agentTask() == null ? null : executionResult.agentTask().taskId());
-        turn.setCreatedAt(now);
+        turn.setCreatedAt(requestStartedAt);
+        String generatedTitle = autoGenerateTitle
+                ? buildAutoTitle(request.getQuery(), executionResult.rewrittenQuery())
+                : null;
         try {
             Runnable persistence = () -> {
                 if (!conversationRepository.lockActiveSession(session.getSessionId())) {
                     throw new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND);
                 }
                 conversationRepository.saveTurn(turn);
+                boolean autoTitleUpdated = generatedTitle != null
+                        && conversationRepository.updateAutoTitleIfUnchanged(
+                        session.getSessionId(), titleAtRequestStart, generatedTitle, requestStartedAt);
+                if (!autoTitleUpdated) {
+                    conversationRepository.touchSessionIfNewer(session.getSessionId(), requestStartedAt);
+                }
                 if (executionResult.agentTask() != null) {
-                    if (agentTaskRepository == null) throw new IllegalStateException("Agent task repository is unavailable");
-                    agentTaskRepository.save(newAgentTask(executionResult, turn, now));
+                    agentTaskRepository.save(newAgentTask(executionResult, turn, requestStartedAt));
                     submitTaskAfterCommit(executionResult.agentTask().taskId());
                 }
             };
-            if (transactionTemplate == null) persistence.run();
-            else transactionTemplate.executeWithoutResult(status -> persistence.run());
+            transactionTemplate.executeWithoutResult(status -> persistence.run());
         } catch (RuntimeException e) {
             markAgentRunTurnFailed(executionResult.agentRunId(), e);
             throw e;
         }
-        if (agentRunFinalizer != null) {
-            agentRunFinalizer.markTurnSaved(executionResult.agentRunId());
-        }
+        agentRunFinalizer.markTurnSaved(executionResult.agentRunId());
         boolean agentQuestion = executionResult.executionMode() == ConversationExecutionMode.AGENT;
         boolean traditionalKnowledgeBaseQuestion = executionResult.intent() != null
                 && executionResult.intent().type() == ConversationIntentType.KB_QUERY;
         if (agentQuestion || traditionalKnowledgeBaseQuestion) {
-            activityEventService.recordQuestionAsked(
+            conversationActivityAcl.recordQuestionAsked(
                     session.getSessionId(),
                     turn.getTurnId(),
                     turn.getQuery(),
@@ -275,16 +304,13 @@ public class ConversationServiceImpl implements ConversationService {
         }
         meterRegistry.counter("conversation.turn.count").increment();
 
-        if (autoGenerateTitle) {
-            session.setTitle(buildAutoTitle(request.getQuery(), executionResult.rewrittenQuery()));
-        }
-        session.touch(now);
-        conversationRepository.saveSession(session);
+        ConversationSession persistedSession = loadSessionOrThrow(session.getSessionId());
 
         ConversationMessageResponseDTO response = new ConversationMessageResponseDTO();
         response.setSessionId(session.getSessionId());
         response.setTurnId(turn.getTurnId());
-        response.setTitle(session.getTitle());
+        response.setTitle(persistedSession.getTitle());
+        response.setSessionUpdatedAt(persistedSession.getUpdatedAt());
         response.setAgentRunId(turn.getAgentRunId());
         response.setWorkflowVersion(turn.getWorkflowVersion());
         response.setExecutionMode(turn.getExecutionMode());
@@ -301,7 +327,7 @@ public class ConversationServiceImpl implements ConversationService {
         response.setCitations(conversationTurnCodec.toCitationDTOs(executionResult.citations()));
         response.setResultCards(executionResult.resultCards());
         response.setRetrievalTrace(buildRetrievalTraceDto(request, executionResult));
-        response.setCreatedAt(now);
+        response.setCreatedAt(requestStartedAt);
         if (executionResult.retrievalExecuted()) {
             meterRegistry.summary("answer.citation.count").record(executionResult.citations().size());
             if (executionResult.citations().isEmpty()) {
@@ -366,9 +392,7 @@ public class ConversationServiceImpl implements ConversationService {
                                     trace.put("details", event.details());
                                 }
                                 sendProgressEventSafely(emitter, trace, clientDisconnected);
-                                if (agentRuntimeSnapshotService != null) {
-                                    agentRuntimeSnapshotService.publishProgress(event);
-                                }
+                                agentRuntimeSnapshotService.publishProgress(event);
                             }
 
                             @Override
@@ -377,7 +401,7 @@ public class ConversationServiceImpl implements ConversationService {
                                 return false;
                             }
                 }, turnId, runId);
-                if (agentRuntimeSnapshotService != null && StringUtils.hasText(response.getAgentRunId())) {
+                if (StringUtils.hasText(response.getAgentRunId())) {
                     agentRuntimeSnapshotService.publishMessage(response.getAgentRunId(), response);
                 }
                 if (clientDisconnected.get()) {
@@ -390,6 +414,7 @@ public class ConversationServiceImpl implements ConversationService {
                 Map<String, Object> done = new LinkedHashMap<>();
                 done.put("turnId", response.getTurnId());
                 done.put("title", response.getTitle());
+                done.put("sessionUpdatedAt", response.getSessionUpdatedAt());
                 done.put("kbScope", response.getKbScope());
                 done.put("assetScope", response.getAssetScope() == null ? List.of() : response.getAssetScope());
                 done.put("answerMode", response.getAnswerMode());
@@ -491,7 +516,7 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private Map<String, AgentTaskDTO> loadActiveTaskDtos(List<ConversationTurn> turns) {
-        if (agentTaskRepository == null || turns == null || turns.isEmpty()) return Map.of();
+        if (turns == null || turns.isEmpty()) return Map.of();
         Set<String> taskIds = new LinkedHashSet<>();
         for (ConversationTurn turn : turns) {
             if (AnswerStatus.PROCESSING.name().equals(turn.getAnswerStatus())
@@ -627,7 +652,7 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private AgentTaskDTO toAgentTaskDto(String taskId) {
-        if (!StringUtils.hasText(taskId) || agentTaskRepository == null) return null;
+        if (!StringUtils.hasText(taskId)) return null;
         return agentTaskRepository.findById(taskId).map(this::toAgentTaskDto).orElse(null);
     }
 
@@ -639,7 +664,6 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private void submitTaskAfterCommit(String taskId) {
-        if (agentTaskProcessor == null) return;
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void afterCommit() { agentTaskProcessor.trigger(taskId); }
@@ -753,27 +777,55 @@ public class ConversationServiceImpl implements ConversationService {
         return Math.max(1, Math.min(limit, MAX_SESSION_LIST_LIMIT));
     }
 
-    private String encodeSessionListCursor(int offset) {
-        String payload = "{\"offset\":" + Math.max(0, offset) + "}";
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+    private String encodeSessionListCursor(ConversationSessionPosition position) {
+        try {
+            var payload = objectMapper.createObjectNode();
+            payload.put("version", SESSION_LIST_CURSOR_VERSION);
+            payload.put("updatedAt", position.updatedAt());
+            payload.put("sessionId", position.sessionId());
+            return Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(objectMapper.writeValueAsBytes(payload));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to encode session list cursor", e);
+        }
     }
 
-    private int decodeSessionListCursor(String cursor) {
+    private ConversationSessionPosition decodeSessionListCursor(String cursor) {
         if (!StringUtils.hasText(cursor)) {
-            return 0;
+            return null;
         }
         try {
-            byte[] decoded = Base64.getUrlDecoder().decode(cursor.trim());
-            Map<?, ?> payload = objectMapper.readValue(decoded, Map.class);
-            Object offset = payload.get("offset");
-            if (offset instanceof Number number) {
-                return Math.max(0, number.intValue());
+            String normalized = cursor.trim();
+            if (normalized.length() > MAX_SESSION_LIST_CURSOR_LENGTH) {
+                throw invalidSessionListCursor();
             }
-            return 0;
+            JsonNode payload = objectMapper.readTree(Base64.getUrlDecoder().decode(normalized));
+            JsonNode version = payload == null ? null : payload.get("version");
+            JsonNode updatedAt = payload == null ? null : payload.get("updatedAt");
+            JsonNode sessionId = payload == null ? null : payload.get("sessionId");
+            if (version == null || !version.isIntegralNumber()
+                    || !version.canConvertToInt()
+                    || version.intValue() != SESSION_LIST_CURSOR_VERSION
+                    || updatedAt == null || !updatedAt.isIntegralNumber()
+                    || !updatedAt.canConvertToLong()
+                    || updatedAt.longValue() < 0
+                    || updatedAt.longValue() > MAX_SESSION_CURSOR_UPDATED_AT
+                    || sessionId == null || !sessionId.isTextual()
+                    || !StringUtils.hasText(sessionId.textValue())
+                    || !sessionId.textValue().equals(sessionId.textValue().trim())
+                    || sessionId.textValue().length() > 64) {
+                throw invalidSessionListCursor();
+            }
+            return new ConversationSessionPosition(sessionId.textValue(), updatedAt.longValue());
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalArgumentException("cursor is invalid");
+            throw invalidSessionListCursor();
         }
+    }
+
+    private BusinessException invalidSessionListCursor() {
+        return new BusinessException(ApiError.INVALID_REQUEST, "cursor is invalid");
     }
 
     private String safeTrim(String text) {
@@ -788,7 +840,7 @@ public class ConversationServiceImpl implements ConversationService {
         if (CollectionUtils.isEmpty(requested) && !CollectionUtils.isEmpty(session.getKbScope())) {
             request.setKbIds(session.getKbScope());
         } else {
-            request.setKbIds(kbScopeResolver.resolveVisibleKbIds(requested));
+            request.setKbIds(conversationKnowledgeAcl.resolveVisibleKbIds(requested));
         }
     }
 
@@ -884,7 +936,6 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     private void markAgentRunTurnFailed(String runId, RuntimeException original) {
-        if (agentRunFinalizer == null) return;
         try {
             agentRunFinalizer.markTurnFailed(runId);
         } catch (RuntimeException traceError) {

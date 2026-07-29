@@ -9,14 +9,28 @@ import java.util.Optional;
 
 @Mapper
 public interface ConversationMapper {
-    int upsertSession(ConversationSessionRecord record);
+    int insertSession(ConversationSessionRecord record);
 
     Optional<ConversationSessionRecord> findSession(@Param("sessionId") String sessionId);
 
     Integer lockActiveSession(@Param("sessionId") String sessionId);
 
-    List<ConversationSessionRecord> findRecentSessions(@Param("userId") String userId,
-                                                       @Param("limit") int limit);
+    List<ConversationSessionRecord> findSessionPage(@Param("userId") String userId,
+                                                    @Param("beforeUpdatedAt") LocalDateTime beforeUpdatedAt,
+                                                    @Param("beforeSessionId") String beforeSessionId,
+                                                    @Param("limit") int limit);
+
+    int renameSession(@Param("sessionId") String sessionId,
+                      @Param("title") String title,
+                      @Param("renamedAt") LocalDateTime renamedAt);
+
+    int touchSessionIfNewer(@Param("sessionId") String sessionId,
+                            @Param("requestStartedAt") LocalDateTime requestStartedAt);
+
+    int updateAutoTitleIfUnchanged(@Param("sessionId") String sessionId,
+                                   @Param("expectedTitle") String expectedTitle,
+                                   @Param("generatedTitle") String generatedTitle,
+                                   @Param("requestStartedAt") LocalDateTime requestStartedAt);
 
     int softDeleteSession(@Param("sessionId") String sessionId);
 

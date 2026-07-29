@@ -2,9 +2,9 @@ package com.anchr.core.search.infrastructure.persistence.es;
 
 import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
 import com.anchr.core.search.infrastructure.persistence.es.repository.EsSegmentRepository;
@@ -31,8 +31,8 @@ class SegmentIndexAvailabilityTest {
         SegmentIndexWriteBarrier barrier = new SegmentIndexWriteBarrier();
         EsSegmentRepository repository =
                 new EsSegmentRepository(null, config, manager, barrier);
-        SegmentBulkWriter bulkWriter =
-                new SegmentBulkWriter(null, config, manager, barrier);
+        SearchSegmentBulkWriter bulkWriter =
+                new SearchSegmentBulkWriter(null, config, manager, barrier);
 
         assertDoesNotThrow(() -> repository.textSearch("", 0));
         assertThrows(BusinessException.class, () ->
@@ -67,6 +67,11 @@ class SegmentIndexAvailabilityTest {
 
         @Override
         public String prepareRebuild() {
+            return null;
+        }
+
+        @Override
+        public String requestRebuild(EmbeddingProfile targetProfile) {
             return null;
         }
     }

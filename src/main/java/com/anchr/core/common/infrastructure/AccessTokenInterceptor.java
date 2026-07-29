@@ -2,8 +2,9 @@ package com.anchr.core.common.infrastructure;
 
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.common.exception.ApiErrorResponseWriter;
 import com.anchr.core.common.exception.ApiError;
-import com.anchr.core.common.model.Result;
+import com.anchr.core.common.exception.UploadCleanupPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -37,6 +38,8 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final ApiErrorResponseWriter errorResponseWriter;
+    private final UploadCleanupPolicy uploadCleanupPolicy;
 
     @Override
     public boolean preHandle(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull Object handler) throws Exception {
@@ -50,13 +53,13 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
             if (requireAuth != null) {
                 String clientToken = request.getHeader("X-Access-Token");
                 if (clientToken == null || clientToken.isBlank()) {
-                    reject(response, 401, ApiError.AUTH_TOKEN_INVALID);
+                    reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
                     return false;
                 }
                 String redisKey = TOKEN_CACHE_PREFIX + clientToken.trim();
                 String tokenJson = redisTemplate.opsForValue().get(redisKey);
                 if (tokenJson == null) {
-                    reject(response, 401, ApiError.AUTH_TOKEN_INVALID);
+                    reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
                     return false;
                 }
                 String role;
@@ -66,13 +69,13 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
                     role = (String) tokenData.getOrDefault("role", "");
                 } catch (Exception e) {
                     log.warn("Failed to parse token JSON", e);
-                    reject(response, 401, ApiError.AUTH_TOKEN_INVALID);
+                    reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
                     return false;
                 }
                 String[] allowedRoles = requireAuth.roles();
                 boolean roleAllowed = Arrays.asList(allowedRoles).contains(role);
                 if (!roleAllowed) {
-                    reject(response, 403, ApiError.AUTH_ROLE_FORBIDDEN);
+                    reject(response, handler, 403, ApiError.AUTH_ROLE_FORBIDDEN);
                     return false;
                 }
                 UserContextHolder.set(new RequestUserContext(
@@ -115,15 +118,9 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
         }
     }
 
-    private void reject(HttpServletResponse response, int httpStatus, ApiError error) throws Exception {
-        response.setStatus(httpStatus);
-        response.setContentType("application/json;charset=UTF-8");
-        Result<Void> result = Result.error(error, UUID.randomUUID().toString());
-        try {
-            response.getWriter().write(objectMapper.writeValueAsString(result));
-        } catch (Exception ex) {
-            log.warn("Failed to serialize rejection payload, fallback to minimal json", ex);
-            response.getWriter().write("{\"code\":" + httpStatus + ",\"message\":\"" + error.getMessage() + "\"}");
-        }
+    private void reject(HttpServletResponse response, Object handler, int httpStatus, ApiError error) {
+        errorResponseWriter.write(response, org.springframework.http.HttpStatus.valueOf(httpStatus), error,
+                error.getMessage(), UUID.randomUUID().toString(),
+                uploadCleanupPolicy.forPreControllerRejection(handler));
     }
 }

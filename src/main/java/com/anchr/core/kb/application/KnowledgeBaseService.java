@@ -1,6 +1,7 @@
 package com.anchr.core.kb.application;
 
 import com.anchr.core.kb.domain.model.Asset;
+import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseHealth;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
@@ -29,7 +30,13 @@ public interface KnowledgeBaseService {
 
     KnowledgeBaseHealth getHealth(String kbId);
 
+    default DocumentPagedResult listDocuments(String kbId, String keyword, String fileType,
+                                              Integer page, Integer size) {
+        return listDocuments(kbId, keyword, fileType, null, page, size);
+    }
+
     DocumentPagedResult listDocuments(String kbId, String keyword, String fileType,
+                                      DocumentAvailabilityStatus availabilityStatus,
                                       Integer page, Integer size);
 
     Asset getDocument(String kbId, String assetId);

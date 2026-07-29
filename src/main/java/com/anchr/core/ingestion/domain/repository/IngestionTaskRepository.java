@@ -1,5 +1,6 @@
 package com.anchr.core.ingestion.domain.repository;
 
+import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
@@ -8,14 +9,14 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * Repository boundary for ingestion tasks.
- */
+/** Repository boundary for the two-table ingestion model. */
 public interface IngestionTaskRepository {
 
     void save(IngestionTask task);
 
     Optional<IngestionTask> findById(String kbId, String taskId);
+
+    Optional<IngestionTask> findByClientRequestId(String createdBy, String clientRequestId);
 
     List<IngestionTask> list(String kbId, IngestionTaskStatus status, int limit);
 
@@ -25,21 +26,46 @@ public interface IngestionTaskRepository {
 
     List<IngestionTaskItem> listFailedItems(String kbId, String taskId);
 
+    List<IngestionTaskItem> listRunningItems();
+
     Optional<IngestionTaskItem> findItem(String kbId, String taskId, String itemId);
 
-    boolean resetFailedItem(String kbId, String taskId, String itemId, LocalDateTime updatedAt);
+    Optional<IngestionTaskItem> findRetryItem(String kbId, String taskId, String itemId);
 
-    boolean resetFailedItems(String kbId, String taskId, LocalDateTime updatedAt);
+    List<String> listPendingItemIds(int limit);
 
-    boolean markItemRunning(String kbId, String taskId, String itemId,
-                            String stage, int progress, LocalDateTime updatedAt);
+    List<String> listPendingItemIds(String taskId, int limit);
 
-    boolean markItemSuccess(String kbId, String taskId, String itemId,
-                            String stage, int progress, LocalDateTime updatedAt);
+    /** Atomically changes one pending item to RUNNING/PARSE. */
+    Optional<IngestionTaskItem> claimPending(String itemId);
 
-    boolean markItemFailed(String kbId, String taskId, String itemId,
-                           String stage, int progress, String errorCode, String errorMessage,
-                           LocalDateTime updatedAt);
+    boolean advanceRunningItem(String kbId, String taskId, String itemId,
+                               IngestionStage expectedStage, IngestionStage nextStage,
+                               int progress, LocalDateTime updatedAt);
+
+    boolean isRunningForUpdate(String itemId, IngestionStage expectedStage);
+
+    boolean completeRunningItem(String kbId, String taskId, String itemId,
+                                IngestionStage expectedStage,
+                                String updatedBy, LocalDateTime updatedAt);
+
+    boolean failRunningItem(String kbId, String taskId, String itemId,
+                            IngestionStage expectedStage, int progress,
+                            String errorCode, String errorMessage,
+                            String updatedBy, LocalDateTime updatedAt);
+
+    boolean resetFailedItem(String kbId, String taskId, String itemId,
+                            long nextTargetIndexGeneration, LocalDateTime updatedAt);
+
+    long findMaxTargetIndexGeneration(String assetId);
+
+    List<Long> listTargetIndexGenerations(String assetId);
+
+    Optional<Long> findTargetIndexGeneration(String itemId, String assetId);
+
+    boolean assignTargetIndexGeneration(String itemId, String assetId,
+                                        long targetIndexGeneration,
+                                        LocalDateTime updatedAt);
 
     void refreshSummary(String kbId, String taskId, String updatedBy, LocalDateTime updatedAt);
 }

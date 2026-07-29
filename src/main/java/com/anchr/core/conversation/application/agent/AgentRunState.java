@@ -70,7 +70,9 @@ public class AgentRunState {
     public void registerEvidence(List<ConversationRetrievalCandidate> candidates) {
         if (candidates == null) return;
         for (ConversationRetrievalCandidate candidate : candidates) {
-            if (candidate != null && candidate.getSegmentId() != null) {
+            if (candidate != null
+                    && candidate.getSegmentId() != null
+                    && candidate.isCitableEvidence()) {
                 evidence.putIfAbsent(candidate.getSegmentId(), candidate);
             }
         }

@@ -47,7 +47,10 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
                 rewrite.getRewrittenQuery(), input.limit() == null ? 8 : input.limit(), context.kbIds(),
                 normalizeModalities(input.modalities()), assets);
         List<ConversationRetrievalCandidate> evidence = retrieval.getTopCandidates() == null
-                ? List.of() : retrieval.getTopCandidates();
+                ? List.of()
+                : retrieval.getTopCandidates().stream()
+                        .filter(ConversationRetrievalCandidate::isCitableEvidence)
+                        .toList();
         try {
             return AgentToolResult.success(objectMapper.writeValueAsString(Map.of(
                     "success", true,

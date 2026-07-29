@@ -8,12 +8,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * Authenticated asynchronous HTTP client for anchr-docling.
@@ -27,19 +30,17 @@ public class DoclingClient {
             .connectTimeout(Duration.ofSeconds(10))
             .build();
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration DEFAULT_RETRY_AFTER = Duration.ofSeconds(5);
+    private static final int MAX_ERROR_BODY_BYTES = 4096;
 
     private final String baseUrl;
     private final String authorization;
-    private final Duration pollInterval;
-    private final Duration maxWait;
-    private final int maxResubmits;
+    private final int maxResponseBytes;
 
     public DoclingClient(
             @Value("${app.docling.base-url}") String baseUrl,
             @Value("${app.docling.api-token}") String apiToken,
-            @Value("${app.docling.poll-interval:2s}") Duration pollInterval,
-            @Value("${app.docling.max-wait:45m}") Duration maxWait,
-            @Value("${app.docling.max-resubmits:2}") int maxResubmits
+            @Value("${app.docling.max-response-bytes:268435456}") int maxResponseBytes
     ) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalArgumentException("app.docling.base-url must not be blank");
@@ -47,78 +48,76 @@ public class DoclingClient {
         if (apiToken == null || apiToken.length() < 32) {
             throw new IllegalArgumentException("app.docling.api-token must contain at least 32 characters");
         }
-        if (pollInterval == null || pollInterval.isZero() || pollInterval.isNegative()) {
-            throw new IllegalArgumentException("app.docling.poll-interval must be positive");
-        }
-        if (maxWait == null || maxWait.isZero() || maxWait.isNegative()) {
-            throw new IllegalArgumentException("app.docling.max-wait must be positive");
-        }
-        if (maxResubmits < 0) {
-            throw new IllegalArgumentException("app.docling.max-resubmits must not be negative");
+        if (maxResponseBytes <= 0 || maxResponseBytes == Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "app.docling.max-response-bytes must be between 1 and Integer.MAX_VALUE - 1");
         }
         this.baseUrl = baseUrl.replaceAll("/+$", "");
         this.authorization = "Bearer " + apiToken;
-        this.pollInterval = pollInterval;
-        this.maxWait = maxWait;
-        this.maxResubmits = maxResubmits;
+        this.maxResponseBytes = maxResponseBytes;
     }
 
-    public ParseResponse parse(ParseRequest request) {
-        long deadlineNanos = System.nanoTime() + maxWait.toNanos();
-        int resubmits = 0;
-        JobEnvelope job = submitUntilAccepted(request, deadlineNanos);
-
-        while (true) {
-            ensureWithinDeadline(deadlineNanos);
-            try {
-                HttpResponse<String> response = send(buildRequest("GET", "/v1/jobs/" + job.jobId(), null));
-                if (response.statusCode() == 404 && resubmits < maxResubmits) {
-                    resubmits++;
-                    job = submitUntilAccepted(request, deadlineNanos);
-                    continue;
-                }
-                requireSuccess(response, "poll");
-                JobEnvelope current = readJob(response.body());
-                switch (current.normalizedStatus()) {
-                    case "queued", "running" -> sleep(pollInterval, deadlineNanos);
-                    case "succeeded" -> {
-                        if (current.result() == null) {
-                            throw new RuntimeException("docling succeeded without a result");
-                        }
-                        acknowledge(current.jobId());
-                        return current.result();
-                    }
-                    case "failed" -> throw new RuntimeException(formatFailure(current.error()));
-                    default -> throw new RuntimeException("docling returned unknown job status: " + current.status());
-                }
-            } catch (TransientDoclingException e) {
-                sleep(pollInterval, deadlineNanos);
-            }
+    public DoclingJob submitJob(ParseRequest request) {
+        Objects.requireNonNull(request, "request");
+        if (request.requestId() == null || request.requestId().isBlank()) {
+            throw new IllegalArgumentException("request.requestId must not be blank");
         }
-    }
-
-    private JobEnvelope submitUntilAccepted(ParseRequest request, long deadlineNanos) {
         final String body;
         try {
             body = OBJECT_MAPPER.writeValueAsString(request);
         } catch (Exception e) {
             throw new RuntimeException("failed to serialize docling request", e);
         }
+        HttpResponse<InputStream> response = send(buildRequest("POST", "/v1/jobs", body));
+        requireSuccess(response, "submit");
+        DoclingJob job = readJob(response, "submit");
+        requireJobIdentity(job, null, request.requestId(), response.statusCode(), "submit");
+        requireSucceededResultIdentity(job, request.requestId(), response.statusCode(), "submit");
+        return job;
+    }
 
-        while (true) {
-            ensureWithinDeadline(deadlineNanos);
-            try {
-                HttpResponse<String> response = send(buildRequest("POST", "/v1/jobs", body));
-                if (response.statusCode() == 429) {
-                    sleep(retryAfter(response), deadlineNanos);
-                    continue;
-                }
-                requireSuccess(response, "submit");
-                return readJob(response.body());
-            } catch (TransientDoclingException e) {
-                sleep(pollInterval, deadlineNanos);
-            }
+    public DoclingJob getJob(String jobId) {
+        return getJobInternal(jobId, null);
+    }
+
+    /**
+     * Loads one Docling job snapshot and verifies that it belongs to the persisted parse request.
+     *
+     * <p>This method performs exactly one HTTP request. Polling, retry timing and lost-job
+     * resubmission are responsibilities of the durable ingestion stage scheduler.</p>
+     */
+    public DoclingJob getJob(String jobId, String expectedRequestId) {
+        if (expectedRequestId == null || expectedRequestId.isBlank()) {
+            throw new IllegalArgumentException("expectedRequestId must not be blank");
         }
+        return getJobInternal(jobId, expectedRequestId);
+    }
+
+    private DoclingJob getJobInternal(String jobId, String expectedRequestId) {
+        if (jobId == null || jobId.isBlank()) {
+            throw new IllegalArgumentException("jobId must not be blank");
+        }
+        HttpResponse<InputStream> response = send(buildRequest("GET", "/v1/jobs/" + jobId, null));
+        requireSuccess(response, "get");
+        DoclingJob job = readJob(response, "get");
+        requireJobIdentity(job, jobId, expectedRequestId, response.statusCode(), "get");
+        String resultRequestId = expectedRequestId == null ? job.requestId() : expectedRequestId;
+        requireSucceededResultIdentity(job, resultRequestId, response.statusCode(), "get");
+        return job;
+    }
+
+    /** DELETE is idempotent: an already acknowledged or expired job is considered acknowledged. */
+    public void ackJob(String jobId) {
+        if (jobId == null || jobId.isBlank()) {
+            throw new IllegalArgumentException("jobId must not be blank");
+        }
+        HttpResponse<InputStream> response = send(buildRequest("DELETE", "/v1/jobs/" + jobId, null));
+        if (response.statusCode() == 404) {
+            closeBody(response);
+            return;
+        }
+        requireSuccess(response, "ack");
+        closeBody(response);
     }
 
     private HttpRequest buildRequest(String method, String path, String body) {
@@ -134,42 +133,150 @@ public class DoclingClient {
                 .build();
     }
 
-    private HttpResponse<String> send(HttpRequest request) {
+    private HttpResponse<InputStream> send(HttpRequest request) {
         try {
-            return HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+            // Streaming the response prevents HttpClient from buffering an unbounded
+            // succeeded payload before the ingestion size limit can be enforced.
+            return HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("docling request interrupted", e);
+            throw new DoclingClientException(
+                    FailureKind.TRANSIENT, null, null, "docling request interrupted", e);
         } catch (IOException e) {
-            throw new TransientDoclingException("docling transport failure", e);
+            throw new DoclingClientException(
+                    FailureKind.TRANSIENT, null, null, "docling transport failure", e);
         }
     }
 
-    private void acknowledge(String jobId) {
-        try {
-            send(buildRequest("DELETE", "/v1/jobs/" + jobId, null));
-        } catch (RuntimeException ignored) {
-            // Best effort: Docling also removes unacknowledged results by TTL.
-        }
-    }
-
-    private void requireSuccess(HttpResponse<String> response, String operation) {
+    private void requireSuccess(HttpResponse<InputStream> response, String operation) {
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return;
         }
-        if (response.statusCode() == 401) {
-            throw new RuntimeException("docling authentication failed; check APP_DOCLING_API_TOKEN");
+        int statusCode = response.statusCode();
+        FailureKind kind;
+        if (statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode >= 500) {
+            kind = FailureKind.TRANSIENT;
+        } else if (statusCode == 404) {
+            kind = FailureKind.NOT_FOUND;
+        } else if (statusCode == 409) {
+            kind = FailureKind.CONFLICT;
+        } else if (statusCode == 401) {
+            kind = FailureKind.CONFIGURATION;
+        } else {
+            kind = FailureKind.PERMANENT;
         }
-        throw new RuntimeException(
-                "docling " + operation + " HTTP " + response.statusCode() + ": "
-                        + safeTruncate(response.body()));
+        Duration retryAfter = kind == FailureKind.TRANSIENT ? retryAfter(response) : null;
+        String errorBody = readErrorBody(response);
+        String message = kind == FailureKind.CONFIGURATION
+                ? "docling authentication failed; check APP_DOCLING_API_TOKEN"
+                : "docling " + operation + " HTTP " + statusCode + ": " + errorBody;
+        throw new DoclingClientException(kind, statusCode, retryAfter, message, null);
     }
 
-    private JobEnvelope readJob(String body) {
+    private DoclingJob readJob(HttpResponse<InputStream> response, String operation) {
+        byte[] body;
+        try (InputStream input = response.body()) {
+            body = input.readNBytes(maxResponseBytes + 1);
+        } catch (IOException e) {
+            throw new DoclingClientException(
+                    FailureKind.TRANSIENT,
+                    response.statusCode(),
+                    null,
+                    "failed to read docling " + operation + " response",
+                    e);
+        }
+        if (body.length > maxResponseBytes) {
+            throw new DoclingClientException(
+                    FailureKind.PERMANENT,
+                    response.statusCode(),
+                    null,
+                    "docling " + operation + " response exceeds the configured size limit",
+                    null);
+        }
         try {
-            return OBJECT_MAPPER.readValue(body, JobEnvelope.class);
+            return OBJECT_MAPPER.readValue(body, DoclingJob.class);
         } catch (Exception e) {
-            throw new RuntimeException("failed to decode docling job response", e);
+            throw new DoclingClientException(
+                    FailureKind.PERMANENT,
+                    null,
+                    null,
+                    "failed to decode docling job response",
+                    e);
+        }
+    }
+
+    private String readErrorBody(HttpResponse<InputStream> response) {
+        try (InputStream input = response.body()) {
+            byte[] body = input.readNBytes(MAX_ERROR_BODY_BYTES + 1);
+            String decoded = new String(
+                    body,
+                    0,
+                    Math.min(body.length, MAX_ERROR_BODY_BYTES),
+                    StandardCharsets.UTF_8);
+            return safeTruncate(decoded);
+        } catch (IOException e) {
+            return "<unreadable response body>";
+        }
+    }
+
+    private void closeBody(HttpResponse<InputStream> response) {
+        try {
+            response.body().close();
+        } catch (IOException ignored) {
+            // ACK response content is not part of the protocol.
+        }
+    }
+
+    private void requireJobIdentity(DoclingJob job, String expectedJobId, String expectedRequestId,
+                                    int statusCode, String operation) {
+        boolean malformed = job == null
+                || job.jobId() == null || job.jobId().isBlank()
+                || job.requestId() == null || job.requestId().isBlank()
+                || job.status() == null || job.status().isBlank();
+        if (malformed) {
+            throw new DoclingClientException(
+                    FailureKind.PERMANENT,
+                    statusCode,
+                    null,
+                    "docling " + operation + " returned a malformed job identity",
+                    null);
+        }
+        boolean mismatched = (expectedJobId != null && !Objects.equals(expectedJobId, job.jobId()))
+                || (expectedRequestId != null && !Objects.equals(expectedRequestId, job.requestId()));
+        if (mismatched) {
+            throw new DoclingClientException(
+                    FailureKind.PERMANENT,
+                    statusCode,
+                    null,
+                    "docling " + operation + " returned a mismatched job identity",
+                    null);
+        }
+    }
+
+    private void requireSucceededResultIdentity(DoclingJob job, String expectedRequestId,
+                                                int statusCode, String operation) {
+        if (!"succeeded".equals(job.normalizedStatus())) {
+            return;
+        }
+        ParseResponse result = job.result();
+        boolean malformed = result == null
+                || result.requestId() == null
+                || result.requestId().isBlank();
+        if (malformed) {
+            throw new DoclingClientException(
+                    FailureKind.PERMANENT,
+                    statusCode,
+                    null,
+                    "docling " + operation + " returned succeeded without a result identity",
+                    null);
+        }
+        if (!Objects.equals(expectedRequestId, result.requestId())) {
+            throw new DoclingClientException(
+                    FailureKind.PERMANENT,
+                    statusCode,
+                    null,
+                    "docling " + operation + " returned a mismatched result identity",
+                    null);
         }
     }
 
@@ -179,41 +286,8 @@ public class DoclingClient {
             long seconds = Math.max(1, Math.min(30, Long.parseLong(value)));
             return Duration.ofSeconds(seconds);
         } catch (NumberFormatException ignored) {
-            return pollInterval;
+            return DEFAULT_RETRY_AFTER;
         }
-    }
-
-    private void sleep(Duration duration, long deadlineNanos) {
-        ensureWithinDeadline(deadlineNanos);
-        long remainingNanos = deadlineNanos - System.nanoTime();
-        long sleepNanos = Math.min(duration.toNanos(), remainingNanos);
-        if (sleepNanos <= 0) {
-            throw timeout();
-        }
-        try {
-            long millis = Math.max(1, Duration.ofNanos(sleepNanos).toMillis());
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("docling polling interrupted", e);
-        }
-    }
-
-    private void ensureWithinDeadline(long deadlineNanos) {
-        if (System.nanoTime() >= deadlineNanos) {
-            throw timeout();
-        }
-    }
-
-    private RuntimeException timeout() {
-        return new RuntimeException("docling job did not finish within " + maxWait);
-    }
-
-    private String formatFailure(JobError error) {
-        if (error == null) {
-            return "docling job failed";
-        }
-        return "docling job failed [" + error.code() + "]: " + safeTruncate(error.message());
     }
 
     private String safeTruncate(String text) {
@@ -221,25 +295,53 @@ public class DoclingClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record JobEnvelope(
+    public record DoclingJob(
             String jobId,
             String requestId,
             String status,
             ParseResponse result,
-            JobError error
+            DoclingJobError error
     ) {
-        private String normalizedStatus() {
+        public String normalizedStatus() {
             return status == null ? "" : status.toLowerCase(Locale.ROOT);
         }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record JobError(String code, String message) {
+    public record DoclingJobError(String code, String message) {
     }
 
-    private static class TransientDoclingException extends RuntimeException {
-        private TransientDoclingException(String message, Throwable cause) {
+    public enum FailureKind {
+        TRANSIENT,
+        NOT_FOUND,
+        CONFLICT,
+        CONFIGURATION,
+        PERMANENT
+    }
+
+    public static class DoclingClientException extends RuntimeException {
+        private final FailureKind kind;
+        private final Integer statusCode;
+        private final Duration retryAfter;
+
+        private DoclingClientException(FailureKind kind, Integer statusCode, Duration retryAfter,
+                                       String message, Throwable cause) {
             super(message, cause);
+            this.kind = kind;
+            this.statusCode = statusCode;
+            this.retryAfter = retryAfter;
+        }
+
+        public FailureKind kind() {
+            return kind;
+        }
+
+        public Integer statusCode() {
+            return statusCode;
+        }
+
+        public Duration retryAfter() {
+            return retryAfter;
         }
     }
 }
