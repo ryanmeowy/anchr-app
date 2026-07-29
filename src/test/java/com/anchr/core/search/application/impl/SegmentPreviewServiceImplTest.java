@@ -254,7 +254,7 @@ class SegmentPreviewServiceImplTest {
                                      String previewObjectKey, long generation) {
         return new DocumentSummary(
                 id, "kb-1", fileName, null, null, null,
-                objectKey, previewObjectKey, generation);
+                objectKey, previewObjectKey, generation, 0);
     }
 
     private PreviewRequestDTO request() {

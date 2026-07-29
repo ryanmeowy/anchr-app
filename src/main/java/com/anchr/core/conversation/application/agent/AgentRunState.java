@@ -2,7 +2,6 @@ package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.model.AgentMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import com.anchr.core.search.domain.model.SegmentType;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -73,7 +72,7 @@ public class AgentRunState {
         for (ConversationRetrievalCandidate candidate : candidates) {
             if (candidate != null
                     && candidate.getSegmentId() != null
-                    && !SegmentType.isImageVisual(candidate.getSegmentType())) {
+                    && candidate.isCitableEvidence()) {
                 evidence.putIfAbsent(candidate.getSegmentId(), candidate);
             }
         }

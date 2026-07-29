@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.application.impl;
 
+import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
@@ -16,6 +17,9 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ConversationMessagePipelineVisualEvidenceTest {
 
@@ -30,6 +34,8 @@ class ConversationMessagePipelineVisualEvidenceTest {
         retrieval.setTopCandidates(List.of(visual, ocr));
         AtomicReference<List<ConversationRetrievalCandidate>> answerInput =
                 new AtomicReference<>();
+        ConversationRetrievalAcl retrievalAcl = mock(ConversationRetrievalAcl.class);
+        when(retrievalAcl.generateCitationReasons(any())).thenReturn(java.util.Map.of());
         ConversationMessagePipeline pipeline = new ConversationMessagePipeline(
                 null,
                 (query, limit, kbIds, modalities, assetIds) -> retrieval,
@@ -40,7 +46,7 @@ class ConversationMessagePipelineVisualEvidenceTest {
                     return new AnswerGenerationResult();
                 },
                 new ConversationTurnCodec(new ObjectMapper()),
-                request -> java.util.Map.of());
+                retrievalAcl);
         ConversationMessageRequestDTO request =
                 new ConversationMessageRequestDTO();
         request.setQuery("question");

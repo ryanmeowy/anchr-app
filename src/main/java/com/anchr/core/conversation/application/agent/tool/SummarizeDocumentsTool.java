@@ -39,8 +39,8 @@ public class SummarizeDocumentsTool implements AgentTool<SummarizeDocumentsTool.
     public AgentToolResult execute(Input input, AgentExecutionContext context) {
         List<Map<String, String>> assets = input.assetIds().stream().distinct().map(id -> {
             var asset = scopeGuard.requireAsset(id, context);
-            return Map.of("assetId", asset.getId(), "kbId", asset.getKbId(), "fileName",
-                    asset.getFileName() == null ? "" : asset.getFileName());
+            return Map.of("assetId", asset.id(), "kbId", asset.kbId(), "fileName",
+                    asset.fileName() == null ? "" : asset.fileName());
         }).toList();
         if (assets.size() != input.assetIds().stream().distinct().count()) {
             return AgentToolResult.failure("INVALID_ARGUMENTS", "{\"success\":false}");

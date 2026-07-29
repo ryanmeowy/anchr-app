@@ -14,7 +14,7 @@ import com.anchr.core.conversation.application.agent.AgentWorkflow;
 import com.anchr.core.conversation.application.ConversationIntentRouter;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.QueryRewriteService;
-import com.anchr.core.search.application.CitationReasonGenerationService;
+import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
@@ -109,7 +109,7 @@ class ConversationServiceImplTest {
     @Mock
     private ChatResponseService chatResponseService;
     @Mock
-    private CitationReasonGenerationService citationReasonGenerationService;
+    private ConversationRetrievalAcl conversationRetrievalAcl;
     @Mock
     private AgentConversationCleanupService agentConversationCleanupService;
     @Mock
@@ -146,7 +146,7 @@ class ConversationServiceImplTest {
                 new ConversationResultCardMapper(),
                 answerGenerationService,
                 conversationTurnCodec,
-                citationReasonGenerationService
+                conversationRetrievalAcl
         );
         lenient().when(conversationIntentRouter.route(any(), any())).thenReturn(new ConversationIntentResult(
                 ConversationIntentType.KB_QUERY, 1.0D, "test", ConversationIntentSource.MODEL, false));
@@ -587,7 +587,7 @@ class ConversationServiceImplTest {
                 .containsExactly("asset_redo_1", "asset_redo_2");
         assertThat(response.getRetrievalTrace().getAnswerFallback()).isFalse();
         assertThat(response.getRetrievalTrace().getAnswerFallbackReason()).isEqualTo("model_unavailable");
-        verify(citationReasonGenerationService, never()).generate(any());
+        verify(conversationRetrievalAcl, never()).generateCitationReasons(any());
     }
 
     @Test
@@ -611,7 +611,7 @@ class ConversationServiceImplTest {
         when(answerGenerationService.generate(eq("mysql buffer pool"), eq("mysql buffer pool 机制"), eq(AnswerMode.STRICT), anyList(), anyList()))
                 .thenReturn(buildAnswer("Buffer pool 用于缓存数据页和索引页。[1]", false, null,
                         List.of("seg_pool_1", "seg_pool_2")));
-        when(citationReasonGenerationService.generate(any())).thenReturn(Map.of(
+        when(conversationRetrievalAcl.generateCitationReasons(any())).thenReturn(Map.of(
                 "seg_pool_1", "该段说明 Buffer Pool 用于缓存数据页。",
                 "seg_pool_2", "该段说明 Buffer Pool 使用 LRU 管理缓存。"
         ));

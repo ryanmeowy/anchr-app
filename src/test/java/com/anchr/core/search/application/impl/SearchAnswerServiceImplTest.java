@@ -1,6 +1,6 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.search.application.CitationReasonGenerationService;
+import com.anchr.core.search.application.api.RetrievalCitationReasonApi;
 import com.anchr.core.search.application.api.model.RetrievalAnchor;
 import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalHit;
@@ -78,7 +78,7 @@ class SearchAnswerServiceImplTest {
                 "kb-1", result.assetId(), "docs/guide.pdf", result.imagePreviewUrl(), result.imagePreviewExpiresAt());
         SearchAnswerRequest query = new SearchAnswerRequest("question", null);
 
-        CitationReasonGenerationService reasonService = request -> Map.of(
+        RetrievalCitationReasonApi reasonService = request -> Map.of(
                 "seg-1", "第一处说明核心机制。",
                 "seg-2", "第二处补充应用场景。"
         );
@@ -105,7 +105,7 @@ class SearchAnswerServiceImplTest {
     }
 
     private SearchAnswerServiceImpl service() {
-        CitationReasonGenerationService reasonService = request -> Map.of();
+        RetrievalCitationReasonApi reasonService = request -> Map.of();
         return new SearchAnswerServiceImpl(reasonService);
     }
 

@@ -17,5 +17,7 @@ public interface KnowledgeContentQueryApi {
 
     Optional<DocumentSummary> findActiveDocument(String kbId, String assetId);
 
+    List<DocumentSummary> searchActiveDocuments(String kbId, String keyword, int limit);
+
     Map<String, Long> findActiveIndexGenerations(Collection<String> assetIds);
 }

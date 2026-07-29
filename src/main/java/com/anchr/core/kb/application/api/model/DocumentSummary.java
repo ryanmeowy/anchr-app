@@ -10,6 +10,7 @@ public record DocumentSummary(
         String mimeType,
         String objectKey,
         String previewObjectKey,
-        long activeIndexGeneration
+        long activeIndexGeneration,
+        int segmentCount
 ) {
 }

@@ -1,6 +1,8 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
+import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.*;
@@ -10,9 +12,6 @@ import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
-import com.anchr.core.kb.domain.repository.AssetRepository;
-import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -44,8 +43,8 @@ public class AgentTaskProcessor {
     private final AgentTaskRepository taskRepository;
     private final ConversationRepository conversationRepository;
     private final AgentTraceRepository traceRepository;
-    private final SegmentRepository segmentRepository;
-    private final AssetRepository assetRepository;
+    private final ConversationKnowledgeAcl conversationKnowledgeAcl;
+    private final ConversationRetrievalAcl conversationRetrievalAcl;
     private final ConversationGenerationPort generationPort;
     private final ConversationCitationMapper citationMapper;
     private final ConversationTurnCodec turnCodec;
@@ -155,25 +154,27 @@ public class AgentTaskProcessor {
     private List<EvidenceText> readAll(AgentTask task, SummaryRequest request, long deadline) {
         List<EvidenceText> result = new ArrayList<>(); int chars = 0;
         for (AssetRef asset : request.assets()) {
-            long activeGeneration = assetRepository.findActiveById(asset.kbId(), asset.assetId())
+            var document = conversationKnowledgeAcl
+                    .findActiveDocument(List.of(asset.kbId()), asset.assetId())
                     .orElseThrow(() -> new PermanentTaskException(
-                            "DOCUMENT_NOT_FOUND", "文档不存在或已删除"))
-                    .getActiveIndexGeneration();
+                            "DOCUMENT_NOT_FOUND", "文档不存在或已删除"));
             Integer order = null; String segmentId = null;
             while (true) {
                 ensureActive(task, deadline);
-                List<Segment> page = segmentRepository.listByAssetId(
-                        asset.kbId(), asset.assetId(), activeGeneration, order, segmentId, 20);
+                List<ConversationRetrievalCandidate> page = conversationRetrievalAcl
+                        .readDocument(document, order, segmentId, 20);
                 if (page.isEmpty()) break;
-                for (Segment segment : page) {
-                    String text = text(segment); if (!StringUtils.hasText(text)) continue;
+                for (ConversationRetrievalCandidate candidate : page) {
+                    String text = candidate.getContent(); if (!StringUtils.hasText(text)) continue;
                     if (result.size() >= properties.getSummaryMaxSegments() || chars + text.length() > properties.getSummaryMaxChars()) {
                         throw new PermanentTaskException("DOCUMENT_TOO_LARGE", "文档超过 V1 总结限制，请缩小文档范围");
                     }
                     chars += text.length();
-                    result.add(new EvidenceText(candidate(segment, asset.fileName(), text), text));
+                    result.add(new EvidenceText(candidate, text));
                 }
-                Segment last = page.getLast(); order = last.getChunkOrder(); segmentId = last.getSegmentId();
+                ConversationRetrievalCandidate last = page.getLast();
+                order = last.getAnchor() == null ? null : last.getAnchor().getChunkOrder();
+                segmentId = last.getSegmentId();
                 if (page.size() < 20) break;
                 renew(task);
             }
@@ -566,8 +567,6 @@ public class AgentTaskProcessor {
 
     private SummaryRequest parseRequest(String json) throws Exception {JsonNode root=objectMapper.readTree(json);List<AssetRef> assets=new ArrayList<>();for(JsonNode n:root.path("assets"))assets.add(new AssetRef(n.path("assetId").asText(),n.path("kbId").asText(),n.path("fileName").asText()));return new SummaryRequest(assets,root.path("instruction").asText(),root.path("language").asText("中文"));}
 
-    private ConversationRetrievalCandidate candidate(Segment s,String file,String text){return ConversationRetrievalCandidate.builder().segmentId(s.getSegmentId()).kbId(s.getKbId()).assetId(s.getAssetId()).assetType(s.getAssetType()).segmentType(s.getSegmentType()==null?null:s.getSegmentType().name()).sourceRef(file).title(s.getTitle()).content(text).pageNo(s.getPageNo()).anchor(ConversationRetrievalCandidate.Anchor.builder().pageNo(s.getPageNo()).chunkOrder(s.getChunkOrder()).bbox(s.getBbox()).build()).build();}
-    private String text(Segment s){return StringUtils.hasText(s.getContentText())?s.getContentText():StringUtils.hasText(s.getOcrText())?s.getOcrText():"";}
     private record AssetRef(String assetId,String kbId,String fileName){} private record SummaryRequest(List<AssetRef> assets,String instruction,String language){} private record EvidenceText(ConversationRetrievalCandidate candidate,String text){}
     private static class TaskCancelledException extends RuntimeException {}
     private static class PermanentTaskException extends RuntimeException {private final String code;private PermanentTaskException(String code,String message){super(message);this.code=code;}}

@@ -62,6 +62,21 @@ public class KnowledgeContentQueryApiImpl implements KnowledgeContentQueryApi {
     }
 
     @Override
+    public List<DocumentSummary> searchActiveDocuments(String kbId, String keyword, int limit) {
+        if (kbId == null || kbId.isBlank()
+                || keyword == null || keyword.isBlank()
+                || limit < 1) {
+            return List.of();
+        }
+        List<Asset> assets = assetRepository.listActive(
+                kbId.trim(), keyword.trim(), null, Math.min(limit, PAGE_SIZE), 0);
+        if (assets == null || assets.isEmpty()) {
+            return List.of();
+        }
+        return assets.stream().map(this::toSummary).toList();
+    }
+
+    @Override
     public Map<String, Long> findActiveIndexGenerations(Collection<String> assetIds) {
         if (assetIds == null || assetIds.isEmpty()) {
             return Map.of();
@@ -87,6 +102,7 @@ public class KnowledgeContentQueryApiImpl implements KnowledgeContentQueryApi {
                 asset.getMimeType(),
                 asset.getObjectKey(),
                 asset.getPreviewObjectKey(),
-                asset.getActiveIndexGeneration());
+                asset.getActiveIndexGeneration(),
+                asset.getSegmentCount());
     }
 }

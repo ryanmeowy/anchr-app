@@ -1,40 +1,31 @@
 package com.anchr.core.conversation.application.agent.tool;
 
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.agent.AgentExecutionContext;
+import com.anchr.core.conversation.application.model.ConversationDocumentReference;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
-import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class FindDocumentsToolVisualEvidenceTest {
 
     @Test
     void visualHitMayFindTheDocumentButMustNotBecomeEvidence() {
-        Asset asset = Asset.builder()
-                .id("asset-1")
-                .kbId("kb-1")
-                .fileName("diagram.png")
-                .fileType("IMAGE")
-                .segmentCount(1)
-                .build();
-        AssetRepository assets = (AssetRepository) Proxy.newProxyInstance(
-                AssetRepository.class.getClassLoader(),
-                new Class<?>[]{AssetRepository.class},
-                (proxy, method, args) -> switch (method.getName()) {
-                    case "listActive" -> List.of();
-                    case "findActiveById" -> Optional.of(asset);
-                    default -> throw new UnsupportedOperationException(
-                            method.getName());
-                });
+        var asset = new ConversationDocumentReference(
+                "asset-1", "kb-1", "diagram.png", null,
+                "IMAGE", "image/png", 7L, 1);
+        ConversationKnowledgeAcl knowledgeAcl = mock(ConversationKnowledgeAcl.class);
+        when(knowledgeAcl.searchActiveDocuments(List.of("kb-1"), "diagram", 5)).thenReturn(List.of());
+        when(knowledgeAcl.findActiveDocument(List.of("kb-1"), "asset-1")).thenReturn(Optional.of(asset));
         ConversationRetrievalResult retrieval = new ConversationRetrievalResult();
         retrieval.setTopCandidates(List.of(
                 ConversationRetrievalCandidate.builder()
@@ -45,7 +36,7 @@ class FindDocumentsToolVisualEvidenceTest {
                         .score(0.95D)
                         .build()));
         FindDocumentsTool tool = new FindDocumentsTool(
-                assets,
+                knowledgeAcl,
                 (query, limit, kbIds, modalities, assetIds) -> retrieval,
                 new ObjectMapper());
         AgentExecutionContext context = new AgentExecutionContext(

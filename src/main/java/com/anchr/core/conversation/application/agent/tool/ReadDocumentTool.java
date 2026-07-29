@@ -1,11 +1,10 @@
 package com.anchr.core.conversation.application.agent.tool;
 
+import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.agent.AgentExecutionContext;
 import com.anchr.core.conversation.application.agent.AgentTool;
 import com.anchr.core.conversation.application.agent.AgentToolResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.constraints.Max;
@@ -32,7 +31,7 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
             @Min(1) @Max(20) Integer limit) {}
 
     private final AgentScopeGuard scopeGuard;
-    private final SegmentRepository segmentRepository;
+    private final ConversationRetrievalAcl conversationRetrievalAcl;
     private final ObjectMapper objectMapper;
 
     @Override public String name() { return "read_document"; }
@@ -47,29 +46,29 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
         var asset = scopeGuard.requireAsset(input.assetId(), context);
         Cursor cursor = decode(input.cursor());
         int limit = input.limit() == null ? 20 : Math.max(MIN_PAGE_SIZE, input.limit());
-        List<Segment> segments = segmentRepository.listByAssetId(asset.getKbId(), asset.getId(),
-                asset.getActiveIndexGeneration(), cursor.chunkOrder(), cursor.segmentId(), limit + 1);
-        boolean hasMore = segments.size() > limit;
-        List<Segment> page = hasMore ? segments.subList(0, limit) : segments;
+        List<ConversationRetrievalCandidate> candidates = conversationRetrievalAcl.readDocument(
+                asset, cursor.chunkOrder(), cursor.segmentId(), limit + 1);
+        boolean hasMore = candidates.size() > limit;
+        List<ConversationRetrievalCandidate> page = hasMore
+                ? candidates.subList(0, limit) : candidates;
         int chars = 0;
-        java.util.ArrayList<Segment> bounded = new java.util.ArrayList<>();
-        for (Segment segment : page) {
-            String text = content(segment);
+        java.util.ArrayList<ConversationRetrievalCandidate> bounded = new java.util.ArrayList<>();
+        for (ConversationRetrievalCandidate candidate : page) {
+            String text = candidate.getContent() == null ? "" : candidate.getContent();
             if (!bounded.isEmpty() && chars + text.length() > MAX_CONTENT_CHARS) break;
             chars += text.length();
-            bounded.add(segment);
+            bounded.add(candidate);
         }
         String next = null;
         if ((hasMore || bounded.size() < page.size()) && !bounded.isEmpty()) {
-            Segment last = bounded.getLast();
-            next = encode(last.getChunkOrder(), last.getSegmentId());
+            ConversationRetrievalCandidate last = bounded.getLast();
+            next = encode(last.getAnchor() == null ? null : last.getAnchor().getChunkOrder(),
+                    last.getSegmentId());
         }
-        List<ConversationRetrievalCandidate> evidence = bounded.stream()
-                .map(segment -> candidate(segment, asset.getFileName(), asset.getTitle()))
-                .toList();
+        List<ConversationRetrievalCandidate> evidence = List.copyOf(bounded);
         try {
             return AgentToolResult.success(objectMapper.writeValueAsString(Map.of(
-                    "success", true, "assetId", asset.getId(), "fileName", asset.getFileName(),
+                    "success", true, "assetId", asset.id(), "fileName", asset.fileName(),
                     "segments", evidence.stream().map(this::view).toList(),
                     "nextCursor", next == null ? "" : next, "hasMore", next != null)), evidence,
                     Map.of("segmentCount", evidence.size(), "evidenceCount", evidence.size(), "hasMore", next != null));
@@ -78,27 +77,9 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
         }
     }
 
-    private ConversationRetrievalCandidate candidate(Segment segment, String assetFileName, String assetTitle) {
-        String sourceRef = StringUtils.hasText(assetFileName)
-                ? assetFileName
-                : StringUtils.hasText(segment.getSourceRef()) ? segment.getSourceRef() : assetTitle;
-        return ConversationRetrievalCandidate.builder().segmentId(segment.getSegmentId()).kbId(segment.getKbId())
-                .assetId(segment.getAssetId()).assetType(segment.getAssetType())
-                .segmentType(segment.getSegmentType() == null ? null : segment.getSegmentType().name())
-                .sourceRef(sourceRef).title(segment.getTitle()).content(content(segment)).pageNo(segment.getPageNo())
-                .anchor(ConversationRetrievalCandidate.Anchor.builder().pageNo(segment.getPageNo())
-                        .chunkOrder(segment.getChunkOrder()).bbox(segment.getBbox()).build()).build();
-    }
-
     private Map<String, Object> view(ConversationRetrievalCandidate value) {
         return Map.of("segmentId", value.getSegmentId(), "title", value.getTitle() == null ? "" : value.getTitle(),
                 "pageNo", value.getPageNo() == null ? -1 : value.getPageNo(), "content", value.getContent());
-    }
-
-    private String content(Segment segment) {
-        if (StringUtils.hasText(segment.getContentText())) return segment.getContentText();
-        if (StringUtils.hasText(segment.getOcrText())) return segment.getOcrText();
-        return "";
     }
 
     private Cursor decode(String raw) {

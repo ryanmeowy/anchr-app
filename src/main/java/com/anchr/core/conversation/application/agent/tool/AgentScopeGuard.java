@@ -2,8 +2,8 @@ package com.anchr.core.conversation.application.agent.tool;
 
 import com.anchr.core.conversation.application.agent.AgentExecutionContext;
 import com.anchr.core.conversation.application.agent.AgentToolException;
-import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.kb.domain.repository.AssetRepository;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
+import com.anchr.core.conversation.application.model.ConversationDocumentReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -17,25 +17,26 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AgentScopeGuard {
     private static final int NAME_LOOKUP_LIMIT = 50;
-    private final AssetRepository assetRepository;
+    private final ConversationKnowledgeAcl conversationKnowledgeAcl;
 
     /**
      * Resolves an exact asset id first, then a unique exact file name/title inside the server-authorized scope.
      */
-    public Asset requireAsset(String reference, AgentExecutionContext context) {
+    public ConversationDocumentReference requireAsset(
+            String reference, AgentExecutionContext context) {
         if (!StringUtils.hasText(reference)) {
             throw new AgentToolException("INVALID_ARGUMENTS", "document reference cannot be blank");
         }
         String normalized = normalizeReference(reference);
-        Asset byId = findById(normalized, context.kbIds());
+        ConversationDocumentReference byId = findById(normalized, context.kbIds());
         if (byId != null) {
-            if (!isAssetAllowed(byId.getId(), context)) {
+            if (!isAssetAllowed(byId.id(), context)) {
                 throw new AgentToolException("PERMISSION_DENIED", "document is outside the request asset scope");
             }
             return byId;
         }
 
-        List<Asset> nameMatches = context.assetIds().isEmpty()
+        List<ConversationDocumentReference> nameMatches = context.assetIds().isEmpty()
                 ? findByNameInKnowledgeBases(normalized, context.kbIds())
                 : findByNameInExplicitAssetScope(normalized, context);
         if (nameMatches.size() == 1) return nameMatches.getFirst();
@@ -50,37 +51,38 @@ public class AgentScopeGuard {
                 "no document matches this reference in the authorized knowledge bases; call find_documents and reuse documents[].assetId");
     }
 
-    private Asset findById(String assetId, List<String> kbIds) {
-        for (String kbId : kbIds) {
-            Asset asset = assetRepository.findActiveById(kbId, assetId).orElse(null);
-            if (asset != null) return asset;
-        }
-        return null;
+    private ConversationDocumentReference findById(String assetId, List<String> kbIds) {
+        return conversationKnowledgeAcl.findActiveDocument(kbIds, assetId).orElse(null);
     }
 
-    private List<Asset> findByNameInKnowledgeBases(String reference, List<String> kbIds) {
-        Map<String, Asset> matches = new LinkedHashMap<>();
-        for (String kbId : kbIds) {
-            for (Asset asset : assetRepository.listActive(kbId, reference, null, NAME_LOOKUP_LIMIT, 0)) {
-                if (matchesName(asset, reference)) matches.putIfAbsent(asset.getId(), asset);
+    private List<ConversationDocumentReference> findByNameInKnowledgeBases(
+            String reference, List<String> kbIds) {
+        Map<String, ConversationDocumentReference> matches = new LinkedHashMap<>();
+        for (ConversationDocumentReference asset : conversationKnowledgeAcl
+                .searchActiveDocuments(kbIds, reference, NAME_LOOKUP_LIMIT)) {
+            if (matchesName(asset, reference)) {
+                matches.putIfAbsent(asset.id(), asset);
             }
         }
         return matches.values().stream().toList();
     }
 
-    private List<Asset> findByNameInExplicitAssetScope(String reference, AgentExecutionContext context) {
-        Map<String, Asset> matches = new LinkedHashMap<>();
+    private List<ConversationDocumentReference> findByNameInExplicitAssetScope(
+            String reference, AgentExecutionContext context) {
+        Map<String, ConversationDocumentReference> matches = new LinkedHashMap<>();
         for (String assetId : context.assetIds()) {
-            Asset asset = findById(assetId, context.kbIds());
-            if (asset != null && matchesName(asset, reference)) matches.putIfAbsent(asset.getId(), asset);
+            ConversationDocumentReference asset = findById(assetId, context.kbIds());
+            if (asset != null && matchesName(asset, reference)) {
+                matches.putIfAbsent(asset.id(), asset);
+            }
         }
         return matches.values().stream().toList();
     }
 
-    private boolean matchesName(Asset asset, String reference) {
+    private boolean matchesName(ConversationDocumentReference asset, String reference) {
         String expected = normalizedName(reference);
-        return expected.equals(normalizedName(asset.getFileName()))
-                || expected.equals(normalizedName(asset.getTitle()));
+        return expected.equals(normalizedName(asset.fileName()))
+                || expected.equals(normalizedName(asset.title()));
     }
 
     private boolean isAssetAllowed(String assetId, AgentExecutionContext context) {

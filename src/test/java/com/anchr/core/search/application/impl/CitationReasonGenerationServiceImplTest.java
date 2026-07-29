@@ -1,6 +1,6 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.search.application.CitationReasonGenerationService;
+import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
 import com.anchr.core.search.domain.port.SearchGenerationPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -55,9 +55,9 @@ class CitationReasonGenerationServiceImplTest {
     @Test
     void generate_shouldSkipModelWhenNoChunkHasOriginalContent() {
         SearchGenerationPort generationPort = mock(SearchGenerationPort.class);
-        CitationReasonGenerationService.Request request = new CitationReasonGenerationService.Request(
-                "问题", null, "回答[1]", List.of(new CitationReasonGenerationService.CitationGroup(
-                1, "asset-1", List.of(new CitationReasonGenerationService.CitationChunk(
+        RetrievalCitationReasonRequest request = new RetrievalCitationReasonRequest(
+                "问题", null, "回答[1]", List.of(new RetrievalCitationReasonRequest.CitationGroup(
+                1, "asset-1", List.of(new RetrievalCitationReasonRequest.CitationChunk(
                 "seg-1", null, 0.2D, List.of("VECTOR"), "语义匹配"
         )))));
 
@@ -73,18 +73,18 @@ class CitationReasonGenerationServiceImplTest {
         );
     }
 
-    private CitationReasonGenerationService.Request request() {
-        return new CitationReasonGenerationService.Request(
+    private RetrievalCitationReasonRequest request() {
+        return new RetrievalCitationReasonRequest(
                 "用户问题",
                 "检索改写",
                 "最终回答[1]",
-                List.of(new CitationReasonGenerationService.CitationGroup(
+                List.of(new RetrievalCitationReasonRequest.CitationGroup(
                         1,
                         "asset-1",
                         List.of(
-                                new CitationReasonGenerationService.CitationChunk(
+                                new RetrievalCitationReasonRequest.CitationChunk(
                                         "seg-1", "原始正文一", 0.65D, List.of("VECTOR"), "语义匹配"),
-                                new CitationReasonGenerationService.CitationChunk(
+                                new RetrievalCitationReasonRequest.CitationChunk(
                                         "seg-2", "原始正文二", 0.52D, List.of("CONTENT"), "内容关键词命中")
                         )
                 ))

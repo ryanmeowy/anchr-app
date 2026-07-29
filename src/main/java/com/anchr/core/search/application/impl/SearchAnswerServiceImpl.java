@@ -1,12 +1,13 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.search.application.CitationReasonGenerationService;
 import com.anchr.core.search.application.SearchAnswerService;
+import com.anchr.core.search.application.api.RetrievalCitationReasonApi;
 import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.application.api.model.SearchAnswerRequest;
 import com.anchr.core.search.application.api.model.SearchAnswerResult;
+import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
 import com.anchr.core.search.domain.model.SegmentType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,7 +27,7 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
     private static final int ASSET_CITATION_LIMIT = 3;
     private static final int CHUNK_LIMIT_PER_ASSET = 3;
 
-    private final CitationReasonGenerationService citationReasonGenerationService;
+    private final RetrievalCitationReasonApi retrievalCitationReasonApi;
 
     @Override
     public SearchAnswerResult answer(SearchAnswerRequest request, List<RetrievalHit> existingResults) {
@@ -48,21 +49,21 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
             SearchAnswerRequest request,
             String answer,
             List<SearchAnswerResult.Citation> citations) {
-        CitationReasonGenerationService.Request generationRequest = new CitationReasonGenerationService.Request(
+        RetrievalCitationReasonRequest generationRequest = new RetrievalCitationReasonRequest(
                 request == null ? null : request.question(),
                 null,
                 answer,
-                citations.stream().map(citation -> new CitationReasonGenerationService.CitationGroup(
+                citations.stream().map(citation -> new RetrievalCitationReasonRequest.CitationGroup(
                         citation.citationIndex(),
                         citation.assetId(),
-                        citation.chunks().stream().map(chunk -> new CitationReasonGenerationService.CitationChunk(
+                        citation.chunks().stream().map(chunk -> new RetrievalCitationReasonRequest.CitationChunk(
                                 chunk.segmentId(), chunk.content(),
                                 chunk.why() == null ? null : chunk.why().score(),
                                 chunk.why() == null ? List.of() : chunk.why().hitSources(),
                                 chunk.why() == null ? null : chunk.why().matchSummary()
                         )).toList()
                 )).toList());
-        Map<String, String> reasons = citationReasonGenerationService.generate(generationRequest);
+        Map<String, String> reasons = retrievalCitationReasonApi.generate(generationRequest);
         return citations.stream().map(citation -> new SearchAnswerResult.Citation(
                 citation.citationIndex(), citation.assetId(), citation.kbId(), citation.fileName(),
                 citation.chunks().stream().map(chunk -> {

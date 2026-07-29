@@ -1,6 +1,8 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.search.application.CitationReasonGenerationService;
+import com.anchr.core.search.application.api.RetrievalCitationReasonApi;
+import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
+import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest.CitationChunk;
 import com.anchr.core.search.domain.port.SearchGenerationPort;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,7 +27,7 @@ import java.util.regex.Pattern;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class CitationReasonGenerationServiceImpl implements CitationReasonGenerationService {
+public class CitationReasonGenerationServiceImpl implements RetrievalCitationReasonApi {
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
     private static final int MAX_REASON_LENGTH = 100;
@@ -35,7 +37,7 @@ public class CitationReasonGenerationServiceImpl implements CitationReasonGenera
     private final MeterRegistry meterRegistry;
 
     @Override
-    public Map<String, String> generate(Request request) {
+    public Map<String, String> generate(RetrievalCitationReasonRequest request) {
         Map<String, String> fallbackReasons = fallbackReasons(request);
         List<CitationChunk> eligibleChunks = eligibleChunks(request);
         if (eligibleChunks.isEmpty()) {
@@ -67,7 +69,7 @@ public class CitationReasonGenerationServiceImpl implements CitationReasonGenera
         }
     }
 
-    private String buildPrompt(Request request) throws Exception {
+    private String buildPrompt(RetrievalCitationReasonRequest request) throws Exception {
         String payload = objectMapper.writeValueAsString(request);
         return """
                 你是知识库回答的引用解释器。请根据用户问题、最终回答和每个引用 Chunk 的原始正文，解释该 Chunk 如何支持回答中对应引用编号附近的论点。
@@ -128,7 +130,7 @@ public class CitationReasonGenerationServiceImpl implements CitationReasonGenera
         return trimmed.length() <= MAX_REASON_LENGTH ? trimmed : trimmed.substring(0, MAX_REASON_LENGTH);
     }
 
-    private List<CitationChunk> eligibleChunks(Request request) {
+    private List<CitationChunk> eligibleChunks(RetrievalCitationReasonRequest request) {
         if (request == null || request.citations() == null) {
             return List.of();
         }
@@ -140,7 +142,7 @@ public class CitationReasonGenerationServiceImpl implements CitationReasonGenera
                 .toList();
     }
 
-    private Map<String, String> fallbackReasons(Request request) {
+    private Map<String, String> fallbackReasons(RetrievalCitationReasonRequest request) {
         if (request == null || request.citations() == null) {
             return Map.of();
         }

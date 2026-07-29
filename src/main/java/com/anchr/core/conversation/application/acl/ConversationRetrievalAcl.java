@@ -1,25 +1,31 @@
 package com.anchr.core.conversation.application.acl;
 
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
+import com.anchr.core.conversation.application.model.ConversationCitationReasonRequest;
+import com.anchr.core.conversation.application.model.ConversationDocumentReference;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
+import com.anchr.core.search.application.api.RetrievalDocumentContentQueryApi;
 import com.anchr.core.search.application.api.RetrievalHitQueryApi;
+import com.anchr.core.search.application.api.RetrievalCitationReasonApi;
+import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
+import com.anchr.core.search.application.api.model.RetrievalDocumentChunk;
+import com.anchr.core.search.application.api.model.RetrievalDocumentContentQuery;
 import com.anchr.core.search.application.api.model.RetrievalAnchor;
 import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalHitQuery;
 import com.anchr.core.search.application.api.model.RetrievalTopChunk;
-import com.anchr.core.search.domain.model.SegmentType;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -32,6 +38,8 @@ public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrat
     private static final String MODALITY_MIXED = "MIXED";
 
     private final RetrievalHitQueryApi retrievalHitQueryApi;
+    private final RetrievalDocumentContentQueryApi retrievalDocumentContentQueryApi;
+    private final RetrievalCitationReasonApi retrievalCitationReasonApi;
     private final MeterRegistry meterRegistry;
 
     @Override
@@ -68,6 +76,40 @@ public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrat
         }
     }
 
+    public List<ConversationRetrievalCandidate> readDocument(
+            ConversationDocumentReference document,
+            Integer afterChunkOrder,
+            String afterSegmentId,
+            int limit) {
+        if (document == null) {
+            return List.of();
+        }
+        return retrievalDocumentContentQueryApi.query(new RetrievalDocumentContentQuery(
+                        document.kbId(), document.id(), document.activeIndexGeneration(),
+                        afterChunkOrder, afterSegmentId, limit))
+                .stream()
+                .map(chunk -> toDocumentCandidate(chunk, document))
+                .toList();
+    }
+
+    public Map<String, String> generateCitationReasons(
+            ConversationCitationReasonRequest request) {
+        if (request == null) {
+            return Map.of();
+        }
+        return retrievalCitationReasonApi.generate(new RetrievalCitationReasonRequest(
+                request.question(), request.rewrittenQuery(), request.answer(),
+                request.citations().stream()
+                        .map(group -> new RetrievalCitationReasonRequest.CitationGroup(
+                                group.citationIndex(), group.assetId(),
+                                group.chunks().stream()
+                                        .map(chunk -> new RetrievalCitationReasonRequest.CitationChunk(
+                                                chunk.segmentId(), chunk.content(), chunk.score(),
+                                                chunk.hitSources(), chunk.matchSummary()))
+                                        .toList()))
+                        .toList()));
+    }
+
     private List<String> resolveSegmentTypes(List<String> preferredModalities) {
         if (preferredModalities == null || preferredModalities.isEmpty()) {
             return List.of();
@@ -81,11 +123,11 @@ public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrat
         if (normalized.size() != 1 || MODALITY_MIXED.equals(normalized.getFirst())) {
             return List.of();
         }
-        String prefix = normalized.getFirst();
-        return Arrays.stream(SegmentType.values())
-                .map(Enum::name)
-                .filter(segmentType -> segmentType.startsWith(prefix))
-                .toList();
+        return switch (normalized.getFirst()) {
+            case "TEXT" -> List.of("TEXT_CHUNK");
+            case "IMAGE" -> List.of("IMAGE_OCR_BLOCK", "IMAGE_VISUAL");
+            default -> List.of();
+        };
     }
 
     private List<ConversationRetrievalCandidate> toCandidates(RetrievalHit item) {
@@ -142,6 +184,30 @@ public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrat
         return ConversationRetrievalCandidate.Explain.builder()
 //                .strategyEffective(source.getStrategyEffective())
                 .hitSources(source.hitSources() == null ? List.of() : List.copyOf(source.hitSources()))
+                .build();
+    }
+
+    private ConversationRetrievalCandidate toDocumentCandidate(
+            RetrievalDocumentChunk chunk,
+            ConversationDocumentReference document) {
+        String sourceRef = StringUtils.hasText(document.fileName())
+                ? document.fileName()
+                : StringUtils.hasText(chunk.sourceRef()) ? chunk.sourceRef() : document.title();
+        return ConversationRetrievalCandidate.builder()
+                .segmentId(chunk.segmentId())
+                .kbId(chunk.kbId())
+                .assetId(chunk.assetId())
+                .assetType(chunk.assetType())
+                .segmentType(chunk.segmentType())
+                .sourceRef(sourceRef)
+                .title(chunk.title())
+                .content(chunk.content())
+                .pageNo(chunk.pageNo())
+                .anchor(ConversationRetrievalCandidate.Anchor.builder()
+                        .pageNo(chunk.pageNo())
+                        .chunkOrder(chunk.chunkOrder())
+                        .bbox(chunk.bbox())
+                        .build())
                 .build();
     }
 

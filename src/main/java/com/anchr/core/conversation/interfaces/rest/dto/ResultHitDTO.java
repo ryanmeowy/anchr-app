@@ -1,6 +1,5 @@
 package com.anchr.core.conversation.interfaces.rest.dto;
 
-import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import lombok.Data;
 
 import java.io.Serializable;
@@ -15,6 +14,6 @@ public class ResultHitDTO implements Serializable {
     private String snippet;
     private Double score;
     private Integer pageNo;
-    private PreviewAnchorDTO anchor;
+    private ResultAnchorDTO anchor;
     private String hitType;
 }
