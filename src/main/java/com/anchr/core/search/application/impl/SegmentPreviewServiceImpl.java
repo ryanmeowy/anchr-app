@@ -5,11 +5,11 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.kb.application.ActivityQueryService;
-import com.anchr.core.kb.application.KnowledgeBaseService;
-import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.application.api.model.DocumentSummary;
+import com.anchr.core.kb.application.api.model.KnowledgeBaseSummary;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
 import com.anchr.core.search.application.SegmentPreviewService;
+import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
@@ -37,7 +37,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private final PreviewAccessCache previewAccessCache;
     private final ActivityEventService activityEventService;
     private final ActivityQueryService  activityQueryService;
-    private final KnowledgeBaseService knowledgeBaseService;
+    private final SearchKnowledgeAcl searchKnowledgeAcl;
 
     @Override
     public PreviewSegmentDTO getSegmentPreview(String segmentId, PreviewRequestDTO request) {
@@ -64,7 +64,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
         requireActiveSegment(segment);
-        Asset parentAsset = resolveParentAsset(segment);
+        DocumentSummary parentAsset = resolveParentAsset(segment);
         previewAccessCache.evict(
                 cacheIdentity(segment.getAssetId(), previewSourceRef(segment, parentAsset)),
                 accessTokenHash);
@@ -75,20 +75,18 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     }
 
     private void requireActiveSegment(Segment segment) {
-        Asset asset;
-        try {
-            asset = knowledgeBaseService.getDocument(segment.getKbId(), segment.getAssetId());
-        } catch (BusinessException ignored) {
-            throw new BusinessException(ApiError.SEGMENT_NOT_FOUND);
-        }
-        if (segment.getIndexGeneration() != asset.getActiveIndexGeneration()) {
+        DocumentSummary asset = searchKnowledgeAcl
+                .findActiveDocument(segment.getKbId(), segment.getAssetId())
+                .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
+        if (segment.getIndexGeneration() != asset.activeIndexGeneration()) {
             throw new BusinessException(ApiError.SEGMENT_NOT_FOUND);
         }
     }
 
     private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash, PreviewRequestDTO request) {
-        KnowledgeBase knowledgeBase = knowledgeBaseService.get(segment.getKbId());
-        Asset parentAsset = resolveParentAsset(segment);
+        KnowledgeBaseSummary knowledgeBase = searchKnowledgeAcl.findActiveKnowledgeBase(segment.getKbId())
+                .orElseThrow(() -> new BusinessException(ApiError.KNOWLEDGE_BASE_NOT_FOUND));
+        DocumentSummary parentAsset = resolveParentAsset(segment);
         PreviewAccessCache.PreviewAccess previewAccess = buildPreviewAccess(
                 segment, parentAsset, accessTokenHash);
         PreviewAccessCache.PreviewAccess imagePreviewAccess = buildImagePreviewAccess(
@@ -99,7 +97,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .segmentId(segment.getSegmentId())
                 .assetId(segment.getAssetId())
                 .kbId(segment.getKbId())
-                .kbName(Optional.ofNullable(knowledgeBase).map(KnowledgeBase::getName).orElse(null))
+                .kbName(knowledgeBase.name())
                 .assetType(segment.getAssetType())
                 .segmentType(toCode(segment.getSegmentType()))
                 .fileName(resolveFileName(segment, parentAsset))
@@ -206,7 +204,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     }
 
     private PreviewAccessCache.PreviewAccess buildPreviewAccess(
-            Segment segment, Asset parentAsset, String accessTokenHash) {
+            Segment segment, DocumentSummary parentAsset, String accessTokenHash) {
         String sourceRef = previewSourceRef(segment, parentAsset);
         if (!StringUtils.hasText(sourceRef)) {
             return new PreviewAccessCache.PreviewAccess(null, null);
@@ -266,22 +264,23 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return access;
     }
 
-    private Asset resolveParentAsset(Segment segment) {
+    private DocumentSummary resolveParentAsset(Segment segment) {
         if (segment == null || segment.getSegmentType() != SegmentType.DOCUMENT_IMAGE) {
             return null;
         }
-        return knowledgeBaseService.getDocument(segment.getKbId(), segment.getAssetId());
+        return searchKnowledgeAcl.findActiveDocument(segment.getKbId(), segment.getAssetId())
+                .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
     }
 
-    private String previewSourceRef(Segment segment, Asset parentAsset) {
+    private String previewSourceRef(Segment segment, DocumentSummary parentAsset) {
         if (parentAsset == null) {
             return segment == null ? null : segment.getSourceRef();
         }
-        if (StringUtils.hasText(parentAsset.getPreviewObjectKey())) {
-            return parentAsset.getPreviewObjectKey().trim();
+        if (StringUtils.hasText(parentAsset.previewObjectKey())) {
+            return parentAsset.previewObjectKey().trim();
         }
-        if (StringUtils.hasText(parentAsset.getObjectKey())) {
-            return parentAsset.getObjectKey().trim();
+        if (StringUtils.hasText(parentAsset.objectKey())) {
+            return parentAsset.objectKey().trim();
         }
         return null;
     }
@@ -333,9 +332,9 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return segment.getTitle();
     }
 
-    private String resolveFileName(Segment segment, Asset parentAsset) {
-        if (parentAsset != null && StringUtils.hasText(parentAsset.getFileName())) {
-            return parentAsset.getFileName().trim();
+    private String resolveFileName(Segment segment, DocumentSummary parentAsset) {
+        if (parentAsset != null && StringUtils.hasText(parentAsset.fileName())) {
+            return parentAsset.fileName().trim();
         }
         if (StringUtils.hasText(segment.getSourceRef())) {
             String sourceRef = segment.getSourceRef().trim();

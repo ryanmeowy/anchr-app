@@ -1,9 +1,10 @@
 package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.application.SearchFollowUpService;
+import com.anchr.core.search.application.api.model.RetrievalHit;
+import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchGenerationPort;
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -36,7 +37,7 @@ public class SearchFollowUpServiceImpl implements SearchFollowUpService {
     private final MeterRegistry meterRegistry;
 
     @Override
-    public List<String> generate(String query, List<SearchResultDTO> results) {
+    public List<String> generate(String query, List<RetrievalHit> results) {
         meterRegistry.counter("search.followup.count").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
@@ -63,28 +64,28 @@ public class SearchFollowUpServiceImpl implements SearchFollowUpService {
     }
 
     private List<FollowUpContext> collectContexts(
-            List<SearchResultDTO> results
+            List<RetrievalHit> results
     ) {
         List<FollowUpContext> contexts = new ArrayList<>();
-        for (SearchResultDTO result : results) {
+        for (RetrievalHit result : results) {
             if (result == null) {
                 continue;
             }
-            if (result.getTopChunks() == null
-                    || result.getTopChunks().isEmpty()) {
+            if (result.topChunks() == null
+                    || result.topChunks().isEmpty()) {
                 addContext(
                         contexts,
-                        result.getSegmentType(),
-                        result.getSnippet(),
-                        result.getScore());
+                        result.segmentType(),
+                        result.snippet(),
+                        result.score());
             } else {
-                for (SearchResultDTO.TopChunk chunk : result.getTopChunks()) {
+                for (RetrievalTopChunk chunk : result.topChunks()) {
                     if (chunk != null) {
                         addContext(
                                 contexts,
-                                chunk.getSegmentType(),
-                                chunk.getSnippet(),
-                                chunk.getScore());
+                                chunk.segmentType(),
+                                chunk.snippet(),
+                                chunk.score());
                     }
                     if (contexts.size() >= MAX_CONTEXT_RESULTS) {
                         break;

@@ -19,6 +19,7 @@ import com.anchr.core.conversation.application.assembler.ConversationCitationMap
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.AnswerStatus;
@@ -49,7 +50,6 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDT
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
-import com.anchr.core.search.application.KbScopeResolver;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -101,7 +101,7 @@ class ConversationServiceImplTest {
     @Mock
     private AnswerGenerationService answerGenerationService;
     @Mock
-    private KbScopeResolver kbScopeResolver;
+    private ConversationKnowledgeAcl kbScopeResolver;
     @Mock
     private ActivityEventService activityEventService;
     @Mock

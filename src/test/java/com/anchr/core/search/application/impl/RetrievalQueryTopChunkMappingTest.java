@@ -1,14 +1,16 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.kb.domain.repository.AssetRepository;
+import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
+import com.anchr.core.search.application.api.model.RetrievalAnchor;
+import com.anchr.core.search.application.api.model.RetrievalExplain;
+import com.anchr.core.search.application.api.model.RetrievalHit;
+import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchRerankPort;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
-import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -25,12 +27,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class UnifiedSearchTopChunkMappingTest {
+class RetrievalQueryTopChunkMappingTest {
 
     @Test
     void visualProjectionShouldRemainAResultWithoutPretendingItsTitleIsEvidence() {
-        UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
-                null, null, null, null, null, null, null, null);
+        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
+                null, null, null, null, null, null);
         Segment segment = Segment.builder()
                 .segmentId("visual-1")
                 .assetId("asset-1")
@@ -47,42 +49,36 @@ class UnifiedSearchTopChunkMappingTest {
                 1,
                 true);
 
-        SearchResultDTO result = ReflectionTestUtils.invokeMethod(
+        RetrievalHit result = ReflectionTestUtils.invokeMethod(
                 service, "toResult", candidate, "architecture");
 
         assertThat(result).isNotNull();
-        assertThat(result.getSegmentType())
+        assertThat(result.segmentType())
                 .isEqualTo(SegmentType.IMAGE_VISUAL.name());
-        assertThat(result.getTitle()).isEqualTo("architecture.png");
-        assertThat(result.getSourceRef())
+        assertThat(result.title()).isEqualTo("architecture.png");
+        assertThat(result.sourceRef())
                 .isEqualTo("images/architecture.png");
-        assertThat(result.getContent()).isEmpty();
-        assertThat(result.getSnippet()).isEmpty();
+        assertThat(result.content()).isEmpty();
+        assertThat(result.snippet()).isEmpty();
     }
 
     @Test
     void toTopChunk_shouldKeepOriginalContentAndDocumentPosition() {
-        UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
-                null, null, null, null, null, null, null, null);
-        SearchResultDTO segment = SearchResultDTO.builder()
-                .segmentId("seg-1")
-                .title("2.1 Retrieval")
-                .content("full original content")
-                .snippet("short snippet")
-                .explain(SearchExplainDTO.builder()
-                        .hitSources(List.of("OCR"))
-                        .build())
-                .pageNo(3)
-                .anchor(SearchResultDTO.Anchor.builder().pageNo(3).chunkOrder(12).build())
-                .build();
+        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
+                null, null, null, null, null, null);
+        RetrievalHit segment = new RetrievalHit(
+                null, "2.1 Retrieval", "full original content", null, null, "short snippet",
+                3, null, new RetrievalExplain(List.of("OCR"), null, null, null),
+                new RetrievalAnchor(3, 12, List.of(), null, null), null, null, null, List.of(),
+                "seg-1", null, null, null, null, null);
 
-        SearchResultDTO.TopChunk topChunk = ReflectionTestUtils.invokeMethod(service, "toTopChunk", segment);
+        RetrievalTopChunk topChunk = ReflectionTestUtils.invokeMethod(service, "toTopChunk", segment);
 
         assertThat(topChunk).isNotNull();
-        assertThat(topChunk.getTitle()).isEqualTo("2.1 Retrieval");
-        assertThat(topChunk.getContent()).isEqualTo("full original content");
-        assertThat(topChunk.getAnchor().getChunkOrder()).isEqualTo(12);
-        assertThat(topChunk.getExplain().getHitSources())
+        assertThat(topChunk.title()).isEqualTo("2.1 Retrieval");
+        assertThat(topChunk.content()).isEqualTo("full original content");
+        assertThat(topChunk.anchor().chunkOrder()).isEqualTo(12);
+        assertThat(topChunk.explain().hitSources())
                 .containsExactly("OCR");
     }
 
@@ -92,8 +88,8 @@ class UnifiedSearchTopChunkMappingTest {
         when(objectStoragePort.buildPreviewUrl("embedded/diagram.png"))
                 .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
                         "https://preview/diagram", 123L));
-        UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
-                null, null, null, null, null, null, null, null);
+        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
+                null, null, null, null, null, null);
         service.setObjectStoragePort(objectStoragePort);
         Segment segment = Segment.builder()
                 .segmentId("document-image-1")
@@ -104,10 +100,10 @@ class UnifiedSearchTopChunkMappingTest {
         SegmentRerankCandidate candidate = new SegmentRerankCandidate(
                 "document-image-1", segment, Map.of(), 0.9D, 0.9D, 1, true);
 
-        SearchResultDTO result = ReflectionTestUtils.invokeMethod(
+        RetrievalHit result = ReflectionTestUtils.invokeMethod(
                 service, "toResult", candidate, "diagram");
 
-        assertThat(result.getImagePreviewUrl()).isEqualTo("https://preview/diagram");
+        assertThat(result.imagePreviewUrl()).isEqualTo("https://preview/diagram");
         verify(objectStoragePort).buildPreviewUrl("embedded/diagram.png");
     }
 
@@ -116,8 +112,8 @@ class UnifiedSearchTopChunkMappingTest {
         SearchRerankPort rerankPort = mock(SearchRerankPort.class);
         when(rerankPort.rerank(anyString(), any(), anyInt())).thenThrow(new IllegalStateException("timeout"));
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
-                null, null, null, null, rerankPort, new AppSearchProperties(), meterRegistry, null);
+        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
+                null, null, null, rerankPort, new AppSearchProperties(), meterRegistry);
         List<SegmentRerankCandidate> candidates = List.of(
                 new SegmentRerankCandidate("s1", null, null, 0.9D, 0.9D, 2, true),
                 new SegmentRerankCandidate("s2", null, null, 0.8D, 0.8D, 1, false));
@@ -133,11 +129,11 @@ class UnifiedSearchTopChunkMappingTest {
     @Test
     @SuppressWarnings("unchecked")
     void generationGate_shouldKeepOnlyActiveCandidatesWithoutChangingTheirOrderOrScore() {
-        AssetRepository assetRepository = mock(AssetRepository.class);
-        when(assetRepository.findActiveIndexGenerations(anyCollection()))
+        SearchKnowledgeAcl searchKnowledgeAcl = mock(SearchKnowledgeAcl.class);
+        when(searchKnowledgeAcl.findActiveIndexGenerations(anyCollection()))
                 .thenReturn(Map.of("asset-active", 2L, "asset-legacy", 0L));
-        UnifiedSearchServiceImpl service = new UnifiedSearchServiceImpl(
-                null, null, null, assetRepository, null, null, null, null);
+        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
+                null, null, searchKnowledgeAcl, null, null, null);
         SegmentRerankCandidate active = candidate("active", "asset-active", 2L, 0.7D);
         SegmentRerankCandidate pending = candidate("pending", "asset-active", 3L, 0.9D);
         SegmentRerankCandidate legacy = candidate("legacy", "asset-legacy", 0L, 0.6D);
@@ -150,7 +146,7 @@ class UnifiedSearchTopChunkMappingTest {
         assertThat(visible).containsExactly(active, legacy);
         assertThat(visible).extracting(SegmentRerankCandidate::score)
                 .containsExactly(0.7D, 0.6D);
-        verify(assetRepository).findActiveIndexGenerations(anyCollection());
+        verify(searchKnowledgeAcl).findActiveIndexGenerations(anyCollection());
     }
 
     private SegmentRerankCandidate candidate(

@@ -1,13 +1,15 @@
-package com.anchr.core.conversation.application.impl;
+package com.anchr.core.conversation.application.acl;
 
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
-import com.anchr.core.search.application.UnifiedSearchService;
+import com.anchr.core.search.application.api.RetrievalHitQueryApi;
+import com.anchr.core.search.application.api.model.RetrievalAnchor;
+import com.anchr.core.search.application.api.model.RetrievalExplain;
+import com.anchr.core.search.application.api.model.RetrievalHit;
+import com.anchr.core.search.application.api.model.RetrievalHitQuery;
+import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.domain.model.SegmentType;
-import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -25,11 +27,11 @@ import java.util.Objects;
  */
 @Service
 @RequiredArgsConstructor
-public class ConversationRetrievalOrchestratorImpl implements ConversationRetrievalOrchestrator {
+public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrator {
 
     private static final String MODALITY_MIXED = "MIXED";
 
-    private final UnifiedSearchService unifiedSearchService;
+    private final RetrievalHitQueryApi retrievalHitQueryApi;
     private final MeterRegistry meterRegistry;
 
     @Override
@@ -40,14 +42,11 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
                                                 List<String> assetIdList) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
-            SearchQueryDTO query = new SearchQueryDTO();
-            query.setQuery(rewrittenQuery);
-            query.setLimit(limit);
-            query.setKbIds(kbIds);
-            query.setAssetIdList(assetIdList);
-            query.setHitTypes(resolveSegmentTypes(preferredModalities));
+            RetrievalHitQuery query = new RetrievalHitQuery(
+                    rewrittenQuery, limit, kbIds, assetIdList,
+                    resolveSegmentTypes(preferredModalities));
 
-            List<SearchResultDTO> rawResults = unifiedSearchService.search(query);
+            List<RetrievalHit> rawResults = retrievalHitQueryApi.query(query);
             List<ConversationRetrievalCandidate> candidates = rawResults.stream()
                     .flatMap(item -> toCandidates(item).stream())
                     .filter(Objects::nonNull)
@@ -89,60 +88,60 @@ public class ConversationRetrievalOrchestratorImpl implements ConversationRetrie
                 .toList();
     }
 
-    private List<ConversationRetrievalCandidate> toCandidates(SearchResultDTO item) {
+    private List<ConversationRetrievalCandidate> toCandidates(RetrievalHit item) {
         if (item == null) {
             return List.of();
         }
-        if (item.getTopChunks() == null || item.getTopChunks().isEmpty()) {
+        if (item.topChunks() == null || item.topChunks().isEmpty()) {
             return List.of(toCandidate(item, null));
         }
-        return item.getTopChunks().stream()
+        return item.topChunks().stream()
                 .filter(Objects::nonNull)
                 .map(topChunk -> toCandidate(item, topChunk))
                 .toList();
     }
 
-    private ConversationRetrievalCandidate toCandidate(SearchResultDTO item, SearchResultDTO.TopChunk topChunk) {
+    private ConversationRetrievalCandidate toCandidate(RetrievalHit item, RetrievalTopChunk topChunk) {
         return ConversationRetrievalCandidate.builder()
-                .segmentId(topChunk == null ? item.getSegmentId() : topChunk.getSegmentId())
-                .kbId(topChunk == null || !StringUtils.hasText(topChunk.getKbId()) ? item.getKbId() : topChunk.getKbId())
-                .assetId(item.getAssetId())
-                .assetType(item.getAssetType())
-                .resultType(item.getResultType())
-                .segmentType(topChunk == null ? item.getSegmentType() : topChunk.getSegmentType())
-                .title(topChunk == null ? item.getTitle() : topChunk.getTitle())
-                .sourceRef(topChunk == null || !StringUtils.hasText(topChunk.getSourceRef())
-                        ? item.getSourceRef() : topChunk.getSourceRef())
-                .content(topChunk == null ? item.getContent() : topChunk.getContent())
-                .snippet(topChunk == null ? item.getSnippet() : topChunk.getSnippet())
-                .score(topChunk == null ? item.getScore() : topChunk.getScore())
-                .pageNo(topChunk == null ? item.getPageNo() : topChunk.getPageNo())
-                .anchor(toCandidateAnchor(topChunk == null ? item.getAnchor() : topChunk.getAnchor()))
+                .segmentId(topChunk == null ? item.segmentId() : topChunk.segmentId())
+                .kbId(topChunk == null || !StringUtils.hasText(topChunk.kbId()) ? item.kbId() : topChunk.kbId())
+                .assetId(item.assetId())
+                .assetType(item.assetType())
+                .resultType(item.resultType())
+                .segmentType(topChunk == null ? item.segmentType() : topChunk.segmentType())
+                .title(topChunk == null ? item.title() : topChunk.title())
+                .sourceRef(topChunk == null || !StringUtils.hasText(topChunk.sourceRef())
+                        ? item.sourceRef() : topChunk.sourceRef())
+                .content(topChunk == null ? item.content() : topChunk.content())
+                .snippet(topChunk == null ? item.snippet() : topChunk.snippet())
+                .score(topChunk == null ? item.score() : topChunk.score())
+                .pageNo(topChunk == null ? item.pageNo() : topChunk.pageNo())
+                .anchor(toCandidateAnchor(topChunk == null ? item.anchor() : topChunk.anchor()))
                 .explain(toCandidateExplain(topChunk == null
-                        ? item.getExplain() : topChunk.getExplain()))
+                        ? item.explain() : topChunk.explain()))
                 .build();
     }
 
-    private ConversationRetrievalCandidate.Anchor toCandidateAnchor(SearchResultDTO.Anchor source) {
+    private ConversationRetrievalCandidate.Anchor toCandidateAnchor(RetrievalAnchor source) {
         if (source == null) {
             return null;
         }
         return ConversationRetrievalCandidate.Anchor.builder()
-                .pageNo(source.getPageNo())
-                .chunkOrder(source.getChunkOrder())
-                .bbox(source.getBbox())
-                .imageWidth(source.getImageWidth())
-                .imageHeight(source.getImageHeight())
+                .pageNo(source.pageNo())
+                .chunkOrder(source.chunkOrder())
+                .bbox(source.bbox())
+                .imageWidth(source.imageWidth())
+                .imageHeight(source.imageHeight())
                 .build();
     }
 
-    private ConversationRetrievalCandidate.Explain toCandidateExplain(SearchExplainDTO source) {
+    private ConversationRetrievalCandidate.Explain toCandidateExplain(RetrievalExplain source) {
         if (source == null) {
             return null;
         }
         return ConversationRetrievalCandidate.Explain.builder()
 //                .strategyEffective(source.getStrategyEffective())
-                .hitSources(source.getHitSources() == null ? List.of() : List.copyOf(source.getHitSources()))
+                .hitSources(source.hitSources() == null ? List.of() : List.copyOf(source.hitSources()))
                 .build();
     }
 

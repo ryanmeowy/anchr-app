@@ -40,7 +40,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDT
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.kb.application.ActivityEventService;
-import com.anchr.core.search.application.KbScopeResolver;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -99,7 +99,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final ConversationMessageOrchestrator conversationMessageOrchestrator;
     private final ConversationTurnCodec conversationTurnCodec;
     private final ConversationRetrievalTraceBuilder conversationRetrievalTraceBuilder;
-    private final KbScopeResolver kbScopeResolver;
+    private final ConversationKnowledgeAcl conversationKnowledgeAcl;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final ActivityEventService activityEventService;
@@ -117,7 +117,7 @@ public class ConversationServiceImpl implements ConversationService {
                                    ConversationMessageOrchestrator conversationMessageOrchestrator,
                                    ConversationTurnCodec conversationTurnCodec,
                                    ConversationRetrievalTraceBuilder conversationRetrievalTraceBuilder,
-                                   KbScopeResolver kbScopeResolver,
+                                   ConversationKnowledgeAcl conversationKnowledgeAcl,
                                    ObjectMapper objectMapper,
                                    MeterRegistry meterRegistry,
                                    ActivityEventService activityEventService,
@@ -134,7 +134,7 @@ public class ConversationServiceImpl implements ConversationService {
         this.conversationTurnCodec = Objects.requireNonNull(conversationTurnCodec);
         this.conversationRetrievalTraceBuilder =
                 Objects.requireNonNull(conversationRetrievalTraceBuilder);
-        this.kbScopeResolver = Objects.requireNonNull(kbScopeResolver);
+        this.conversationKnowledgeAcl = Objects.requireNonNull(conversationKnowledgeAcl);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.meterRegistry = Objects.requireNonNull(meterRegistry);
         this.activityEventService = Objects.requireNonNull(activityEventService);
@@ -159,7 +159,7 @@ public class ConversationServiceImpl implements ConversationService {
                 title,
                 now
         );
-        session.setKbScope(kbScopeResolver.resolveVisibleKbIds(request.getKbIds()));
+        session.setKbScope(conversationKnowledgeAcl.resolveVisibleKbIds(request.getKbIds()));
         conversationRepository.createSession(session);
         meterRegistry.counter("conversation.created.count").increment();
         return toSessionDto(session);
@@ -840,7 +840,7 @@ public class ConversationServiceImpl implements ConversationService {
         if (CollectionUtils.isEmpty(requested) && !CollectionUtils.isEmpty(session.getKbScope())) {
             request.setKbIds(session.getKbScope());
         } else {
-            request.setKbIds(kbScopeResolver.resolveVisibleKbIds(requested));
+            request.setKbIds(conversationKnowledgeAcl.resolveVisibleKbIds(requested));
         }
     }
 

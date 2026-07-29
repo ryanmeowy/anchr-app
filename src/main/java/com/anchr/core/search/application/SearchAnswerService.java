@@ -1,8 +1,8 @@
 package com.anchr.core.search.application;
 
-import com.anchr.core.search.interfaces.rest.dto.SearchAnswerDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
+import com.anchr.core.search.application.api.model.RetrievalHit;
+import com.anchr.core.search.application.api.model.SearchAnswerRequest;
+import com.anchr.core.search.application.api.model.SearchAnswerResult;
 
 import java.util.List;
 
@@ -11,7 +11,5 @@ import java.util.List;
  */
 public interface SearchAnswerService {
 
-    SearchAnswerDTO answer(SearchQueryDTO query);
-
-    SearchAnswerDTO answer(SearchQueryDTO query, List<SearchResultDTO> existingResults);
+    SearchAnswerResult answer(SearchAnswerRequest request, List<RetrievalHit> existingResults);
 }

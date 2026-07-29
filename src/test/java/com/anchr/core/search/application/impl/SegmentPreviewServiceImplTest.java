@@ -5,10 +5,10 @@ import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.kb.application.ActivityQueryService;
-import com.anchr.core.kb.application.KnowledgeBaseService;
-import com.anchr.core.kb.domain.model.Asset;
-import com.anchr.core.kb.domain.model.KnowledgeBase;
+import com.anchr.core.kb.application.api.model.DocumentSummary;
+import com.anchr.core.kb.application.api.model.KnowledgeBaseSummary;
 import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
+import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
@@ -49,7 +49,7 @@ class SegmentPreviewServiceImplTest {
     @Mock
     private ActivityQueryService activityQueryService;
     @Mock
-    private KnowledgeBaseService knowledgeBaseService;
+    private SearchKnowledgeAcl searchKnowledgeAcl;
 
     private SegmentPreviewServiceImpl service;
 
@@ -63,10 +63,11 @@ class SegmentPreviewServiceImplTest {
                 previewAccessCache,
                 activityEventService,
                 activityQueryService,
-                knowledgeBaseService);
-        lenient().when(knowledgeBaseService.get(anyString())).thenReturn(KnowledgeBase.builder().id("kb-1").name("KB").build());
-        lenient().when(knowledgeBaseService.getDocument(anyString(), anyString())).thenReturn(
-                Asset.builder().id("asset-1").kbId("kb-1").activeIndexGeneration(0L).build());
+                searchKnowledgeAcl);
+        lenient().when(searchKnowledgeAcl.findActiveKnowledgeBase(anyString()))
+                .thenReturn(Optional.of(new KnowledgeBaseSummary("kb-1", "KB", "ACTIVE")));
+        lenient().when(searchKnowledgeAcl.findActiveDocument(anyString(), anyString()))
+                .thenReturn(Optional.of(document("asset-1", null, null, null, 0L)));
     }
 
     @AfterEach
@@ -193,18 +194,13 @@ class SegmentPreviewServiceImplTest {
                 .contentText("architecture diagram")
                 .sourceRef("embedded/architecture.png")
                 .build();
-        Asset asset = Asset.builder()
-                .id("asset-1")
-                .kbId("kb-1")
-                .fileName("design.pdf")
-                .objectKey("documents/design.pdf")
-                .previewObjectKey("previews/design.pdf")
-                .build();
+        DocumentSummary asset = document(
+                "asset-1", "design.pdf", "documents/design.pdf", "previews/design.pdf", 0L);
         long expiresAt = System.currentTimeMillis() + 120_000L;
         when(segmentRepository.findBySegmentId("seg-1"))
                 .thenReturn(Optional.of(segment));
-        when(knowledgeBaseService.getDocument("kb-1", "asset-1"))
-                .thenReturn(asset);
+        when(searchKnowledgeAcl.findActiveDocument("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
         when(objectStoragePort.buildPreviewUrl("previews/design.pdf"))
                 .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
                         "https://preview/document", expiresAt));
@@ -226,9 +222,8 @@ class SegmentPreviewServiceImplTest {
                 .indexGeneration(3L)
                 .build();
         when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(segment));
-        when(knowledgeBaseService.getDocument("kb-1", "asset-1")).thenReturn(
-                Asset.builder().id("asset-1").kbId("kb-1")
-                        .activeIndexGeneration(4L).build());
+        when(searchKnowledgeAcl.findActiveDocument("kb-1", "asset-1")).thenReturn(
+                Optional.of(document("asset-1", null, null, null, 4L)));
 
         assertThatThrownBy(() -> service.getSegmentPreview("seg-1", new PreviewRequestDTO()))
                 .isInstanceOf(com.anchr.core.common.exception.BusinessException.class)
@@ -253,6 +248,13 @@ class SegmentPreviewServiceImplTest {
                         .bbox(BboxInfo.Bbox.builder().l(10).t(20).r(30).b(40).build())
                         .build()))
                 .build();
+    }
+
+    private DocumentSummary document(String id, String fileName, String objectKey,
+                                     String previewObjectKey, long generation) {
+        return new DocumentSummary(
+                id, "kb-1", fileName, null, null, null,
+                objectKey, previewObjectKey, generation);
     }
 
     private PreviewRequestDTO request() {

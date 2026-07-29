@@ -1,14 +1,21 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.kb.application.ActivityEventService;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.search.application.QueryEmbeddingService;
-import com.anchr.core.search.application.KbScopeResolver;
-import com.anchr.core.search.application.UnifiedSearchService;
-import com.anchr.core.search.application.model.SearchRewriteResult;
+import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
+import com.anchr.core.search.application.api.RetrievalHitQueryApi;
+import com.anchr.core.search.application.api.RetrievalPageQueryApi;
+import com.anchr.core.search.application.api.model.RetrievalAnchor;
+import com.anchr.core.search.application.api.model.RetrievalExplain;
+import com.anchr.core.search.application.api.model.RetrievalFacet;
+import com.anchr.core.search.application.api.model.RetrievalHit;
+import com.anchr.core.search.application.api.model.RetrievalHitQuery;
+import com.anchr.core.search.application.api.model.RetrievalInsight;
+import com.anchr.core.search.application.api.model.RetrievalPageQuery;
+import com.anchr.core.search.application.api.model.RetrievalPageResult;
+import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.SegmentHit;
@@ -19,11 +26,6 @@ import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.port.SearchRerankPort.RerankItem;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
-import com.anchr.core.search.interfaces.rest.dto.RetrievalInsightDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchPageDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -47,16 +49,14 @@ import java.util.Objects;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class UnifiedSearchServiceImpl implements UnifiedSearchService {
+public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, RetrievalPageQueryApi {
 
     private final SegmentRepository kbSegmentRepository;
     private final QueryEmbeddingService kbQueryEmbeddingService;
-    private final KbScopeResolver kbScopeResolver;
-    private final AssetRepository assetRepository;
+    private final SearchKnowledgeAcl searchKnowledgeAcl;
     private final SearchRerankPort searchRerankPort;
     private final AppSearchProperties appSearchProperties;
     private final MeterRegistry meterRegistry;
-    private final ActivityEventService activityEventService;
     private SearchObjectStoragePort objectStoragePort;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -65,42 +65,31 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     }
 
     @Override
-    public List<SearchResultDTO> search(SearchQueryDTO query) {
-        return search(query, List.of());
-    }
-
-    @Override
-    public List<SearchResultDTO> search(SearchQueryDTO query, List<String> keywords) {
-        SearchResult result = searchInternal(query, keywords);
+    public List<RetrievalHit> query(RetrievalHitQuery query) {
+        SearchCriteria criteria = query == null ? null : new SearchCriteria(
+                query.query(), query.limit(), query.kbIds(), query.assetIds(),
+                List.of(), query.hitTypes(), null, null, null);
+        SearchResult result = searchInternal(criteria, List.of());
         return result.items();
     }
 
     @Override
-    public SearchPageDTO searchPage(SearchQueryDTO query, SearchRewriteResult rewriteResult) {
-        List<String> keywords = null == rewriteResult.getKeywords() ? List.of() :rewriteResult.getKeywords();
-        String queryStr = rewriteResult.getRewrittenQuery();
-        if (StringUtils.hasText(queryStr)) {
-            query.setQuery(queryStr);
-        }
-        SearchResult result = searchInternal(query, keywords);
-        RetrievalInsightDTO insight = buildInsight(result);
-        SearchPageDTO page = SearchPageDTO.builder()
-                .items(result.items())
-                .total(result.total())
-                .facets(buildFacets(result.items()))
-                .insight(insight)
-                .build();
-        recordSearchEvent(query, result.total());
-        return page;
+    public RetrievalPageResult query(RetrievalPageQuery query) {
+        SearchCriteria criteria = query == null ? null : new SearchCriteria(
+                query.query(), query.limit(), query.kbIds(), query.assetIds(), query.assetTypes(),
+                query.hitTypes(), query.createdFrom(), query.createdTo(), query.sort());
+        SearchResult result = searchInternal(criteria, query == null ? List.of() : query.keywords());
+        return new RetrievalPageResult(
+                result.items(), result.total(), buildFacets(result.items()), buildInsight(result));
     }
 
-    private SearchResult searchInternal(SearchQueryDTO query, List<String> keywords) {
+    private SearchResult searchInternal(SearchCriteria query, List<String> keywords) {
         long startMs = System.currentTimeMillis();
-        if (query == null || !StringUtils.hasText(query.getQuery())) {
+        if (query == null || !StringUtils.hasText(query.query())) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
-        String rawQuery = query.getQuery().trim();
-        int limit = resolveLimit(query.getLimit());
+        String rawQuery = query.query().trim();
+        int limit = resolveLimit(query.limit());
         int recallTopK = resolveRecallTopK(limit);
         SearchFilter filter = buildFilter(query);
         if (filter.getKbIds().isEmpty()) {
@@ -145,31 +134,27 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         List<SegmentRerankCandidate> rankedCandidates = rerankOutcome.candidates();
         int rerankCount = rankedCandidates.size();
 
-        List<SearchResultDTO> segmentResults = rankedCandidates.stream()
+        List<RetrievalHit> segmentResults = rankedCandidates.stream()
                 .map(candidate -> toResult(candidate, rawQuery))
                 .filter(Objects::nonNull)
                 .toList();
-        List<SearchResultDTO> allAggregated = aggregateByAsset(segmentResults, limit);
+        List<RetrievalHit> allAggregated = aggregateByAsset(segmentResults, limit);
         long latencyMs = System.currentTimeMillis() - startMs;
         return new SearchResult(allAggregated, allAggregated.size(),
                 textHitCount, vectorHitCount, fusedCount, rerankCount, latencyMs);
     }
 
-    private RetrievalInsightDTO buildInsight(SearchResult result) {
-        List<SearchResultDTO> allItems = result.items();
+    private RetrievalInsight buildInsight(SearchResult result) {
+        List<RetrievalHit> allItems = result.items();
 
         // Pipeline
-        RetrievalInsightDTO.PipelineDTO pipeline = RetrievalInsightDTO.PipelineDTO.builder()
-                .keywordCandidates(result.textHits())
-                .vectorCandidates(result.vectorHits())
-                .fusedRetained(result.fusedCount())
-                .rerankAdopted(result.rerankCount())
-                .build();
+        RetrievalInsight.Pipeline pipeline = new RetrievalInsight.Pipeline(
+                result.textHits(), result.vectorHits(), result.fusedCount(), result.rerankCount());
 
         // Relevance distribution
         int high = 0, medium = 0, low = 0;
-        for (SearchResultDTO item : allItems) {
-            Double score = item.getScore();
+        for (RetrievalHit item : allItems) {
+            Double score = item.score();
             if (score == null) {
                 low++;
             } else if (score >= 0.8) {
@@ -180,26 +165,20 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 low++;
             }
         }
-        RetrievalInsightDTO.RelevanceDistributionDTO relevanceDistribution =
-                RetrievalInsightDTO.RelevanceDistributionDTO.builder()
-                        .high(high)
-                        .medium(medium)
-                        .low(low)
-                        .build();
+        RetrievalInsight.RelevanceDistribution relevanceDistribution =
+                new RetrievalInsight.RelevanceDistribution(high, medium, low);
 
         // Risk
-        RetrievalInsightDTO.RiskDTO risk = RetrievalInsightDTO.RiskDTO.builder()
-                .lowRelevanceCount(low)
-                .build();
+        RetrievalInsight.Risk risk = new RetrievalInsight.Risk(low);
 
         // Hit source distribution
         int vectorCount = 0, contentCount = 0, ocrCount = 0, tagCount = 0, titleCount = 0;
-        for (SearchResultDTO item : allItems) {
-            SearchExplainDTO explain = item.getExplain();
-            if (explain == null || explain.getHitSources() == null) {
+        for (RetrievalHit item : allItems) {
+            RetrievalExplain explain = item.explain();
+            if (explain == null || explain.hitSources() == null) {
                 continue;
             }
-            for (String source : explain.getHitSources()) {
+            for (String source : explain.hitSources()) {
                 if (!StringUtils.hasText(source)) {
                     continue;
                 }
@@ -213,29 +192,12 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 }
             }
         }
-        RetrievalInsightDTO.HitSourceDistributionDTO hitSourceDistribution =
-                RetrievalInsightDTO.HitSourceDistributionDTO.builder()
-                        .vectorCount(vectorCount)
-                        .contentCount(contentCount)
-                        .ocrCount(ocrCount)
-                        .tagCount(tagCount)
-                        .titleCount(titleCount)
-                        .build();
+        RetrievalInsight.HitSourceDistribution hitSourceDistribution =
+                new RetrievalInsight.HitSourceDistribution(
+                        vectorCount, contentCount, ocrCount, tagCount, titleCount);
 
-        return RetrievalInsightDTO.builder()
-                .pipeline(pipeline)
-                .relevanceDistribution(relevanceDistribution)
-                .risk(risk)
-                .hitSourceDistribution(hitSourceDistribution)
-                .latencyMs(result.latencyMs())
-                .build();
-    }
-
-    private void recordSearchEvent(SearchQueryDTO query, long total) {
-        if (query == null) {
-            return;
-        }
-        activityEventService.recordSearchExecuted(query, Math.toIntExact(Math.min(total, Integer.MAX_VALUE)));
+        return new RetrievalInsight(
+                pipeline, relevanceDistribution, risk, hitSourceDistribution, result.latencyMs());
     }
 
     private List<SegmentRerankCandidate> fuseCandidates(List<SegmentHit> textHits,
@@ -274,7 +236,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         }
 
         Map<String, Long> activeGenerationByAsset =
-                assetRepository.findActiveIndexGenerations(assetIds);
+                searchKnowledgeAcl.findActiveIndexGenerations(assetIds);
         if (activeGenerationByAsset == null || activeGenerationByAsset.isEmpty()) {
             return List.of();
         }
@@ -356,7 +318,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         );
     }
 
-    private SearchResultDTO toResult(SegmentRerankCandidate candidate, String keyword) {
+    private RetrievalHit toResult(SegmentRerankCandidate candidate, String keyword) {
         Segment segment = candidate.segment();
         Map<String, String> highlights = candidate.highlights();
         boolean titleHit = highlights.containsKey("title") || containsIgnoreCase(segment.getTitle(), keyword);
@@ -387,171 +349,118 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         String content = resolveContent(segment);
         String snippet = visualProjection
                 ? "" : pickSnippet(content, highlights);
-        SearchResultDTO.Anchor anchor = SearchResultDTO.Anchor.builder()
-                .pageNo(segment.getPageNo())
-                .chunkOrder(segment.getChunkOrder())
-                .bbox(segment.getBbox())
-                .imageWidth(segment.getImageWidth())
-                .imageHeight(segment.getImageHeight())
-                .build();
+        RetrievalAnchor anchor = new RetrievalAnchor(
+                segment.getPageNo(), segment.getChunkOrder(), segment.getBbox(),
+                segment.getImageWidth(), segment.getImageHeight());
         SearchObjectStoragePort.SignedObjectUrl imagePreview =
                 signImagePreview(segment);
-        return SearchResultDTO.builder()
-                .segmentType(toCode(segment.getSegmentType()))
-                .title(segment.getTitle())
-                .content(content)
-                .resultType(resultType(segment.getSegmentType()))
-                .assetType(segment.getAssetType())
-                .snippet(snippet)
-                .pageNo(segment.getPageNo())
-                .score(candidate.score())
-                .segmentId(segment.getSegmentId())
-                .kbId(segment.getKbId())
-                .assetId(segment.getAssetId())
-                .sourceRef(segment.getSourceRef())
-                .imagePreviewUrl(imagePreview == null ? null : imagePreview.url())
-                .imagePreviewExpiresAt(imagePreview == null ? null : imagePreview.expiresAt())
-                .anchor(anchor)
-                .explain(buildExplain(segment, hitSources, candidate.vectorHit(), titleHit, contentHit, ocrHit, tagHit))
-                .build();
+        return new RetrievalHit(
+                toCode(segment.getSegmentType()), segment.getTitle(), content,
+                resultType(segment.getSegmentType()), segment.getAssetType(), snippet,
+                segment.getPageNo(), candidate.score(),
+                buildExplain(segment, hitSources, candidate.vectorHit(), titleHit, contentHit, ocrHit, tagHit),
+                anchor, null, null, null, List.of(), segment.getSegmentId(), segment.getKbId(),
+                segment.getAssetId(), segment.getSourceRef(),
+                imagePreview == null ? null : imagePreview.url(),
+                imagePreview == null ? null : imagePreview.expiresAt());
     }
 
-    private List<SearchResultDTO> aggregateByAsset(List<SearchResultDTO> rankedSegments, int limit) {
+    private List<RetrievalHit> aggregateByAsset(List<RetrievalHit> rankedSegments, int limit) {
         if (rankedSegments == null || rankedSegments.isEmpty()) {
             return List.of();
         }
-        Map<String, SearchResultDTO> aggregatedByAsset = new LinkedHashMap<>();
-        for (SearchResultDTO item : rankedSegments) {
+        Map<String, RetrievalHit> aggregatedByAsset = new LinkedHashMap<>();
+        for (RetrievalHit item : rankedSegments) {
             String groupKey = resolveAggregateKey(item);
-            SearchResultDTO.TopChunk topChunk = toTopChunk(item);
-            SearchResultDTO aggregated = aggregatedByAsset.get(groupKey);
+            RetrievalTopChunk topChunk = toTopChunk(item);
+            RetrievalHit aggregated = aggregatedByAsset.get(groupKey);
             if (aggregated == null) {
                 aggregatedByAsset.put(groupKey, initAggregateResult(item, topChunk));
                 continue;
             }
-            List<SearchResultDTO.TopChunk> topChunks = aggregated.getTopChunks();
-            if (topChunks == null) {
-                topChunks = new ArrayList<>();
-                aggregated.setTopChunks(topChunks);
-            }
+            List<RetrievalTopChunk> topChunks = new ArrayList<>(aggregated.topChunks());
             topChunks.add(topChunk);
-            int totalHits = aggregated.getTotalHits() == null ? 0 : aggregated.getTotalHits();
-            aggregated.setTotalHits(totalHits + 1);
-            if (!StringUtils.hasText(aggregated.getThumbnail()) && StringUtils.hasText(item.getThumbnail())) {
-                aggregated.setThumbnail(item.getThumbnail());
-            }
-            if (!StringUtils.hasText(aggregated.getOcrSummary()) && StringUtils.hasText(item.getOcrSummary())) {
-                aggregated.setOcrSummary(item.getOcrSummary());
-            }
-            if (!Objects.equals(aggregated.getResultType(), item.getResultType())) {
-                aggregated.setResultType("MIXED");
-            }
+            int totalHits = aggregated.totalHits() == null ? 0 : aggregated.totalHits();
+            String thumbnail = StringUtils.hasText(aggregated.thumbnail())
+                    ? aggregated.thumbnail() : item.thumbnail();
+            String ocrSummary = StringUtils.hasText(aggregated.ocrSummary())
+                    ? aggregated.ocrSummary() : item.ocrSummary();
+            String aggregateResultType = Objects.equals(aggregated.resultType(), item.resultType())
+                    ? aggregated.resultType() : "MIXED";
+            aggregatedByAsset.put(groupKey, withAggregation(
+                    aggregated, aggregateResultType, thumbnail, ocrSummary,
+                    totalHits + 1, topChunks));
         }
         return aggregatedByAsset.values().stream().limit(limit).toList();
     }
 
-    private SearchResultDTO initAggregateResult(SearchResultDTO primary, SearchResultDTO.TopChunk topChunk) {
-        List<SearchResultDTO.TopChunk> topChunks = new ArrayList<>();
-        topChunks.add(topChunk);
-        return SearchResultDTO.builder()
-                .segmentType(primary.getSegmentType())
-                .title(primary.getTitle())
-                .content(primary.getContent())
-                .resultType(primary.getResultType())
-                .assetType(primary.getAssetType())
-                .snippet(primary.getSnippet())
-                .pageNo(primary.getPageNo())
-                .score(primary.getScore())
-                .explain(primary.getExplain())
-                .anchor(primary.getAnchor())
-                .thumbnail(primary.getThumbnail())
-                .ocrSummary(primary.getOcrSummary())
-                .segmentId(primary.getSegmentId())
-                .kbId(primary.getKbId())
-                .assetId(primary.getAssetId())
-                .sourceRef(primary.getSourceRef())
-                .imagePreviewUrl(primary.getImagePreviewUrl())
-                .imagePreviewExpiresAt(primary.getImagePreviewExpiresAt())
-                .totalHits(1)
-                .topChunks(topChunks)
-                .build();
+    private RetrievalHit initAggregateResult(RetrievalHit primary, RetrievalTopChunk topChunk) {
+        return withAggregation(primary, primary.resultType(), primary.thumbnail(), primary.ocrSummary(),
+                1, List.of(topChunk));
     }
 
-    private SearchResultDTO.TopChunk toTopChunk(SearchResultDTO segmentItem) {
-        return SearchResultDTO.TopChunk.builder()
-                .segmentId(segmentItem.getSegmentId())
-                .kbId(segmentItem.getKbId())
-                .segmentType(segmentItem.getSegmentType())
-                .title(segmentItem.getTitle())
-                .content(segmentItem.getContent())
-                .snippet(segmentItem.getSnippet())
-                .explain(segmentItem.getExplain())
-                .score(segmentItem.getScore())
-                .pageNo(segmentItem.getPageNo())
-                .anchor(segmentItem.getAnchor())
-                .sourceRef(segmentItem.getSourceRef())
-                .imagePreviewUrl(segmentItem.getImagePreviewUrl())
-                .imagePreviewExpiresAt(segmentItem.getImagePreviewExpiresAt())
-                .thumbnail(segmentItem.getThumbnail())
-                .ocrSummary(segmentItem.getOcrSummary())
-                .build();
+    private RetrievalHit withAggregation(RetrievalHit source,
+                                         String resultType,
+                                         String thumbnail,
+                                         String ocrSummary,
+                                         int totalHits,
+                                         List<RetrievalTopChunk> topChunks) {
+        return new RetrievalHit(
+                source.segmentType(), source.title(), source.content(), resultType, source.assetType(),
+                source.snippet(), source.pageNo(), source.score(), source.explain(), source.anchor(),
+                thumbnail, ocrSummary, totalHits, topChunks, source.segmentId(), source.kbId(),
+                source.assetId(), source.sourceRef(), source.imagePreviewUrl(), source.imagePreviewExpiresAt());
     }
 
-    private String resolveAggregateKey(SearchResultDTO item) {
+    private RetrievalTopChunk toTopChunk(RetrievalHit segmentItem) {
+        return new RetrievalTopChunk(
+                segmentItem.segmentId(), segmentItem.kbId(), segmentItem.segmentType(),
+                segmentItem.title(), segmentItem.content(), segmentItem.snippet(), segmentItem.explain(),
+                segmentItem.score(), segmentItem.pageNo(), segmentItem.anchor(), segmentItem.sourceRef(),
+                segmentItem.imagePreviewUrl(), segmentItem.imagePreviewExpiresAt(),
+                segmentItem.thumbnail(), segmentItem.ocrSummary());
+    }
+
+    private String resolveAggregateKey(RetrievalHit item) {
         if (item == null) {
             return "";
         }
-        if (StringUtils.hasText(item.getAssetId())) {
-            return item.getAssetId().trim();
+        if (StringUtils.hasText(item.assetId())) {
+            return item.assetId().trim();
         }
-        if (StringUtils.hasText(item.getSegmentId())) {
-            return "__segment__" + item.getSegmentId().trim();
+        if (StringUtils.hasText(item.segmentId())) {
+            return "__segment__" + item.segmentId().trim();
         }
-        if (StringUtils.hasText(item.getSourceRef())) {
-            return "__source__" + item.getSourceRef().trim();
+        if (StringUtils.hasText(item.sourceRef())) {
+            return "__source__" + item.sourceRef().trim();
         }
         return "__fallback__" + item.hashCode();
     }
 
-    private SearchExplainDTO buildExplain(Segment segment,
+    private RetrievalExplain buildExplain(Segment segment,
                                           List<String> hitSources,
                                             boolean vectorHit,
                                             boolean titleHit,
                                             boolean contentHit,
                                             boolean ocrHit,
                                             boolean tagHit) {
-        SearchExplainDTO.MatchedBy matchedBy = SearchExplainDTO.MatchedBy.builder()
-                .vector(vectorHit)
-                .title(titleHit)
-                .content(contentHit)
-                .ocr(ocrHit)
-                .build();
+        RetrievalExplain.MatchedBy matchedBy =
+                new RetrievalExplain.MatchedBy(vectorHit, titleHit, contentHit, ocrHit);
 
-        SearchExplainDTO.TextSignals textSignals = null;
-        SearchExplainDTO.ImageSignals imageSignals = null;
+        RetrievalExplain.TextSignals textSignals = null;
+        RetrievalExplain.ImageSignals imageSignals = null;
 
         if (isTextSegment(segment)) {
-            textSignals = SearchExplainDTO.TextSignals.builder()
-                    .semantic(vectorHit)
-                    .keyword(titleHit || contentHit || ocrHit)
-                    .pageHit(segment.getPageNo() != null)
-                    .chunkHit(segment.getChunkOrder() != null)
-                    .build();
+            textSignals = new RetrievalExplain.TextSignals(
+                    vectorHit, titleHit || contentHit || ocrHit,
+                    segment.getPageNo() != null, segment.getChunkOrder() != null);
         } else if (isImageSegment(segment)) {
-            imageSignals = SearchExplainDTO.ImageSignals.builder()
-                    .vector(vectorHit)
-                    .ocr(ocrHit)
-                    .caption(isImageCaptionSegment(segment) && (titleHit || contentHit))
-                    .tag(tagHit)
-                    .build();
+            imageSignals = new RetrievalExplain.ImageSignals(
+                    vectorHit, ocrHit,
+                    isImageCaptionSegment(segment) && (titleHit || contentHit), tagHit);
         }
 
-        return SearchExplainDTO.builder()
-                .hitSources(hitSources)
-                .matchedBy(matchedBy)
-                .textSignals(textSignals)
-                .imageSignals(imageSignals)
-                .build();
+        return new RetrievalExplain(hitSources, matchedBy, textSignals, imageSignals);
     }
 
     private String pickSnippet(String content, Map<String, String> highlights) {
@@ -902,14 +811,15 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
         return Math.min(limit, 200);
     }
 
-    private SearchFilter buildFilter(SearchQueryDTO query) {
+    private SearchFilter buildFilter(SearchCriteria query) {
         return SearchFilter.builder()
-                .kbIds(kbScopeResolver.resolveVisibleKbIds(query.getKbIds()))
-                .assetIds(query.getAssetIdList() == null || query.getAssetIdList().isEmpty() ? null : List.copyOf(query.getAssetIdList()))
-                .assetTypes(normalizeEnums(query.getAssetTypes()))
-                .hitTypes(normalizeEnums(query.getHitTypes()))
-                .createdFrom(query.getDateRange() == null ? null : query.getDateRange().getFrom())
-                .createdTo(query.getDateRange() == null ? null : query.getDateRange().getTo())
+                .kbIds(searchKnowledgeAcl.resolveVisibleKbIds(query.kbIds()))
+                .assetIds(query.assetIds() == null || query.assetIds().isEmpty()
+                        ? null : List.copyOf(query.assetIds()))
+                .assetTypes(normalizeEnums(query.assetTypes()))
+                .hitTypes(normalizeEnums(query.hitTypes()))
+                .createdFrom(query.createdFrom())
+                .createdTo(query.createdTo())
                 .build();
     }
 
@@ -925,17 +835,17 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
                 .toList();
     }
 
-    private Map<String, List<SearchPageDTO.FacetItemDTO>> buildFacets(List<SearchResultDTO> items) {
+    private Map<String, List<RetrievalFacet>> buildFacets(List<RetrievalHit> items) {
         if (items == null || items.isEmpty()) {
             return Map.of("assetTypes", List.of(), "hitTypes", List.of());
         }
         return Map.of(
-                "assetTypes", toFacet(items.stream().map(SearchResultDTO::getAssetType).toList()),
-                "hitTypes", toFacet(items.stream().map(SearchResultDTO::getSegmentType).toList())
+                "assetTypes", toFacet(items.stream().map(RetrievalHit::assetType).toList()),
+                "hitTypes", toFacet(items.stream().map(RetrievalHit::segmentType).toList())
         );
     }
 
-    private List<SearchPageDTO.FacetItemDTO> toFacet(List<String> values) {
+    private List<RetrievalFacet> toFacet(List<String> values) {
         Map<String, Long> counts = new LinkedHashMap<>();
         for (String value : values) {
             if (!StringUtils.hasText(value)) {
@@ -945,10 +855,7 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
             counts.put(normalized, counts.getOrDefault(normalized, 0L) + 1L);
         }
         return counts.entrySet().stream()
-                .map(entry -> SearchPageDTO.FacetItemDTO.builder()
-                        .value(entry.getKey())
-                        .count(entry.getValue())
-                        .build())
+                .map(entry -> new RetrievalFacet(entry.getKey(), entry.getValue()))
                 .toList();
     }
 
@@ -983,13 +890,26 @@ public class UnifiedSearchServiceImpl implements UnifiedSearchService {
     private record WeightPair(double alpha, double beta) {
     }
 
-    private record SearchResult(List<SearchResultDTO> items,
+    private record SearchResult(List<RetrievalHit> items,
                                 long total,
                                 int textHits,
                                 int vectorHits,
                                 int fusedCount,
                                 int rerankCount,
                                 long latencyMs) {
+    }
+
+    private record SearchCriteria(
+            String query,
+            Integer limit,
+            List<String> kbIds,
+            List<String> assetIds,
+            List<String> assetTypes,
+            List<String> hitTypes,
+            Long createdFrom,
+            Long createdTo,
+            String sort
+    ) {
     }
 
     private record WindowRankItem(int index,

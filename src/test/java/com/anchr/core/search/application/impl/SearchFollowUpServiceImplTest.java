@@ -1,7 +1,8 @@
 package com.anchr.core.search.application.impl;
 
+import com.anchr.core.search.application.api.model.RetrievalHit;
+import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.domain.model.SegmentType;
-import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -24,10 +25,7 @@ class SearchFollowUpServiceImplTest {
                 },
                 new ObjectMapper(),
                 new SimpleMeterRegistry());
-        SearchResultDTO visual = SearchResultDTO.builder()
-                .segmentType(SegmentType.IMAGE_VISUAL.name())
-                .snippet("image title")
-                .build();
+        RetrievalHit visual = hit(SegmentType.IMAGE_VISUAL.name(), "image title", List.of());
 
         assertThat(service.generate("question", List.of(visual))).isEmpty();
         assertThat(calls).hasValue(0);
@@ -43,26 +41,24 @@ class SearchFollowUpServiceImplTest {
                 },
                 new ObjectMapper(),
                 new SimpleMeterRegistry());
-        SearchResultDTO result = SearchResultDTO.builder()
-                .segmentType(SegmentType.IMAGE_VISUAL.name())
-                .snippet("")
-                .topChunks(List.of(
-                        SearchResultDTO.TopChunk.builder()
-                                .segmentType(SegmentType.IMAGE_VISUAL.name())
-                                .snippet("")
-                                .build(),
-                        SearchResultDTO.TopChunk.builder()
-                                .segmentType(
-                                        SegmentType.IMAGE_OCR_BLOCK.name())
-                                .snippet("recognized database diagram")
-                                .score(0.8D)
-                                .build()))
-                .build();
+        RetrievalHit result = hit(SegmentType.IMAGE_VISUAL.name(), "", List.of(
+                chunk(SegmentType.IMAGE_VISUAL.name(), "", null),
+                chunk(SegmentType.IMAGE_OCR_BLOCK.name(), "recognized database diagram", 0.8D)));
 
         assertThat(service.generate("question", List.of(result)))
                 .containsExactly("q1");
         assertThat(prompt.get())
                 .contains("recognized database diagram")
                 .doesNotContain("image title");
+    }
+
+    private RetrievalHit hit(String segmentType, String snippet, List<RetrievalTopChunk> chunks) {
+        return new RetrievalHit(segmentType, null, null, null, null, snippet, null, null,
+                null, null, null, null, null, chunks, null, null, null, null, null, null);
+    }
+
+    private RetrievalTopChunk chunk(String segmentType, String snippet, Double score) {
+        return new RetrievalTopChunk(null, null, segmentType, null, null, snippet, null, score,
+                null, null, null, null, null, null, null);
     }
 }
