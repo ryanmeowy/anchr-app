@@ -7,6 +7,8 @@ import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
+import com.anchr.core.ingestion.application.acl.IngestionRetrievalAcl;
+import com.anchr.core.ingestion.application.model.IngestionIndexSegment;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
@@ -28,7 +30,6 @@ import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy.Profile;
-import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
@@ -88,6 +89,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final AesUtil aesUtil;
     private final StorageTokenIssuer storageTokenIssuer;
     private final IngestionIndexFinalizer ingestionIndexFinalizer;
+    private final IngestionRetrievalAcl ingestionRetrievalAcl;
     private final IngestionStageTransactionCoordinator transactionCoordinator;
     private final IngestionObjectStoragePort objectStoragePort;
     private final StorageConfigRepository storageConfigRepository;
@@ -216,7 +218,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     .progress(Math.max(item.getProgress(), 55))
                     .build();
 
-            List<Segment> segments = prepareSegments(item, asset, parsedJob.result());
+            List<IngestionIndexSegment> segments = prepareSegments(item, asset, parsedJob.result());
             if (!transactionCoordinator.advanceAndUpdateAssetStatus(
                     item, IngestionStage.INDEX, 75, asset,
                     DocumentParseStatus.SUCCESS.name(),
@@ -228,7 +230,10 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     .progress(Math.max(item.getProgress(), 75))
                     .build();
 
-            if (!ingestionIndexFinalizer.finalizeIndex(item, asset, segments)) return;
+            var writeReceipt = ingestionRetrievalAcl.replaceGeneration(item, asset, segments);
+            if (!ingestionIndexFinalizer.activateGeneration(
+                    item, asset, IngestionIndexFinalizer.countReadableSegments(segments),
+                    writeReceipt)) return;
             acknowledgeBestEffort(doclingJobId);
             refreshKnowledgeBaseStats(item);
         } catch (WorkerInterruptedException interrupted) {
@@ -363,7 +368,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
     }
 
-    private List<Segment> prepareSegments(
+    private List<IngestionIndexSegment> prepareSegments(
             IngestionTaskItem item, Asset asset, ParseResponse parsed) {
         boolean parsedContentIsEmpty = parsed.chunks() == null || parsed.chunks().isEmpty();
         long generation = requireTargetIndexGeneration(item);
@@ -386,73 +391,59 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
 
         Profile profile = Profile.fromMulti(embeddingPort.isMulti());
-        List<Segment> segments = buildSegments(asset, chunks, generation, profile);
+        List<IngestionIndexSegment> segments = buildSegments(asset, chunks, generation, profile);
         String imageInput = EmbeddingProjectionPolicy.requiresImageVisual(
                 profile, asset.getFileType()) ? resolveImageEmbeddingUrl(asset) : null;
         return applyEmbeddings(asset, segments, profile, imageInput);
     }
 
-    private List<Segment> buildSegments(
+    private List<IngestionIndexSegment> buildSegments(
             Asset asset, List<Chunk> chunks, long generation, Profile profile) {
         long createdAt = System.currentTimeMillis();
-        List<Segment> segments = new ArrayList<>();
+        List<IngestionIndexSegment> segments = new ArrayList<>();
         for (Chunk chunk : chunks) {
             if (chunk == null || !StringUtils.hasText(chunk.getSegmentId())) continue;
-            segments.add(Segment.builder()
-                    .segmentId(chunk.getSegmentId())
-                    .kbId(chunk.getKbId())
-                    .assetId(asset.getId())
-                    .indexGeneration(generation)
-                    .assetType(asset.getFileType())
-                    .segmentType(chunk.getSegmentType() != null
-                            ? chunk.getSegmentType()
-                            : isImage(asset)
-                                    ? SegmentType.IMAGE_OCR_BLOCK : SegmentType.TEXT_CHUNK)
-                    .title(chunk.getTitle())
-                    .contentText(chunk.getChunkText())
-                    .ocrText(chunk.getOcrText())
-                    .pageNo(chunk.getPageNo())
-                    .chunkOrder(chunk.getChunkOrder())
-                    .sourceRef(chunk.getSourceRef())
-                    .imageWidth(chunk.getImageWidth())
-                    .imageHeight(chunk.getImageHeight())
-                    .createdAt(createdAt)
-                    .bbox(chunk.getBboxInfos())
-                    .build());
+            SegmentType segmentType = chunk.getSegmentType() != null
+                    ? chunk.getSegmentType()
+                    : isImage(asset) ? SegmentType.IMAGE_OCR_BLOCK : SegmentType.TEXT_CHUNK;
+            segments.add(new IngestionIndexSegment(
+                    chunk.getSegmentId(), chunk.getKbId(), asset.getId(), generation,
+                    asset.getFileType(), segmentType.name(), chunk.getTitle(),
+                    chunk.getChunkText(), chunk.getOcrText(), chunk.getPageNo(),
+                    chunk.getChunkOrder(), chunk.getBboxInfos(), chunk.getImageWidth(),
+                    chunk.getImageHeight(), null, chunk.getSourceRef(), null, null,
+                    null, createdAt));
         }
         if (EmbeddingProjectionPolicy.requiresImageVisual(profile, asset.getFileType())) {
-            segments.add(Segment.builder()
-                    .segmentId(idGen.nextIdStr())
-                    .kbId(asset.getKbId())
-                    .assetId(asset.getId())
-                    .indexGeneration(generation)
-                    .assetType(asset.getFileType())
-                    .segmentType(SegmentType.IMAGE_VISUAL)
-                    .chunkOrder(0)
-                    .title(StringUtils.hasText(asset.getTitle())
-                            ? asset.getTitle() : asset.getFileName())
-                    .sourceRef(stableSourceRef(asset))
-                    .createdAt(createdAt)
-                    .build());
+            segments.add(new IngestionIndexSegment(
+                    idGen.nextIdStr(), asset.getKbId(), asset.getId(), generation,
+                    asset.getFileType(), SegmentType.IMAGE_VISUAL.name(),
+                    StringUtils.hasText(asset.getTitle()) ? asset.getTitle() : asset.getFileName(),
+                    null, null, null, 0, null, null, null, null,
+                    stableSourceRef(asset), null, null, null, createdAt));
         }
         return segments;
     }
 
-    private List<Segment> applyEmbeddings(
-            Asset asset, List<Segment> segments, Profile profile, String imageInput) {
-        List<Segment> embedded = new ArrayList<>(segments.size());
-        for (Segment segment : segments) {
-            String imageSource = switch (segment.getSegmentType()) {
+    private List<IngestionIndexSegment> applyEmbeddings(
+            Asset asset,
+            List<IngestionIndexSegment> segments,
+            Profile profile,
+            String imageInput) {
+        List<IngestionIndexSegment> embedded = new ArrayList<>(segments.size());
+        for (IngestionIndexSegment segment : segments) {
+            SegmentType segmentType = SegmentType.valueOf(segment.segmentType());
+            String imageSource = switch (segmentType) {
                 case IMAGE_VISUAL -> imageInput;
-                case DOCUMENT_IMAGE -> StringUtils.hasText(segment.getSourceRef())
-                        ? objectStoragePort.buildImageEmbeddingUrl(segment.getSourceRef()) : null;
+                case DOCUMENT_IMAGE -> StringUtils.hasText(segment.sourceRef())
+                        ? objectStoragePort.buildImageEmbeddingUrl(segment.sourceRef()) : null;
                 default -> null;
             };
             Optional<EmbeddingProjection> projection = EmbeddingProjectionPolicy.select(
-                    profile, asset.getFileType(), segment.getSegmentType(),
-                    segment.getContentText(), segment.getOcrText(), imageSource);
+                    profile, asset.getFileType(), segmentType,
+                    segment.contentText(), segment.ocrText(), imageSource);
             if (projection.isEmpty()) {
-                embedded.add(segment.toBuilder().embedding(null).build());
+                embedded.add(segment.withEmbedding(null));
                 continue;
             }
             EmbeddingProjection selected = projection.get();
@@ -460,7 +451,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             if (embedding == null || embedding.isEmpty()) {
                 throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
             }
-            embedded.add(segment.toBuilder().embedding(embedding).build());
+            embedded.add(segment.withEmbedding(embedding));
         }
         return embedded;
     }

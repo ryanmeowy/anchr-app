@@ -8,7 +8,7 @@ import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.ingestion.application.impl.IngestionImagePaths;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
-import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.kb.application.acl.KnowledgeRetrievalCleanupAcl;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,7 +36,7 @@ public class OutboxEventProcessor {
     private static final List<Long> RETRY_DELAYS_MINUTES = List.of(1L, 5L, 30L, 120L, 720L, 1440L);
 
     private final OutboxEventRepository outboxEventRepository;
-    private final SegmentRepository segmentRepository;
+    private final KnowledgeRetrievalCleanupAcl knowledgeRetrievalCleanupAcl;
     private final ObjectMapper objectMapper;
     private final IngestionTaskRepository ingestionTaskRepository;
     private final IngestionObjectStoragePort objectStoragePort;
@@ -77,14 +77,15 @@ public class OutboxEventProcessor {
                     cleanupIngestionImages(
                             payload.assetId(),
                             ingestionTaskRepository.listTargetIndexGenerations(payload.assetId()));
-                    segmentRepository.deleteByAssetId(payload.assetId());
+                    knowledgeRetrievalCleanupAcl.deleteAsset(
+                            payload.kbId(), payload.assetId());
                 }
                 case DELETE_ASSET_GENERATION -> {
                     DocumentIndexGenerationDeletePayload payload =
                             readGenerationDeletePayload(event);
                     cleanupIngestionImages(payload.assetId(), List.of(payload.indexGeneration()));
-                    segmentRepository.deleteByAssetGeneration(
-                            payload.assetId(), payload.indexGeneration());
+                    knowledgeRetrievalCleanupAcl.deleteGeneration(
+                            payload.kbId(), payload.assetId(), payload.indexGeneration());
                 }
                 case UNKNOWN -> {
                     failPermanently(

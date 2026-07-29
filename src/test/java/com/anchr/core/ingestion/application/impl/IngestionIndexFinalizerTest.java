@@ -5,13 +5,10 @@ import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
-import com.anchr.core.ingestion.infrastructure.persistence.es.SegmentBulkWriter;
 import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
-import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.domain.model.SegmentType;
-import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.search.application.api.model.RetrievalGenerationWriteReceipt;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,7 +16,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,8 +31,6 @@ class IngestionIndexFinalizerTest {
 
     @Mock private AssetRepository assetRepository;
     @Mock private IngestionTaskRepository repository;
-    @Mock private SegmentRepository segmentRepository;
-    @Mock private SegmentBulkWriter bulkWriter;
     @Mock private AssetCleanupOutboxRecorder cleanupRecorder;
 
     private IngestionIndexFinalizer finalizer;
@@ -44,14 +38,13 @@ class IngestionIndexFinalizerTest {
     @BeforeEach
     void setUp() {
         finalizer = new IngestionIndexFinalizer(
-                assetRepository, repository, segmentRepository, bulkWriter, cleanupRecorder);
+                assetRepository, repository, cleanupRecorder);
     }
 
     @Test
-    void finalizeIndex_shouldActivateGenerationAndCompleteItem() {
+    void activateGeneration_shouldSwitchGenerationAndCompleteItem() {
         IngestionTaskItem item = item();
         Asset asset = asset();
-        List<Segment> segments = List.of(segment());
         when(repository.isRunningForUpdate("item-1", IngestionStage.INDEX)).thenReturn(true);
         when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
                 .thenReturn(Optional.of(asset));
@@ -63,32 +56,70 @@ class IngestionIndexFinalizerTest {
                 eq("kb-1"), eq("task-1"), eq("item-1"), eq(IngestionStage.INDEX),
                 eq("user-1"), any(LocalDateTime.class))).thenReturn(true);
 
-        assertThat(finalizer.finalizeIndex(item, asset, segments)).isTrue();
+        assertThat(finalizer.activateGeneration(item, asset, 1, receipt())).isTrue();
 
-        verify(segmentRepository).deleteByAssetGeneration("asset-1", 2L);
-        verify(bulkWriter).write(segments);
         verify(cleanupRecorder).generationRetired(
                 eq("kb-1"), eq("asset-1"), eq(1L), eq("user-1"),
                 any(LocalDateTime.class));
     }
 
     @Test
-    void finalizeIndex_whenItemIsNotRunning_shouldStopBeforeExternalWrites() {
+    void activateGeneration_whenItemIsNotRunning_shouldRetireUnactivatedGeneration() {
         when(repository.isRunningForUpdate("item-1", IngestionStage.INDEX)).thenReturn(false);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset()));
 
-        assertThat(finalizer.finalizeIndex(item(), asset(), List.of(segment()))).isFalse();
+        assertThat(finalizer.activateGeneration(item(), asset(), 1, receipt())).isFalse();
 
-        verify(bulkWriter, never()).write(any());
+        verify(cleanupRecorder).generationRetired(
+                eq("kb-1"), eq("asset-1"), eq(2L), eq("user-1"),
+                any(LocalDateTime.class));
+        verify(assetRepository, never()).activateIndexGeneration(
+                any(), any(), any(Long.class), any(Long.class), any(), any(),
+                any(Integer.class), any(Integer.class), any(), any());
     }
 
     @Test
-    void finalizeIndex_whenAssetWasDeleted_shouldFailWholeRun() {
+    void activateGeneration_whenTargetAlreadyActive_shouldNotRetireIt() {
+        Asset activeTarget = asset().toBuilder().activeIndexGeneration(2L).build();
+        when(repository.isRunningForUpdate("item-1", IngestionStage.INDEX)).thenReturn(false);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(activeTarget));
+
+        assertThat(finalizer.activateGeneration(item(), asset(), 1, receipt())).isFalse();
+
+        verify(cleanupRecorder, never()).generationRetired(
+                any(), any(), any(Long.class), any(), any());
+    }
+
+    @Test
+    void activateGeneration_whenAssetWasDeleted_shouldFailShortTransaction() {
         when(repository.isRunningForUpdate("item-1", IngestionStage.INDEX)).thenReturn(true);
         when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> finalizer.finalizeIndex(item(), asset(), List.of(segment())))
+        assertThatThrownBy(() -> finalizer.activateGeneration(
+                item(), asset(), 1, receipt()))
                 .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void activateGeneration_shouldRejectReceiptForAnotherGeneration() {
+        RetrievalGenerationWriteReceipt mismatched =
+                new RetrievalGenerationWriteReceipt(
+                        "kb-1", "asset-1", 3L, 1, "index", "profile");
+
+        assertThatThrownBy(() -> finalizer.activateGeneration(
+                item(), asset(), 1, mismatched))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("receipt");
+
+        verify(repository, never()).isRunningForUpdate(any(), any());
+    }
+
+    private RetrievalGenerationWriteReceipt receipt() {
+        return new RetrievalGenerationWriteReceipt(
+                "kb-1", "asset-1", 2L, 1, "kb_segment_write", "profile");
     }
 
     private IngestionTaskItem item() {
@@ -106,13 +137,6 @@ class IngestionIndexFinalizerTest {
         return Asset.builder()
                 .id("asset-1").kbId("kb-1").fileType("PDF")
                 .activeIndexGeneration(1L)
-                .build();
-    }
-
-    private Segment segment() {
-        return Segment.builder()
-                .segmentId("segment-1").kbId("kb-1").assetId("asset-1")
-                .indexGeneration(2L).segmentType(SegmentType.TEXT_CHUNK)
                 .build();
     }
 }

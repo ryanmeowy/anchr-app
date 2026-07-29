@@ -1,4 +1,4 @@
-package com.anchr.core.ingestion.infrastructure.persistence.es;
+package com.anchr.core.search.infrastructure.persistence.es;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.ErrorCause;
@@ -33,20 +33,20 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class SegmentBulkWriterTest {
+class SearchSegmentBulkWriterTest {
 
     @Mock
     private ElasticsearchClient esClient;
     @Mock
     private SegmentIndexManager segmentIndexManager;
 
-    private SegmentBulkWriter writer;
+    private SearchSegmentBulkWriter writer;
 
     @BeforeEach
     void setUp() {
         SegmentIndexConfig config = new SegmentIndexConfig();
         config.setWriteAlias("kb_segment_write");
-        writer = new SegmentBulkWriter(
+        writer = new SearchSegmentBulkWriter(
                 esClient,
                 config,
                 segmentIndexManager,

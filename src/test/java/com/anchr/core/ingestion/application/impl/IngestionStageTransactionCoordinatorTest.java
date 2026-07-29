@@ -93,16 +93,57 @@ class IngestionStageTransactionCoordinatorTest {
     }
 
     @Test
-    void fail_whenItemAlreadyChanged_shouldNotTouchAsset() {
-        IngestionTaskItem item = item();
+    void fail_whenItemAlreadyChanged_shouldStillRetireUnactivatedGeneration() {
+        IngestionTaskItem item = item().toBuilder().targetIndexGeneration(2L).build();
         when(repository.failRunningItem(any(), any(), any(), any(),
                 any(Integer.class), any(), any(), any(), any())).thenReturn(false);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset(1L)));
 
         assertThat(coordinator.failRunning(
-                item, asset(0L), ApiError.INTERNAL_ERROR, "failed", "FAILED", "FAILED"))
+                item, asset(1L), ApiError.INTERNAL_ERROR, "failed", "FAILED", "FAILED"))
                 .isFalse();
 
-        verify(assetRepository, never()).findByIdForUpdate(any(), any());
+        verify(assetRepository, never()).updateIngestionResult(
+                any(), any(), any(), any(), any(Integer.class), any(Integer.class),
+                any(), any(), any(), any());
+        verify(cleanupRecorder).generationRetired(
+                eq("kb-1"), eq("asset-1"), eq(2L), eq("user-1"),
+                any(LocalDateTime.class));
+    }
+
+    @Test
+    void fail_whenTargetGenerationIsAlreadyActive_shouldNeverRetireIt() {
+        IngestionTaskItem item = item().toBuilder().targetIndexGeneration(2L).build();
+        when(repository.failRunningItem(any(), any(), any(), any(),
+                any(Integer.class), any(), any(), any(), any())).thenReturn(false);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset(2L)));
+
+        assertThat(coordinator.failRunning(
+                item, asset(1L), ApiError.INTERNAL_ERROR, "failed", "FAILED", "FAILED"))
+                .isFalse();
+
+        verify(cleanupRecorder, never()).generationRetired(
+                any(), any(), any(Long.class), any(), any());
+    }
+
+    @Test
+    void fail_whenAssetWasDeleted_shouldStillRetireRemoteGeneration() {
+        IngestionTaskItem item = item().toBuilder().targetIndexGeneration(2L).build();
+        Asset deleted = asset(1L).toBuilder().deletedAt(LocalDateTime.now()).build();
+        when(repository.failRunningItem(any(), any(), any(), any(),
+                any(Integer.class), any(), any(), any(), any())).thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(deleted));
+
+        assertThat(coordinator.failRunning(
+                item, deleted, ApiError.INTERNAL_ERROR, "failed", "FAILED", "FAILED"))
+                .isTrue();
+
+        verify(cleanupRecorder).generationRetired(
+                eq("kb-1"), eq("asset-1"), eq(2L), eq("user-1"),
+                any(LocalDateTime.class));
     }
 
     private IngestionTaskItem item() {

@@ -89,34 +89,39 @@ public class IngestionStageTransactionCoordinator {
                                String parseStatus,
                                String indexStatus) {
         LocalDateTime now = LocalDateTime.now();
-        if (!ingestionTaskRepository.failRunningItem(
+        boolean failed = ingestionTaskRepository.failRunningItem(
                 item.getKbId(), item.getTaskId(), item.getId(), item.getStage(),
-                item.getProgress(), error.name(), message, updatedBy(item), now)) {
-            return false;
-        }
+                item.getProgress(), error.name(), message, updatedBy(item), now);
         if (asset != null) {
             Asset current = assetRepository.findByIdForUpdate(
                     item.getKbId(), asset.getId()).orElse(null);
-            if (current != null && current.getDeletedAt() == null) {
+            if (failed && current != null && current.getDeletedAt() == null) {
                 assetRepository.updateIngestionResult(
                         item.getKbId(), current.getId(), parseStatus, indexStatus,
                         current.getSegmentCount(), current.getIndexedSegmentCount(),
                         error.name(), message, updatedBy(item), now);
-                retireInactiveGeneration(item, current, now);
             }
+            retireInactiveGeneration(item, asset.getId(), current, now);
         }
-        return true;
+        return failed;
     }
 
     private void retireInactiveGeneration(
-            IngestionTaskItem item, Asset asset, LocalDateTime now) {
+            IngestionTaskItem item,
+            String assetId,
+            Asset current,
+            LocalDateTime now) {
         Long generation = item.getTargetIndexGeneration();
-        if (generation == null || generation < 1L
-                || generation == asset.getActiveIndexGeneration()) {
+        if (generation == null || generation < 1L) {
+            return;
+        }
+        if (current != null
+                && current.getDeletedAt() == null
+                && generation == current.getActiveIndexGeneration()) {
             return;
         }
         assetCleanupOutboxRecorder.generationRetired(
-                item.getKbId(), asset.getId(), generation, updatedBy(item), now);
+                item.getKbId(), assetId, generation, updatedBy(item), now);
     }
 
     private String updatedBy(IngestionTaskItem item) {

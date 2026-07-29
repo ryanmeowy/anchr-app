@@ -1,7 +1,6 @@
 package com.anchr.core.ingestion.application.impl;
 
-import com.anchr.core.search.domain.model.Segment;
-import com.anchr.core.search.domain.model.SegmentType;
+import com.anchr.core.ingestion.application.model.IngestionIndexSegment;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -12,19 +11,19 @@ class IngestionSegmentCountTest {
 
     @Test
     void assetCountShouldExcludeTheAssetLevelVisualProjection() {
-        List<Segment> segments = List.of(
-                segment("ocr-1", SegmentType.IMAGE_OCR_BLOCK),
-                segment("ocr-2", SegmentType.IMAGE_OCR_BLOCK),
-                segment("visual", SegmentType.IMAGE_VISUAL));
+        List<IngestionIndexSegment> segments = List.of(
+                segment("ocr-1", "IMAGE_OCR_BLOCK"),
+                segment("ocr-2", "IMAGE_OCR_BLOCK"),
+                segment("visual", "IMAGE_VISUAL"));
 
         assertThat(IngestionIndexFinalizer.countReadableSegments(segments))
                 .isEqualTo(2);
     }
 
-    private Segment segment(String id, SegmentType type) {
-        return Segment.builder()
-                .segmentId(id)
-                .segmentType(type)
-                .build();
+    private IngestionIndexSegment segment(String id, String type) {
+        return new IngestionIndexSegment(
+                id, "kb-1", "asset-1", 2L, "IMAGE", type,
+                null, null, null, null, 0, null, null, null,
+                null, null, null, null, null, 1L);
     }
 }

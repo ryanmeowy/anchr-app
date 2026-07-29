@@ -1,4 +1,4 @@
-package com.anchr.core.ingestion.infrastructure.persistence.es;
+package com.anchr.core.search.infrastructure.persistence.es;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.Refresh;
@@ -25,19 +25,20 @@ import java.util.List;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class SegmentBulkWriter {
+public class SearchSegmentBulkWriter {
 
     private final ElasticsearchClient esClient;
     private final SegmentIndexConfig kbSegmentConfig;
     private final SegmentIndexManager segmentIndexManager;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
 
-    public void write(List<Segment> segments) {
+    public WriteResult write(List<Segment> segments) {
+        String indexName = kbSegmentConfig.getWriteTargetName();
         if (segments == null || segments.isEmpty()) {
-            return;
+            return new WriteResult(0, indexName, null);
         }
         validateSegments(segments);
-        indexWriteBarrier.withWritePermit(() -> doWrite(segments));
+        return indexWriteBarrier.withWritePermit(() -> doWrite(segments));
     }
 
     private void validateSegments(List<Segment> segments) {
@@ -54,7 +55,7 @@ public class SegmentBulkWriter {
         }
     }
 
-    private void doWrite(List<Segment> segments) {
+    private WriteResult doWrite(List<Segment> segments) {
         SegmentIndexStatusDTO status = segmentIndexManager.status();
         if (!status.isWritable()) {
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
@@ -93,12 +94,17 @@ public class SegmentBulkWriter {
                         .orElse("kb_segment bulk save failed");
                 throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE, reason);
             }
+            return new WriteResult(
+                    segments.size(), indexName, status.getActualProfileFingerprint());
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             log.error("Failed to persist segments to index [{}]", indexName, e);
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE, "Failed to persist segments", e);
         }
+    }
+
+    public record WriteResult(int writtenCount, String indexName, String profileFingerprint) {
     }
 
     private SegmentDocument toDocument(Segment segment) {

@@ -6,9 +6,9 @@ import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
+import com.anchr.core.kb.application.acl.KnowledgeRetrievalCleanupAcl;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
-import com.anchr.core.search.domain.repository.SegmentRepository;
 import com.anchr.core.settings.domain.model.StorageConfig;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,7 +41,7 @@ class OutboxEventProcessorTest {
     @Mock
     private OutboxEventRepository outboxEventRepository;
     @Mock
-    private SegmentRepository segmentRepository;
+    private KnowledgeRetrievalCleanupAcl knowledgeRetrievalCleanupAcl;
     @Mock
     private IngestionTaskRepository ingestionTaskRepository;
     @Mock
@@ -55,7 +55,7 @@ class OutboxEventProcessorTest {
     void setUp() {
         processor = new OutboxEventProcessor(
                 outboxEventRepository,
-                segmentRepository,
+                knowledgeRetrievalCleanupAcl,
                 new ObjectMapper(),
                 ingestionTaskRepository,
                 objectStoragePort,
@@ -70,7 +70,7 @@ class OutboxEventProcessorTest {
 
         processor.process(event);
 
-        verify(segmentRepository).deleteByAssetId("asset-1");
+        verify(knowledgeRetrievalCleanupAcl).deleteAsset("kb-1", "asset-1");
         verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
         verify(outboxEventRepository, never()).markRetry(anyLong(), anyString(), anyInt(), any(), any(), any());
     }
@@ -85,8 +85,8 @@ class OutboxEventProcessorTest {
 
         processor.process(event);
 
-        verify(segmentRepository).deleteByAssetGeneration("asset-1", 4L);
-        verify(segmentRepository, never()).deleteByAssetId(any());
+        verify(knowledgeRetrievalCleanupAcl).deleteGeneration("kb-1", "asset-1", 4L);
+        verify(knowledgeRetrievalCleanupAcl, never()).deleteAsset(any(), any());
         verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
         verify(outboxEventRepository, never())
                 .markRetry(anyLong(), anyString(), anyInt(), any(), any(), any());
@@ -96,7 +96,7 @@ class OutboxEventProcessorTest {
     void process_shouldScheduleFirstRetryAfterOneMinute() {
         OutboxEvent event = event(0, validPayload());
         doThrow(new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE))
-                .when(segmentRepository).deleteByAssetId("asset-1");
+                .when(knowledgeRetrievalCleanupAcl).deleteAsset("kb-1", "asset-1");
         when(outboxEventRepository.markRetry(eq(1L), eq("claim-1"), eq(1), any(), any(), any()))
                 .thenReturn(true);
         ArgumentCaptor<LocalDateTime> retryAt = ArgumentCaptor.forClass(LocalDateTime.class);
@@ -116,7 +116,8 @@ class OutboxEventProcessorTest {
                 0,
                 generationPayload(4L));
         doThrow(new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE))
-                .when(segmentRepository).deleteByAssetGeneration("asset-1", 4L);
+                .when(knowledgeRetrievalCleanupAcl)
+                .deleteGeneration("kb-1", "asset-1", 4L);
         when(outboxEventRepository.markRetry(
                 eq(1L), eq("claim-1"), eq(1), any(), any(), any()))
                 .thenReturn(true);
@@ -136,7 +137,7 @@ class OutboxEventProcessorTest {
     void process_shouldMoveTenthFailureToFailed() {
         OutboxEvent event = event(9, validPayload());
         doThrow(new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE))
-                .when(segmentRepository).deleteByAssetId("asset-1");
+                .when(knowledgeRetrievalCleanupAcl).deleteAsset("kb-1", "asset-1");
         when(outboxEventRepository.markFailed(eq(1L), eq("claim-1"), eq(10), any(), any()))
                 .thenReturn(true);
 
@@ -155,8 +156,9 @@ class OutboxEventProcessorTest {
         processor.process(event);
 
         verify(outboxEventRepository).markFailed(eq(1L), eq("claim-1"), eq(0), any(), any());
-        verify(segmentRepository, never()).deleteByAssetId(any());
-        verify(segmentRepository, never()).deleteByAssetGeneration(any(), anyLong());
+        verify(knowledgeRetrievalCleanupAcl, never()).deleteAsset(any(), any());
+        verify(knowledgeRetrievalCleanupAcl, never())
+                .deleteGeneration(any(), any(), anyLong());
     }
 
     @Test
@@ -173,8 +175,9 @@ class OutboxEventProcessorTest {
 
         verify(outboxEventRepository).markFailed(
                 eq(1L), eq("claim-1"), eq(0), any(), any());
-        verify(segmentRepository, never()).deleteByAssetId(any());
-        verify(segmentRepository, never()).deleteByAssetGeneration(any(), anyLong());
+        verify(knowledgeRetrievalCleanupAcl, never()).deleteAsset(any(), any());
+        verify(knowledgeRetrievalCleanupAcl, never())
+                .deleteGeneration(any(), any(), anyLong());
         verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());
     }
 
@@ -188,8 +191,9 @@ class OutboxEventProcessorTest {
         processor.process(event);
 
         verify(outboxEventRepository).markFailed(eq(1L), eq("claim-1"), eq(0), any(), any());
-        verify(segmentRepository, never()).deleteByAssetId(any());
-        verify(segmentRepository, never()).deleteByAssetGeneration(any(), anyLong());
+        verify(knowledgeRetrievalCleanupAcl, never()).deleteAsset(any(), any());
+        verify(knowledgeRetrievalCleanupAcl, never())
+                .deleteGeneration(any(), any(), anyLong());
     }
 
     @Test
@@ -206,7 +210,8 @@ class OutboxEventProcessorTest {
 
         verify(objectStoragePort).deleteObjectsByPrefix(
                 "embedded/ingestion/assets/asset-1/generations/4/images/");
-        verify(segmentRepository).deleteByAssetGeneration("asset-1", 4L);
+        verify(knowledgeRetrievalCleanupAcl)
+                .deleteGeneration("kb-1", "asset-1", 4L);
         verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
     }
 
@@ -226,8 +231,8 @@ class OutboxEventProcessorTest {
 
         processor.process(event);
 
-        verify(segmentRepository, never())
-                .deleteByAssetGeneration(anyString(), anyLong());
+        verify(knowledgeRetrievalCleanupAcl, never())
+                .deleteGeneration(anyString(), anyString(), anyLong());
         verify(outboxEventRepository).markRetry(
                 eq(1L), eq("claim-1"), eq(1), any(), eq("OSS unavailable"), any());
         verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());

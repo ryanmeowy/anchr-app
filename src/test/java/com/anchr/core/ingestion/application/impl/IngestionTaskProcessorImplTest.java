@@ -1,8 +1,11 @@
 package com.anchr.core.ingestion.application.impl;
 
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
+import com.anchr.core.ingestion.application.acl.IngestionRetrievalAcl;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
@@ -17,6 +20,7 @@ import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.anchr.core.search.domain.model.SegmentType;
+import com.anchr.core.search.application.api.model.RetrievalGenerationWriteReceipt;
 import com.anchr.core.settings.domain.repository.StorageConfigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +52,7 @@ class IngestionTaskProcessorImplTest {
     @Mock private AesUtil aesUtil;
     @Mock private StorageTokenIssuer storageTokenIssuer;
     @Mock private IngestionIndexFinalizer finalizer;
+    @Mock private IngestionRetrievalAcl ingestionRetrievalAcl;
     @Mock private IngestionStageTransactionCoordinator coordinator;
     @Mock private IngestionObjectStoragePort objectStoragePort;
     @Mock private StorageConfigRepository storageConfigRepository;
@@ -62,7 +67,8 @@ class IngestionTaskProcessorImplTest {
         Executor direct = Runnable::run;
         processor = new IngestionTaskProcessorImpl(
                 direct, repository, assetRepository, knowledgeBaseRepository,
-                embeddingPort, aesUtil, storageTokenIssuer, finalizer, coordinator,
+                embeddingPort, aesUtil, storageTokenIssuer, finalizer,
+                ingestionRetrievalAcl, coordinator,
                 objectStoragePort, storageConfigRepository, chunkMapper, doclingClient,
                 new ObjectMapper(), idGen);
         ReflectionTestUtils.setField(processor, "parsePollInterval", Duration.ofMillis(1));
@@ -99,7 +105,10 @@ class IngestionTaskProcessorImplTest {
         when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("hello", "text")).thenReturn(List.of(0.1f));
-        when(finalizer.finalizeIndex(any(), eq(asset), any())).thenReturn(true);
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+                .thenReturn(receipt());
+        when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
+                .thenReturn(true);
 
         processor.processItem(item);
 
@@ -107,7 +116,9 @@ class IngestionTaskProcessorImplTest {
                 any(), eq(IngestionStage.EMBED), eq(55), eq(asset), any(), any());
         verify(coordinator).advanceAndUpdateAssetStatus(
                 any(), eq(IngestionStage.INDEX), eq(75), eq(asset), any(), any());
-        verify(finalizer).finalizeIndex(any(), eq(asset), any());
+        var order = org.mockito.Mockito.inOrder(ingestionRetrievalAcl, finalizer);
+        order.verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
+        order.verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
         verify(doclingClient).ackJob("job-1");
         verify(repository, never()).advanceRunningItem(any(), any(), any(), any(), any(),
                 anyInt(), any());
@@ -137,13 +148,58 @@ class IngestionTaskProcessorImplTest {
                         .assetId("asset-1").segmentType(SegmentType.DOCUMENT_IMAGE)
                         .sourceRef("images/1.png").build()));
         when(embeddingPort.isMulti()).thenReturn(false);
-        when(finalizer.finalizeIndex(any(), eq(asset), any())).thenReturn(true);
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+                .thenReturn(receipt());
+        when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
+                .thenReturn(true);
 
         processor.processItem(item);
 
         verify(doclingClient, org.mockito.Mockito.times(2)).submitJob(any());
         verify(doclingClient).ackJob("failed");
-        verify(finalizer).finalizeIndex(any(), eq(asset), any());
+        verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
+        verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
+    }
+
+    @Test
+    void processItem_whenRetrievalWriteFails_shouldFailItemWithoutActivatingGeneration() {
+        IngestionTaskItem item = runningItem();
+        Asset asset = asset();
+        ParseResponse response = response();
+        Chunk chunk = Chunk.builder()
+                .segmentId("segment-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .chunkText("hello")
+                .segmentType(SegmentType.TEXT_CHUNK)
+                .build();
+        when(coordinator.ensureTargetIndexGeneration(item)).thenReturn(item);
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(coordinator.updateAssetStatus(any(), eq(asset), any(), any())).thenReturn(true);
+        when(coordinator.advanceAndUpdateAssetStatus(
+                any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
+        when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
+        when(doclingClient.submitJob(any())).thenReturn(
+                new DoclingClient.DoclingJob(
+                        "job-1", "task-1:item-1:1", "succeeded", response, null));
+        when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of(chunk));
+        when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.embed("hello", "text")).thenReturn(List.of(0.1f));
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+                .thenThrow(new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE));
+
+        processor.processItem(item);
+
+        verify(finalizer, never()).activateGeneration(
+                any(), any(), anyInt(), any());
+        verify(coordinator).failRunning(
+                org.mockito.ArgumentMatchers.argThat(failed ->
+                        failed.getStage() == IngestionStage.INDEX),
+                eq(asset), eq(ApiError.SEARCH_BACKEND_UNAVAILABLE),
+                any(), eq("FAILED"), eq("FAILED"));
+        verify(doclingClient, never()).ackJob("job-1");
     }
 
     @Test
@@ -197,5 +253,10 @@ class IngestionTaskProcessorImplTest {
                         "chunk-1", "text", "hello", "hello",
                         List.of(1), 5, null, List.of(), List.of())),
                 List.of(), List.of());
+    }
+
+    private RetrievalGenerationWriteReceipt receipt() {
+        return new RetrievalGenerationWriteReceipt(
+                "kb-1", "asset-1", 1L, 1, "kb_segment_write", "profile");
     }
 }
