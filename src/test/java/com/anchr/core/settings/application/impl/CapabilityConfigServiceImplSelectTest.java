@@ -1,9 +1,11 @@
 package com.anchr.core.settings.application.impl;
 
+import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
-import com.anchr.core.search.application.SegmentIndexManager;
-import com.anchr.core.search.domain.model.EmbeddingProfile;
-import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
+import com.anchr.core.integration.ai.client.ClientCacheManager;
+import com.anchr.core.search.application.api.RetrievalEmbeddingDeploymentApi;
+import com.anchr.core.search.application.api.model.RetrievalEmbeddingDeploymentRequest;
+import com.anchr.core.settings.application.acl.CapabilityRetrievalAcl;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CapabilityConfigServiceImplSelectTest {
 
@@ -22,7 +26,7 @@ class CapabilityConfigServiceImplSelectTest {
         CapabilityConfig active = config(1L, "old-model", true);
         CapabilityConfig target = config(2L, "new-model", false);
         RecordingRepository repository = new RecordingRepository(active, target);
-        RecordingIndexManager indexManager = new RecordingIndexManager();
+        RecordingDeploymentApi deploymentApi = new RecordingDeploymentApi();
 
         CapabilityConfigServiceImpl service = new CapabilityConfigServiceImpl(
                 repository,
@@ -31,14 +35,80 @@ class CapabilityConfigServiceImplSelectTest {
                 null,
                 new CapabilityResolver(repository),
                 null);
-        service.setSegmentIndexManager(indexManager);
+        service.setCapabilityRetrievalAcl(new CapabilityRetrievalAcl(deploymentApi));
 
         service.select("EMBEDDING", 2L);
 
-        assertNotNull(indexManager.requestedProfile);
-        assertEquals("new-model", indexManager.requestedProfile.modelName());
+        assertNotNull(deploymentApi.request);
+        assertEquals(2L, deploymentApi.request.configId());
+        assertEquals("new-model", deploymentApi.request.modelName());
+        assertEquals(1024, deploymentApi.request.dimension());
         assertFalse(repository.selected);
         assertFalse(repository.disabled);
+    }
+
+    @Test
+    void missingOptionalDeploymentCapabilityKeepsImmediateSelectionBehavior() {
+        CapabilityConfig active = config(1L, "old-model", true);
+        CapabilityConfig target = config(2L, "new-model", false);
+        RecordingRepository repository = new RecordingRepository(active, target);
+        CapabilityConfigServiceImpl service = service(repository);
+
+        service.select("EMBEDDING", 2L);
+
+        assertTrue(repository.selected);
+        assertTrue(repository.disabled);
+    }
+
+    @Test
+    void sameEmbeddingProfileSelectsImmediatelyWithoutDeployment() {
+        CapabilityConfig active = config(1L, "same-model", true);
+        CapabilityConfig target = config(2L, "same-model", false);
+        RecordingRepository repository = new RecordingRepository(active, target);
+        RecordingDeploymentApi deploymentApi = new RecordingDeploymentApi();
+        CapabilityConfigServiceImpl service = service(repository);
+        service.setCapabilityRetrievalAcl(new CapabilityRetrievalAcl(deploymentApi));
+
+        service.select("EMBEDDING", 2L);
+
+        assertTrue(repository.selected);
+        assertTrue(repository.disabled);
+        assertEquals(null, deploymentApi.request);
+    }
+
+    @Test
+    void deploymentFailureKeepsExistingServingSelection() {
+        CapabilityConfig active = config(1L, "old-model", true);
+        CapabilityConfig target = config(2L, "new-model", false);
+        RecordingRepository repository = new RecordingRepository(active, target);
+        CapabilityConfigServiceImpl service = service(repository);
+        service.setCapabilityRetrievalAcl(new CapabilityRetrievalAcl(request -> {
+            throw new IllegalStateException("deployment unavailable");
+        }));
+
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                () -> service.select("EMBEDDING", 2L));
+
+        assertEquals("deployment unavailable", failure.getMessage());
+        assertFalse(repository.selected);
+        assertFalse(repository.disabled);
+    }
+
+    private CapabilityConfigServiceImpl service(RecordingRepository repository) {
+        CapabilityClientFactory clientFactory = new CapabilityClientFactory(null) {
+            @Override
+            public Object build(CapabilityConfig config) {
+                return new Object();
+            }
+        };
+        return new CapabilityConfigServiceImpl(
+                repository,
+                null,
+                null,
+                clientFactory,
+                new CapabilityResolver(repository),
+                new ClientCacheManager());
     }
 
     private CapabilityConfig config(Long id, String modelName, boolean enabled) {
@@ -104,36 +174,13 @@ class CapabilityConfigServiceImplSelectTest {
         }
     }
 
-    private static final class RecordingIndexManager implements SegmentIndexManager {
-        private EmbeddingProfile requestedProfile;
+    private static final class RecordingDeploymentApi implements RetrievalEmbeddingDeploymentApi {
+        private RetrievalEmbeddingDeploymentRequest request;
 
         @Override
-        public void asyncCreate() {}
-
-        @Override
-        public boolean retryCreate() {
-            return false;
-        }
-
-        @Override
-        public boolean confirmRebuild(String taskId) {
-            return false;
-        }
-
-        @Override
-        public String prepareRebuild() {
-            return null;
-        }
-
-        @Override
-        public String requestRebuild(EmbeddingProfile targetProfile) {
-            requestedProfile = targetProfile;
+        public String requestDeployment(RetrievalEmbeddingDeploymentRequest request) {
+            this.request = request;
             return "task-1";
-        }
-
-        @Override
-        public SegmentIndexStatusDTO status() {
-            return null;
         }
     }
 }

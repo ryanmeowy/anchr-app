@@ -16,9 +16,11 @@ import co.elastic.clients.elasticsearch.indices.get_mapping.IndexMappingRecord;
 import co.elastic.clients.json.JsonData;
 import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.util.IdGen;
-import com.anchr.core.integration.ai.adapter.ServingEmbeddingConfigActivator;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.application.acl.RetrievalCapabilityAcl;
+import com.anchr.core.search.application.api.RetrievalEmbeddingDeploymentApi;
+import com.anchr.core.search.application.api.model.RetrievalEmbeddingDeploymentRequest;
 import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
@@ -62,7 +64,7 @@ import java.util.function.Supplier;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class SegmentIndexManagerImpl implements SegmentIndexManager {
+public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEmbeddingDeploymentApi {
 
     private static final String SETTINGS_PATH = "es-settings.json";
     private static final String MAPPING_PATH = "es-kb-segment-mapping.json";
@@ -90,11 +92,11 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     private final Executor indexInitExecutor;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
     private final SegmentIndexAliasManager aliasManager;
-    private ServingEmbeddingConfigActivator servingConfigActivator;
+    private RetrievalCapabilityAcl retrievalCapabilityAcl;
 
     @Autowired(required = false)
-    void setServingConfigActivator(ServingEmbeddingConfigActivator activator) {
-        this.servingConfigActivator = activator;
+    void setRetrievalCapabilityAcl(RetrievalCapabilityAcl retrievalCapabilityAcl) {
+        this.retrievalCapabilityAcl = retrievalCapabilityAcl;
     }
 
     // Instance-level lock; use a distributed lock for multi-instance deployments.
@@ -430,6 +432,19 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
     }
 
     @Override
+    public String requestDeployment(RetrievalEmbeddingDeploymentRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Target embedding deployment is required");
+        }
+        return requestRebuild(new EmbeddingProfile(
+                request.configId(),
+                request.capability(),
+                request.modelName(),
+                request.dimension(),
+                request.fingerprint()));
+    }
+
+    @Override
     public boolean confirmRebuild(String taskId) {
         RebuildClaim claim = tryClaimRebuild(taskId);
         if (claim == null) {
@@ -574,17 +589,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
             // 5. alias 原子切换到新索引
             log.info("Rebuild: switching alias from [{}] to [{}]",
                     oldPhysicalIndex, newPhysicalIndex);
-            aliasManager.switchAliases(oldPhysicalIndex, newPhysicalIndex);
-            try {
-                if (servingConfigActivator != null) {
-                    servingConfigActivator.activate(targetProfile);
-                }
-            } catch (Exception activationFailure) {
-                aliasManager.switchAliases(newPhysicalIndex, oldPhysicalIndex);
-                throw new IllegalStateException(
-                        "Embedding config activation failed after alias switch",
-                        activationFailure);
-            }
+            switchAliasesAndActivate(oldPhysicalIndex, newPhysicalIndex, targetProfile);
 
             stateRef.updateAndGet(current -> current.withRebuildProgress(
                     new RebuildProgressState(
@@ -598,6 +603,24 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager {
                     newPhysicalIndex, e);
             cleanupFailedTargetIndex(newPhysicalIndex, readAlias, writeAlias);
             throw e;
+        }
+    }
+
+    void switchAliasesAndActivate(
+            String oldPhysicalIndex,
+            String newPhysicalIndex,
+            EmbeddingProfile targetProfile
+    ) throws Exception {
+        aliasManager.switchAliases(oldPhysicalIndex, newPhysicalIndex);
+        try {
+            if (retrievalCapabilityAcl != null) {
+                retrievalCapabilityAcl.activateServingProfile(targetProfile);
+            }
+        } catch (Exception activationFailure) {
+            aliasManager.switchAliases(newPhysicalIndex, oldPhysicalIndex);
+            throw new IllegalStateException(
+                    "Embedding config activation failed after alias switch",
+                    activationFailure);
         }
     }
 

@@ -10,10 +10,10 @@ import com.anchr.core.integration.ai.client.GenerationClient;
 import com.anchr.core.integration.ai.client.MultiEmbeddingClient;
 import com.anchr.core.integration.ai.client.RerankClient;
 import com.anchr.core.integration.ai.client.TextEmbeddingClient;
-import com.anchr.core.integration.ai.adapter.CapabilityEmbeddingProfileProvider;
-import com.anchr.core.search.application.SegmentIndexManager;
-import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.settings.application.CapabilityConfigService;
+import com.anchr.core.settings.application.acl.CapabilityRetrievalAcl;
+import com.anchr.core.settings.application.model.CapabilityEmbeddingProfileSnapshot;
+import com.anchr.core.settings.application.support.CapabilityEmbeddingProfileFactory;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.model.EmbedParamEnum;
 import com.anchr.core.settings.domain.model.ModelTypeEnum;
@@ -48,11 +48,11 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     private final CapabilityClientFactory clientFactory;
     private final CapabilityResolver configResolver;
     private final ClientCacheManager clientCacheManager;
-    private SegmentIndexManager segmentIndexManager;
+    private CapabilityRetrievalAcl capabilityRetrievalAcl;
 
     @Autowired(required = false)
-    void setSegmentIndexManager(SegmentIndexManager segmentIndexManager) {
-        this.segmentIndexManager = segmentIndexManager;
+    void setCapabilityRetrievalAcl(CapabilityRetrievalAcl capabilityRetrievalAcl) {
+        this.capabilityRetrievalAcl = capabilityRetrievalAcl;
     }
 
     @Override
@@ -155,10 +155,10 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
         if (!existing.isEnabled() || !isEmbeddingCapability(existing.getCapability())) {
             return false;
         }
-        Optional<EmbeddingProfile> current =
-                CapabilityEmbeddingProfileProvider.createProfile(existing);
-        Optional<EmbeddingProfile> next =
-                CapabilityEmbeddingProfileProvider.createProfile(proposed);
+        Optional<CapabilityEmbeddingProfileSnapshot> current =
+                CapabilityEmbeddingProfileFactory.create(existing);
+        Optional<CapabilityEmbeddingProfileSnapshot> next =
+                CapabilityEmbeddingProfileFactory.create(proposed);
         return current.isEmpty()
                 || next.isEmpty()
                 || !current.get().fingerprint().equals(next.get().fingerprint());
@@ -229,20 +229,21 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
 
     @Override
     public void select(String capability, Long id) {
-        if (isEmbeddingCapability(capability) && segmentIndexManager != null) {
+        if (isEmbeddingCapability(capability) && capabilityRetrievalAcl != null) {
             CapabilityConfig selected = repository.findById(id)
                     .filter(config -> capability.equals(config.getCapability()))
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Embedding config not found: " + id));
-            EmbeddingProfile target = CapabilityEmbeddingProfileProvider.createProfile(selected)
+            CapabilityEmbeddingProfileSnapshot target =
+                    CapabilityEmbeddingProfileFactory.create(selected)
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Embedding config does not define a valid profile"));
-            EmbeddingProfile active = configResolver
+            CapabilityEmbeddingProfileSnapshot active = configResolver
                     .activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
-                    .flatMap(CapabilityEmbeddingProfileProvider::createProfile)
+                    .flatMap(CapabilityEmbeddingProfileFactory::create)
                     .orElse(null);
             if (active != null && !active.fingerprint().equals(target.fingerprint())) {
-                segmentIndexManager.requestRebuild(target);
+                capabilityRetrievalAcl.requestDeployment(target);
                 return;
             }
         }
