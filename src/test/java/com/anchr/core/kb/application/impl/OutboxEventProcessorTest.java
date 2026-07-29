@@ -17,11 +17,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -60,6 +63,38 @@ class OutboxEventProcessorTest {
                 objectStoragePort,
                 knowledgeStorageAcl);
         ReflectionTestUtils.setField(processor, "maxAttempts", 10);
+        ReflectionTestUtils.setField(processor, "batchSize", 20);
+        ReflectionTestUtils.setField(processor, "lockLeaseMinutes", 5L);
+        ReflectionTestUtils.setField(processor, "retentionDays", 90L);
+        ReflectionTestUtils.setField(processor, "cleanupBatchSize", 1000);
+    }
+
+    @Test
+    void poll_shouldClaimWithConfiguredBatchAndLeaseThenProcessClaimedEvent() {
+        OutboxEvent event = event(0, validPayload());
+        when(outboxEventRepository.claimAvailable(
+                any(), any(), eq(20), anyString())).thenAnswer(invocation -> {
+                    event.setLockToken(invocation.getArgument(3));
+                    return List.of(event);
+                });
+        when(outboxEventRepository.markDone(
+                eq(1L), anyString(), any())).thenReturn(true);
+        ArgumentCaptor<LocalDateTime> now =
+                ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<LocalDateTime> expiredBefore =
+                ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<String> lockToken =
+                ArgumentCaptor.forClass(String.class);
+
+        processor.poll();
+
+        verify(outboxEventRepository).claimAvailable(
+                now.capture(), expiredBefore.capture(), eq(20), lockToken.capture());
+        assertThat(expiredBefore.getValue().plusMinutes(5))
+                .isEqualTo(now.getValue());
+        assertThat(UUID.fromString(lockToken.getValue())).isNotNull();
+        verify(outboxEventRepository).markDone(
+                eq(1L), eq(lockToken.getValue()), any());
     }
 
     @Test
@@ -237,6 +272,87 @@ class OutboxEventProcessorTest {
         verify(outboxEventRepository).markRetry(
                 eq(1L), eq("claim-1"), eq(1), any(), eq("OSS unavailable"), any());
         verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());
+    }
+
+    @Test
+    void process_shouldRepeatIdempotentImageCleanupWhenRetrievalRetrySucceeds() {
+        OutboxEvent event = event(
+                OutboxEventType.DELETE_ASSET_GENERATION,
+                0,
+                generationPayload(4L));
+        when(knowledgeStorageAcl.findConfiguredPrefix())
+                .thenReturn(Optional.of("embedded"));
+        doThrow(new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE))
+                .doNothing()
+                .when(knowledgeRetrievalCleanupAcl)
+                .deleteGeneration("kb-1", "asset-1", 4L);
+        when(outboxEventRepository.markRetry(
+                eq(1L), eq("claim-1"), eq(1), any(), any(), any()))
+                .thenReturn(true);
+
+        processor.process(event);
+        event.setRetryCount(1);
+        event.setLockToken("claim-2");
+        when(outboxEventRepository.markDone(
+                eq(1L), eq("claim-2"), any())).thenReturn(true);
+        processor.process(event);
+
+        verify(objectStoragePort, org.mockito.Mockito.times(2))
+                .deleteObjectsByPrefix(
+                        "embedded/ingestion/assets/asset-1/generations/4/images/");
+        verify(knowledgeRetrievalCleanupAcl, org.mockito.Mockito.times(2))
+                .deleteGeneration("kb-1", "asset-1", 4L);
+        verify(outboxEventRepository).markDone(
+                eq(1L), eq("claim-2"), any());
+    }
+
+    @Test
+    void process_assetDeleteShouldCleanEveryKnownGenerationBeforeRetrieval() {
+        OutboxEvent event = event(0, validPayload());
+        when(ingestionTaskRepository.listTargetIndexGenerations("asset-1"))
+                .thenReturn(List.of(2L, 4L));
+        when(knowledgeStorageAcl.findConfiguredPrefix())
+                .thenReturn(Optional.of("embedded"));
+        when(outboxEventRepository.markDone(
+                eq(1L), eq("claim-1"), any())).thenReturn(true);
+
+        processor.process(event);
+
+        var ordered = org.mockito.Mockito.inOrder(
+                objectStoragePort, knowledgeRetrievalCleanupAcl);
+        ordered.verify(objectStoragePort).deleteObjectsByPrefix(
+                "embedded/ingestion/assets/asset-1/generations/2/images/");
+        ordered.verify(objectStoragePort).deleteObjectsByPrefix(
+                "embedded/ingestion/assets/asset-1/generations/4/images/");
+        ordered.verify(knowledgeRetrievalCleanupAcl)
+                .deleteAsset("kb-1", "asset-1");
+    }
+
+    @Test
+    void cleanupDoneEvents_shouldUseConfiguredRetentionAndBatch() {
+        ArgumentCaptor<LocalDateTime> processedBefore =
+                ArgumentCaptor.forClass(LocalDateTime.class);
+        LocalDateTime before = LocalDateTime.now().minusDays(90);
+
+        processor.cleanupDoneEvents();
+
+        verify(outboxEventRepository)
+                .deleteDoneBefore(processedBefore.capture(), eq(1000));
+        assertThat(processedBefore.getValue())
+                .isBetween(before.minusSeconds(1), before.plusSeconds(2));
+    }
+
+    @Test
+    void cleanupDoneEvents_shouldKeepConfiguredCronAndBeijingZone()
+            throws Exception {
+        Method method = OutboxEventProcessor.class
+                .getMethod("cleanupDoneEvents");
+        Scheduled scheduled = method.getAnnotation(Scheduled.class);
+
+        assertThat(scheduled).isNotNull();
+        assertThat(scheduled.cron())
+                .isEqualTo("${app.outbox.cleanup-cron:0 0 3 * * *}");
+        assertThat(scheduled.zone()).isEqualTo("Asia/Shanghai");
     }
 
     private OutboxEvent event(int retryCount, String payload) {
