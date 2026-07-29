@@ -39,7 +39,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
-import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -102,7 +102,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final ConversationKnowledgeAcl conversationKnowledgeAcl;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
-    private final ActivityEventService activityEventService;
+    private final ConversationActivityAcl conversationActivityAcl;
     private final AgentTaskRepository agentTaskRepository;
     private final TransactionTemplate transactionTemplate;
     private final Executor streamExecutor;
@@ -120,7 +120,7 @@ public class ConversationServiceImpl implements ConversationService {
                                    ConversationKnowledgeAcl conversationKnowledgeAcl,
                                    ObjectMapper objectMapper,
                                    MeterRegistry meterRegistry,
-                                   ActivityEventService activityEventService,
+                                   ConversationActivityAcl conversationActivityAcl,
                                    AgentTaskRepository agentTaskRepository,
                                    TransactionTemplate transactionTemplate,
                                    @Qualifier("streamEventExecutor") Executor streamExecutor,
@@ -137,7 +137,7 @@ public class ConversationServiceImpl implements ConversationService {
         this.conversationKnowledgeAcl = Objects.requireNonNull(conversationKnowledgeAcl);
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.meterRegistry = Objects.requireNonNull(meterRegistry);
-        this.activityEventService = Objects.requireNonNull(activityEventService);
+        this.conversationActivityAcl = Objects.requireNonNull(conversationActivityAcl);
         this.agentTaskRepository = Objects.requireNonNull(agentTaskRepository);
         this.transactionTemplate = Objects.requireNonNull(transactionTemplate);
         this.streamExecutor = Objects.requireNonNull(streamExecutor);
@@ -209,7 +209,7 @@ public class ConversationServiceImpl implements ConversationService {
         agentConversationCleanupService.cancelRunning(sessionId);
         conversationRepository.deleteSession(sessionId);
         agentConversationCleanupService.deleteRecords(sessionId);
-        activityEventService.deleteBySessionId(sessionId);
+        conversationActivityAcl.deleteBySessionId(sessionId);
     }
 
     @Override
@@ -296,7 +296,7 @@ public class ConversationServiceImpl implements ConversationService {
         boolean traditionalKnowledgeBaseQuestion = executionResult.intent() != null
                 && executionResult.intent().type() == ConversationIntentType.KB_QUERY;
         if (agentQuestion || traditionalKnowledgeBaseQuestion) {
-            activityEventService.recordQuestionAsked(
+            conversationActivityAcl.recordQuestionAsked(
                     session.getSessionId(),
                     turn.getTurnId(),
                     turn.getQuery(),

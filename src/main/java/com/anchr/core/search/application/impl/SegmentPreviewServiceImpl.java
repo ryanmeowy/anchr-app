@@ -3,13 +3,11 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.application.context.UserContextHolder;
-import com.anchr.core.kb.application.ActivityEventService;
-import com.anchr.core.kb.application.ActivityQueryService;
 import com.anchr.core.kb.application.api.model.DocumentSummary;
 import com.anchr.core.kb.application.api.model.KnowledgeBaseSummary;
-import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
 import com.anchr.core.search.application.SegmentPreviewService;
 import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
+import com.anchr.core.search.application.acl.SearchActivityAcl;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
@@ -35,8 +33,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
     private final SegmentRepository kbSegmentRepository;
     private final SearchObjectStoragePort objectStoragePort;
     private final PreviewAccessCache previewAccessCache;
-    private final ActivityEventService activityEventService;
-    private final ActivityQueryService  activityQueryService;
+    private final SearchActivityAcl searchActivityAcl;
     private final SearchKnowledgeAcl searchKnowledgeAcl;
 
     @Override
@@ -122,15 +119,15 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
 
     private PreviewInfo fetchCitationInfo(PreviewRequestDTO request) {
         if (StringUtils.hasText(request.getRecordId())) {
-            RecentCitationDTO recentCitationDTO = activityQueryService.fetchCitationsById(request.getRecordId());
+            SearchActivityAcl.CitationSnapshot recentCitationDTO = searchActivityAcl.findCitationById(request.getRecordId());
             return PreviewInfo.builder()
-                    .sourceType(recentCitationDTO.getSourceType())
-                    .sourceId(recentCitationDTO.getSourceId())
-                    .sessionId(recentCitationDTO.getSessionId())
-                    .citationIndex(recentCitationDTO.getCitationIndex())
-                    .reason(recentCitationDTO.getCitationReason())
-                    .question(recentCitationDTO.getQuestion())
-                    .anchor(recentCitationDTO.getAnchor())
+                    .sourceType(recentCitationDTO.sourceType())
+                    .sourceId(recentCitationDTO.sourceId())
+                    .sessionId(recentCitationDTO.sessionId())
+                    .citationIndex(recentCitationDTO.citationIndex())
+                    .reason(recentCitationDTO.citationReason())
+                    .question(recentCitationDTO.question())
+                    .anchor(recentCitationDTO.anchor())
                     .build();
         }
 
@@ -152,25 +149,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                        String reason, String question, PreviewAnchorDTO anchor){}
 
     private void recordCitationOpened(PreviewSegmentDTO preview, PreviewRequestDTO request) {
-        PreviewSegmentDTO.CitationContextDTO citationContext = preview.getCitationContext();
-        PreviewRequestDTO.CitationInfo citationInfo = request.getCitationInfo();
-        ActivityEventService.CitationContext cxt = ActivityEventService.CitationContext.builder()
-                .segmentId(preview.getSegmentId())
-                .assetId(preview.getAssetId())
-                .kbId(preview.getKbId())
-                .fileName(preview.getFileName())
-                .title(preview.getTitle())
-                .snippet(preview.getContent())
-                .citationIndex(citationInfo.getCitationIndex())
-                .citationReason(citationContext.getCitationReason())
-                .sourceId(request.getSourceId())
-                .sessionId(request.getSessionId())
-                .sourceType(request.getSourceType())
-                .question(request.getQuestion())
-                .anchor(preview.getAnchor())
-                .chunks(citationInfo.getChunks())
-                .build();
-        activityEventService.recordCitationOpened(cxt);
+        searchActivityAcl.recordCitationOpened(preview, request);
     }
 
     private PreviewAnchorDTO toAnchor(Segment segment) {

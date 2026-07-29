@@ -3,11 +3,9 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.model.BboxInfo;
-import com.anchr.core.kb.application.ActivityEventService;
-import com.anchr.core.kb.application.ActivityQueryService;
 import com.anchr.core.kb.application.api.model.DocumentSummary;
 import com.anchr.core.kb.application.api.model.KnowledgeBaseSummary;
-import com.anchr.core.kb.interfaces.rest.dto.RecentCitationDTO;
+import com.anchr.core.search.application.acl.SearchActivityAcl;
 import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.support.PreviewAccessCache;
 import com.anchr.core.search.domain.model.Segment;
@@ -45,9 +43,7 @@ class SegmentPreviewServiceImplTest {
     @Mock
     private SearchObjectStoragePort objectStoragePort;
     @Mock
-    private ActivityEventService activityEventService;
-    @Mock
-    private ActivityQueryService activityQueryService;
+    private SearchActivityAcl activityEventService;
     @Mock
     private SearchKnowledgeAcl searchKnowledgeAcl;
 
@@ -62,7 +58,6 @@ class SegmentPreviewServiceImplTest {
                 objectStoragePort,
                 previewAccessCache,
                 activityEventService,
-                activityQueryService,
                 searchKnowledgeAcl);
         lenient().when(searchKnowledgeAcl.findActiveKnowledgeBase(anyString()))
                 .thenReturn(Optional.of(new KnowledgeBaseSummary("kb-1", "KB", "ACTIVE")));
@@ -84,15 +79,16 @@ class SegmentPreviewServiceImplTest {
 
         assertThat(result.getContent()).isEqualTo("Original content");
         assertThat(result.getCitationContext().getCitationReason()).isEqualTo("预先生成的引用理由");
-        ArgumentCaptor<ActivityEventService.CitationContext> captor =
-                ArgumentCaptor.forClass(ActivityEventService.CitationContext.class);
-        verify(activityEventService).recordCitationOpened(captor.capture());
-        assertThat(captor.getValue().snippet()).isEqualTo("Original content");
-        assertThat(captor.getValue().citationReason()).isEqualTo("预先生成的引用理由");
-        assertThat(captor.getValue().anchor().getPageNo()).isEqualTo(2);
-        assertThat(captor.getValue().anchor().getChunkOrder()).isEqualTo(7);
-        assertThat(captor.getValue().anchor().getBbox()).hasSize(1);
-        assertThat(captor.getValue().chunks()).extracting(CitationChunkSnapshotDTO::getSegmentId)
+        ArgumentCaptor<com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO> previewCaptor =
+                ArgumentCaptor.forClass(com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO.class);
+        ArgumentCaptor<PreviewRequestDTO> requestCaptor = ArgumentCaptor.forClass(PreviewRequestDTO.class);
+        verify(activityEventService).recordCitationOpened(previewCaptor.capture(), requestCaptor.capture());
+        assertThat(previewCaptor.getValue().getContent()).isEqualTo("Original content");
+        assertThat(previewCaptor.getValue().getCitationContext().getCitationReason()).isEqualTo("预先生成的引用理由");
+        assertThat(previewCaptor.getValue().getAnchor().getPageNo()).isEqualTo(2);
+        assertThat(previewCaptor.getValue().getAnchor().getChunkOrder()).isEqualTo(7);
+        assertThat(previewCaptor.getValue().getAnchor().getBbox()).hasSize(1);
+        assertThat(requestCaptor.getValue().getCitationInfo().getChunks()).extracting(CitationChunkSnapshotDTO::getSegmentId)
                 .containsExactly("seg-1", "seg-2");
     }
 
@@ -131,13 +127,8 @@ class SegmentPreviewServiceImplTest {
                 .imageWidth(1200)
                 .imageHeight(1600)
                 .build();
-        when(activityQueryService.fetchCitationsById("record-1")).thenReturn(RecentCitationDTO.builder()
-                .recordId("record-1")
-                .segmentId("seg-1")
-                .citationReason("历史引用理由")
-                .citationIndex("1")
-                .anchor(persistedAnchor)
-                .build());
+        when(activityEventService.findCitationById("record-1")).thenReturn(new SearchActivityAcl.CitationSnapshot(
+                null, null, null, "1", "历史引用理由", null, persistedAnchor));
         PreviewRequestDTO request = new PreviewRequestDTO();
         request.setRecordId("record-1");
 
@@ -147,7 +138,7 @@ class SegmentPreviewServiceImplTest {
         assertThat(result.getAnchor().getPageNo()).isEqualTo(9);
         assertThat(result.getAnchor().getChunkOrder()).isEqualTo(42);
         assertThat(result.getCitationContext().getCitationReason()).isEqualTo("历史引用理由");
-        verifyNoInteractions(activityEventService);
+        verify(activityEventService).findCitationById("record-1");
     }
 
     @Test

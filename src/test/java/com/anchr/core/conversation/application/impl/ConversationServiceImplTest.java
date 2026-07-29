@@ -2,7 +2,7 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
 import com.anchr.core.conversation.application.ChatResponseService;
@@ -103,7 +103,7 @@ class ConversationServiceImplTest {
     @Mock
     private ConversationKnowledgeAcl kbScopeResolver;
     @Mock
-    private ActivityEventService activityEventService;
+    private ConversationActivityAcl activityEventService;
     @Mock
     private ConversationIntentRouter conversationIntentRouter;
     @Mock

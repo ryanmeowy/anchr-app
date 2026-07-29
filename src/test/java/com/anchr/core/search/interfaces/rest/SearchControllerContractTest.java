@@ -1,6 +1,6 @@
 package com.anchr.core.search.interfaces.rest;
 
-import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.search.application.acl.SearchActivityAcl;
 import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.SearchFollowUpService;
 import com.anchr.core.search.application.SearchQueryRewriteService;
@@ -14,16 +14,18 @@ import com.anchr.core.search.interfaces.rest.assembler.SearchRestAssembler;
 import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -51,16 +53,7 @@ class SearchControllerContractTest {
             result.setIntentCategory("FACT");
             return result;
         };
-        AtomicInteger activityCount = new AtomicInteger();
-        AtomicReference<SearchQueryDTO> activityQuery = new AtomicReference<>();
-        ActivityEventService activity = new NoOpActivityEventService() {
-            @Override
-            public void recordSearchExecuted(SearchQueryDTO query, int total) {
-                activityCount.incrementAndGet();
-                activityQuery.set(query);
-                assertThat(total).isEqualTo(1);
-            }
-        };
+        SearchActivityAcl activity = mock(SearchActivityAcl.class);
         SearchAnswerService answerService = (request, hits) -> null;
         SearchFollowUpService followUpService = (query, hits) -> List.of("next?");
         SearchController controller = new SearchController(
@@ -84,16 +77,8 @@ class SearchControllerContractTest {
 
         assertThat(capturedQuery.get().query()).isEqualTo("rewritten query");
         assertThat(capturedQuery.get().kbIds()).containsExactly("kb-1");
-        assertThat(activityCount).hasValue(1);
-        assertThat(activityQuery.get().getQuery()).isEqualTo("original query");
-    }
-
-    private static class NoOpActivityEventService implements ActivityEventService {
-        public void recordQuestionAsked(String sessionId, String turnId, String question, List<String> kbScope) {}
-        public void recordCitationOpened(CitationContext cxt) {}
-        public void recordDocumentImported(String taskId, String kbId, String status,
-                                           int totalCount, int successCount, int failureCount, int runningCount) {}
-        public void recordSearchExecuted(SearchQueryDTO query, int total) {}
-        public void deleteBySessionId(String sessionId) {}
+        ArgumentCaptor<SearchQueryDTO> activityQuery = ArgumentCaptor.forClass(SearchQueryDTO.class);
+        verify(activity).recordSearchExecuted(activityQuery.capture(), org.mockito.ArgumentMatchers.eq(1));
+        assertThat(activityQuery.getValue().getQuery()).isEqualTo("original query");
     }
 }

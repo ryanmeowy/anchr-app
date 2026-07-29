@@ -46,6 +46,25 @@ public class KnowledgeContentQueryApiImpl implements KnowledgeContentQueryApi {
     }
 
     @Override
+    public List<KnowledgeBaseSummary> findActiveKnowledgeBases(Collection<String> kbIds) {
+        if (kbIds == null || kbIds.isEmpty()) {
+            return List.of();
+        }
+        List<String> normalizedIds = kbIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (normalizedIds.isEmpty()) {
+            return List.of();
+        }
+        List<KnowledgeBase> knowledgeBases = knowledgeBaseRepository.listActiveByIds(normalizedIds);
+        return knowledgeBases == null || knowledgeBases.isEmpty()
+                ? List.of()
+                : knowledgeBases.stream().map(this::toSummary).toList();
+    }
+
+    @Override
     public Optional<KnowledgeBaseSummary> findActiveKnowledgeBase(String kbId) {
         if (kbId == null || kbId.isBlank()) {
             return Optional.empty();

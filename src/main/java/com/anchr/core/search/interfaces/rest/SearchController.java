@@ -2,7 +2,7 @@ package com.anchr.core.search.interfaces.rest;
 
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
-import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.search.application.acl.SearchActivityAcl;
 import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.SearchFollowUpService;
 import com.anchr.core.search.application.SearchQueryRewriteService;
@@ -38,7 +38,7 @@ public class SearchController {
     private final SearchAnswerService kbSearchAnswerService;
     private final SearchQueryRewriteService searchQueryRewriteService;
     private final SearchFollowUpService searchFollowUpService;
-    private final ActivityEventService activityEventService;
+    private final SearchActivityAcl searchActivityAcl;
     private final SearchRestAssembler searchRestAssembler;
 
     @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
@@ -55,7 +55,7 @@ public class SearchController {
                     retrievalResult.items());
         }
         var suggestedQuestions = searchFollowUpService.generate(userQuery, retrievalResult.items());
-        activityEventService.recordSearchExecuted(
+        searchActivityAcl.recordSearchExecuted(
                 query, Math.toIntExact(Math.min(retrievalResult.total(), Integer.MAX_VALUE)));
         SearchPageDTO page = searchRestAssembler.toPageDto(
                 retrievalResult, rewrite, answer, suggestedQuestions);

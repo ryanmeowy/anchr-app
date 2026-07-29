@@ -1,7 +1,7 @@
 package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
-import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.ingestion.application.acl.IngestionActivityAcl;
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
@@ -58,7 +58,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
     private final IngestionTaskRepository ingestionTaskRepository;
     private final IngestionCapabilityService ingestionCapabilityService;
     private final IdGen idGen;
-    private final ActivityEventService activityEventService;
+    private final IngestionActivityAcl ingestionActivityAcl;
     private final IngestionTaskProcessor ingestionTaskProcessor;
     private final IngestionCreateTransactionRunner transactionRunner;
 
@@ -107,8 +107,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 context, kbId, request.sourceType(), items, now,
                 request.clientRequestId(), requestHash);
         ingestionTaskRepository.save(task);
-        activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
-                task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
+        ingestionActivityAcl.recordDocumentImported(task);
         knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), false);
         submitAfterCommit(kbId, task.getId(), context.userId());
         return getTask(kbId, task.getId());
@@ -252,8 +251,7 @@ public class IngestionApplicationServiceImpl implements IngestionApplicationServ
                 .build();
         IngestionTask task = buildTask(context, kbId, sourceType, List.of(item), now);
         ingestionTaskRepository.save(task);
-        activityEventService.recordDocumentImported(task.getId(), task.getKbId(), task.getStatus().name(),
-                task.getTotalCount(), task.getSuccessCount(), task.getFailureCount(), task.getRunningCount());
+        ingestionActivityAcl.recordDocumentImported(task);
         if (sourceType == IngestionSourceType.REPARSE) {
             assetRepository.updateStatuses(kbId, document.getId(),
                     DocumentParseStatus.PENDING.name(), DocumentIndexStatus.PENDING.name(), context.userId(), now);

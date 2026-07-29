@@ -34,6 +34,7 @@ class KnowledgeContentQueryApiImplTest {
         when(knowledgeBaseRepository.searchKbs(null, "ACTIVE", null, null, 100, 0))
                 .thenReturn(List.of(kb));
         when(knowledgeBaseRepository.findActiveById("kb-1")).thenReturn(Optional.of(kb));
+        when(knowledgeBaseRepository.listActiveByIds(List.of("kb-1", "missing"))).thenReturn(List.of(kb));
         when(assetRepository.findActiveById("kb-1", "asset-1")).thenReturn(Optional.of(asset));
         when(assetRepository.findActiveIndexGenerations(List.of("asset-1", "missing")))
                 .thenReturn(Map.of("asset-1", 4L));
@@ -45,6 +46,8 @@ class KnowledgeContentQueryApiImplTest {
             assertThat(summary.status()).isEqualTo("ACTIVE");
         });
         assertThat(api.findActiveKnowledgeBase("kb-1")).get().extracting("name").isEqualTo("Knowledge");
+        assertThat(api.findActiveKnowledgeBases(List.of(" kb-1 ", "missing", "kb-1")))
+                .singleElement().extracting("name").isEqualTo("Knowledge");
         assertThat(api.findActiveDocument("kb-1", "asset-1")).get().satisfies(summary -> {
             assertThat(summary.fileName()).isEqualTo("guide.pdf");
             assertThat(summary.activeIndexGeneration()).isEqualTo(4L);

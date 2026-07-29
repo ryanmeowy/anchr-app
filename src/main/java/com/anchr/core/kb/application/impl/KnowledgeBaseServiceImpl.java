@@ -6,6 +6,7 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.kb.application.KnowledgeBaseService;
+import com.anchr.core.kb.application.acl.KnowledgeActivityAcl;
 import com.anchr.core.kb.application.support.AssetCleanupOutboxRecorder;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.AssetHealthStats;
@@ -17,7 +18,6 @@ import com.anchr.core.kb.domain.model.KnowledgeBaseStats;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.domain.model.SourceTypeCount;
 import com.anchr.core.kb.domain.repository.AssetRepository;
-import com.anchr.core.kb.domain.repository.ActivityEventRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -42,7 +42,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final AssetRepository assetRepository;
-    private final ActivityEventRepository activityEventRepository;
+    private final KnowledgeActivityAcl knowledgeActivityAcl;
     private final AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
     private final IdGen idGen;
 
@@ -221,7 +221,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (!deleted) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
-        activityEventRepository.deleteCitationOpenedByAssetId(context.userId(), assetId);
+        knowledgeActivityAcl.deleteCitationOpenedByAssetId(context.userId(), assetId);
         knowledgeBaseRepository.refreshDocumentStats(kbId, context.userId(), false);
         assetCleanupOutboxRecorder.assetDeleted(
                 kbId,

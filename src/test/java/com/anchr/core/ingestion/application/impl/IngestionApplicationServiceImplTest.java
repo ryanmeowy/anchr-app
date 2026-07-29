@@ -17,7 +17,7 @@ import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
-import com.anchr.core.kb.application.ActivityEventService;
+import com.anchr.core.ingestion.application.acl.IngestionActivityAcl;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
@@ -66,7 +66,7 @@ class IngestionApplicationServiceImplTest {
     @Mock
     private IdGen idGen;
     @Mock
-    private ActivityEventService activityEventService;
+    private IngestionActivityAcl activityEventService;
     @Mock
     private IngestionTaskProcessor ingestionTaskProcessor;
     @Mock
@@ -303,7 +303,7 @@ class IngestionApplicationServiceImplTest {
                 .hasSize(67);
         verify(ingestionTaskRepository).save(any());
         verify(assetRepository).save(any());
-        verify(activityEventService).recordDocumentImported(any(), any(), any(), anyInt(), anyInt(), anyInt(), anyInt());
+        verify(activityEventService).recordDocumentImported(any());
         verify(knowledgeBaseRepository).refreshDocumentStats("kb-1", "user-a", false);
         verify(ingestionTaskProcessor).submit("kb-1", first.task().getId(), "user-a");
     }
@@ -444,7 +444,7 @@ class IngestionApplicationServiceImplTest {
         assertThat(result.created()).isFalse();
         assertThat(result.task()).isSameAs(winner);
         verify(transactionRunner).read(any());
-        verify(activityEventService, never()).recordDocumentImported(any(), any(), any(), anyInt(), anyInt(), anyInt(), anyInt());
+        verify(activityEventService, never()).recordDocumentImported(any());
         verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
     }
 

@@ -13,6 +13,8 @@ public interface KnowledgeContentQueryApi {
 
     List<KnowledgeBaseSummary> listActiveKnowledgeBases();
 
+    List<KnowledgeBaseSummary> findActiveKnowledgeBases(Collection<String> kbIds);
+
     Optional<KnowledgeBaseSummary> findActiveKnowledgeBase(String kbId);
 
     Optional<DocumentSummary> findActiveDocument(String kbId, String assetId);

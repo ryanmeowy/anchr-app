@@ -10,7 +10,7 @@ import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
-import com.anchr.core.kb.domain.repository.ActivityEventRepository;
+import com.anchr.core.kb.application.acl.KnowledgeActivityAcl;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,7 +40,7 @@ class KnowledgeBaseServiceImplTest {
     @Mock
     private AssetRepository assetRepository;
     @Mock
-    private ActivityEventRepository activityEventRepository;
+    private KnowledgeActivityAcl activityEventRepository;
     @Mock
     private AssetCleanupOutboxRecorder assetCleanupOutboxRecorder;
     @Mock
@@ -132,6 +132,22 @@ class KnowledgeBaseServiceImplTest {
         assertThatThrownBy(() -> service.deleteDocument("kb-1", "asset-1"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("database unavailable");
+    }
+
+    @Test
+    void deleteDocument_shouldPropagateSynchronousActivityCleanupFailureForTransactionRollback() {
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset("asset-1", 5L)));
+        when(assetRepository.markDeleted(eq("kb-1"), eq("asset-1"), eq("user-a"), any()))
+                .thenReturn(true);
+        doThrow(new IllegalStateException("activity cleanup unavailable"))
+                .when(activityEventRepository).deleteCitationOpenedByAssetId("user-a", "asset-1");
+
+        assertThatThrownBy(() -> service.deleteDocument("kb-1", "asset-1"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("activity cleanup unavailable");
+
+        verify(assetCleanupOutboxRecorder, never()).assetDeleted(any(), any(), any(), any());
     }
 
     @Test
