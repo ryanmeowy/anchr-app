@@ -272,8 +272,6 @@ Anchr Web 默认连接当前 API 的 `http://127.0.0.1:8080`。
 ### 延伸阅读
 
 - [Agent RAG 完整工作流](./docs/agent-rag-workflow.md)
-- [Agentic RAG 演进计划](./docs/agentic-rag-evolution-plan.md)
-- [Intent Routing 报告](./docs/agent-rag-intent-routing-report.md)
 - [领域边界与交互](./docs/domain-boundaries-and-interactions.md)
 
 ## 生产部署提示

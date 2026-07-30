@@ -272,8 +272,6 @@ See [`project_layout.text`](./project_layout.text) for the maintained repository
 ### Further reading
 
 - [Agent RAG workflow](./docs/agent-rag-workflow.md)
-- [Agentic RAG evolution plan](./docs/agentic-rag-evolution-plan.md)
-- [Intent-routing report](./docs/agent-rag-intent-routing-report.md)
 - [Domain boundaries and interactions](./docs/domain-boundaries-and-interactions.md)
 
 ## Production notes

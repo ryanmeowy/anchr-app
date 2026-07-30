@@ -27,68 +27,40 @@ Anchr App 后端是一个 Spring Boot 模块化单体。所有模块运行在同
 
 ```mermaid
 flowchart LR
-    UI["REST / SSE 客户端"]
+    ASK["Ask<br/>会话、回答与 Agent"]
+    KC["Knowledge Content<br/>知识库、Asset 与摄取"]
+    RET["Retrieval<br/>索引投影与检索"]
+    ACT["Activity<br/>最近活动读模型"]
 
-    subgraph APP["Anchr App 模块化单体"]
-        AUTH["Auth<br/>认证与用户上下文"]
-        ASK["Ask<br/>conversation + agent"]
-        KC["Knowledge Content<br/>kb + ingestion"]
-        RET["Retrieval<br/>search"]
-        ACT["Activity<br/>最近活动读模型"]
-        CAP["Capability & Provider<br/>settings + integration"]
-        COMMON["Technical Kernel<br/>common"]
-    end
+    ASK -->|"查询知识范围"| KC
+    ASK -->|"检索、阅读与引用"| RET
+    KC -->|"写入或清理 generation 投影"| RET
+    RET -->|"校验 Asset 与 active generation"| KC
 
-    MYSQL[("MySQL")]
-    ES[("Elasticsearch")]
-    REDIS[("Redis")]
-    OSS[("Object Storage")]
-    AI["AI Providers"]
-    DOCLING["Docling"]
-
-    UI --> AUTH
-    UI --> ASK
-    UI --> KC
-    UI --> RET
-    UI --> ACT
-    UI --> CAP
-
-    ASK -->|"KnowledgeContentQueryApi"| KC
-    ASK -->|"Retrieval APIs"| RET
-    KC -->|"Generation index / cleanup APIs"| RET
-    RET -->|"KnowledgeContentQueryApi"| KC
-    RET -->|"CapabilityServingConfigApi"| CAP
-    CAP -->|"Embedding deployment API"| RET
-
-    AUTH -->|"StorageRuntimeApi"| CAP
-    ASK -.->|"best-effort record"| ACT
-    KC -.->|"best-effort record"| ACT
-    RET -.->|"best-effort record"| ACT
-    ACT -->|"KnowledgeContentQueryApi"| KC
-
-    ASK --> MYSQL
-    KC --> MYSQL
-    ACT --> MYSQL
-    CAP --> MYSQL
-    RET --> ES
-    AUTH --> REDIS
-    ASK --> REDIS
-
-    CAP --> AI
-    CAP --> OSS
-    KC --> DOCLING
-    KC --> OSS
-    RET --> OSS
-
-    COMMON --- AUTH
-    COMMON --- ASK
-    COMMON --- KC
-    COMMON --- RET
-    COMMON --- ACT
-    COMMON --- CAP
+    ASK -.->|"记录活动"| ACT
+    KC -.->|"记录活动"| ACT
+    RET -.->|"记录活动"| ACT
 ```
 
-箭头表示依赖方向，不表示状态归属。跨上下文调用默认经过提供方 Application API 和调用方 ACL；外部供应商能力则由消费侧 Domain Port 与 `integration` 适配器连接。
+读图方式：
+
+- 实线表示核心业务调用，箭头指向被依赖的上下文，不表示状态归属。
+- 虚线表示 best-effort 活动记录；记录失败通常不回滚主业务。
+- Knowledge Content 与 Retrieval 双向协作，但各自负责不同事实：前者决定 Asset 和 active generation，后者维护 Segment 投影并执行检索。
+- 跨上下文调用默认经过调用方 ACL 和提供方 Application API。
+
+支撑上下文和技术资源
+
+| 支撑边界 | 在当前系统中的作用 | 主要连接 |
+| --- | --- | --- |
+| Auth | 认证、角色和请求用户上下文 | 所有 REST/SSE 入口；需要临时存储凭证时调用 Capability |
+| Capability & Provider | 管理 AI/存储配置并适配外部供应商 | 为 Ask、Knowledge Content、Retrieval 和 Auth 实现各自的 Domain Port |
+| Technical Kernel | 统一错误、返回值、ID、加密和技术配置 | 被各模块复用，但不拥有业务状态 |
+| MySQL | 权威业务事实、任务和可靠补偿事件 | Knowledge Content、Ask、Activity、Capability |
+| Elasticsearch | Segment 检索投影和物理索引拓扑 | Retrieval |
+| Redis | 认证、缓存、ID 号段和 Agent 运行快照 | Auth、Ask 及技术基础设施 |
+| Object Storage | 原始文档、预览资源和摄取图片 | Knowledge Content、Retrieval 通过各自端口访问 |
+| AI Providers / Docling | 生成、Embedding、Rerank 和文档解析 | 通过 Capability/Integration 或消费侧端口接入 |
 
 ## 3. 领域边界与状态所有权
 
