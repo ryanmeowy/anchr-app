@@ -38,7 +38,8 @@ class AgentCitationRendererTest {
         AgentCitationRenderResult rendered = AgentCitationRenderer.render(
                 answer, List.of(evidence("seg-1", "asset-a")));
 
-        assertThat(rendered.answer()).doesNotContain("segment:ID", "seg-1", "[9]", "[1-1]");
+        assertThat(rendered.answer()).doesNotContain("segment:ID", "seg-1", "[1-1]");
+        assertThat(rendered.answer()).contains("[9]");
         assertThat(rendered.references()).isEmpty();
     }
 
@@ -59,12 +60,33 @@ class AgentCitationRendererTest {
     }
 
     @Test
-    void shouldReuseIndexForRepeatedSegmentAndStripModelHierarchicalIndex() {
+    void shouldReuseIndexForRepeatedSegmentAndPreserveUnrelatedBracketedNumber() {
         AgentCitationRenderResult rendered = AgentCitationRenderer.render(
                 "A {{segment:seg-1}}，B {{segment:seg-1}}，伪造 [9-9]。",
                 List.of(evidence("seg-1", "asset-a")));
 
-        assertThat(rendered.answer()).isEqualTo("A [1-1]，B [1-1]，伪造。");
+        assertThat(rendered.answer()).isEqualTo("A [1-1]，B [1-1]，伪造 [9-9]。");
+    }
+
+    @Test
+    void shouldOnlyConvertMarkersAndPreserveOrdinaryBracketedText() {
+        AgentCitationRenderResult rendered = AgentCitationRenderer.render(
+                "普通 [1]，数组 arr[1]，区间 [2024-2025]，链接 [1](https://example.com)，结论 {{segment:seg-1}}。",
+                List.of(evidence("seg-1", "asset-a")));
+
+        assertThat(rendered.answer()).isEqualTo(
+                "普通 [1]，数组 arr[1]，区间 [2024-2025]，链接 [1](https://example.com)，结论 [1-1]。");
+    }
+
+    @Test
+    void shouldDetectOnlyAuthoredLabelsThatConflictWithRenderedCitations() {
+        AgentCitationRenderResult rendered = AgentCitationRenderer.render(
+                "结论 {{segment:seg-1}}", List.of(evidence("seg-1", "asset-a")));
+
+        assertThat(AgentCitationRenderer.containsAuthoredVisibleCitation(
+                "伪引用 [1-1]，结论 {{segment:seg-1}}", rendered.references())).isTrue();
+        assertThat(AgentCitationRenderer.containsAuthoredVisibleCitation(
+                "数组 arr[1-1]，链接 [1-1](https://example.com)", rendered.references())).isFalse();
     }
 
     private ConversationRetrievalCandidate evidence(String segmentId, String assetId) {

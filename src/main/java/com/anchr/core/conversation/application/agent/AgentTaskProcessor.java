@@ -131,7 +131,15 @@ public class AgentTaskProcessor {
             List<ConversationRetrievalCandidate> selected = citedIds.stream().distinct().map(registry::get)
                     .filter(Objects::nonNull).limit(20).toList();
             if (selected.isEmpty()) throw new IllegalStateException("Summary citations are outside task evidence");
+            Set<String> selectedIds = selected.stream().map(ConversationRetrievalCandidate::getSegmentId)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            if (!selectedIds.containsAll(citedIds)) {
+                throw new IllegalStateException("Summary contains unregistered segment citations");
+            }
             AgentCitationRenderResult rendered = AgentCitationRenderer.render(answer, selected);
+            if (AgentCitationRenderer.containsAuthoredVisibleCitation(answer, rendered.references())) {
+                throw new IllegalStateException("Summary contains an untrusted visible citation label");
+            }
             List<ConversationCitation> citations = citationMapper.mapFromSearchResults(selected);
             AgentCitationIndexPlan.apply(citations, rendered.references());
             String citationsJson = turnCodec.serializeCitations(citations);

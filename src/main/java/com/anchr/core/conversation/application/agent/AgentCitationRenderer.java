@@ -16,8 +16,6 @@ import java.util.regex.Pattern;
  * Keeps segment ids as an internal evidence protocol while rendering hierarchical Agent citations.
  */
 public final class AgentCitationRenderer {
-    private static final Pattern MODEL_NUMERIC_CITATION = Pattern.compile("\\[\\d+(?:-\\d+)?]");
-
     private AgentCitationRenderer() {
     }
 
@@ -48,10 +46,7 @@ public final class AgentCitationRenderer {
         if (evidenceBySegment.isEmpty()) return new AgentCitationRenderResult(source, Map.of());
         Map<String, AgentCitationReference> references = AgentCitationIndexPlan.build(source, evidence);
 
-        // Numeric references authored directly by the model are not trusted: only internal segment markers
-        // are allowed to produce clickable citation indexes.
-        String withoutModelIndexes = MODEL_NUMERIC_CITATION.matcher(source).replaceAll("");
-        Matcher matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(withoutModelIndexes);
+        Matcher matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(source);
         StringBuilder rendered = new StringBuilder();
         while (matcher.find()) {
             String segmentId = matcher.group(1).trim();
@@ -68,11 +63,28 @@ public final class AgentCitationRenderer {
                         .reversed())
                 .toList();
         for (String segmentId : rawIds) {
-            AgentCitationReference reference = references.get(segmentId);
-            value = value.replace(segmentId, reference == null ? "" : "[" + reference.label() + "]");
+            value = value.replace(segmentId, "");
         }
         value = cleanAfterRemoval(value);
         return new AgentCitationRenderResult(value.trim(), references);
+    }
+
+    static boolean containsAuthoredVisibleCitation(
+            String answer,
+            Map<String, AgentCitationReference> references
+    ) {
+        if (!StringUtils.hasText(answer) || references == null || references.isEmpty()) return false;
+        Set<String> labels = references.values().stream()
+                .map(AgentCitationReference::label)
+                .filter(StringUtils::hasText)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        for (String label : labels) {
+            Pattern authoredLabel = Pattern.compile(
+                    "(?<![A-Za-z0-9_])\\[" + Pattern.quote(label) + "](?!\\s*\\()"
+            );
+            if (authoredLabel.matcher(answer).find()) return true;
+        }
+        return false;
     }
 
     private static String cleanAfterRemoval(String value) {

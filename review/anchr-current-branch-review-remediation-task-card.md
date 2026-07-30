@@ -26,7 +26,7 @@
 |---|---|---:|---|---|
 | 207A | 认证改为 fail-closed | P0 | 止血完成 | Spring Security 迁移和内部系统上下文重构均需单独确认 |
 | 207B | 禁止日志记录用户原始查询和模型原始输出 | P1 | 完成 | 否 |
-| 207C | 修复 Agent 数字方括号和引用清洗误删 | P1 | 待执行 | 否 |
+| 207C | 修复 Agent 数字方括号和引用清洗误删 | P1 | 完成 | 否 |
 | 207D | 修复 active generation 后置过滤造成的召回损失 | P1 | 待执行 | 补偿召回或 ES 前置过滤方案需确认 |
 | 207E | 让 Search API 的 sort、total、facets 与真实语义一致 | P1 | 待执行 | 是；必须先选择 Top-N 或真实分页 |
 | 207F | 收敛生产运行默认值和搜索参数来源 | P1/P2 | 待执行 | 生产部署方式需确认 |
@@ -186,6 +186,17 @@ Golden tests 至少覆盖：
 - 伪造的 segment ID 不会变成引用；
 - 合法 Marker 与 `citedSegmentIds` 一一对应；
 - 历史上下文和最终展示都不泄露内部 segment ID。
+
+### 2026-07-30 实施记录
+
+- 历史回答不再按数字方括号正则全局清洗；Agent 按持久化 citation 的 `assetCitationIndex-segmentCitationIndex` 精确删除，传统回答只在没有分段标签时按资产级索引删除。
+- citation JSON 缺失或损坏时保留历史回答原文；普通 `[1]`、数组下标、年份区间和 Markdown link label 不再被误删，也未修改任何历史落库数据。
+- `AgentCitationRenderer` 只把当前 Run 已注册证据的合法 `{{segment:id}}` Marker 转成可见引用；未知 Marker 和裸露的内部 segment ID 不会变成引用或泄露到最终回答。
+- `citedSegmentIds` 与正文 Marker 的去重集合必须完全一致；模型预写且与生成标签冲突的裸引用会进入既有 repair/fallback，异步总结中的未注册 Marker 或冲突标签会进入明确失败/重试路径。
+- `anchr-web` 在存在分段 `citationLabel` 时只注册层级标签，传统引用继续注册资产级标签；Markdown 解析不再把 `arr[1]` 一类数组下标转换为引用链接。
+- 未修改 REST、SSE、数据库 Schema、Citation DTO、分层引用格式或现有历史数据。
+- 207C 后端定向测试通过；完整 `mvn test`：537 个测试，0 failure，0 error；17 个依赖 Docker/Testcontainers 的既有测试按环境条件跳过。
+- `anchr-web` 78 个 Node 测试、ESLint 和 Next.js 生产构建通过。
 
 ---
 

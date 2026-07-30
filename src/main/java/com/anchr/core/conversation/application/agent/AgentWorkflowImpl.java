@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -348,15 +350,30 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                     "KNOWLEDGE 回答缺少当前 Run 的证据，请先调用 search_knowledge、read_document 或 find_documents",
                     "missing_agent_evidence", validationToolCallId, validationToolName);
         }
-        List<String> illegal = requested.stream().filter(id -> !state.getEvidence().containsKey(id)).distinct().toList();
-        if (!illegal.isEmpty() || requested.isEmpty()) {
+        Set<String> requestedSet = requested.stream()
+                .filter(StringUtils::hasText)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> markerSet = new LinkedHashSet<>(markers);
+        List<String> illegal = requestedSet.stream().filter(id -> !state.getEvidence().containsKey(id)).toList();
+        boolean containsBlankRequest = requested.stream().anyMatch(id -> !StringUtils.hasText(id));
+        if (!illegal.isEmpty() || requestedSet.isEmpty() || containsBlankRequest) {
             return validationFailure(state, progress, "INVALID_CITATION",
                     illegal.isEmpty() ? "KNOWLEDGE 回答必须引用本轮证据" : "引用不属于本轮证据: " + illegal,
                     "invalid_agent_citation", validationToolCallId, validationToolName);
         }
-        List<ConversationRetrievalCandidate> selected = requested.stream().distinct()
+        if (!requestedSet.equals(markerSet)) {
+            return validationFailure(state, progress, "CITATION_BINDING_MISMATCH",
+                    "citedSegmentIds 必须与 answer 中实际出现的证据 Marker 一一对应",
+                    "invalid_agent_citation_binding", validationToolCallId, validationToolName);
+        }
+        List<ConversationRetrievalCandidate> selected = requestedSet.stream()
                 .map(state.getEvidence()::get).filter(Objects::nonNull).toList();
         AgentCitationRenderResult rendered = AgentCitationRenderer.render(answer.answer(), selected);
+        if (AgentCitationRenderer.containsAuthoredVisibleCitation(answer.answer(), rendered.references())) {
+            return validationFailure(state, progress, "UNTRUSTED_VISIBLE_CITATION",
+                    "不要自行生成数字引用；只使用当前证据的 {{segment:实际ID}} Marker",
+                    "untrusted_visible_citation", validationToolCallId, validationToolName);
+        }
         if (!selected.isEmpty() && rendered.references().isEmpty()) {
             return validationFailure(state, progress, "MISSING_CITATION_MARKER",
                     "KNOWLEDGE 回答必须把最直接的证据 Marker 放在对应结论之后；不要只填写 citedSegmentIds",
@@ -472,7 +489,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         int used = 0;
         for (ConversationTurn turn : recent) {
             String user = clip(turn.getQuery(), FIELD_LIMIT);
-            String assistant = clip(stripHistoricalCitationLabels(turn.getAnswer()), FIELD_LIMIT);
+            String assistant = clip(stripHistoricalCitationLabels(turn), FIELD_LIMIT);
             int size = user.length() + assistant.length();
             if (used + size > HISTORY_CHAR_LIMIT) break;
             if (StringUtils.hasText(user)) messages.add(AgentMessage.user(user));
@@ -508,11 +525,74 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         return "<ANCHR_REQUEST_CONTEXT>\n" + json + "\n</ANCHR_REQUEST_CONTEXT>";
     }
 
-    static String stripHistoricalCitationLabels(String value) {
+    private String stripHistoricalCitationLabels(ConversationTurn turn) {
+        if (turn == null) return "";
+        return stripHistoricalCitationLabels(turn.getAnswer(), parseHistoricalCitations(turn.getCitationsJson()));
+    }
+
+    private List<ConversationCitation> parseHistoricalCitations(String citationsJson) {
+        if (!StringUtils.hasText(citationsJson)) return List.of();
+        try {
+            var listType = objectMapper.getTypeFactory()
+                    .constructCollectionType(List.class, ConversationCitation.class);
+            return objectMapper.readValue(citationsJson, listType);
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    static String stripHistoricalCitationLabels(String value, List<ConversationCitation> citations) {
         if (!StringUtils.hasText(value)) return "";
-        return value.replaceAll("\\[\\d+(?:-\\d+)?]", "")
-                .replaceAll("[ \\t]+([，。；：,.!?])", "$1")
-                .trim();
+        Set<String> labels = historicalCitationLabels(citations);
+        if (labels.isEmpty()) return value.trim();
+        String cleaned = value;
+        boolean removed = false;
+        for (String label : labels) {
+            Pattern visibleLabel = Pattern.compile(
+                    "(?<![A-Za-z0-9_])\\[" + Pattern.quote(label) + "](?!\\s*\\()"
+            );
+            Matcher matcher = visibleLabel.matcher(cleaned);
+            if (matcher.find()) {
+                cleaned = matcher.replaceAll("");
+                removed = true;
+            }
+        }
+        return (removed ? cleaned.replaceAll("[ \\t]+([，。；：,.!?])", "$1") : cleaned).trim();
+    }
+
+    private static Set<String> historicalCitationLabels(List<ConversationCitation> citations) {
+        if (citations == null || citations.isEmpty()) return Set.of();
+        Map<String, List<ConversationCitation>> groups = new LinkedHashMap<>();
+        for (ConversationCitation citation : citations) {
+            if (citation == null) continue;
+            String groupKey = StringUtils.hasText(citation.getAssetId())
+                    ? "asset:" + citation.getAssetId().trim()
+                    : "segment:" + Objects.toString(citation.getSegmentId(), "");
+            groups.computeIfAbsent(groupKey, ignored -> new ArrayList<>()).add(citation);
+        }
+        Set<String> labels = new LinkedHashSet<>();
+        int fallbackAssetIndex = 0;
+        for (List<ConversationCitation> group : groups.values()) {
+            fallbackAssetIndex++;
+            Set<String> segmentLabels = new LinkedHashSet<>();
+            for (ConversationCitation citation : group) {
+                Integer assetIndex = citation.getAssetCitationIndex();
+                Integer segmentIndex = citation.getSegmentCitationIndex();
+                if (assetIndex != null && assetIndex > 0 && segmentIndex != null && segmentIndex > 0) {
+                    segmentLabels.add(assetIndex + "-" + segmentIndex);
+                }
+            }
+            if (!segmentLabels.isEmpty()) {
+                labels.addAll(segmentLabels);
+                continue;
+            }
+            Integer explicitAssetIndex = group.stream()
+                    .map(ConversationCitation::getAssetCitationIndex)
+                    .filter(index -> index != null && index > 0)
+                    .findFirst().orElse(null);
+            labels.add(String.valueOf(explicitAssetIndex == null ? fallbackAssetIndex : explicitAssetIndex));
+        }
+        return labels;
     }
 
     private void emit(ConversationProgressListener progress, AgentRunState state,
