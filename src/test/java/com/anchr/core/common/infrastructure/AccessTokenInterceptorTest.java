@@ -1,5 +1,7 @@
 package com.anchr.core.common.infrastructure;
 
+import com.anchr.core.common.application.context.RequestUserContext;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.ApiErrorResponseWriter;
 import com.anchr.core.common.exception.UploadCleanupPolicy;
@@ -7,6 +9,7 @@ import com.anchr.core.ingestion.interfaces.rest.KnowledgeBaseIngestionController
 import com.anchr.core.ingestion.interfaces.rest.dto.IngestionTaskCreateRequestDTO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -31,6 +34,7 @@ class AccessTokenInterceptorTest {
 
     @BeforeEach
     void setUp() {
+        UserContextHolder.clear();
         objectMapper = new ObjectMapper();
         tokenValues = new HashMap<>();
         StringRedisTemplate redisTemplate = new StubStringRedisTemplate(tokenValues);
@@ -40,6 +44,11 @@ class AccessTokenInterceptorTest {
                 objectMapper,
                 new ApiErrorResponseWriter(objectMapper),
                 cleanupPolicy);
+    }
+
+    @AfterEach
+    void tearDown() {
+        UserContextHolder.clear();
     }
 
     @Test
@@ -75,7 +84,7 @@ class AccessTokenInterceptorTest {
     }
 
     @Test
-    void shouldNotGrantCleanupForAnUnannotatedEndpoint() throws Exception {
+    void shouldNotGrantCleanupForAnAuthenticatedEndpointWithoutToken() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/kbs/kb-1/ingestion-tasks");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -86,6 +95,74 @@ class AccessTokenInterceptorTest {
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(body.path("uploadCleanupAllowed").asBoolean()).isFalse();
         assertThat(body.has("requestAccepted")).isFalse();
+    }
+
+    @Test
+    void shouldRejectUnannotatedHandlerByDefault() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/unannotated");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        boolean allowed = interceptor.preHandle(
+                request, response, handler(new UnannotatedController(), "endpoint"));
+
+        JsonNode body = objectMapper.readTree(response.getContentAsString());
+        assertThat(allowed).isFalse();
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(body.path("errorCode").asText()).isEqualTo(ApiError.AUTH_TOKEN_INVALID.name());
+        assertThat(body.path("uploadCleanupAllowed").asBoolean()).isFalse();
+    }
+
+    @Test
+    void shouldAllowExplicitPermitAllWithAnonymousContext() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/public");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        boolean allowed = interceptor.preHandle(
+                request, response, handler(new PublicController(), "endpoint"));
+
+        assertThat(allowed).isTrue();
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(UserContextHolder.get())
+                .isEqualTo(RequestUserContext.anonymous());
+    }
+
+    @Test
+    void shouldHonorClassLevelRequireAuth() throws Exception {
+        tokenValues.put(TOKEN_CACHE_PREFIX + "user-token", "{\"role\":\"USER\"}");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/class-secured");
+        request.addHeader("X-Access-Token", "user-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        boolean allowed = interceptor.preHandle(
+                request, response, handler(new ClassSecuredController(), "endpoint"));
+
+        assertThat(allowed).isTrue();
+        assertThat(UserContextHolder.get().role()).isEqualTo("USER");
+        assertThat(UserContextHolder.get().accessTokenHash()).isNotBlank();
+    }
+
+    @Test
+    void methodLevelRuleShouldOverrideClassLevelPermitAll() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/public/protected");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        boolean allowed = interceptor.preHandle(
+                request, response, handler(new PublicController(), "protectedEndpoint"));
+
+        assertThat(allowed).isFalse();
+        assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    void conflictingMethodRulesShouldFailClosed() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/conflicting");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        boolean allowed = interceptor.preHandle(
+                request, response, handler(new ConflictingController(), "endpoint"));
+
+        assertThat(allowed).isFalse();
+        assertThat(response.getStatus()).isEqualTo(401);
     }
 
     private HandlerMethod ingestionCreateHandler() throws NoSuchMethodException {
@@ -103,6 +180,38 @@ class AccessTokenInterceptorTest {
 
     private KnowledgeBaseIngestionController controller() {
         return new KnowledgeBaseIngestionController(null);
+    }
+
+    private HandlerMethod handler(Object controller, String methodName) throws NoSuchMethodException {
+        return new HandlerMethod(controller, controller.getClass().getMethod(methodName));
+    }
+
+    private static final class UnannotatedController {
+        public void endpoint() {
+        }
+    }
+
+    @PermitAll
+    private static final class PublicController {
+        public void endpoint() {
+        }
+
+        @RequireAuth(roles = "ADMIN")
+        public void protectedEndpoint() {
+        }
+    }
+
+    @RequireAuth(roles = "USER")
+    private static final class ClassSecuredController {
+        public void endpoint() {
+        }
+    }
+
+    private static final class ConflictingController {
+        @PermitAll
+        @RequireAuth
+        public void endpoint() {
+        }
     }
 
     private static final class StubStringRedisTemplate extends StringRedisTemplate {

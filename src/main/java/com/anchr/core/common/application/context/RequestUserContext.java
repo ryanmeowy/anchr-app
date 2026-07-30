@@ -7,6 +7,8 @@ public record RequestUserContext(String userId, String role, String accessTokenH
 
     public static final String DEFAULT_USER_ID = "system";
     public static final String DEFAULT_ROLE = "ADMIN";
+    public static final String ANONYMOUS_USER_ID = "anonymous";
+    public static final String ANONYMOUS_ROLE = "ANONYMOUS";
 
     public RequestUserContext(String userId, String role) {
         this(userId, role, null);
@@ -16,7 +18,7 @@ public record RequestUserContext(String userId, String role, String accessTokenH
         return new RequestUserContext(DEFAULT_USER_ID, DEFAULT_ROLE, null);
     }
 
-    public static RequestUserContext systemDefault(String accessTokenHash) {
-        return new RequestUserContext(DEFAULT_USER_ID, DEFAULT_ROLE, accessTokenHash);
+    public static RequestUserContext anonymous() {
+        return new RequestUserContext(ANONYMOUS_USER_ID, ANONYMOUS_ROLE, null);
     }
 }

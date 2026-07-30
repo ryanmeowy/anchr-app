@@ -1,11 +1,14 @@
 services:
   elasticsearch:
-    build: .
+    build:
+      context: ../..
+      dockerfile: docker/infra/Dockerfile
+    image: anchr-elasticsearch:8.18.8-ik
     container_name: elasticsearch
     environment:
       - TZ=Asia/Shanghai
       - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms384m -Xmx384m
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
       - bootstrap.memory_lock=true
       - xpack.ml.enabled=false
       - ingest.geoip.downloader.enabled=false
@@ -34,7 +37,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 1536M
 
   redis:
     image: redis:7.4.9
@@ -94,4 +97,5 @@ volumes:
 
 networks:
   backend_network:
+    name: anchr-backend
     driver: bridge

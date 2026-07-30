@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: docker/app/Dockerfile
+    image: anchr-app:local
+    container_name: anchr-app
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8081}:${SERVER_PORT:-8081}"
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - backend_network
+
+networks:
+  backend_network:
+    name: anchr-backend
+    external: true

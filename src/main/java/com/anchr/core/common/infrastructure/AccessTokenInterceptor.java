@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
@@ -49,47 +50,113 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
         }
 
         try {
-            RequireAuth requireAuth = hm.getMethodAnnotation(RequireAuth.class);
-            if (requireAuth != null) {
-                String clientToken = request.getHeader("X-Access-Token");
-                if (clientToken == null || clientToken.isBlank()) {
-                    reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
-                    return false;
-                }
-                String redisKey = TOKEN_CACHE_PREFIX + clientToken.trim();
-                String tokenJson = redisTemplate.opsForValue().get(redisKey);
-                if (tokenJson == null) {
-                    reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
-                    return false;
-                }
-                String role;
-                try {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> tokenData = objectMapper.readValue(tokenJson, Map.class);
-                    role = (String) tokenData.getOrDefault("role", "");
-                } catch (Exception e) {
-                    log.warn("Failed to parse token JSON", e);
-                    reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
-                    return false;
-                }
-                String[] allowedRoles = requireAuth.roles();
-                boolean roleAllowed = Arrays.asList(allowedRoles).contains(role);
-                if (!roleAllowed) {
-                    reject(response, handler, 403, ApiError.AUTH_ROLE_FORBIDDEN);
-                    return false;
-                }
-                UserContextHolder.set(new RequestUserContext(
-                        RequestUserContext.DEFAULT_USER_ID,
-                        role,
-                        tokenHash(clientToken)
-                ));
-            } else {
-                UserContextHolder.set(RequestUserContext.systemDefault());
+            AuthorizationRule rule = resolveRule(hm);
+            if (rule.kind() == AuthorizationKind.DENY) {
+                reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
+                return false;
             }
-            return true;
+            if (rule.kind() == AuthorizationKind.PERMIT_ALL) {
+                UserContextHolder.set(RequestUserContext.anonymous());
+                return true;
+            }
+            return authenticate(request, response, handler, rule.requireAuth());
         } catch (Exception e) {
             UserContextHolder.clear();
             throw e;
+        }
+    }
+
+    private boolean authenticate(HttpServletRequest request,
+                                 HttpServletResponse response,
+                                 Object handler,
+                                 RequireAuth requireAuth) {
+        String clientToken = request.getHeader("X-Access-Token");
+        if (clientToken == null || clientToken.isBlank()) {
+            reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
+            return false;
+        }
+        String redisKey = TOKEN_CACHE_PREFIX + clientToken.trim();
+        String tokenJson = redisTemplate.opsForValue().get(redisKey);
+        if (tokenJson == null) {
+            reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
+            return false;
+        }
+        String role;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> tokenData = objectMapper.readValue(tokenJson, Map.class);
+            role = (String) tokenData.getOrDefault("role", "");
+        } catch (Exception e) {
+            log.warn("Failed to parse token JSON", e);
+            reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
+            return false;
+        }
+        String[] allowedRoles = requireAuth.roles();
+        boolean roleAllowed = Arrays.asList(allowedRoles).contains(role);
+        if (!roleAllowed) {
+            reject(response, handler, 403, ApiError.AUTH_ROLE_FORBIDDEN);
+            return false;
+        }
+        UserContextHolder.set(new RequestUserContext(
+                RequestUserContext.DEFAULT_USER_ID,
+                role,
+                tokenHash(clientToken)
+        ));
+        return true;
+    }
+
+    private AuthorizationRule resolveRule(HandlerMethod handlerMethod) {
+        PermitAll methodPermitAll = AnnotatedElementUtils.findMergedAnnotation(
+                handlerMethod.getMethod(), PermitAll.class);
+        RequireAuth methodRequireAuth = AnnotatedElementUtils.findMergedAnnotation(
+                handlerMethod.getMethod(), RequireAuth.class);
+        if (methodPermitAll != null || methodRequireAuth != null) {
+            return exclusiveRule(handlerMethod.toString(), methodPermitAll, methodRequireAuth);
+        }
+
+        Class<?> beanType = handlerMethod.getBeanType();
+        PermitAll typePermitAll = AnnotatedElementUtils.findMergedAnnotation(beanType, PermitAll.class);
+        RequireAuth typeRequireAuth = AnnotatedElementUtils.findMergedAnnotation(beanType, RequireAuth.class);
+        if (typePermitAll != null || typeRequireAuth != null) {
+            return exclusiveRule(beanType.getName(), typePermitAll, typeRequireAuth);
+        }
+        return AuthorizationRule.deny();
+    }
+
+    private AuthorizationRule exclusiveRule(String source,
+                                            PermitAll permitAll,
+                                            RequireAuth requireAuth) {
+        if (permitAll != null && requireAuth != null) {
+            log.error("Conflicting API authorization annotations on {}", source);
+            return AuthorizationRule.deny();
+        }
+        if (permitAll != null) {
+            return AuthorizationRule.permitAll();
+        }
+        if (requireAuth != null) {
+            return AuthorizationRule.requireAuth(requireAuth);
+        }
+        return AuthorizationRule.deny();
+    }
+
+    private enum AuthorizationKind {
+        DENY,
+        PERMIT_ALL,
+        REQUIRE_AUTH
+    }
+
+    private record AuthorizationRule(AuthorizationKind kind, RequireAuth requireAuth) {
+
+        private static AuthorizationRule deny() {
+            return new AuthorizationRule(AuthorizationKind.DENY, null);
+        }
+
+        private static AuthorizationRule permitAll() {
+            return new AuthorizationRule(AuthorizationKind.PERMIT_ALL, null);
+        }
+
+        private static AuthorizationRule requireAuth(RequireAuth requireAuth) {
+            return new AuthorizationRule(AuthorizationKind.REQUIRE_AUTH, requireAuth);
         }
     }
 

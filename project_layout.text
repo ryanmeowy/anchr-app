@@ -1,8 +1,20 @@
 anchr-app/
 ├── README.md                              # 英文项目主页
 ├── README.zh-CN.md                        # 简体中文说明
-├── docs/                                  # 架构决策、Agent 工作流与演进文档
-├── review/                                # 跨仓库与代码质量审查报告
+├── docs/
+│   ├── agent-rag-workflow.md              # Agent RAG 运行、证据与恢复流程
+│   └── domain-boundaries-and-interactions.md # 领域边界、状态所有权与交互规则
+├── docker/
+│   ├── README.md                          # Docker 部署与常用命令
+│   ├── app/
+│   │   ├── .env.example                  # API 容器环境变量模板
+│   │   ├── compose.yml                   # API 构建与运行
+│   │   ├── Dockerfile                    # Java 21 非 root 运行镜像
+│   │   └── settings.xml                  # Maven 公共镜像配置
+│   └── infra/
+│       ├── .env.example                  # 基础设施初始化变量模板
+│       ├── compose.yml                   # Elasticsearch、Redis、MySQL
+│       └── Dockerfile                    # 带 IK 插件的 Elasticsearch 镜像
 ├── src/
 │   ├── main/
 │   │   ├── java/com/anchr/core/
@@ -35,12 +47,12 @@ anchr-app/
 │   │   │   │   └── interfaces/rest(/dto)  # REST、SSE、Run/Task 恢复
 │   │   │   ├── ingestion/                 # Knowledge Content 的入库处理部分
 │   │   │   │   ├── application/(acl,impl,model)
-│   │   │   │   ├── config
 │   │   │   │   ├── domain/(model,port,repository)
 │   │   │   │   ├── infrastructure/(parser,persistence)
 │   │   │   │   └── interfaces/rest(/dto)
 │   │   │   ├── integration/               # 外部 Provider 的配置驱动适配器
 │   │   │   │   ├── ai/(adapter,client)    # Generation/Embedding/Rerank/Docling
+│   │   │   │   ├── multimodal/example     # 多模态请求示例
 │   │   │   │   └── storage                # 阿里云 OSS 与 STS 实现
 │   │   │   ├── kb/                        # Knowledge Content 的目录与资产部分
 │   │   │   │   ├── application/(acl,api,impl,support)
@@ -52,6 +64,7 @@ anchr-app/
 │   │   │   │   ├── config
 │   │   │   │   ├── domain/(model,port,repository)
 │   │   │   │   ├── infrastructure/persistence/es
+│   │   │   │   │   ├── bootstrap
 │   │   │   │   │   ├── document
 │   │   │   │   │   └── repository
 │   │   │   │   └── interfaces/rest/(assembler,dto)
@@ -67,8 +80,7 @@ anchr-app/
 │   │       ├── es-kb-segment-mapping.json  # 动态向量维度的 Segment Mapping
 │   │       └── es-settings.json            # IK Analyzer 与索引设置
 │   └── test/java/com/anchr/core/           # 单元、契约与 Testcontainers 测试
-├── .env.example                            # 环境变量模板
-├── docker-compose.yml                      # Elasticsearch、Redis、MySQL
-├── Dockerfile                              # 带 IK 插件的 Elasticsearch 镜像
+├── .dockerignore                           # Docker 构建上下文排除规则
+├── .gitignore                              # 本地密钥、构建产物与 IDE 文件
 ├── pom.xml                                 # Maven 构建与依赖版本
 └── LICENSE                                 # MIT License

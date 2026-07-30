@@ -127,27 +127,38 @@ flowchart LR
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/ryanmeowy/smart-vision.git anchr-app
+git clone https://github.com/ryanmeowy/anchr-app.git anchr-app
 cd anchr-app
 ```
 
 ### 2. 准备 Elasticsearch IK 插件
 
-从 [analysis-ik releases](https://github.com/infinilabs/analysis-ik/releases) 下载与 Elasticsearch `8.18.8` 兼容的压缩包，并按 Dockerfile 期望的名称放到仓库根目录：
+从 [analysis-ik releases](https://github.com/infinilabs/analysis-ik/releases) 下载与 Elasticsearch `8.18.8` 兼容的压缩包，并放到基础设施 Dockerfile 旁：
 
 ```text
-elasticsearch-analysis-ik-8.18.8.zip
+docker/infra/elasticsearch-analysis-ik-8.18.8.zip
 ```
 
-该二进制文件没有提交到仓库。在文件就位前，`docker compose build` 无法构建 Elasticsearch 镜像。
+该压缩包已被 Git 忽略。在文件就位前，基础设施镜像无法构建。
 
-### 3. 配置环境变量
+### 3. 启动基础设施
 
 ```bash
-cp .env.example .env
+cp docker/infra/.env.example docker/infra/.env
+# 替换全部 change-me。
+docker compose --env-file docker/infra/.env \
+  -f docker/infra/compose.yml up -d --build
 ```
 
-替换所有 `change-me` 值。使用以下命令生成加密材料：
+Elasticsearch、Redis 和 MySQL 只发布到宿主机回环端口。基础设施初始化使用 `ES_PASSWORD`、`REDIS_PASSWORD`、`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD` 和 `MYSQL_ROOT_PASSWORD`。
+
+### 4. 配置 Anchr App
+
+```bash
+cp docker/app/.env.example docker/app/.env
+```
+
+让其中的数据存储凭据与基础设施环境一致，然后配置 Docling 并替换所有应用密钥。使用以下命令生成加密材料：
 
 ```bash
 openssl rand -base64 32
@@ -162,42 +173,42 @@ openssl rand -base64 16
 | --- | --- | --- |
 | Redis | `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` | Token、分布式 ID 分段、查询改写缓存和 Agent 快照。 |
 | Elasticsearch | `ES_USERNAME`、`ES_PASSWORD`、`ES_HOST` | Segment 索引、alias、全文召回和向量召回。 |
-| MySQL | `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD` | 应用状态和 Docker Compose 初始化。 |
+| MySQL | `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD` | 应用状态。 |
 | 安全 | `APP_ADMIN_SECRET`、`APP_ENCRYPT_KEY`、`APP_ENCRYPT_IV` | Token 管理和模型/存储凭据加密。 |
 | Docling | `APP_DOCLING_BASE_URL`、`APP_DOCLING_API_TOKEN` | 带鉴权的异步文档解析。 |
 | Server | `SERVER_HOST`、`SERVER_PORT` | HTTP 监听地址与端口。 |
 
 > [!WARNING]
-> 不要提交 `.env`。已有加密配置存在时，应保持加密 Key 和 IV 稳定；生产环境请使用 Secret Manager。
-
-### 4. 启动基础设施
-
-Docker Compose 会在仅绑定本机回环地址的端口上启动 Elasticsearch、Redis 和 MySQL：
-
-```bash
-docker compose up -d
-docker compose ps
-```
-
-Java 应用和 Anchr Docling 需要分别启动。
+> 不要提交任一 Docker `.env` 文件。已有加密配置存在时，应保持加密 Key 和 IV 稳定；生产环境请使用 Secret Manager。
 
 ### 5. 启动 Anchr App
 
-Spring Boot 不会自动读取仓库根目录的 `.env`。启动前需要把它导入当前 Shell：
+构建并启动 API 容器：
 
 ```bash
+docker compose --env-file docker/app/.env \
+  -f docker/app/compose.yml up -d --build
+```
+
+Anchr Docling 仍作为独立服务运行。使用示例端口时，API 地址为 [http://127.0.0.1:8081](http://127.0.0.1:8081)。
+
+如果要直接在本机 JVM 开发，请把应用环境模板复制到仓库根目录，将 Docker 服务名改为 `127.0.0.1`，再导出环境并运行 Maven：
+
+```bash
+cp docker/app/.env.example .env
+# 为宿主机访问设置 REDIS_HOST、MYSQL_HOST 和 ES_HOST。
 set -a
 source .env
 set +a
 mvn spring-boot:run
 ```
 
-Flyway 会在启动时自动创建或迁移数据库。使用示例默认值时，API 地址为 [http://127.0.0.1:8080](http://127.0.0.1:8080)。
+Flyway 会在启动时自动创建或迁移数据库。
 
 检查应用健康状态：
 
 ```bash
-curl http://127.0.0.1:8080/actuator/health
+curl http://127.0.0.1:8081/actuator/health
 ```
 
 ### 6. 创建访问令牌
@@ -205,7 +216,7 @@ curl http://127.0.0.1:8080/actuator/health
 使用配置的 Admin Secret 签发一个有效期一小时的管理员 Token：
 
 ```bash
-curl --get http://127.0.0.1:8080/api/v1/auth/refresh-token \
+curl --get http://127.0.0.1:8081/api/v1/auth/refresh-token \
   --header "X-Admin-Secret: ${APP_ADMIN_SECRET}" \
   --data-urlencode "role=ADMIN"
 ```
@@ -221,7 +232,7 @@ curl --get http://127.0.0.1:8080/api/v1/auth/refresh-token \
 3. 配置文本 Embedding 或多模态 Embedding 服务；
 4. 激活选中的配置，并等待 Segment 索引进入 Ready 状态。
 
-Anchr Web 默认连接当前 API 的 `http://127.0.0.1:8080`。
+请将 Anchr Web 配置为连接当前 API 的 `http://127.0.0.1:8081`。
 
 ## API 概览
 
@@ -263,7 +274,7 @@ Anchr Web 默认连接当前 API 的 `http://127.0.0.1:8080`。
 | `mvn test` | 运行单元、契约和集成测试；依赖 Docker 的测试需要可用的 Docker Daemon。 |
 | `mvn -DskipTests package` | 构建可执行 Spring Boot JAR。 |
 | `java -jar target/anchr-app-0.0.1-SNAPSHOT.jar` | 导出环境变量后运行构建产物。 |
-| `docker compose logs -f elasticsearch` | 查看 Elasticsearch 启动与插件日志。 |
+| `docker compose --env-file docker/infra/.env -f docker/infra/compose.yml logs -f elasticsearch` | 查看 Elasticsearch 启动与插件日志。 |
 
 ### 项目结构
 
@@ -273,6 +284,7 @@ Anchr Web 默认连接当前 API 的 `http://127.0.0.1:8080`。
 
 - [Agent RAG 完整工作流](./docs/agent-rag-workflow.md)
 - [领域边界与交互](./docs/domain-boundaries-and-interactions.md)
+- [Docker 部署](./docker/README.md)
 
 ## 生产部署提示
 
