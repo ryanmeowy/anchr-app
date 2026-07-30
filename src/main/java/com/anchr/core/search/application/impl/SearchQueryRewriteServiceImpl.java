@@ -83,7 +83,8 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
 
             return parsed;
         } catch (Exception e) {
-            log.warn("Search query rewrite failed, query={}, message={}", query, e.getMessage());
+            log.warn("Search query rewrite failed, queryLength={}, errorType={}",
+                    query == null ? 0 : query.length(), e.getClass().getSimpleName());
             meterRegistry.counter("search.query.rewrite.fallback.count").increment();
             return fallback;
         } finally {
@@ -107,7 +108,8 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
             }
             return objectMapper.readValue(json, SearchRewriteResult.class);
         } catch (Exception e) {
-            log.warn("Failed to deserialize cached rewrite result, key={}", cacheKey, e);
+            log.warn("Failed to deserialize cached rewrite result, errorType={}",
+                    e.getClass().getSimpleName());
             return null;
         }
     }
@@ -117,7 +119,8 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
             String json = objectMapper.writeValueAsString(result);
             stringRedisTemplate.opsForValue().set(cacheKey, json, CACHE_TTL);
         } catch (JsonProcessingException e) {
-            log.warn("Failed to serialize rewrite result for cache, key={}", cacheKey, e);
+            log.warn("Failed to serialize rewrite result for cache, errorType={}",
+                    e.getClass().getSimpleName());
         }
     }
 
@@ -167,7 +170,8 @@ public class SearchQueryRewriteServiceImpl implements SearchQueryRewriteService 
             }
             return result;
         } catch (Exception e) {
-            log.warn("Failed to parse search rewrite json, rawText={}", rawText);
+            log.warn("Failed to parse search rewrite json, rawTextLength={}, errorType={}",
+                    rawText.length(), e.getClass().getSimpleName());
             result.setFallbackUsed(true);
             return result;
         }

@@ -53,7 +53,11 @@ public class SearchFollowUpServiceImpl implements SearchFollowUpService {
             List<String> questions = parseQuestions(raw);
             return questions.size() > 3 ? questions.subList(0, 3) : questions;
         } catch (Exception e) {
-            log.warn("Follow-up question generation failed, query={}", query, e);
+            log.warn("Follow-up question generation failed, queryLength={}, resultCount={}, "
+                            + "errorType={}",
+                    query == null ? 0 : query.length(),
+                    results == null ? 0 : results.size(),
+                    e.getClass().getSimpleName());
             meterRegistry.counter("search.followup.fallback.count").increment();
             return List.of();
         } finally {

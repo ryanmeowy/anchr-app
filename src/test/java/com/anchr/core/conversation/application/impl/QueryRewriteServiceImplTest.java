@@ -59,4 +59,36 @@ class QueryRewriteServiceImplTest {
         assertThat(options.getValue().maxTokens()).isEqualTo(300);
     }
 
+    @Test
+    void invalidModelJsonShouldKeepOriginalQueryAndMarkFallback() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                repository, generationPort, new ObjectMapper(), registry);
+        when(repository.findRecentTurns("session", 5)).thenReturn(List.of());
+        when(generationPort.generate(any(), any()))
+                .thenReturn("{\"rewrittenQuery\":\"broken\",invalid}");
+
+        var result = service.rewrite("session", "原始问题");
+
+        assertThat(result.getRewrittenQuery()).isEqualTo("原始问题");
+        assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(registry.counter("query.rewrite.fallback.count").count()).isEqualTo(1D);
+    }
+
+    @Test
+    void missingRewrittenQueryShouldKeepOriginalQueryAndMarkFallback() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        QueryRewriteServiceImpl service = new QueryRewriteServiceImpl(
+                repository, generationPort, new ObjectMapper(), registry);
+        when(repository.findRecentTurns("session", 5)).thenReturn(List.of());
+        when(generationPort.generate(any(), any()))
+                .thenReturn("{\"rewriteReason\":\"missing required field\",\"confidence\":0.9}");
+
+        var result = service.rewrite("session", "原始问题");
+
+        assertThat(result.getRewrittenQuery()).isEqualTo("原始问题");
+        assertThat(result.isFallbackUsed()).isTrue();
+        assertThat(registry.counter("query.rewrite.fallback.count").count()).isEqualTo(1D);
+    }
+
 }

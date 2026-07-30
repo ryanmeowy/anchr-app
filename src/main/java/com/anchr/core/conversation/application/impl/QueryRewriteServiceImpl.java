@@ -71,14 +71,20 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                     new GenerationOptions(0.0D, 300, Duration.ofSeconds(30))
             );
             RewriteResult parsed = parseRewriteResult(latestQuery.trim(), raw);
+            if (parsed.isFallbackUsed()) {
+                meterRegistry.counter("query.rewrite.fallback.count").increment();
+                return parsed;
+            }
             if (!StringUtils.hasText(parsed.getRewrittenQuery())) {
                 meterRegistry.counter("query.rewrite.fallback.count").increment();
                 return fallback;
             }
-            parsed.setFallbackUsed(false);
             return parsed;
         } catch (Exception e) {
-            log.warn("Query rewrite failed, sessionId={}, message={}", sessionId, e.getMessage());
+            log.warn("Query rewrite failed, sessionId={}, queryLength={}, errorType={}",
+                    sessionId,
+                    latestQuery == null ? 0 : latestQuery.length(),
+                    e.getClass().getSimpleName());
             meterRegistry.counter("query.rewrite.fallback.count").increment();
             return fallback;
         } finally {
@@ -103,9 +109,10 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         try {
             JsonNode root = objectMapper.readTree(json);
             String rewrittenQuery = trimToNull(root.path("rewrittenQuery").asText(null));
-            if (StringUtils.hasText(rewrittenQuery)) {
-                result.setRewrittenQuery(rewrittenQuery);
+            if (!StringUtils.hasText(rewrittenQuery)) {
+                return result;
             }
+            result.setRewrittenQuery(rewrittenQuery);
             String reason = trimToNull(root.path("rewriteReason").asText(null));
             if (StringUtils.hasText(reason)) {
                 result.setRewriteReason(reason);
@@ -113,9 +120,11 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
             result.setTopicEntities(readStringArray(root.path("topicEntities")));
             double confidence = root.path("confidence").asDouble(0.0D);
             result.setConfidence(Math.max(0.0D, Math.min(1.0D, confidence)));
+            result.setFallbackUsed(false);
             return result;
         } catch (Exception e) {
-            log.warn("Failed to parse rewrite json, rawText={}", rawText);
+            log.warn("Failed to parse rewrite json, rawTextLength={}, errorType={}",
+                    rawText.length(), e.getClass().getSimpleName());
             result.setFallbackUsed(true);
             return result;
         }

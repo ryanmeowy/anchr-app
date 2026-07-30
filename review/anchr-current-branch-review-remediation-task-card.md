@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：待执行
+- 状态：执行中
 - 审查基线：`anchr-app dev/clean-up@db0cbdcc76126d54c619b709a8cf3165a246c5f8`
 - 形成日期：2026-07-30
 - 适用项目：`anchr-app`；涉及公开 Search 契约时交叉检查 `anchr-web`
@@ -25,7 +25,7 @@
 | 子卡 | 目标 | 优先级 | 状态 | 是否需要先对齐 |
 |---|---|---:|---|---|
 | 207A | 认证改为 fail-closed | P0 | 止血完成 | Spring Security 迁移和内部系统上下文重构均需单独确认 |
-| 207B | 禁止日志记录用户原始查询和模型原始输出 | P1 | 待执行 | 否 |
+| 207B | 禁止日志记录用户原始查询和模型原始输出 | P1 | 完成 | 否 |
 | 207C | 修复 Agent 数字方括号和引用清洗误删 | P1 | 待执行 | 否 |
 | 207D | 修复 active generation 后置过滤造成的召回损失 | P1 | 待执行 | 补偿召回或 ES 前置过滤方案需确认 |
 | 207E | 让 Search API 的 sort、total、facets 与真实语义一致 | P1 | 待执行 | 是；必须先选择 Top-N 或真实分页 |
@@ -140,6 +140,20 @@ Spring Security 是推荐的后续实现方向，但不是立即止血的前置�
 - 使用 Logback test appender 覆盖成功召回、rewrite 失败、follow-up 失败和非法模型响应。
 - 测试查询包含唯一敏感字符串，所有捕获日志均不得出现该字符串。
 - 召回数量、延迟和错误分类指标仍然存在。
+
+### 2026-07-30 实施记录
+
+- Retrieval 成功日志不再记录 `rawQuery`，改为记录 query 长度、KB/Asset scope 数量、recallTopK、三路候选数和耗时。
+- generation gate 日志明确区分 recalled、visible 和 discarded；只修正诊断口径，过滤和排序流程不变。
+- Search rewrite、Conversation rewrite 和 Follow-up 失败日志不再记录 query、模型原始输出、文档 snippet、异常 message 或异常堆栈，改为记录长度、结果数和异常类型。
+- rewrite 缓存异常日志不再记录包含查询 MD5 的缓存键；缓存键生成、TTL 和 Redis 数据协议不变。
+- Conversation rewrite 解析失败或缺少 `rewrittenQuery` 时保持原查询并正确标记 `fallbackUsed=true`；合法改写仍标记为 `false`。
+- 保留 Conversation 既有 sessionId；没有为日志新增跨层 request ID、MDC 或通用脱敏框架。
+- Activity Recent Search 及其产品数据、端点、请求/响应 JSON、模型调用、缓存行为和 fallback 结果均未修改。
+- Logback 合同测试覆盖成功召回、Search rewrite 调用失败、Search/Conversation 非法模型输出和 Follow-up 失败；同时检查格式化消息与异常链均不包含唯一敏感字符串。
+- `mvn -DskipTests compile` 通过。
+- 207B 定向测试通过。
+- 完整 `mvn test`：532 个测试，0 failure，0 error；17 个依赖 Docker/Testcontainers 的既有测试按环境条件跳过。
 
 ---
 

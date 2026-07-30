@@ -126,10 +126,17 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
                 routeFilter(filter, true));
         int textHitCount = textHits.size();
         int vectorHitCount = textVectorHits.size() + imageVectorHits.size();
-        log.info("kb search recall completed, keyword={}, recallTopK={}, textHits={}, "
-                        + "textVectorHits={}, documentImageVectorHits={}",
-                rawQuery, recallTopK, textHitCount,
-                textVectorHits.size(), imageVectorHits.size());
+        log.info("kb search recall completed, queryLength={}, kbScope={}, assetScope={}, "
+                        + "recallTopK={}, textHits={}, textVectorHits={}, "
+                        + "documentImageVectorHits={}, latencyMs={}",
+                rawQuery.length(),
+                filter.getKbIds().size(),
+                filter.getAssetIds() == null ? 0 : filter.getAssetIds().size(),
+                recallTopK,
+                textHitCount,
+                textVectorHits.size(),
+                imageVectorHits.size(),
+                System.currentTimeMillis() - startMs);
 
         List<SegmentRerankCandidate> candidates = rrfFusionPolicy.fuse(
                 textHits,
@@ -139,12 +146,16 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
         );
         int recalledCandidateCount = candidates.size();
         candidates = filterActiveIndexGeneration(candidates);
+        int activeGenerationCandidateCount = candidates.size();
+        if (recalledCandidateCount != activeGenerationCandidateCount) {
+            log.info("kb search generation gate filtered candidates, recalled={}, visible={}, "
+                            + "discarded={}",
+                    recalledCandidateCount,
+                    activeGenerationCandidateCount,
+                    recalledCandidateCount - activeGenerationCandidateCount);
+        }
         candidates = rrfFusionPolicy.diversify(candidates);
         int fusedCount = candidates.size();
-        if (recalledCandidateCount != fusedCount) {
-            log.info("kb search generation gate filtered candidates, recalled={}, visible={}",
-                    recalledCandidateCount, fusedCount);
-        }
 
         RetrievalRerankPolicy.Outcome rerankOutcome =
                 rerankPolicy.rerank(rawQuery, candidates, limit);
