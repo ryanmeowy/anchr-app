@@ -17,39 +17,40 @@ class SegmentIndexMigrationValidationTest {
 
     @Test
     void validateEmbeddingShouldAcceptExpectedFiniteVector() {
-        assertDoesNotThrow(() -> SegmentIndexManagerImpl.validateEmbedding(
+        assertDoesNotThrow(() -> SegmentIndexMigrationRunner.validateEmbedding(
                 "segment-1", List.of(0.1f, 0.2f, 0.3f), 3));
     }
 
     @Test
     void validateEmbeddingShouldRejectMissingOrWrongDimensionVector() {
         assertThrows(IllegalStateException.class,
-                () -> SegmentIndexManagerImpl.validateEmbedding("segment-1", null, 3));
+                () -> SegmentIndexMigrationRunner.validateEmbedding(
+                        "segment-1", null, 3));
         assertThrows(IllegalStateException.class,
-                () -> SegmentIndexManagerImpl.validateEmbedding(
+                () -> SegmentIndexMigrationRunner.validateEmbedding(
                         "segment-1", List.of(0.1f, 0.2f), 3));
     }
 
     @Test
     void validateEmbeddingShouldRejectNonFiniteValues() {
         assertThrows(IllegalStateException.class,
-                () -> SegmentIndexManagerImpl.validateEmbedding(
+                () -> SegmentIndexMigrationRunner.validateEmbedding(
                         "segment-1", List.of(0.1f, Float.NaN, 0.3f), 3));
         assertThrows(IllegalStateException.class,
-                () -> SegmentIndexManagerImpl.validateEmbedding(
+                () -> SegmentIndexMigrationRunner.validateEmbedding(
                         "segment-1", List.of(0.1f, Float.POSITIVE_INFINITY, 0.3f), 3));
     }
 
     @Test
     void validateMigrationCountsShouldAllowProfileProjectionToChangeDocumentCount() {
         assertDoesNotThrow(() ->
-                SegmentIndexManagerImpl.validateMigrationCounts(10, 10, 12, 12));
+                SegmentIndexMigrationRunner.validateMigrationCounts(10, 10, 12, 12));
         assertDoesNotThrow(() ->
-                SegmentIndexManagerImpl.validateMigrationCounts(10, 10, 8, 8));
+                SegmentIndexMigrationRunner.validateMigrationCounts(10, 10, 8, 8));
         assertThrows(IllegalStateException.class, () ->
-                SegmentIndexManagerImpl.validateMigrationCounts(10, 9, 12, 12));
+                SegmentIndexMigrationRunner.validateMigrationCounts(10, 9, 12, 12));
         assertThrows(IllegalStateException.class, () ->
-                SegmentIndexManagerImpl.validateMigrationCounts(10, 10, 12, 11));
+                SegmentIndexMigrationRunner.validateMigrationCounts(10, 10, 12, 11));
     }
 
     @Test
@@ -57,7 +58,8 @@ class SegmentIndexMigrationValidationTest {
         EmbeddingProfile profile =
                 new EmbeddingProfile(42L, "EMBEDDING", "model-a", 1024, "fingerprint-a");
 
-        Map<String, JsonData> metadata = SegmentIndexManagerImpl.toMappingMetadata(profile);
+        Map<String, JsonData> metadata =
+                SegmentPhysicalIndexFactory.toMappingMetadata(profile);
 
         assertEquals(Set.of(
                 "embeddingProfileVersion",
@@ -65,15 +67,15 @@ class SegmentIndexMigrationValidationTest {
                 "embeddingCapability",
                 "embeddingModel",
                 "embeddingDimension"), metadata.keySet());
-        assertEquals("fingerprint-a", SegmentIndexManagerImpl.readMetadataString(
+        assertEquals("fingerprint-a", SegmentIndexTopologyInspector.readMetadataString(
                 metadata, "embeddingProfileFingerprint"));
-        assertEquals("EMBEDDING", SegmentIndexManagerImpl.readMetadataString(
+        assertEquals("EMBEDDING", SegmentIndexTopologyInspector.readMetadataString(
                 metadata, "embeddingCapability"));
-        assertEquals("model-a", SegmentIndexManagerImpl.readMetadataString(
+        assertEquals("model-a", SegmentIndexTopologyInspector.readMetadataString(
                 metadata, "embeddingModel"));
-        assertEquals(1024, SegmentIndexManagerImpl.readMetadataInteger(
+        assertEquals(1024, SegmentIndexTopologyInspector.readMetadataInteger(
                 metadata, "embeddingDimension"));
-        assertEquals(1, SegmentIndexManagerImpl.readMetadataInteger(
+        assertEquals(1, SegmentIndexTopologyInspector.readMetadataInteger(
                 metadata, "embeddingProfileVersion"));
     }
 
@@ -98,17 +100,15 @@ class SegmentIndexMigrationValidationTest {
                 throw new UnsupportedOperationException();
             }
         };
-        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
-                null, null, null, null, storage,
-                null,
-                Runnable::run, null, null);
+        SegmentIndexMigrationRunner runner =
+                new SegmentIndexMigrationRunner(null, storage, null);
 
         assertEquals(
                 "signed://images/photo.png",
-                manager.resolveRebuildImageInput("images/photo.png"));
+                runner.resolveRebuildImageInput("images/photo.png"));
         assertEquals(
                 "https://cdn.example.test/photo.png",
-                manager.resolveRebuildImageInput(
+                runner.resolveRebuildImageInput(
                         "https://cdn.example.test/photo.png"));
     }
 

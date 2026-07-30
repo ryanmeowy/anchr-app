@@ -1,14 +1,11 @@
 package com.anchr.core.search.application.impl;
 
 import co.elastic.clients.elasticsearch.core.search.Hit;
-import com.anchr.core.common.config.SegmentIndexConfig;
-import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort.EmbeddingSession;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,18 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SegmentIndexMigrationProjectionTest {
 
     @Test
-    @SuppressWarnings("unchecked")
-    void managerShouldUseOnePlannerAcrossBatchesAndEmbedOnlyOneVisual() {
-        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
-                null,
-                new SegmentIndexConfig(),
-                null,
-                null,
-                null,
-                null,
-                Runnable::run,
-                new SegmentIndexWriteBarrier(),
-                null);
+    void runnerShouldUseOnePlannerAcrossBatchesAndEmbedOnlyOneVisual() {
+        SegmentIndexMigrationRunner runner =
+                new SegmentIndexMigrationRunner(null, null, null);
         EmbeddingProfile profile = new EmbeddingProfile(
                 1L, "MULTI_EMBEDDING", "multi-model", 2, "fingerprint");
         SegmentRebuildProjectionPlanner planner =
@@ -41,16 +29,14 @@ class SegmentIndexMigrationProjectionTest {
             return List.of(0.1f, 0.2f);
         };
 
-        List<?> first = ReflectionTestUtils.invokeMethod(
-                manager,
-                "prepareMigrationBatch",
+        List<SegmentIndexMigrationRunner.MigrationDocument> first =
+                runner.prepareMigrationBatch(
                 List.of(hit("ocr-1", imageOcr("ocr-1", "first", 1))),
                 profile,
                 session,
                 planner);
-        List<?> second = ReflectionTestUtils.invokeMethod(
-                manager,
-                "prepareMigrationBatch",
+        List<SegmentIndexMigrationRunner.MigrationDocument> second =
+                runner.prepareMigrationBatch(
                 List.of(hit("ocr-2", imageOcr("ocr-2", "second", 2))),
                 profile,
                 session,
@@ -61,14 +47,8 @@ class SegmentIndexMigrationProjectionTest {
         assertThat(calls).containsExactly(
                 "image:https://images.example.test/photo.png");
         List<SegmentDocument> documents = new ArrayList<>();
-        for (Object item : first) {
-            documents.add((SegmentDocument) ReflectionTestUtils.getField(
-                    item, "document"));
-        }
-        for (Object item : second) {
-            documents.add((SegmentDocument) ReflectionTestUtils.getField(
-                    item, "document"));
-        }
+        first.forEach(item -> documents.add(item.document()));
+        second.forEach(item -> documents.add(item.document()));
         assertThat(documents).filteredOn(document ->
                         SegmentType.IMAGE_VISUAL.name().equals(
                                 document.getSegmentType()))
@@ -84,18 +64,9 @@ class SegmentIndexMigrationProjectionTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void managerShouldPreserveExistingEsIdAndSegmentIdIndependently() {
-        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
-                null,
-                new SegmentIndexConfig(),
-                null,
-                null,
-                null,
-                null,
-                Runnable::run,
-                new SegmentIndexWriteBarrier(),
-                null);
+    void runnerShouldPreserveExistingEsIdAndSegmentIdIndependently() {
+        SegmentIndexMigrationRunner runner =
+                new SegmentIndexMigrationRunner(null, null, null);
         EmbeddingProfile profile = new EmbeddingProfile(
                 1L, "EMBEDDING", "text-model", 2, "fingerprint");
         SegmentRebuildProjectionPlanner planner =
@@ -108,19 +79,16 @@ class SegmentIndexMigrationProjectionTest {
         source.setSegmentType(SegmentType.TEXT_CHUNK.name());
         source.setContentText("text");
 
-        List<?> migrated = ReflectionTestUtils.invokeMethod(
-                manager,
-                "prepareMigrationBatch",
+        List<SegmentIndexMigrationRunner.MigrationDocument> migrated =
+                runner.prepareMigrationBatch(
                 List.of(hit("existing-es-id", source)),
                 profile,
                 (EmbeddingSession) (text, type) -> List.of(0.1f, 0.2f),
                 planner);
 
         assertThat(migrated).singleElement().satisfies(item -> {
-            assertThat(ReflectionTestUtils.getField(item, "id"))
-                    .isEqualTo("existing-es-id");
-            SegmentDocument document = (SegmentDocument)
-                    ReflectionTestUtils.getField(item, "document");
+            assertThat(item.id()).isEqualTo("existing-es-id");
+            SegmentDocument document = item.document();
             assertThat(document.getSegmentId()).isEqualTo("source-segment-id");
             assertThat(document.getChunkOrder()).isNull();
         });

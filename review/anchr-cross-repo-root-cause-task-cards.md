@@ -42,7 +42,7 @@
 | ANCHR-203 | 收口 Knowledge Content 与 Retrieval 的一致性边界 | 已完成 | P1 | L | app | 201、202，且 101B/101C、106B、107、110 契约稳定 |
 | ANCHR-204 | 收口 Ask 剩余的 Knowledge/Retrieval 同步读取边界 | 已完成 | P1 | L | app | 201–203、109 |
 | ANCHR-205 | 收口 Activity、Provider/Storage 与专用 Outbox 支撑边界 | 源码与本地回归已完成；待真实 MySQL/OSS/ES 验收 | P2 | XL | app | 201–204、101C、107 |
-| ANCHR-206 | 按已稳定用例边界拆分超大 Application Service | 206A–206E 源码与本地回归已完成；206F 待执行 | P2 | XXL | app | 203–205 |
+| ANCHR-206 | 按已稳定用例边界拆分超大 Application Service | 206A–206F 源码与本地回归已完成；真实基础设施与部署验收待完成 | P2 | XXL | app | 203–205 |
 
 ## 任务边界与唯一归属
 
@@ -1819,7 +1819,7 @@ SegmentIndexManagerImpl
 - 未修改任务表、Repository/Mapper、状态机、claim/lease/claimVersion、调度批次/并发、`IngestionStageTransactionCoordinator`、`IngestionIndexFinalizer`、任何端点、HTTP/JSON、SSE 或前端；206D 创建/维护/查询用例和 206F 物理索引生命周期均未改。
 - `mvn compile`、`test-compile`、Worker/阶段事务/Index finalizer/ACL/Repository/Mapper/Application 目标回归和允许本机临时端口后的完整 `mvn clean test` 通过：515 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。真实 MySQL claim/lease/短事务竞争、OSS 临时凭证、Docling submit/poll/ACK、Embedding provider 限速和 Elasticsearch generation 激活/失败清理仍需集成环境验收。
 
-### 206F：Retrieval 物理索引生命周期拆分
+### 206F：Retrieval 物理索引生命周期拆分（源码与本地回归已完成，2026-07-30）
 
 最后执行，只处理 `SegmentIndexManagerImpl`；这是 206 风险最高的子卡，不能与 206A 或 Capability 配置改动合并。
 
@@ -1834,6 +1834,16 @@ SegmentIndexManagerImpl
 5. 不新增持久化 deployment 状态、分布式 lease、增量追平或新索引协议；这些不是机械拆分。
 
 **完成条件：** create/retry/prepare/request/confirm/status 并发 characterization tests 全部保持；真实 Elasticsearch 验证 mapping、全量迁移、count、alias 切换、激活失败回切和失败索引清理。没有真实 ES 验证时只能报告源码与本地回归完成，不能把 206F 标为生产验收完成。
+
+**实施结果：**
+
+- `SegmentIndexManagerImpl` 继续是唯一 `SegmentIndexManager/RetrievalEmbeddingDeploymentApi` Bean，独占唯一 `AtomicReference<SegmentIndexLifecycleState>`、15 秒 topology refresh 时间戳、instance `ReentrantLock`、create/rebuild CAS claim、`SegmentIndexWriteBarrier`、alias 切换和 Capability 激活；主类由 1,249 行收敛为 677 行，没有第二套生命周期入口、状态或锁。
+- 提取四个同 package、无 Spring 注解、无新增接口的具体协作者：`SegmentIndexTopologyInspector` 负责 alias topology 与 mapping/profile metadata 读取；`SegmentPhysicalIndexFactory` 负责 settings/mapping 资源加载、维度替换、profile metadata 和物理索引创建；`SegmentIndexMigrationRunner` 负责 scroll、projection、Embedding pacing/retry、bulk write、count validation 和 scroll 清理；`SegmentIndexStatusAssembler` 负责状态 DTO 与 rebuild reason。生命周期 state/pending/progress 只迁为 package-private records，仍只有 Manager 持有和 CAS 更新。
+- `SegmentIndexAliasManager`、`SegmentIndexWriteBarrier` 和 `RetrievalCapabilityAcl` 原样复用。完整重建顺序仍是 `requireValid alias → refresh/count old index → create target → scroll/project/embed/bulk/count → atomic alias switch → activate serving profile`；Capability 激活失败仍先把 alias 切回旧索引，再让外层按原规则检查 alias 引用并清理未被引用的 target。
+- 保持单实例内存状态、启动检查、15 秒 topology 缓存、物理索引命名、settings/mapping、mapping meta 字段、scroll/bulk size 与 sort、单次 embedding session、500 ms pacing、429/Throttling/RateQuota retry/backoff、projection planner 跨 batch 复用、ES `_id` 与 segmentId 语义、progress phase、旧索引回滚快照和 fail-closed target 清理。
+- 固定并验证 create/retry 和 confirm 并发只能 claim 一次、executor rejection 回滚、requested target 与 active profile 分离、相同 pending target 幂等/不同 target 替换、15 秒 topology 缓存及失效恢复、完整 status/pending/progress DTO、rebuild reason 文案、mapping metadata、Embedding 维度/有限值、projection 文档数变化、IMAGE_VISUAL 单次生成、对象 key 临时签名、write barrier、alias 切换后 Capability 激活及失败回切。
+- 未新增持久化 deployment 状态、分布式 lease、增量追平、第二套 alias manager、状态仓库或 deployment API；未修改 ES mapping JSON、索引/alias 名称协议、Capability contract、任何端点、HTTP/JSON、SSE 或前端。
+- `mvn compile`、`test-compile`、索引生命周期/并发/migration/mapping/alias/write barrier/Capability/Controller 目标回归和允许本机临时端口后的完整 `mvn clean test` 通过：519 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。真实 Elasticsearch 的索引创建、全量 scroll/bulk、count、alias 原子切换、Capability 激活失败回切、orphan target 清理、旧索引回滚和多实例部署竞争仍未验收，因此 206F 与 ANCHR-206 不标记为生产验收完成。
 
 ### 统一硬边界
 

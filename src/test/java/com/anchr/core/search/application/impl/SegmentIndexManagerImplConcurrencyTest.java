@@ -9,6 +9,7 @@ import com.anchr.core.search.infrastructure.persistence.es.SegmentIndexAliasMana
 import com.anchr.core.search.infrastructure.persistence.es.SegmentIndexAliasManager.AliasTopology;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -19,6 +20,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -258,6 +261,102 @@ class SegmentIndexManagerImplConcurrencyTest {
         assertTrue(manager.confirmRebuild(taskId));
         assertEquals(1, queuedTasks.size());
         assertEquals(SegmentIndexStatus.REBUILDING, manager.status().getStatus());
+    }
+
+    @Test
+    void requestedRebuildShouldReuseSameTargetAndReplaceDifferentTarget() {
+        SegmentIndexManagerImpl manager = newManager(Runnable::run,
+                () -> Optional.of(TEXT_EMBEDDING_V3));
+        manager.markReadyFromStatus(SegmentIndexStatusDTO.builder()
+                .indexExists(true)
+                .readable(true)
+                .writable(true)
+                .actualDim(TEXT_EMBEDDING_V3.dimension())
+                .actualModel(TEXT_EMBEDDING_V3.modelName())
+                .actualProfileFingerprint(TEXT_EMBEDDING_V3.fingerprint())
+                .build());
+
+        String firstTaskId = manager.requestRebuild(TEXT_EMBEDDING_V4);
+        String repeatedTaskId = manager.requestRebuild(TEXT_EMBEDDING_V4);
+        EmbeddingProfile replacement = new EmbeddingProfile(
+                4L, "EMBEDDING", "replacement-model", 1536, "replacement-fingerprint");
+        String replacementTaskId = manager.requestRebuild(replacement);
+
+        assertEquals(firstTaskId, repeatedTaskId);
+        assertFalse(firstTaskId.equals(replacementTaskId));
+        SegmentIndexStatusDTO status = manager.status();
+        assertEquals(replacement.fingerprint(), status.getExpectedProfileFingerprint());
+        assertEquals(replacement.dimension(), status.getPendingRebuild().getExpectedDim());
+    }
+
+    @Test
+    void statusShouldThrottleTopologyInspectionAndRefreshReadWriteAvailability() {
+        SegmentIndexConfig config = new SegmentIndexConfig();
+        config.setReadAlias("kb_segment_read");
+        config.setWriteAlias("kb_segment_write");
+        AtomicInteger inspections = new AtomicInteger();
+        AtomicReference<AliasTopology> topology = new AtomicReference<>(
+                AliasTopology.unavailable("aliases unavailable"));
+        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null, config) {
+            @Override
+            public AliasTopology inspect() {
+                inspections.incrementAndGet();
+                return topology.get();
+            }
+        };
+        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
+                null,
+                config,
+                PROFILE_PROVIDER,
+                null,
+                null,
+                null,
+                Runnable::run,
+                new SegmentIndexWriteBarrier(),
+                aliasManager);
+        manager.markReadyFromStatus(SegmentIndexStatusDTO.builder()
+                .indexExists(true)
+                .readable(true)
+                .writable(true)
+                .actualDim(TEST_PROFILE.dimension())
+                .actualModel(TEST_PROFILE.modelName())
+                .actualProfileFingerprint(TEST_PROFILE.fingerprint())
+                .build());
+
+        SegmentIndexStatusDTO cached = manager.status();
+
+        assertTrue(cached.isReadable());
+        assertTrue(cached.isWritable());
+        assertEquals(0, inspections.get());
+
+        AtomicLong lastRefresh = (AtomicLong) ReflectionTestUtils.getField(
+                manager, "lastAliasTopologyRefreshMs");
+        lastRefresh.set(0);
+        SegmentIndexStatusDTO unavailable = manager.status();
+
+        assertFalse(unavailable.isIndexExists());
+        assertFalse(unavailable.isReadable());
+        assertFalse(unavailable.isWritable());
+        assertTrue(unavailable.getLastError().startsWith("Alias topology invalid: "));
+        assertEquals(1, inspections.get());
+
+        topology.set(new AliasTopology(
+                true,
+                true,
+                true,
+                true,
+                true,
+                "kb_segment_20260101000000",
+                "kb_segment_20260101000000",
+                null));
+        lastRefresh.set(0);
+        SegmentIndexStatusDTO restored = manager.status();
+
+        assertTrue(restored.isIndexExists());
+        assertTrue(restored.isReadable());
+        assertTrue(restored.isWritable());
+        assertEquals(null, restored.getLastError());
+        assertEquals(2, inspections.get());
     }
 
     private SegmentIndexManagerImpl newManager(Executor executor) {
