@@ -133,21 +133,32 @@ cd anchr-app
 
 ### 2. Add the Elasticsearch IK plugin
 
-Download the release archive compatible with Elasticsearch `8.18.8` from [analysis-ik releases](https://github.com/infinilabs/analysis-ik/releases), then place it in the repository root using the name expected by the Dockerfile:
+Download the release archive compatible with Elasticsearch `8.18.8` from [analysis-ik releases](https://github.com/infinilabs/analysis-ik/releases), then place it beside the infrastructure Dockerfile:
 
 ```text
-elasticsearch-analysis-ik-8.18.8.zip
+docker/infra/elasticsearch-analysis-ik-8.18.8.zip
 ```
 
-The archive is intentionally not committed to this repository. `docker compose build` cannot build the Elasticsearch image until the file is present.
+The archive is intentionally excluded from Git. The infrastructure image cannot be built until the file is present.
 
-### 3. Configure the environment
+### 3. Start infrastructure
 
 ```bash
-cp .env.example .env
+cp docker/infra/.env.example docker/infra/.env
+# Replace every change-me value.
+docker compose --env-file docker/infra/.env \
+  -f docker/infra/compose.yml up -d --build
 ```
 
-Replace every `change-me` value. Generate the encryption material with:
+Elasticsearch, Redis, and MySQL are published on loopback-only ports. Infrastructure initialization uses `ES_PASSWORD`, `REDIS_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_ROOT_PASSWORD`.
+
+### 4. Configure Anchr App
+
+```bash
+cp docker/app/.env.example docker/app/.env
+```
+
+Match its datastore credentials to the infrastructure environment, then configure Docling and replace all application secrets. Generate the encryption material with:
 
 ```bash
 openssl rand -base64 32
@@ -162,42 +173,42 @@ The template is organized into these groups:
 | --- | --- | --- |
 | Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Tokens, distributed ID segments, rewrite cache, and Agent snapshots. |
 | Elasticsearch | `ES_USERNAME`, `ES_PASSWORD`, `ES_HOST` | Segment indexes, aliases, lexical recall, and vector recall. |
-| MySQL | `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` | Application state and Docker Compose initialization. |
+| MySQL | `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` | Application state. |
 | Security | `APP_ADMIN_SECRET`, `APP_ENCRYPT_KEY`, `APP_ENCRYPT_IV` | Token administration and encryption of provider credentials. |
 | Docling | `APP_DOCLING_BASE_URL`, `APP_DOCLING_API_TOKEN` | Authenticated asynchronous parsing. |
 | Server | `SERVER_HOST`, `SERVER_PORT` | HTTP bind address and port. |
 
 > [!WARNING]
-> Do not commit `.env`. Keep the encryption key and IV stable for existing encrypted configuration records, and use a secret manager in production.
-
-### 4. Start infrastructure
-
-Docker Compose starts Elasticsearch, Redis, and MySQL on loopback-only ports:
-
-```bash
-docker compose up -d
-docker compose ps
-```
-
-The application itself and Anchr Docling run separately.
+> Do not commit either Docker `.env` file. Keep the encryption key and IV stable for existing encrypted configuration records, and use a secret manager in production.
 
 ### 5. Start Anchr App
 
-Spring Boot does not load the repository `.env` file automatically. Export it into the current shell before starting the application:
+Build and start the API container:
 
 ```bash
+docker compose --env-file docker/app/.env \
+  -f docker/app/compose.yml up -d --build
+```
+
+Anchr Docling remains a separate service. With the example port, the API is available at [http://127.0.0.1:8081](http://127.0.0.1:8081).
+
+For local JVM development instead, copy the application environment to the repository root, change the datastore hosts from Docker service names to `127.0.0.1`, export it, and run Maven:
+
+```bash
+cp docker/app/.env.example .env
+# Set REDIS_HOST, MYSQL_HOST, and ES_HOST for host access.
 set -a
 source .env
 set +a
 mvn spring-boot:run
 ```
 
-Flyway applies the database schema on startup. The API is available at [http://127.0.0.1:8080](http://127.0.0.1:8080) with the example defaults.
+Flyway applies the database schema on startup.
 
 Check the application:
 
 ```bash
-curl http://127.0.0.1:8080/actuator/health
+curl http://127.0.0.1:8081/actuator/health
 ```
 
 ### 6. Create an access token
@@ -205,7 +216,7 @@ curl http://127.0.0.1:8080/actuator/health
 Issue a one-hour administrator token using the configured admin secret:
 
 ```bash
-curl --get http://127.0.0.1:8080/api/v1/auth/refresh-token \
+curl --get http://127.0.0.1:8081/api/v1/auth/refresh-token \
   --header "X-Admin-Secret: ${APP_ADMIN_SECRET}" \
   --data-urlencode "role=ADMIN"
 ```
@@ -221,7 +232,7 @@ Use the **Settings** workspace in Anchr Web, or the `/api/v1/settings` endpoints
 3. configure either a text Embedding or multimodal Embedding provider;
 4. activate the selected providers and wait for the Segment index to become ready.
 
-The frontend defaults to `http://127.0.0.1:8080` for this API.
+Configure Anchr Web to use `http://127.0.0.1:8081` for this API.
 
 ## API surface
 
@@ -263,7 +274,7 @@ Model endpoints, API keys, model names, dimensions, and storage credentials are 
 | `mvn test` | Run unit, contract, and integration tests; Docker-backed tests require a working Docker daemon. |
 | `mvn -DskipTests package` | Build the executable Spring Boot JAR. |
 | `java -jar target/anchr-app-0.0.1-SNAPSHOT.jar` | Run the packaged application after exporting its environment. |
-| `docker compose logs -f elasticsearch` | Follow Elasticsearch startup and plugin logs. |
+| `docker compose --env-file docker/infra/.env -f docker/infra/compose.yml logs -f elasticsearch` | Follow Elasticsearch startup and plugin logs. |
 
 ### Project structure
 
@@ -273,6 +284,7 @@ See [`project_layout.text`](./project_layout.text) for the maintained repository
 
 - [Agent RAG workflow](./docs/agent-rag-workflow.md)
 - [Domain boundaries and interactions](./docs/domain-boundaries-and-interactions.md)
+- [Docker deployment](./docker/README.md)
 
 ## Production notes
 

@@ -11,3 +11,5 @@
 /docs/*.sh
 /scripts
 /*.iml
+/docker/**/.env
+/docker/infra/elasticsearch-analysis-ik-*.zip
