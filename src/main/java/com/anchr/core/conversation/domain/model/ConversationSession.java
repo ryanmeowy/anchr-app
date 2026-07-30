@@ -33,9 +33,4 @@ public class ConversationSession {
         session.setExpiresAt(null);
         return session;
     }
-
-    public void touch(long now) {
-        this.updatedAt = now;
-        this.expiresAt = null;
-    }
 }

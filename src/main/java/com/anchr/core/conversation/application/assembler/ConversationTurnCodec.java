@@ -68,32 +68,6 @@ public class ConversationTurnCodec {
         }
     }
 
-    public List<ResultCardDTO> parseResultCards(String resultCardsJson) {
-        if (!StringUtils.hasText(resultCardsJson)) {
-            return List.of();
-        }
-        try {
-            CollectionType listType = objectMapper.getTypeFactory()
-                    .constructCollectionType(List.class, ResultCardDTO.class);
-            return objectMapper.readValue(resultCardsJson, listType);
-        } catch (Exception e) {
-            return List.of();
-        }
-    }
-
-    public List<String> parseKbScope(String kbScopeJson) {
-        if (!StringUtils.hasText(kbScopeJson)) {
-            return List.of();
-        }
-        try {
-            CollectionType listType = objectMapper.getTypeFactory()
-                    .constructCollectionType(List.class, String.class);
-            return objectMapper.readValue(kbScopeJson, listType);
-        } catch (Exception e) {
-            return List.of();
-        }
-    }
-
     public List<String> parseAssetScope(String assetScopeJson) {
         if (!StringUtils.hasText(assetScopeJson)) {
             return List.of();

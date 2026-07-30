@@ -1,6 +1,5 @@
 package com.anchr.core.integration.ai.adapter;
 
-import com.anchr.core.conversation.domain.port.ConversationRewritePort;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationGenerationResult;
@@ -28,7 +27,7 @@ import java.util.function.Consumer;
 @Primary
 @Service
 @RequiredArgsConstructor
-public class ConfigDrivenGenerationAdapter implements ConversationRewritePort, ConversationGenerationPort, SearchGenerationPort {
+public class ConfigDrivenGenerationAdapter implements ConversationGenerationPort, SearchGenerationPort {
 
     private final ClientCacheManager cacheManager;
     private final CapabilityClientFactory clientFactory;
