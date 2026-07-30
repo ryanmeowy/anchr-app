@@ -1,37 +1,74 @@
-src/main/java/com/anchr/core
-├── auth                           # 认证子域（STS、令牌接口）
-│   ├── application
-│   ├── infrastructure/aliyun
-│   └── interfaces/rest
-├── common                         # 跨域共享能力
-│   ├── api                        # 统一返回模型
-│   ├── config                     # 全局配置与 Bean 装配
-│   ├── constant                   # 通用常量
-│   ├── exception                  # 统一异常与错误码
-│   ├── security                   # 鉴权注解/拦截器/加密
-│   └── util
-├── ingestion                      # 入库流水线子域
-│   ├── application(/impl)
-│   ├── domain/model
-│   ├── infrastructure/(id,persistence/es)
-│   └── interfaces/rest(/dto)
-├── integration                    # 外部系统适配层
-│   ├── ai
-│   │   ├── adapter/(cloud,local)
-│   │   ├── client
-│   │   ├── domain/model
-│   │   └── port
-│   └── oss
-│       ├── domain/model
-│       └── task
-└── search                         # 搜索子域
-    ├── application(/impl,/support)
-    ├── domain/(model,port,strategy,util)
-    ├── infrastructure
-    │   ├── acl                    # search -> integration 防腐层
-    │   └── persistence/es
-    │   ├── bootstrap
-    │   ├── document
-    │   ├── query/(factory,spec)
-    │   └── repository
-    └── interfaces/(rest/dto,assembler)
+anchr-app/
+├── README.md                              # 英文项目主页
+├── README.zh-CN.md                        # 简体中文说明
+├── docs/                                  # 架构决策、Agent 工作流与演进文档
+├── review/                                # 跨仓库与代码质量审查报告
+├── src/
+│   ├── main/
+│   │   ├── java/com/anchr/core/
+│   │   │   ├── activity/                  # Activity/Recent 支撑域与读模型
+│   │   │   │   ├── application/(acl,api,impl)
+│   │   │   │   ├── domain/(model,repository)
+│   │   │   │   ├── infrastructure/persistence
+│   │   │   │   └── interfaces/rest/(assembler,dto)
+│   │   │   ├── auth/                      # Token 校验、管理与上传 STS 接口
+│   │   │   │   ├── application/(acl,model)
+│   │   │   │   └── interfaces/rest(/dto)
+│   │   │   ├── common/                    # 稳定技术内核，不承载跨域业务模型
+│   │   │   │   ├── application/context
+│   │   │   │   ├── config                 # ES、Redis、线程池与 Web 装配
+│   │   │   │   ├── constant
+│   │   │   │   ├── exception              # 统一错误与 HTTP 响应
+│   │   │   │   ├── infrastructure         # 鉴权拦截器与健康检查
+│   │   │   │   ├── model                  # 通用结果与稳定值对象
+│   │   │   │   └── util                   # 加密、ID 与向量工具
+│   │   │   ├── conversation/              # Ask：会话、回答与 Agent
+│   │   │   │   ├── application/
+│   │   │   │   │   ├── acl                # Ask -> Knowledge/Retrieval/Activity
+│   │   │   │   │   ├── agent(/tool)       # Agent 状态机、预算与工具
+│   │   │   │   │   ├── assembler
+│   │   │   │   │   ├── impl
+│   │   │   │   │   └── model
+│   │   │   │   ├── config
+│   │   │   │   ├── domain/(model,port,repository)
+│   │   │   │   ├── infrastructure/persistence
+│   │   │   │   └── interfaces/rest(/dto)  # REST、SSE、Run/Task 恢复
+│   │   │   ├── ingestion/                 # Knowledge Content 的入库处理部分
+│   │   │   │   ├── application/(acl,impl,model)
+│   │   │   │   ├── config
+│   │   │   │   ├── domain/(model,port,repository)
+│   │   │   │   ├── infrastructure/(parser,persistence)
+│   │   │   │   └── interfaces/rest(/dto)
+│   │   │   ├── integration/               # 外部 Provider 的配置驱动适配器
+│   │   │   │   ├── ai/(adapter,client)    # Generation/Embedding/Rerank/Docling
+│   │   │   │   └── storage                # 阿里云 OSS 与 STS 实现
+│   │   │   ├── kb/                        # Knowledge Content 的目录与资产部分
+│   │   │   │   ├── application/(acl,api,impl,support)
+│   │   │   │   ├── domain/(model,port,repository)
+│   │   │   │   ├── infrastructure/persistence
+│   │   │   │   └── interfaces/rest(/dto)
+│   │   │   ├── search/                    # Retrieval：索引、检索与 Preview
+│   │   │   │   ├── application/(acl,api,impl,model,support)
+│   │   │   │   ├── config
+│   │   │   │   ├── domain/(model,port,repository)
+│   │   │   │   ├── infrastructure/persistence/es
+│   │   │   │   │   ├── document
+│   │   │   │   │   └── repository
+│   │   │   │   └── interfaces/rest/(assembler,dto)
+│   │   │   └── settings/                  # Capability 与 Storage 运行时配置
+│   │   │       ├── application/(acl,api,impl,model,support)
+│   │   │       ├── domain/(model,repository)
+│   │   │       ├── infrastructure/persistence
+│   │   │       └── interfaces/rest(/dto)
+│   │   └── resources/
+│   │       ├── application.yaml            # Spring 与 app.* 默认配置
+│   │       ├── db/migration/               # Flyway V1-V7 数据库迁移
+│   │       ├── mapper/                     # MyBatis XML Mapper
+│   │       ├── es-kb-segment-mapping.json  # 动态向量维度的 Segment Mapping
+│   │       └── es-settings.json            # IK Analyzer 与索引设置
+│   └── test/java/com/anchr/core/           # 单元、契约与 Testcontainers 测试
+├── .env.example                            # 环境变量模板
+├── docker-compose.yml                      # Elasticsearch、Redis、MySQL
+├── Dockerfile                              # 带 IK 插件的 Elasticsearch 镜像
+├── pom.xml                                 # Maven 构建与依赖版本
+└── LICENSE                                 # MIT License

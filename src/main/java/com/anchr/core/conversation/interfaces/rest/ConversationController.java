@@ -41,6 +41,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final ConversationMessageStreamAdapter messageStreamAdapter;
     private final AgentProperties agentProperties;
 
     @GetMapping("/capabilities")
@@ -102,7 +103,7 @@ public class ConversationController {
         response.setHeader("Cache-Control", "no-cache, no-store, no-transform");
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("Connection", "keep-alive");
-        return conversationService.streamMessage(sessionId, request);
+        return messageStreamAdapter.stream(sessionId, request);
     }
 
     @GetMapping("/{sessionId}/messages/{turnId}")

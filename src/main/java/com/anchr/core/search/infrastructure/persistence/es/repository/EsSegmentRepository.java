@@ -300,49 +300,6 @@ public class EsSegmentRepository implements SegmentRepository {
         }
     }
 
-    private SearchRequest buildTextSearchRequest1(String query, List<String> keywords, int limit, SearchFilter filter) {
-        boolean hasKeywords = keywords != null && keywords.stream().anyMatch(StringUtils::hasText);
-        return SearchRequest.of(s -> s
-                .index(kbSegmentConfig.getReadTargetName())
-                .size(limit)
-                .query(q -> q.bool(b -> {
-                    applyFilters(b, filter);
-                    if (hasKeywords) {
-                        // Original query as low-weight fallback
-                        if (StringUtils.hasText(query)) {
-                            b.should(sh -> sh.match(m -> m.field("title").query(query).boost(1.0f)));
-                            b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(2.0f)));
-                            b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(1.5f)));
-                        }
-                        // Rewritten keywords with higher weight
-                        for (String kw : keywords) {
-                            if (!StringUtils.hasText(kw)) {
-                                continue;
-                            }
-                            b.should(sh -> sh.match(m -> m.field("title").query(kw).boost(2.5f)));
-                            b.should(sh -> sh.match(m -> m.field("contentText").query(kw).boost(4.0f)));
-                            b.should(sh -> sh.match(m -> m.field("ocrText").query(kw).boost(3.0f)));
-//                            b.should(sh -> sh.match(m -> m.field("tags").query(kw).boost(3.2f)));
-                        }
-                    } else {
-                        // No keywords: original query with full weights
-                        b.should(sh -> sh.match(m -> m.field("title").query(query).boost(2.5f)));
-                        b.should(sh -> sh.match(m -> m.field("contentText").query(query).boost(4.0f)));
-                        b.should(sh -> sh.match(m -> m.field("ocrText").query(query).boost(3.0f)));
-//                        b.should(sh -> sh.match(m -> m.field("tags").query(query).boost(3.2f)));
-                    }
-                    b.minimumShouldMatch("1");
-                    return b;
-                }))
-                .highlight(h -> h
-                        .fields("title", f -> f.numberOfFragments(0))
-                        .fields("contentText", f -> f.fragmentSize(180).numberOfFragments(1))
-                        .fields("ocrText", f -> f.fragmentSize(180).numberOfFragments(1))
-//                        .fields("tags", f -> f.numberOfFragments(0))
-                )
-        );
-    }
-
     /**
      * Builds one term-centric combined-fields query per rewritten keyword.
      * Rewritten keywords are preferred when available; the original query is
@@ -517,27 +474,6 @@ public class EsSegmentRepository implements SegmentRepository {
                 .highlights(extractHighlightMap(hit))
                 .highlightFields(hit.highlight() == null ? List.of() : List.copyOf(hit.highlight().keySet()))
                 .build();
-    }
-
-    private List<Segment> convertSegmentHits(SearchResponse<SegmentDocument> response) {
-        if (response == null || response.hits() == null || response.hits().hits() == null) {
-            return List.of();
-        }
-        return response.hits().hits().stream()
-                .map(this::convertSegmentHit)
-                .filter(java.util.Objects::nonNull)
-                .toList();
-    }
-
-    private Segment convertSegmentHit(Hit<SegmentDocument> hit) {
-        if (hit == null || hit.source() == null) {
-            return null;
-        }
-        SegmentDocument doc = hit.source();
-        if (!StringUtils.hasText(doc.getSegmentId()) && StringUtils.hasText(hit.id())) {
-            doc.setSegmentId(hit.id());
-        }
-        return toSegment(doc);
     }
 
     private Segment toSegment(SegmentDocument doc) {

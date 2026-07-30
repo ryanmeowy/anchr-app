@@ -76,10 +76,6 @@ public class DoclingClient {
         return job;
     }
 
-    public DoclingJob getJob(String jobId) {
-        return getJobInternal(jobId, null);
-    }
-
     /**
      * Loads one Docling job snapshot and verifies that it belongs to the persisted parse request.
      *

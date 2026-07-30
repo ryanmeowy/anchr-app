@@ -31,8 +31,7 @@ class RetrievalQueryTopChunkMappingTest {
 
     @Test
     void visualProjectionShouldRemainAResultWithoutPretendingItsTitleIsEvidence() {
-        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
-                null, null, null, null, null, null);
+        RetrievalResultAssembler assembler = new RetrievalResultAssembler();
         Segment segment = Segment.builder()
                 .segmentId("visual-1")
                 .assetId("asset-1")
@@ -49,8 +48,7 @@ class RetrievalQueryTopChunkMappingTest {
                 1,
                 true);
 
-        RetrievalHit result = ReflectionTestUtils.invokeMethod(
-                service, "toResult", candidate, "architecture");
+        RetrievalHit result = assembler.toResult(candidate, "architecture");
 
         assertThat(result).isNotNull();
         assertThat(result.segmentType())
@@ -64,15 +62,14 @@ class RetrievalQueryTopChunkMappingTest {
 
     @Test
     void toTopChunk_shouldKeepOriginalContentAndDocumentPosition() {
-        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
-                null, null, null, null, null, null);
+        RetrievalResultAssembler assembler = new RetrievalResultAssembler();
         RetrievalHit segment = new RetrievalHit(
                 null, "2.1 Retrieval", "full original content", null, null, "short snippet",
                 3, null, new RetrievalExplain(List.of("OCR"), null, null, null),
                 new RetrievalAnchor(3, 12, List.of(), null, null), null, null, null, List.of(),
                 "seg-1", null, null, null, null, null);
 
-        RetrievalTopChunk topChunk = ReflectionTestUtils.invokeMethod(service, "toTopChunk", segment);
+        RetrievalTopChunk topChunk = assembler.toTopChunk(segment);
 
         assertThat(topChunk).isNotNull();
         assertThat(topChunk.title()).isEqualTo("2.1 Retrieval");
@@ -88,9 +85,8 @@ class RetrievalQueryTopChunkMappingTest {
         when(objectStoragePort.buildPreviewUrl("embedded/diagram.png"))
                 .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
                         "https://preview/diagram", 123L));
-        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
-                null, null, null, null, null, null);
-        service.setObjectStoragePort(objectStoragePort);
+        RetrievalResultAssembler assembler = new RetrievalResultAssembler();
+        assembler.setObjectStoragePort(objectStoragePort);
         Segment segment = Segment.builder()
                 .segmentId("document-image-1")
                 .segmentType(SegmentType.DOCUMENT_IMAGE)
@@ -100,8 +96,7 @@ class RetrievalQueryTopChunkMappingTest {
         SegmentRerankCandidate candidate = new SegmentRerankCandidate(
                 "document-image-1", segment, Map.of(), 0.9D, 0.9D, 1, true);
 
-        RetrievalHit result = ReflectionTestUtils.invokeMethod(
-                service, "toResult", candidate, "diagram");
+        RetrievalHit result = assembler.toResult(candidate, "diagram");
 
         assertThat(result.imagePreviewUrl()).isEqualTo("https://preview/diagram");
         verify(objectStoragePort).buildPreviewUrl("embedded/diagram.png");
@@ -112,16 +107,17 @@ class RetrievalQueryTopChunkMappingTest {
         SearchRerankPort rerankPort = mock(SearchRerankPort.class);
         when(rerankPort.rerank(anyString(), any(), anyInt())).thenThrow(new IllegalStateException("timeout"));
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
-                null, null, null, rerankPort, new AppSearchProperties(), meterRegistry);
+        RetrievalRerankPolicy policy =
+                new RetrievalRerankPolicy(rerankPort, new AppSearchProperties(), meterRegistry);
         List<SegmentRerankCandidate> candidates = List.of(
                 new SegmentRerankCandidate("s1", null, null, 0.9D, 0.9D, 2, true),
                 new SegmentRerankCandidate("s2", null, null, 0.8D, 0.8D, 1, false));
 
-        Object outcome = ReflectionTestUtils.invokeMethod(service, "applyRerank", "query", candidates, 2);
+        RetrievalRerankPolicy.Outcome outcome = policy.rerank("query", candidates, 2);
 
         assertThat(outcome).isNotNull();
-        assertThat(ReflectionTestUtils.getField(outcome, "candidates")).isEqualTo(candidates);
+        assertThat(outcome.candidates()).isEqualTo(candidates);
+        assertThat(outcome.applied()).isFalse();
         assertThat(meterRegistry.counter("kb.search.rerank.fallback", "reason", "model_error").count())
                 .isEqualTo(1.0D);
     }

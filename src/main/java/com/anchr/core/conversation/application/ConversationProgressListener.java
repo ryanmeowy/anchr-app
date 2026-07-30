@@ -8,6 +8,9 @@ public interface ConversationProgressListener {
     ConversationProgressListener NOOP = new ConversationProgressListener() {
     };
 
+    default void onExecutionStarted(String turnId, String runId) {
+    }
+
     default void onRoutingCompleted(ConversationIntentResult intent) {
     }
 

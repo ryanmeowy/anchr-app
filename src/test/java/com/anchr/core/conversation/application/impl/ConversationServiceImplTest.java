@@ -50,6 +50,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDT
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
+import com.anchr.core.conversation.interfaces.rest.ConversationMessageStreamAdapter;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -126,6 +127,7 @@ class ConversationServiceImplTest {
     private SimpleMeterRegistry meterRegistry;
     private TransactionTemplate transactionTemplate;
     private ConversationServiceImpl service;
+    private ConversationMessageStreamAdapter streamAdapter;
 
     @BeforeEach
     void setUp() {
@@ -163,23 +165,39 @@ class ConversationServiceImplTest {
             List<String> requested = invocation.getArgument(0);
             return requested == null ? List.of() : requested;
         });
-        service = new ConversationServiceImpl(
+        ConversationAgentTaskDtoAssembler taskAssembler =
+                new ConversationAgentTaskDtoAssembler(conversationTurnCodec);
+        ConversationMessageUseCase messageUseCase = new ConversationMessageUseCase(
                 repository,
                 orchestrator,
                 conversationTurnCodec,
                 new ConversationRetrievalTraceBuilder(objectMapper),
                 kbScopeResolver,
-                objectMapper,
                 meterRegistry,
                 activityEventService,
                 agentTaskRepository,
                 transactionTemplate,
-                Runnable::run,
                 agentRunFinalizer,
                 agentTaskProcessor,
-                agentConversationCleanupService,
-                agentRuntimeSnapshotService
-        );
+                taskAssembler);
+        service = new ConversationServiceImpl(
+                new ConversationSessionUseCase(
+                        repository,
+                        kbScopeResolver,
+                        objectMapper,
+                        meterRegistry,
+                        agentConversationCleanupService,
+                        activityEventService),
+                messageUseCase,
+                new ConversationHistoryQuery(
+                        repository,
+                        agentTaskRepository,
+                        conversationTurnCodec,
+                        taskAssembler,
+                        objectMapper,
+                        meterRegistry));
+        streamAdapter = new ConversationMessageStreamAdapter(
+                messageUseCase, Runnable::run, agentRuntimeSnapshotService);
     }
 
     @Test
@@ -398,7 +416,8 @@ class ConversationServiceImplTest {
                 eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList()
         )).thenReturn(buildAnswer("最终规范回答", false, null, List.of()));
 
-        SseEmitter emitter = service.streamMessage(sessionId, buildMessageRequest("mysql 架构是什么"));
+        SseEmitter emitter = streamAdapter.stream(
+                sessionId, buildMessageRequest("mysql 架构是什么"));
 
         verify(answerGenerationService).generate(
                 eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList());
@@ -410,6 +429,19 @@ class ConversationServiceImplTest {
                 (Set<ResponseBodyEmitter.DataWithMediaType>) ReflectionTestUtils.getField(
                         emitter, "earlySendAttempts");
         assertThat(earlyEvents).isNotNull();
+        String sseFraming = earlyEvents.stream()
+                .map(ResponseBodyEmitter.DataWithMediaType::getData)
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .collect(Collectors.joining());
+        assertThat(sseFraming)
+                .contains("event:trace", "event:delta", "event:citations", "event:done");
+        assertThat(sseFraming.indexOf("event:trace"))
+                .isLessThan(sseFraming.indexOf("event:delta"));
+        assertThat(sseFraming.indexOf("event:delta"))
+                .isLessThan(sseFraming.indexOf("event:citations"));
+        assertThat(sseFraming.indexOf("event:citations"))
+                .isLessThan(sseFraming.indexOf("event:done"));
         Map<?, ?> initialTrace = earlyEvents.stream()
                 .map(ResponseBodyEmitter.DataWithMediaType::getData)
                 .filter(Map.class::isInstance)
@@ -423,8 +455,16 @@ class ConversationServiceImplTest {
                 .filter(event -> event.containsKey("sessionUpdatedAt"))
                 .findFirst()
                 .orElseThrow();
+        Map<?, ?> answerDelta = earlyEvents.stream()
+                .map(ResponseBodyEmitter.DataWithMediaType::getData)
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .filter(event -> "最终规范回答".equals(event.get("text")))
+                .findFirst()
+                .orElseThrow();
         ConversationTurn storedTurn = repository.findRecentTurns(sessionId, 1).getFirst();
         assertThat(initialTrace.get("turnId")).isEqualTo(storedTurn.getTurnId());
+        assertThat(answerDelta.get("text")).isEqualTo(storedTurn.getAnswer());
         assertThat(done.get("sessionUpdatedAt")).isEqualTo(
                 repository.findSession(sessionId).orElseThrow().getUpdatedAt());
 
@@ -1032,23 +1072,36 @@ class ConversationServiceImplTest {
     private ConversationServiceImpl buildService(ConversationMessageOrchestrator orchestrator,
                                                   TransactionTemplate transactionTemplate) {
         ConversationTurnCodec codec = new ConversationTurnCodec(objectMapper);
-        ConversationServiceImpl builtService = new ConversationServiceImpl(
-                repository,
-                orchestrator,
-                codec,
-                new ConversationRetrievalTraceBuilder(objectMapper),
-                kbScopeResolver,
-                objectMapper,
-                meterRegistry,
-                activityEventService,
-                agentTaskRepository,
-                transactionTemplate,
-                Runnable::run,
-                agentRunFinalizer,
-                agentTaskProcessor,
-                agentConversationCleanupService,
-                agentRuntimeSnapshotService);
-        return builtService;
+        ConversationAgentTaskDtoAssembler taskAssembler =
+                new ConversationAgentTaskDtoAssembler(codec);
+        return new ConversationServiceImpl(
+                new ConversationSessionUseCase(
+                        repository,
+                        kbScopeResolver,
+                        objectMapper,
+                        meterRegistry,
+                        agentConversationCleanupService,
+                        activityEventService),
+                new ConversationMessageUseCase(
+                        repository,
+                        orchestrator,
+                        codec,
+                        new ConversationRetrievalTraceBuilder(objectMapper),
+                        kbScopeResolver,
+                        meterRegistry,
+                        activityEventService,
+                        agentTaskRepository,
+                        transactionTemplate,
+                        agentRunFinalizer,
+                        agentTaskProcessor,
+                        taskAssembler),
+                new ConversationHistoryQuery(
+                        repository,
+                        agentTaskRepository,
+                        codec,
+                        taskAssembler,
+                        objectMapper,
+                        meterRegistry));
     }
 
     private ConversationMessageRequestDTO buildMessageRequest(String query) {

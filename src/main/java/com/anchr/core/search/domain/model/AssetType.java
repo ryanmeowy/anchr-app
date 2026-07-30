@@ -1,8 +1,6 @@
 package com.anchr.core.search.domain.model;
 
 import lombok.Getter;
-import org.springframework.util.StringUtils;
-
 import java.util.List;
 
 @Getter
@@ -25,21 +23,5 @@ public enum AssetType {
         this.mimeTypes = mimeTypes;
         this.enabled = enabled;
         this.priority = priority;
-    }
-
-    public AssetType byFileType(String fileType) {
-        if (!StringUtils.hasText(fileType)) return null;
-        for (AssetType type : values()) {
-            if (type.fileType.equals(fileType)) return type;
-        }
-        return null;
-    }
-
-    public AssetType byMimeType(String mimeType) {
-        if (!StringUtils.hasText(mimeType)) return null;
-        for (AssetType type : values()) {
-            if (type.mimeTypes.contains(mimeType)) return type;
-        }
-        return null;
     }
 }

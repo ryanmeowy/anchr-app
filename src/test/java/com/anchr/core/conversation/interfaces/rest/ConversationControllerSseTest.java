@@ -18,11 +18,14 @@ class ConversationControllerSseTest {
     @Test
     void streamMessage_shouldDisableProxyBufferingAndTransformation() {
         ConversationService service = mock(ConversationService.class);
-        ConversationController controller = new ConversationController(service, new AgentProperties());
+        ConversationMessageStreamAdapter streamAdapter =
+                mock(ConversationMessageStreamAdapter.class);
+        ConversationController controller = new ConversationController(
+                service, streamAdapter, new AgentProperties());
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("hello");
         SseEmitter emitter = new SseEmitter();
-        when(service.streamMessage("session-1", request)).thenReturn(emitter);
+        when(streamAdapter.stream("session-1", request)).thenReturn(emitter);
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         assertThat(controller.streamMessage("session-1", request, response)).isSameAs(emitter);
@@ -30,12 +33,16 @@ class ConversationControllerSseTest {
         assertThat(response.getHeader("Cache-Control")).isEqualTo("no-cache, no-store, no-transform");
         assertThat(response.getHeader("X-Accel-Buffering")).isEqualTo("no");
         assertThat(response.getHeader("Connection")).isEqualTo("keep-alive");
+        verify(streamAdapter).stream("session-1", request);
     }
 
     @Test
     void getMessage_shouldDelegateExactTurnLookup() {
         ConversationService service = mock(ConversationService.class);
-        ConversationController controller = new ConversationController(service, new AgentProperties());
+        ConversationController controller = new ConversationController(
+                service,
+                mock(ConversationMessageStreamAdapter.class),
+                new AgentProperties());
         ConversationTurnDTO turn = new ConversationTurnDTO();
         turn.setTurnId("turn-1");
         when(service.getMessage("session-1", "turn-1")).thenReturn(turn);

@@ -8,7 +8,6 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * Application service for conversation APIs.
@@ -26,8 +25,6 @@ public interface ConversationService {
     void deleteSession(String sessionId);
 
     ConversationMessageResponseDTO createMessage(String sessionId, ConversationMessageRequestDTO request);
-
-    SseEmitter streamMessage(String sessionId, ConversationMessageRequestDTO request);
 
     ConversationTurnDTO getMessage(String sessionId, String turnId);
 
