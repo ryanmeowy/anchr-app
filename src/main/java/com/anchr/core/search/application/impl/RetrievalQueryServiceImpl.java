@@ -6,11 +6,11 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.api.RetrievalHitQueryApi;
-import com.anchr.core.search.application.api.RetrievalPageQueryApi;
+import com.anchr.core.search.application.api.RetrievalTopNQueryApi;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalHitQuery;
-import com.anchr.core.search.application.api.model.RetrievalPageQuery;
-import com.anchr.core.search.application.api.model.RetrievalPageResult;
+import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
+import com.anchr.core.search.application.api.model.RetrievalTopNResult;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.Segment;
@@ -38,7 +38,7 @@ import java.util.Objects;
  */
 @Slf4j
 @Service
-public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, RetrievalPageQueryApi {
+public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, RetrievalTopNQueryApi {
 
     private final SegmentRepository segmentRepository;
     private final QueryEmbeddingService queryEmbeddingService;
@@ -47,7 +47,7 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
     private final RetrievalRrfFusionPolicy rrfFusionPolicy;
     private final RetrievalRerankPolicy rerankPolicy;
     private final RetrievalResultAssembler resultAssembler;
-    private final RetrievalPageAssembler pageAssembler;
+    private final RetrievalTopNAssembler topNAssembler;
 
     public RetrievalQueryServiceImpl(
             SegmentRepository segmentRepository,
@@ -64,7 +64,7 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
         this.rrfFusionPolicy = new RetrievalRrfFusionPolicy();
         this.rerankPolicy = new RetrievalRerankPolicy(rerankPort, properties, meterRegistry);
         this.resultAssembler = new RetrievalResultAssembler();
-        this.pageAssembler = new RetrievalPageAssembler();
+        this.topNAssembler = new RetrievalTopNAssembler();
     }
 
     @Autowired(required = false)
@@ -76,21 +76,20 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
     public List<RetrievalHit> query(RetrievalHitQuery query) {
         SearchCriteria criteria = query == null ? null : new SearchCriteria(
                 query.query(), query.limit(), query.kbIds(), query.assetIds(),
-                List.of(), query.hitTypes(), null, null, null);
+                List.of(), query.hitTypes(), null, null);
         return searchInternal(criteria, List.of()).items();
     }
 
     @Override
-    public RetrievalPageResult query(RetrievalPageQuery query) {
+    public RetrievalTopNResult query(RetrievalTopNQuery query) {
         SearchCriteria criteria = query == null ? null : new SearchCriteria(
                 query.query(), query.limit(), query.kbIds(), query.assetIds(), query.assetTypes(),
-                query.hitTypes(), query.createdFrom(), query.createdTo(), query.sort());
+                query.hitTypes(), query.createdFrom(), query.createdTo());
         SearchResult result = searchInternal(criteria, query == null ? List.of() : query.keywords());
-        return new RetrievalPageResult(
+        return new RetrievalTopNResult(
                 result.items(),
-                result.total(),
-                pageAssembler.buildFacets(result.items()),
-                pageAssembler.buildInsight(
+                topNAssembler.buildWindowFacets(result.items()),
+                topNAssembler.buildInsight(
                         result.items(), result.textHits(), result.vectorHits(),
                         result.fusedCount(), result.rerankCount(), result.latencyMs()));
     }
@@ -169,7 +168,6 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
                 resultAssembler.aggregateByAsset(segmentResults, limit);
         return new SearchResult(
                 allAggregated,
-                allAggregated.size(),
                 textHitCount,
                 vectorHitCount,
                 fusedCount,
@@ -180,7 +178,7 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
 
     private SearchResult emptyResult(long startMs) {
         return new SearchResult(
-                List.of(), 0, 0, 0, 0, 0,
+                List.of(), 0, 0, 0, 0,
                 System.currentTimeMillis() - startMs);
     }
 
@@ -292,7 +290,6 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
 
     private record SearchResult(
             List<RetrievalHit> items,
-            long total,
             int textHits,
             int vectorHits,
             int fusedCount,
@@ -309,8 +306,7 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
             List<String> assetTypes,
             List<String> hitTypes,
             Long createdFrom,
-            Long createdTo,
-            String sort
+            Long createdTo
     ) {
     }
 }

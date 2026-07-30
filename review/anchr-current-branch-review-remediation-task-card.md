@@ -28,7 +28,7 @@
 | 207B | 禁止日志记录用户原始查询和模型原始输出 | P1 | 完成 | 否 |
 | 207C | 修复 Agent 数字方括号和引用清洗误删 | P1 | 完成 | 否 |
 | 207D | 修复 active generation 后置过滤造成的召回损失 | P1 | 待执行 | 补偿召回或 ES 前置过滤方案需确认 |
-| 207E | 让 Search API 的 sort、total、facets 与真实语义一致 | P1 | 待执行 | 是；必须先选择 Top-N 或真实分页 |
+| 207E | 让 Search API 的 sort、total、facets 与真实语义一致 | P1 | 完成 | 已选择 Top-N |
 | 207F | 收敛生产运行默认值和搜索参数来源 | P1/P2 | 待执行 | 生产部署方式需确认 |
 | 207G | 建立最小 CI 和合并门禁 | P1 | 待执行 | 跨仓工作流范围需确认 |
 | 207H | 准确描述 Ingestion 的恢复能力 | P2 | 待执行 | 否 |
@@ -276,10 +276,21 @@ ES text/vector Top-K
 
 ### 验收
 
-- 非空 `sort` 不再被静默忽略。
+- `sort` 不再作为 Search API 或内部 Retrieval 的公开能力。
 - `total/facets` 的字段语义、后端实现、接口文档和前端展示一致。
 - 为选定方案增加 HTTP golden contract。
 - Search Answer、Follow-up、Activity 记录和 Conversation 内部 Retrieval 不受影响。
+
+### 2026-07-30 实施记录
+
+- `/api/v1/search/kb` 明确定义为 `limit=1..10` 的 bounded Top-N 检索；未增加 page、offset、cursor、nextCursor 或 totalHits。
+- 从 `SearchQueryDTO`、`anchr-web` 请求类型和内部 Retrieval Query 中删除 `sort`；检索固定使用现有相关性排序，不再暴露只有一个选项的伪配置。
+- 搜索响应将 `total/facets` 直接替换为 `returnedCount/windowFacets`，不双写旧字段；`returnedCount` 始终由最终 `items` 数量生成，`windowFacets` 只统计最终返回窗口。
+- Retrieval 应用接口、结果模型和装配器从 Page 命名收敛为 Top-N；BM25、向量双路、RRF、generation gate、rerank 和 Asset 聚合顺序未改变。
+- `anchr-web` 同步使用新响应字段，排序请求类型收窄为 `RELEVANCE`，来源标题明确显示“本次返回 N 条”。
+- Search Activity 的历史 `total` 字段继续记录当次返回数量；未迁移或重写历史活动数据。
+- 后端定向测试通过；完整 `mvn test`：537 个测试，0 failure，0 error；17 个依赖 Docker/Testcontainers 的既有测试按环境条件跳过。
+- `anchr-web` 80 个 Node 测试、ESLint 和 Next.js 生产构建通过。
 
 ---
 

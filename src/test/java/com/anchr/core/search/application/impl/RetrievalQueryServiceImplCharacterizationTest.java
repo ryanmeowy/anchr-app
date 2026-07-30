@@ -2,8 +2,8 @@ package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
-import com.anchr.core.search.application.api.model.RetrievalPageQuery;
-import com.anchr.core.search.application.api.model.RetrievalPageResult;
+import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
+import com.anchr.core.search.application.api.model.RetrievalTopNResult;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.Segment;
@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
 class RetrievalQueryServiceImplCharacterizationTest {
 
     @Test
-    void pageQueryShouldKeepRecallRoutesGenerationGateRerankAndPageProjection() {
+    void topNQueryShouldKeepRecallRoutesGenerationGateRerankAndWindowProjection() {
         SegmentRepository repository = mock(SegmentRepository.class);
         QueryEmbeddingService embedding = mock(QueryEmbeddingService.class);
         SearchKnowledgeAcl knowledgeAcl = mock(SearchKnowledgeAcl.class);
@@ -75,26 +75,25 @@ class RetrievalQueryServiceImplCharacterizationTest {
                 repository, embedding, knowledgeAcl, rerankPort,
                 properties, new SimpleMeterRegistry());
 
-        RetrievalPageResult page = service.query(new RetrievalPageQuery(
+        RetrievalTopNResult result = service.query(new RetrievalTopNQuery(
                 " retrieval ", List.of("architecture"), 3, List.of("kb-1"), List.of(),
-                List.of(" pdf ", "PDF"), List.of(), 10L, 20L, "RELEVANCE"));
+                List.of(" pdf ", "PDF"), List.of(), 10L, 20L));
 
-        assertThat(page.total()).isEqualTo(1);
-        assertThat(page.items()).singleElement().satisfies(item -> {
+        assertThat(result.items()).singleElement().satisfies(item -> {
             assertThat(item.segmentId()).isEqualTo("seg-1");
             assertThat(item.totalHits()).isEqualTo(1);
             assertThat(item.topChunks()).singleElement()
                     .satisfies(chunk -> assertThat(chunk.segmentId()).isEqualTo("seg-1"));
         });
-        assertThat(page.facets().get("assetTypes")).singleElement()
+        assertThat(result.windowFacets().get("assetTypes")).singleElement()
                 .satisfies(facet -> {
                     assertThat(facet.value()).isEqualTo("PDF");
                     assertThat(facet.count()).isEqualTo(1);
                 });
-        assertThat(page.insight().pipeline().keywordCandidates()).isEqualTo(1);
-        assertThat(page.insight().pipeline().vectorCandidates()).isEqualTo(1);
-        assertThat(page.insight().pipeline().fusedRetained()).isEqualTo(1);
-        assertThat(page.insight().pipeline().rerankAdopted()).isEqualTo(1);
+        assertThat(result.insight().pipeline().keywordCandidates()).isEqualTo(1);
+        assertThat(result.insight().pipeline().vectorCandidates()).isEqualTo(1);
+        assertThat(result.insight().pipeline().fusedRetained()).isEqualTo(1);
+        assertThat(result.insight().pipeline().rerankAdopted()).isEqualTo(1);
 
         ArgumentCaptor<SearchFilter> vectorFilters = ArgumentCaptor.forClass(SearchFilter.class);
         verify(repository, org.mockito.Mockito.times(2))
@@ -115,7 +114,7 @@ class RetrievalQueryServiceImplCharacterizationTest {
     }
 
     @Test
-    void emptyVisibleScopeShouldReturnEmptyPageBeforeEmbeddingOrRepositoryCalls() {
+    void emptyVisibleScopeShouldReturnEmptyTopNBeforeEmbeddingOrRepositoryCalls() {
         SegmentRepository repository = mock(SegmentRepository.class);
         QueryEmbeddingService embedding = mock(QueryEmbeddingService.class);
         SearchKnowledgeAcl knowledgeAcl = mock(SearchKnowledgeAcl.class);
@@ -125,14 +124,13 @@ class RetrievalQueryServiceImplCharacterizationTest {
                 repository, embedding, knowledgeAcl, rerankPort,
                 new AppSearchProperties(), new SimpleMeterRegistry());
 
-        RetrievalPageResult page = service.query(new RetrievalPageQuery(
+        RetrievalTopNResult result = service.query(new RetrievalTopNQuery(
                 "query", List.of(), 5, List.of("missing"), List.of(),
-                List.of(), List.of(), null, null, null));
+                List.of(), List.of(), null, null));
 
-        assertThat(page.items()).isEmpty();
-        assertThat(page.total()).isZero();
-        assertThat(page.facets()).containsOnlyKeys("assetTypes", "hitTypes");
-        assertThat(page.insight().pipeline().fusedRetained()).isZero();
+        assertThat(result.items()).isEmpty();
+        assertThat(result.windowFacets()).containsOnlyKeys("assetTypes", "hitTypes");
+        assertThat(result.insight().pipeline().fusedRetained()).isZero();
         verify(embedding, never()).embedQuery(any());
         verify(repository, never()).textSearch(any(), anyList(), anyInt(), any());
         verify(repository, never()).vectorSearch(anyList(), anyInt(), anyFloat(), any());

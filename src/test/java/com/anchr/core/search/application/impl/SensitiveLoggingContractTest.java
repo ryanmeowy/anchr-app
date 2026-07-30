@@ -10,7 +10,7 @@ import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.api.model.RetrievalHit;
-import com.anchr.core.search.application.api.model.RetrievalPageQuery;
+import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
 import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.SearchFilter;
@@ -64,7 +64,7 @@ class SensitiveLoggingContractTest {
                 new SimpleMeterRegistry());
 
         try (LogCapture logs = LogCapture.start(RetrievalQueryServiceImpl.class)) {
-            service.query(new RetrievalPageQuery(
+            service.query(new RetrievalTopNQuery(
                     SENSITIVE_QUERY,
                     List.of(),
                     5,
@@ -72,7 +72,6 @@ class SensitiveLoggingContractTest {
                     List.of(),
                     List.of(),
                     List.of(),
-                    null,
                     null,
                     null));
 

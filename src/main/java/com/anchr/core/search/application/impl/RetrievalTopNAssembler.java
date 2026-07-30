@@ -12,11 +12,11 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Pure Page result projections derived from the final aggregated Retrieval hits.
+ * Pure Top-N result projections derived from the final aggregated Retrieval hits.
  */
-final class RetrievalPageAssembler {
+final class RetrievalTopNAssembler {
 
-    Map<String, List<RetrievalFacet>> buildFacets(List<RetrievalHit> items) {
+    Map<String, List<RetrievalFacet>> buildWindowFacets(List<RetrievalHit> items) {
         if (items == null || items.isEmpty()) {
             return Map.of("assetTypes", List.of(), "hitTypes", List.of());
         }

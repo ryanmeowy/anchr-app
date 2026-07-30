@@ -8,15 +8,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Paged kb search response.
+ * Bounded Top-N kb search response.
  */
 @Data
 @Builder
-public class SearchPageDTO implements Serializable {
+public class SearchTopNDTO implements Serializable {
 
     private List<SearchResultDTO> items;
-    private long total;
-    private Map<String, List<FacetItemDTO>> facets;
+    private long returnedCount;
+    private Map<String, List<FacetItemDTO>> windowFacets;
     private SearchAnswerDTO answer;
     private String rewrittenQuery;
     private List<String> rewrittenKeywords;
