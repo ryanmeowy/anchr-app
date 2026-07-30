@@ -8,6 +8,8 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.acl.IngestionDoclingAcl;
 import com.anchr.core.ingestion.application.acl.IngestionRetrievalAcl;
 import com.anchr.core.ingestion.application.acl.IngestionStorageAcl;
+import com.anchr.core.ingestion.application.model.IngestionDoclingException;
+import com.anchr.core.ingestion.application.model.IngestionDoclingFailureKind;
 import com.anchr.core.ingestion.application.model.IngestionDoclingJob;
 import com.anchr.core.ingestion.application.model.IngestionDoclingJobError;
 import com.anchr.core.ingestion.application.model.IngestionStorageCredential;
@@ -38,12 +40,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,13 +73,7 @@ class IngestionTaskProcessorImplTest {
 
     @BeforeEach
     void setUp() {
-        Executor direct = Runnable::run;
-        processor = new IngestionTaskProcessorImpl(
-                direct, repository, assetRepository, knowledgeBaseRepository,
-                embeddingPort, aesUtil, finalizer,
-                ingestionRetrievalAcl, coordinator,
-                objectStoragePort, ingestionStorageAcl, chunkMapper, ingestionDoclingAcl,
-                new ObjectMapper(), idGen);
+        processor = newProcessor(Runnable::run);
         ReflectionTestUtils.setField(processor, "parsePollInterval", Duration.ofMillis(1));
         ReflectionTestUtils.setField(processor, "parseTimeout", Duration.ofSeconds(2));
         ReflectionTestUtils.setField(processor, "providerMaxRetries", 2);
@@ -116,14 +115,30 @@ class IngestionTaskProcessorImplTest {
 
         processor.processItem(item);
 
-        verify(coordinator).advanceAndUpdateAssetStatus(
+        var order = org.mockito.Mockito.inOrder(
+                coordinator,
+                ingestionDoclingAcl,
+                chunkMapper,
+                embeddingPort,
+                ingestionRetrievalAcl,
+                finalizer,
+                knowledgeBaseRepository);
+        order.verify(coordinator).ensureTargetIndexGeneration(item);
+        order.verify(coordinator).updateAssetStatus(any(), eq(asset), any(), any());
+        order.verify(ingestionDoclingAcl).submitJob(any());
+        order.verify(coordinator).advanceAndUpdateAssetStatus(
                 any(), eq(IngestionStage.EMBED), eq(55), eq(asset), any(), any());
-        verify(coordinator).advanceAndUpdateAssetStatus(
+        order.verify(chunkMapper).toTextChunks(asset, response, 1L);
+        order.verify(chunkMapper).toDocumentImageChunks(asset, response, 1L);
+        order.verify(embeddingPort).isMulti();
+        order.verify(embeddingPort).embed("hello", "text");
+        order.verify(coordinator).advanceAndUpdateAssetStatus(
                 any(), eq(IngestionStage.INDEX), eq(75), eq(asset), any(), any());
-        var order = org.mockito.Mockito.inOrder(ingestionRetrievalAcl, finalizer);
         order.verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
         order.verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
-        verify(ingestionDoclingAcl).ackJob("job-1");
+        order.verify(ingestionDoclingAcl).ackJob("job-1");
+        order.verify(knowledgeBaseRepository)
+                .refreshDocumentStats("kb-1", "user-1", true);
         verify(repository, never()).advanceRunningItem(any(), any(), any(), any(), any(),
                 anyInt(), any());
     }
@@ -166,6 +181,50 @@ class IngestionTaskProcessorImplTest {
     }
 
     @Test
+    void processItem_whenDoclingReturnsTransientRetryAfter_shouldRetryWithinSameRun() {
+        IngestionTaskItem item = runningItem();
+        Asset asset = asset();
+        ParseResponse response = response();
+        Chunk chunk = Chunk.builder()
+                .segmentId("segment-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .chunkText("hello")
+                .segmentType(SegmentType.TEXT_CHUNK)
+                .build();
+        when(coordinator.ensureTargetIndexGeneration(item)).thenReturn(item);
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(coordinator.updateAssetStatus(any(), eq(asset), any(), any())).thenReturn(true);
+        when(coordinator.advanceAndUpdateAssetStatus(
+                any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
+        when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
+        when(ingestionDoclingAcl.submitJob(any()))
+                .thenThrow(new IngestionDoclingException(
+                        IngestionDoclingFailureKind.TRANSIENT,
+                        429,
+                        Duration.ofMillis(1),
+                        "busy",
+                        null))
+                .thenReturn(new IngestionDoclingJob(
+                        "job-2", "task-1:item-1:1", "succeeded", response, null));
+        when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of(chunk));
+        when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.embed("hello", "text")).thenReturn(List.of(0.1f));
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+                .thenReturn(receipt());
+        when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
+                .thenReturn(true);
+
+        processor.processItem(item);
+
+        verify(ingestionDoclingAcl, times(2)).submitJob(any());
+        verify(ingestionDoclingAcl).ackJob("job-2");
+        verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
+    }
+
+    @Test
     void processItem_whenRetrievalWriteFails_shouldFailItemWithoutActivatingGeneration() {
         IngestionTaskItem item = runningItem();
         Asset asset = asset();
@@ -204,6 +263,53 @@ class IngestionTaskProcessorImplTest {
                 eq(asset), eq(ApiError.SEARCH_BACKEND_UNAVAILABLE),
                 any(), eq("FAILED"), eq("FAILED"));
         verify(ingestionDoclingAcl, never()).ackJob("job-1");
+    }
+
+    @Test
+    void processItem_whenEmbeddingProviderFails_shouldKeepEmbedStageAndErrorMapping() {
+        IngestionTaskItem item = runningItem();
+        Asset asset = asset();
+        ParseResponse response = response();
+        Chunk chunk = Chunk.builder()
+                .segmentId("segment-1")
+                .kbId("kb-1")
+                .assetId("asset-1")
+                .chunkText("hello")
+                .segmentType(SegmentType.TEXT_CHUNK)
+                .build();
+        when(coordinator.ensureTargetIndexGeneration(item)).thenReturn(item);
+        when(assetRepository.findActiveById("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset));
+        when(coordinator.updateAssetStatus(any(), eq(asset), any(), any())).thenReturn(true);
+        when(coordinator.advanceAndUpdateAssetStatus(
+                any(), eq(IngestionStage.EMBED), eq(55), eq(asset), any(), any()))
+                .thenReturn(true);
+        when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
+        when(ingestionDoclingAcl.submitJob(any())).thenReturn(
+                new IngestionDoclingJob(
+                        "job-1", "task-1:item-1:1", "succeeded", response, null));
+        when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of(chunk));
+        when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
+        when(embeddingPort.isMulti()).thenReturn(false);
+        when(embeddingPort.embed("hello", "text"))
+                .thenThrow(new IllegalStateException("provider unavailable"));
+        when(coordinator.failRunning(
+                any(), eq(asset), eq(ApiError.EMBEDDING_FAILED), any(), any(), any()))
+                .thenReturn(true);
+
+        processor.processItem(item);
+
+        verify(coordinator).failRunning(
+                org.mockito.ArgumentMatchers.argThat(failed ->
+                        failed.getStage() == IngestionStage.EMBED),
+                eq(asset),
+                eq(ApiError.EMBEDDING_FAILED),
+                eq("provider unavailable"),
+                eq("FAILED"),
+                eq("FAILED"));
+        verify(ingestionRetrievalAcl, never()).replaceGeneration(any(), any(), any());
+        verify(finalizer, never()).activateGeneration(any(), any(), anyInt(), any());
+        verify(ingestionDoclingAcl).ackJob("job-1");
     }
 
     @Test
@@ -304,6 +410,45 @@ class IngestionTaskProcessorImplTest {
                 eq(item), eq(asset), eq(com.anchr.core.common.exception.ApiError.INTERNAL_ERROR),
                 any(), eq("FAILED"), eq("FAILED"));
         verify(ingestionDoclingAcl, never()).submitJob(any());
+    }
+
+    @Test
+    void submit_whenExecutorRejects_shouldReleaseLocalDispatchForTheNextWakeUp() {
+        AtomicInteger attempts = new AtomicInteger();
+        IngestionTaskProcessorImpl rejectingProcessor = newProcessor(command -> {
+            attempts.incrementAndGet();
+            throw new RejectedExecutionException("full");
+        });
+        when(repository.listPendingItemIds("task-1", 32))
+                .thenReturn(List.of("item-1"));
+
+        rejectingProcessor.submit("kb-1", "task-1", "user-1");
+        rejectingProcessor.submit("kb-1", "task-1", "user-1");
+
+        assertThat(attempts).hasValue(2);
+        verify(repository, never()).claimPending(any());
+    }
+
+    @Test
+    void submit_shouldLocallyDeduplicateTheSamePendingItemBeforeExecution() {
+        AtomicInteger accepted = new AtomicInteger();
+        IngestionTaskProcessorImpl holdingProcessor =
+                newProcessor(command -> accepted.incrementAndGet());
+        when(repository.listPendingItemIds("task-1", 32))
+                .thenReturn(List.of("item-1", "item-1"));
+
+        holdingProcessor.submit("kb-1", "task-1", "user-1");
+
+        assertThat(accepted).hasValue(1);
+    }
+
+    private IngestionTaskProcessorImpl newProcessor(Executor executor) {
+        return new IngestionTaskProcessorImpl(
+                executor, repository, assetRepository, knowledgeBaseRepository,
+                embeddingPort, aesUtil, finalizer,
+                ingestionRetrievalAcl, coordinator,
+                objectStoragePort, ingestionStorageAcl, chunkMapper, ingestionDoclingAcl,
+                new ObjectMapper(), idGen);
     }
 
     private IngestionTaskItem runningItem() {

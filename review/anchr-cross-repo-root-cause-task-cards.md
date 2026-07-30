@@ -42,7 +42,7 @@
 | ANCHR-203 | 收口 Knowledge Content 与 Retrieval 的一致性边界 | 已完成 | P1 | L | app | 201、202，且 101B/101C、106B、107、110 契约稳定 |
 | ANCHR-204 | 收口 Ask 剩余的 Knowledge/Retrieval 同步读取边界 | 已完成 | P1 | L | app | 201–203、109 |
 | ANCHR-205 | 收口 Activity、Provider/Storage 与专用 Outbox 支撑边界 | 源码与本地回归已完成；待真实 MySQL/OSS/ES 验收 | P2 | XL | app | 201–204、101C、107 |
-| ANCHR-206 | 按已稳定用例边界拆分超大 Application Service | 206A–206D 源码与本地回归已完成；206E–206F 待执行 | P2 | XXL | app | 203–205 |
+| ANCHR-206 | 按已稳定用例边界拆分超大 Application Service | 206A–206E 源码与本地回归已完成；206F 待执行 | P2 | XXL | app | 203–205 |
 
 ## 任务边界与唯一归属
 
@@ -1794,7 +1794,7 @@ SegmentIndexManagerImpl
 - 未修改 `IngestionTaskProcessorImpl`、Parse/Embedding/Index 阶段、203/205C ACL、数据库/Mapper、Outbox、任何端点、HTTP/JSON、SSE 或前端；Worker、阶段事务、Index finalizer、Storage/Docling/Retrieval ACL、Repository/Mapper 和 REST Controller 只做扩展回归。
 - `mvn compile`、`test-compile`、目标测试和允许本机临时端口后的完整 `mvn clean test` 通过：509 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。真实 MySQL REQUIRES_NEW/唯一键竞争/事务回滚、after-commit 调度饱和和部署 Worker 仍需集成环境验收。
 
-### 206E：Ingestion Worker 阶段执行拆分
+### 206E：Ingestion Worker 阶段执行拆分（源码与本地回归已完成，2026-07-30）
 
 只处理 `IngestionTaskProcessorImpl`，必须在 206D 完成并稳定后执行；不修改任务表、状态机或调度模型。
 
@@ -1808,6 +1808,16 @@ SegmentIndexManagerImpl
 5. 203 的 `IngestionRetrievalAcl`、205C 的 `IngestionStorageAcl/IngestionDoclingAcl` 原样复用；不得绕过 ACL，也不得增加提供方 API。
 
 **完成条件：** Parse → Embedding → Index 的状态、事务、外部调用和失败序列与迁移前一致；没有双调度、双 ACK、双 embedding、双 index 或 active generation 误清理。
+
+**实施结果：**
+
+- `IngestionTaskProcessorImpl` 继续是唯一 `IngestionTaskProcessor` Bean，保留启动 restart recovery、定时 poll、claim/local dispatch set、executor rejection 恢复、单 item 总体编排和 KB stats 刷新；主类由 693 行收敛为 339 行，没有第二条调度、claim 或阶段执行路径。
+- 提取三个同 package、无 Spring 注解、无新增接口的具体协作者：`IngestionParseStage` 负责 source URL、Storage target/credential、Docling submit/poll/recovery/Retry-After/ACK 和 chunk 映射；`IngestionEmbeddingStage` 负责 projection、进程内 pacing、provider retry/backoff 和 segment embedding；`IngestionWorkerFailureClassifier` 负责中断、业务、Embedding 和未知异常的错误码/错误文本转换。
+- Processor 继续直接复用 `IngestionStageTransactionCoordinator` 推进 `PARSE → EMBED → INDEX`，通过 `IngestionRetrievalAcl.replaceGeneration` 写入目标 generation，并由唯一 `IngestionIndexFinalizer.activateGeneration` 完成激活；未增加 Index executor、事务 coordinator、提供方 API、ACL、Port、Facade 或消息总线。
+- 保持 Docling 终态 ACK 时点、失败 Job 的 retryable ACK、Parse timeout/poll interval、`Retry-After`、Embedding 全局限速和节流重试、TEXT/IMAGE projection、target generation、失败 stage/error/Outbox、索引激活与 KB stats 顺序；Storage、Docling、Retrieval 三个既有 ACL 原样复用。
+- 固定并验证成功链调用顺序、Docling transient `Retry-After` 重试、Embedding provider 失败停留在 EMBED 并映射 `EMBEDDING_FAILED`、失败 Job ACK、executor rejection 后可再次调度、同 item 本地去重，以及中断/业务/未知异常和 1000 字符错误截断。
+- 未修改任务表、Repository/Mapper、状态机、claim/lease/claimVersion、调度批次/并发、`IngestionStageTransactionCoordinator`、`IngestionIndexFinalizer`、任何端点、HTTP/JSON、SSE 或前端；206D 创建/维护/查询用例和 206F 物理索引生命周期均未改。
+- `mvn compile`、`test-compile`、Worker/阶段事务/Index finalizer/ACL/Repository/Mapper/Application 目标回归和允许本机临时端口后的完整 `mvn clean test` 通过：515 tests、0 failures、0 errors、17 个无 Docker 的 Testcontainers 用例跳过。真实 MySQL claim/lease/短事务竞争、OSS 临时凭证、Docling submit/poll/ACK、Embedding provider 限速和 Elasticsearch generation 激活/失败清理仍需集成环境验收。
 
 ### 206F：Retrieval 物理索引生命周期拆分
 
