@@ -127,7 +127,7 @@ For the full boundary decision, see [Domain boundaries and interactions](./docs/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/ryanmeowy/smart-vision.git anchr-app
+git clone https://github.com/ryanmeowy/anchr-app.git anchr-app
 cd anchr-app
 ```
 

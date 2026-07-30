@@ -3,6 +3,7 @@ package com.anchr.core.auth.interfaces.rest;
 import com.anchr.core.auth.application.acl.AuthStorageAcl;
 import com.anchr.core.auth.interfaces.rest.dto.TokenValidationDTO;
 import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.infrastructure.PermitAll;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -49,6 +50,7 @@ public class AuthController {
 
     private final SecureRandom secureRandom = new SecureRandom();
 
+    @PermitAll
     @GetMapping("/validate-token")
     public Result<TokenValidationDTO> validateToken(
             @RequestHeader(value = "X-Access-Token", required = false) String token) {
@@ -101,6 +103,7 @@ public class AuthController {
         return MessageDigest.isEqual(aBytes, bBytes);
     }
 
+    @PermitAll
     @GetMapping("/refresh-token")
     public Result<String> refreshToken(@RequestHeader("X-Admin-Secret") String secret,
                                        @RequestParam(required = false) String code,
@@ -144,6 +147,7 @@ public class AuthController {
         return Result.success(newToken);
     }
 
+    @PermitAll
     @GetMapping("/clean-token")
     public Result<Void> cleanToken(@RequestHeader("X-Admin-Secret") String secret,
                                    @RequestParam(required = false) String token) {
@@ -177,6 +181,7 @@ public class AuthController {
         return Result.success();
     }
 
+    @PermitAll
     @GetMapping("/list-tokens")
     public Result<List<Map<String, Object>>> listTokens(@RequestHeader("X-Admin-Secret") String secret) {
         if (!StringUtils.hasText(adminSecret)) {

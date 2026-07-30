@@ -127,7 +127,7 @@ flowchart LR
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/ryanmeowy/smart-vision.git anchr-app
+git https://github.com/ryanmeowy/anchr-app.git anchr-app
 cd anchr-app
 ```
 
