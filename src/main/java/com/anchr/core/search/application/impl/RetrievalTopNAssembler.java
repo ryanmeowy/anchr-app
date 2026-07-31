@@ -4,6 +4,7 @@ import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalFacet;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalInsight;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
@@ -14,6 +15,7 @@ import java.util.Map;
 /**
  * Pure Top-N result projections derived from the final aggregated Retrieval hits.
  */
+@Component
 final class RetrievalTopNAssembler {
 
     Map<String, List<RetrievalFacet>> buildWindowFacets(List<RetrievalHit> items) {

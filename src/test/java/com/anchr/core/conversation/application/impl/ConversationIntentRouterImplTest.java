@@ -6,6 +6,7 @@ import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.GenerationOptions;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -39,10 +40,9 @@ class ConversationIntentRouterImplTest {
     @BeforeEach
     void setUp() {
         router = new ConversationIntentRouterImpl(repository, generationPort,
-                new ObjectMapper(), new SimpleMeterRegistry());
-        ReflectionTestUtils.setField(router, "enabled", true);
-        ReflectionTestUtils.setField(router, "contextTurnLimit", 5);
-        ReflectionTestUtils.setField(router, "timeout", Duration.ofSeconds(5));
+                new ObjectMapper(), new SimpleMeterRegistry(),
+                RuntimeConfigTestUnits.values(
+                        java.util.Map.of("CONVERSATION.intentRoutingEnabled", "true")));
     }
 
     @Test

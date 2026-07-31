@@ -32,15 +32,14 @@ public class DoclingClient {
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration DEFAULT_RETRY_AFTER = Duration.ofSeconds(5);
     private static final int MAX_ERROR_BODY_BYTES = 4096;
+    private static final int DEFAULT_MAX_RESPONSE_BYTES = 268_435_456;
 
     private final String baseUrl;
     private final String authorization;
-    private final int maxResponseBytes;
 
     public DoclingClient(
             @Value("${app.docling.base-url}") String baseUrl,
-            @Value("${app.docling.api-token}") String apiToken,
-            @Value("${app.docling.max-response-bytes:268435456}") int maxResponseBytes
+            @Value("${app.docling.api-token}") String apiToken
     ) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new IllegalArgumentException("app.docling.base-url must not be blank");
@@ -48,17 +47,17 @@ public class DoclingClient {
         if (apiToken == null || apiToken.length() < 32) {
             throw new IllegalArgumentException("app.docling.api-token must contain at least 32 characters");
         }
-        if (maxResponseBytes <= 0 || maxResponseBytes == Integer.MAX_VALUE) {
-            throw new IllegalArgumentException(
-                    "app.docling.max-response-bytes must be between 1 and Integer.MAX_VALUE - 1");
-        }
         this.baseUrl = baseUrl.replaceAll("/+$", "");
         this.authorization = "Bearer " + apiToken;
-        this.maxResponseBytes = maxResponseBytes;
     }
 
     public DoclingJob submitJob(ParseRequest request) {
+        return submitJob(request, DEFAULT_MAX_RESPONSE_BYTES);
+    }
+
+    public DoclingJob submitJob(ParseRequest request, int responseLimitBytes) {
         Objects.requireNonNull(request, "request");
+        validateResponseLimit(responseLimitBytes);
         if (request.requestId() == null || request.requestId().isBlank()) {
             throw new IllegalArgumentException("request.requestId must not be blank");
         }
@@ -70,7 +69,7 @@ public class DoclingClient {
         }
         HttpResponse<InputStream> response = send(buildRequest("POST", "/v1/jobs", body));
         requireSuccess(response, "submit");
-        DoclingJob job = readJob(response, "submit");
+        DoclingJob job = readJob(response, "submit", responseLimitBytes);
         requireJobIdentity(job, null, request.requestId(), response.statusCode(), "submit");
         requireSucceededResultIdentity(job, request.requestId(), response.statusCode(), "submit");
         return job;
@@ -83,19 +82,26 @@ public class DoclingClient {
      * resubmission are responsibilities of the durable ingestion stage scheduler.</p>
      */
     public DoclingJob getJob(String jobId, String expectedRequestId) {
+        return getJob(jobId, expectedRequestId, DEFAULT_MAX_RESPONSE_BYTES);
+    }
+
+    public DoclingJob getJob(
+            String jobId, String expectedRequestId, int responseLimitBytes) {
         if (expectedRequestId == null || expectedRequestId.isBlank()) {
             throw new IllegalArgumentException("expectedRequestId must not be blank");
         }
-        return getJobInternal(jobId, expectedRequestId);
+        validateResponseLimit(responseLimitBytes);
+        return getJobInternal(jobId, expectedRequestId, responseLimitBytes);
     }
 
-    private DoclingJob getJobInternal(String jobId, String expectedRequestId) {
+    private DoclingJob getJobInternal(
+            String jobId, String expectedRequestId, int responseLimitBytes) {
         if (jobId == null || jobId.isBlank()) {
             throw new IllegalArgumentException("jobId must not be blank");
         }
         HttpResponse<InputStream> response = send(buildRequest("GET", "/v1/jobs/" + jobId, null));
         requireSuccess(response, "get");
-        DoclingJob job = readJob(response, "get");
+        DoclingJob job = readJob(response, "get", responseLimitBytes);
         requireJobIdentity(job, jobId, expectedRequestId, response.statusCode(), "get");
         String resultRequestId = expectedRequestId == null ? job.requestId() : expectedRequestId;
         requireSucceededResultIdentity(job, resultRequestId, response.statusCode(), "get");
@@ -169,10 +175,14 @@ public class DoclingClient {
         throw new DoclingClientException(kind, statusCode, retryAfter, message, null);
     }
 
-    private DoclingJob readJob(HttpResponse<InputStream> response, String operation) {
+    private DoclingJob readJob(
+            HttpResponse<InputStream> response,
+            String operation,
+            int responseLimitBytes
+    ) {
         byte[] body;
         try (InputStream input = response.body()) {
-            body = input.readNBytes(maxResponseBytes + 1);
+            body = input.readNBytes(responseLimitBytes + 1);
         } catch (IOException e) {
             throw new DoclingClientException(
                     FailureKind.TRANSIENT,
@@ -181,7 +191,7 @@ public class DoclingClient {
                     "failed to read docling " + operation + " response",
                     e);
         }
-        if (body.length > maxResponseBytes) {
+        if (body.length > responseLimitBytes) {
             throw new DoclingClientException(
                     FailureKind.PERMANENT,
                     response.statusCode(),
@@ -198,6 +208,13 @@ public class DoclingClient {
                     null,
                     "failed to decode docling job response",
                     e);
+        }
+    }
+
+    private void validateResponseLimit(int responseLimitBytes) {
+        if (responseLimitBytes <= 0 || responseLimitBytes == Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "docling response limit must be between 1 and Integer.MAX_VALUE - 1");
         }
     }
 

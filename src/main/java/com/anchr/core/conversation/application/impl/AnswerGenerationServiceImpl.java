@@ -2,6 +2,7 @@ package com.anchr.core.conversation.application.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.model.AnswerMode;
@@ -16,7 +17,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -55,8 +55,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     private final ConversationGenerationPort generationPort;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
-    @Value("${app.conversation.legacy-evidence-fallback-enabled:false}")
-    private boolean legacyEvidenceFallbackEnabled;
+    private final RuntimeConfigUnit runtimeConfigUnit;
 
     @Override
     public AnswerGenerationResult generate(String userQuery,
@@ -90,6 +89,8 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         AnswerMode resolvedMode = answerMode == null ? AnswerMode.STRICT : answerMode;
         AnswerModePolicy policy = resolvedMode.policy();
         List<GroundingSegment> groundingSegments = pickGroundingSegments(topCandidates, citations, policy);
+        boolean effectiveLegacyFallback = runtimeConfigUnit.getBoolean(
+                "CONVERSATION", "legacyEvidenceFallbackEnabled", false);
         try {
             String noEvidenceReason = resolveNoEvidenceReason(groundingSegments, topCandidates, policy);
             if (StringUtils.hasText(noEvidenceReason)) {
@@ -111,7 +112,8 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             ModelAnswer modelAnswer = parseModelAnswer(rawText);
             if (modelAnswer == null) {
                 return finalizeStream(buildGenerationFailureOrLegacyFallback(
-                                groundingSegments, "invalid_model_response"),
+                                groundingSegments, "invalid_model_response",
+                                effectiveLegacyFallback),
                         decoder, progress);
             }
             if (modelAnswer.status() == ModelAnswerStatus.NO_EVIDENCE) {
@@ -123,18 +125,21 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             String answerText = modelAnswer.answer();
             if (!StringUtils.hasText(answerText)) {
                 return finalizeStream(buildGenerationFailureOrLegacyFallback(
-                                groundingSegments, "empty_model_answer"),
+                                groundingSegments, "empty_model_answer",
+                                effectiveLegacyFallback),
                         decoder, progress);
             }
             if (hasInvalidCitationReference(answerText, groundingSegments.size())) {
                 return finalizeStream(buildGenerationFailureOrLegacyFallback(
-                                groundingSegments, "invalid_answer_citation"),
+                                groundingSegments, "invalid_answer_citation",
+                                effectiveLegacyFallback),
                         decoder, progress);
             }
             NormalizedAnswerCitations normalized = normalizeAnswerCitations(answerText, groundingSegments);
             if (normalized == null) {
                 return finalizeStream(buildGenerationFailureOrLegacyFallback(
-                                groundingSegments, "missing_answer_citation"),
+                                groundingSegments, "missing_answer_citation",
+                                effectiveLegacyFallback),
                         decoder, progress);
             }
             AnswerGenerationResult result = new AnswerGenerationResult();
@@ -146,7 +151,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         } catch (Exception e) {
             log.warn("Answer generation failed: {}", e.getMessage());
             AnswerGenerationResult failure = buildGenerationFailureOrLegacyFallback(
-                    groundingSegments, "model_unavailable");
+                    groundingSegments, "model_unavailable", effectiveLegacyFallback);
             if (progress.supportsAnswerStreaming()) progress.onAnswerReset(failure.getAnswerText());
             return failure;
         } finally {
@@ -388,9 +393,10 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
 
     private AnswerGenerationResult buildGenerationFailureOrLegacyFallback(
             List<GroundingSegment> segments,
-            String reason) {
+            String reason,
+            boolean effectiveLegacyFallback) {
         meterRegistry.counter("answer.generate.failure.count", "reason", reason).increment();
-        if (!legacyEvidenceFallbackEnabled) {
+        if (!effectiveLegacyFallback) {
             return buildGenerationFailure(reason);
         }
         meterRegistry.counter("answer.generate.fallback.count").increment();

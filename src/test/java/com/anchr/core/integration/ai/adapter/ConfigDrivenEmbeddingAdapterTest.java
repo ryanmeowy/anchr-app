@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class ConfigDrivenEmbeddingAdapterTest {
 
@@ -30,7 +31,11 @@ class ConfigDrivenEmbeddingAdapterTest {
                 CapabilityResolver.SLOT_EMBEDDING,
                 new ClientCacheManager.ResolvedClient(client, config));
         ConfigDrivenEmbeddingAdapter adapter =
-                new ConfigDrivenEmbeddingAdapter(cacheManager, null, null);
+                new ConfigDrivenEmbeddingAdapter(
+                        cacheManager,
+                        null,
+                        null,
+                        mock(CapabilityConfigRepository.class));
 
         adapter.embed("query text", "text");
         adapter.embed("https://example.test/original.png", "image");
@@ -79,8 +84,7 @@ class ConfigDrivenEmbeddingAdapterTest {
                 };
         RecordingConfigRepository repository = new RecordingConfigRepository(target);
         ConfigDrivenEmbeddingAdapter adapter = new ConfigDrivenEmbeddingAdapter(
-                new ClientCacheManager(), clientFactory, null);
-        adapter.setCapabilityConfigRepository(repository);
+                new ClientCacheManager(), clientFactory, null, repository);
 
         adapter.openSession(targetProfile).embed("document text", "text");
 

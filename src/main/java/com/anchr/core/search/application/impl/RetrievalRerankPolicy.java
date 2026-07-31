@@ -1,13 +1,15 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.search.config.AppSearchProperties;
+import com.anchr.core.search.application.model.SearchRuntimeSettings;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.port.SearchRerankPort;
 import com.anchr.core.search.domain.port.SearchRerankPort.RerankItem;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -20,27 +22,28 @@ import java.util.Map;
  * Bounded rerank window and score fusion. It deliberately preserves the existing RRF fallback.
  */
 @Slf4j
+@Component
+@RequiredArgsConstructor
 final class RetrievalRerankPolicy {
 
     private final SearchRerankPort rerankPort;
-    private final AppSearchProperties properties;
     private final MeterRegistry meterRegistry;
 
-    RetrievalRerankPolicy(
-            SearchRerankPort rerankPort,
-            AppSearchProperties properties,
-            MeterRegistry meterRegistry
-    ) {
-        this.rerankPort = rerankPort;
-        this.properties = properties;
-        this.meterRegistry = meterRegistry;
+    Outcome rerank(String keyword, List<SegmentRerankCandidate> candidates, int limit) {
+        return rerank(
+                keyword, candidates, limit, SearchRuntimeSettings.defaults());
     }
 
-    Outcome rerank(String keyword, List<SegmentRerankCandidate> candidates, int limit) {
+    Outcome rerank(
+            String keyword,
+            List<SegmentRerankCandidate> candidates,
+            int limit,
+            SearchRuntimeSettings runtimeConfig
+    ) {
         if (!StringUtils.hasText(keyword) || candidates.isEmpty()) {
             return new Outcome(candidates, false);
         }
-        int windowSize = resolveWindowSize(limit, candidates.size());
+        int windowSize = resolveWindowSize(limit, candidates.size(), runtimeConfig);
         if (windowSize <= 0) {
             return new Outcome(candidates, false);
         }
@@ -50,7 +53,9 @@ final class RetrievalRerankPolicy {
         List<SegmentRerankCandidate> untouchedTail = windowSize >= candidates.size()
                 ? List.of()
                 : candidates.subList(windowSize, candidates.size());
-        List<String> documents = rerankWindow.stream().map(this::buildDocument).toList();
+        List<String> documents = rerankWindow.stream()
+                .map(candidate -> buildDocument(candidate, runtimeConfig.maxDocChars()))
+                .toList();
 
         meterRegistry.counter("kb.search.rerank.calls").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -83,7 +88,7 @@ final class RetrievalRerankPolicy {
             return new Outcome(candidates, false);
         }
 
-        WeightPair weights = resolveFusionWeights();
+        WeightPair weights = resolveFusionWeights(runtimeConfig);
         List<WindowRankItem> sortedWindow = buildAndSortWindow(
                 rerankWindow, rerankScoreByIndex, weights.alpha(), weights.beta());
         List<SegmentRerankCandidate> merged = new ArrayList<>(candidates.size());
@@ -131,27 +136,27 @@ final class RetrievalRerankPolicy {
         return items;
     }
 
-    private int resolveWindowSize(int limit, int candidateSize) {
+    private int resolveWindowSize(
+            int limit, int candidateSize, SearchRuntimeSettings runtimeConfig) {
         if (candidateSize <= 0) {
             return 0;
         }
-        AppSearchProperties.Rerank rerank = properties.getRerank();
-        if (!rerank.isWindowEnabled()) {
+        if (!runtimeConfig.windowEnabled()) {
             return candidateSize;
         }
         int safeLimit = Math.max(1, limit);
-        int baseSize = rerank.getWindowSize() > 0
-                ? rerank.getWindowSize()
-                : safeLimit * Math.max(1, rerank.getWindowFactor());
-        int minSize = Math.max(1, rerank.getWindowMin());
-        int maxSize = Math.max(minSize, rerank.getWindowMax());
+        int baseSize = runtimeConfig.windowSize() > 0
+                ? runtimeConfig.windowSize()
+                : safeLimit * Math.max(1, runtimeConfig.windowFactor());
+        int minSize = Math.max(1, runtimeConfig.windowMin());
+        int maxSize = Math.max(minSize, runtimeConfig.windowMax());
         int bounded = Math.max(minSize, Math.min(baseSize, maxSize));
         return Math.min(candidateSize, bounded);
     }
 
-    private WeightPair resolveFusionWeights() {
-        double alpha = clamp01(properties.getRerank().getFusionAlpha());
-        double beta = clamp01(properties.getRerank().getFusionBeta());
+    private WeightPair resolveFusionWeights(SearchRuntimeSettings runtimeConfig) {
+        double alpha = clamp01(runtimeConfig.fusionAlpha());
+        double beta = clamp01(runtimeConfig.fusionBeta());
         double sum = alpha + beta;
         if (sum <= 0d) {
             return new WeightPair(1d, 0d);
@@ -176,7 +181,7 @@ final class RetrievalRerankPolicy {
         return value;
     }
 
-    private String buildDocument(SegmentRerankCandidate candidate) {
+    private String buildDocument(SegmentRerankCandidate candidate, int configuredMaxDocChars) {
         if (candidate == null || candidate.segment() == null) {
             return "";
         }
@@ -191,7 +196,7 @@ final class RetrievalRerankPolicy {
             appendField(builder, "tags", String.join(", ", segment.getTags()));
         }
         String merged = builder.toString();
-        int maxDocChars = Math.max(64, properties.getRerank().getMaxDocChars());
+        int maxDocChars = Math.max(64, configuredMaxDocChars);
         return merged.length() <= maxDocChars ? merged : merged.substring(0, maxDocChars);
     }
 

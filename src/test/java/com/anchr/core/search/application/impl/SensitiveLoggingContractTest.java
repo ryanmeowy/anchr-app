@@ -12,7 +12,7 @@ import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
 import com.anchr.core.search.application.model.SearchRewriteResult;
-import com.anchr.core.search.config.AppSearchProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchGenerationPort;
@@ -55,12 +55,12 @@ class SensitiveLoggingContractTest {
         when(repository.vectorSearch(
                 anyList(), anyInt(), anyFloat(), any(SearchFilter.class)))
                 .thenReturn(List.of());
-        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
+        RetrievalQueryServiceImpl service = RetrievalQueryServiceTestFactory.create(
                 repository,
                 embedding,
                 knowledgeAcl,
                 rerankPort,
-                new AppSearchProperties(),
+                RuntimeConfigTestUnits.defaults(),
                 new SimpleMeterRegistry());
 
         try (LogCapture logs = LogCapture.start(RetrievalQueryServiceImpl.class)) {

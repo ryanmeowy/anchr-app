@@ -1,6 +1,6 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.search.config.AppSearchProperties;
+import com.anchr.core.search.application.model.SearchRuntimeSettings;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.model.SegmentType;
@@ -30,15 +30,16 @@ class RetrievalRerankPolicyTest {
                         new SearchRerankPort.RerankItem(1, 2D),
                         new SearchRerankPort.RerankItem(0, -1D),
                         new SearchRerankPort.RerankItem(99, 1D)));
-        AppSearchProperties properties = properties();
+        SearchRuntimeSettings settings = settings();
         SimpleMeterRegistry meters = new SimpleMeterRegistry();
-        RetrievalRerankPolicy policy = new RetrievalRerankPolicy(port, properties, meters);
+        RetrievalRerankPolicy policy = new RetrievalRerankPolicy(port, meters);
         List<SegmentRerankCandidate> candidates = List.of(
                 candidate("s1", 1D, "first"),
                 candidate("s2", 0.8D, "second"),
                 candidate("s3", 0.7D, "tail"));
 
-        RetrievalRerankPolicy.Outcome outcome = policy.rerank("query", candidates, 2);
+        RetrievalRerankPolicy.Outcome outcome =
+                policy.rerank("query", candidates, 2, settings);
 
         assertThat(outcome.applied()).isTrue();
         assertThat(outcome.candidates()).extracting(SegmentRerankCandidate::segmentId)
@@ -59,7 +60,7 @@ class RetrievalRerankPolicyTest {
         SearchRerankPort port = mock(SearchRerankPort.class);
         when(port.rerank(eq("query"), anyList(), anyInt())).thenReturn(List.of());
         SimpleMeterRegistry meters = new SimpleMeterRegistry();
-        RetrievalRerankPolicy policy = new RetrievalRerankPolicy(port, properties(), meters);
+        RetrievalRerankPolicy policy = new RetrievalRerankPolicy(port, meters);
         List<SegmentRerankCandidate> candidates =
                 List.of(candidate("s1", 1D, "first"));
 
@@ -71,15 +72,24 @@ class RetrievalRerankPolicyTest {
                 "kb.search.rerank.fallback", "reason", "empty_result").count()).isEqualTo(1D);
     }
 
-    private AppSearchProperties properties() {
-        AppSearchProperties properties = new AppSearchProperties();
-        properties.getRerank().setWindowEnabled(true);
-        properties.getRerank().setWindowSize(2);
-        properties.getRerank().setWindowMin(1);
-        properties.getRerank().setWindowMax(2);
-        properties.getRerank().setFusionAlpha(0.6D);
-        properties.getRerank().setFusionBeta(0.4D);
-        return properties;
+    private SearchRuntimeSettings settings() {
+        SearchRuntimeSettings defaults = SearchRuntimeSettings.defaults();
+        return new SearchRuntimeSettings(
+                defaults.rankConstant(),
+                defaults.candidateMultiplier(),
+                defaults.maxCandidates(),
+                defaults.textTopK(),
+                defaults.documentImageTopK(),
+                defaults.textSimilarity(),
+                defaults.documentImageSimilarity(),
+                defaults.maxDocChars(),
+                true,
+                2,
+                defaults.windowFactor(),
+                1,
+                2,
+                0.6D,
+                0.4D);
     }
 
     private SegmentRerankCandidate candidate(String segmentId, double score, String title) {

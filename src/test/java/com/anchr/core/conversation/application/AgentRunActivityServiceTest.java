@@ -172,7 +172,6 @@ class AgentRunActivityServiceTest {
         run.setRunId("run-1");
         run.setSessionId("session-1");
         run.setTurnId("turn-1");
-        run.setWorkflowVersion("general-agent-v1");
         run.setStatus(status);
         run.setStepCount(2);
         run.setToolCallCount(1);

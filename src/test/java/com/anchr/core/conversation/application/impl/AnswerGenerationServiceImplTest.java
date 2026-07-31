@@ -8,15 +8,16 @@ import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -41,7 +42,8 @@ class AnswerGenerationServiceImplTest {
         service = new AnswerGenerationServiceImpl(
                 generationPort,
                 new ObjectMapper(),
-                meterRegistry
+                meterRegistry,
+                RuntimeConfigTestUnits.defaults()
         );
     }
 
@@ -253,7 +255,12 @@ class AnswerGenerationServiceImplTest {
         ConversationRetrievalCandidate candidate = buildCandidate("seg_legacy", longEvidence);
         ConversationCitation citation = buildCitation("seg_legacy", longEvidence);
         when(generationPort.generate(any(), any())).thenThrow(new RuntimeException("timeout"));
-        ReflectionTestUtils.setField(service, "legacyEvidenceFallbackEnabled", true);
+        service = new AnswerGenerationServiceImpl(
+                generationPort,
+                new ObjectMapper(),
+                meterRegistry,
+                RuntimeConfigTestUnits.values(Map.of(
+                        "CONVERSATION.legacyEvidenceFallbackEnabled", "true")));
 
         var result = service.generate(
                 "那 InnoDB 呢",

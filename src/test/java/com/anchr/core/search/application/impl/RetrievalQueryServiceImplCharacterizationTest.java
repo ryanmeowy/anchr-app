@@ -4,7 +4,7 @@ import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
 import com.anchr.core.search.application.api.model.RetrievalTopNResult;
-import com.anchr.core.search.config.AppSearchProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentHit;
@@ -40,9 +40,6 @@ class RetrievalQueryServiceImplCharacterizationTest {
         QueryEmbeddingService embedding = mock(QueryEmbeddingService.class);
         SearchKnowledgeAcl knowledgeAcl = mock(SearchKnowledgeAcl.class);
         SearchRerankPort rerankPort = mock(SearchRerankPort.class);
-        AppSearchProperties properties = new AppSearchProperties();
-        properties.getRrf().setCandidateMultiplier(2);
-        properties.getRrf().setMaxCandidates(20);
         Segment segment = Segment.builder()
                 .segmentId("seg-1")
                 .kbId("kb-1")
@@ -71,9 +68,12 @@ class RetrievalQueryServiceImplCharacterizationTest {
                 .thenReturn(List.of(hit), List.of());
         when(rerankPort.rerank(eq("retrieval"), anyList(), eq(1)))
                 .thenReturn(List.of(new SearchRerankPort.RerankItem(0, 0.9D)));
-        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
+        RetrievalQueryServiceImpl service = RetrievalQueryServiceTestFactory.create(
                 repository, embedding, knowledgeAcl, rerankPort,
-                properties, new SimpleMeterRegistry());
+                RuntimeConfigTestUnits.values(Map.of(
+                        "SEARCH.candidateMultiplier", "2",
+                        "SEARCH.maxCandidates", "20")),
+                new SimpleMeterRegistry());
 
         RetrievalTopNResult result = service.query(new RetrievalTopNQuery(
                 " retrieval ", List.of("architecture"), 3, List.of("kb-1"), List.of(),
@@ -120,9 +120,9 @@ class RetrievalQueryServiceImplCharacterizationTest {
         SearchKnowledgeAcl knowledgeAcl = mock(SearchKnowledgeAcl.class);
         SearchRerankPort rerankPort = mock(SearchRerankPort.class);
         when(knowledgeAcl.resolveVisibleKbIds(List.of("missing"))).thenReturn(List.of());
-        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
+        RetrievalQueryServiceImpl service = RetrievalQueryServiceTestFactory.create(
                 repository, embedding, knowledgeAcl, rerankPort,
-                new AppSearchProperties(), new SimpleMeterRegistry());
+                RuntimeConfigTestUnits.defaults(), new SimpleMeterRegistry());
 
         RetrievalTopNResult result = service.query(new RetrievalTopNQuery(
                 "query", List.of(), 5, List.of("missing"), List.of(),

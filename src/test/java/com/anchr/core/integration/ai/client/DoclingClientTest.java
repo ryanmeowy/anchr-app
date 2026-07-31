@@ -196,21 +196,16 @@ class DoclingClientTest {
 
         DoclingClient.DoclingClientException error = assertThrows(
                 DoclingClient.DoclingClientException.class,
-                () -> client(128).getJob("job-1", "task-1:item-1:1"));
+                () -> client().getJob("job-1", "task-1:item-1:1", 128));
 
         assertEquals(DoclingClient.FailureKind.PERMANENT, error.kind());
         assertTrue(error.getMessage().contains("configured size limit"));
     }
 
     private DoclingClient client() {
-        return client(268435456);
-    }
-
-    private DoclingClient client(int maxResponseBytes) {
         return new DoclingClient(
                 "http://127.0.0.1:" + server.getAddress().getPort(),
-                TOKEN,
-                maxResponseBytes);
+                TOKEN);
     }
 
     private ParseRequest request() {

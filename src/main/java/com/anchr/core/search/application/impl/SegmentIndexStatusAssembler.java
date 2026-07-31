@@ -2,9 +2,11 @@ package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
+import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
+@Component
 final class SegmentIndexStatusAssembler {
 
     SegmentIndexStatusDTO assemble(

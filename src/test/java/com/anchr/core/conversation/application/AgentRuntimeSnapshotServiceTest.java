@@ -1,8 +1,9 @@
 package com.anchr.core.conversation.application;
 
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AgentProgressEvent;
-import com.anchr.core.conversation.config.AgentProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentRunActivityDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -25,12 +26,12 @@ class AgentRuntimeSnapshotServiceTest {
 
     @Test
     void ttlCoversAllConfiguredTaskAttempts() {
-        AgentProperties properties = new AgentProperties();
-        properties.setRuntimeSnapshotTtl(Duration.ofMinutes(10));
-        properties.setTaskTimeout(Duration.ofMinutes(10));
-        properties.setTaskMaxRetries(2);
-
-        AgentRuntimeSnapshotService service = service(properties, mock(StringRedisTemplate.class));
+        AgentRuntimeSnapshotService service = service(
+                RuntimeConfigTestUnits.values(Map.of(
+                        "AGENT.runtimeSnapshotTtlSeconds", "600",
+                        "AGENT.taskTimeoutSeconds", "600",
+                        "AGENT.taskMaxRetries", "2")),
+                mock(StringRedisTemplate.class));
 
         assertThat(service.effectiveTtl()).isEqualTo(Duration.ofMinutes(35));
     }
@@ -53,9 +54,9 @@ class AgentRuntimeSnapshotServiceTest {
         activity.setSteps(List.of());
         when(activityService.get("run-1")).thenReturn(activity);
 
-        AgentProperties properties = new AgentProperties();
         AgentRuntimeSnapshotService service = new AgentRuntimeSnapshotService(
-                redis, new ObjectMapper(), activityService, mock(ConversationTurnCodec.class), properties);
+                redis, new ObjectMapper(), activityService,
+                mock(ConversationTurnCodec.class), RuntimeConfigTestUnits.defaults());
 
         service.publishActivity("run-1");
 
@@ -81,7 +82,8 @@ class AgentRuntimeSnapshotServiceTest {
         when(activityService.get("run-1")).thenReturn(activity);
         ObjectMapper objectMapper = new ObjectMapper();
         AgentRuntimeSnapshotService service = new AgentRuntimeSnapshotService(
-                redis, objectMapper, activityService, mock(ConversationTurnCodec.class), new AgentProperties());
+                redis, objectMapper, activityService,
+                mock(ConversationTurnCodec.class), RuntimeConfigTestUnits.defaults());
 
         service.publishProgress(new AgentProgressEvent("run-1", "agent_thinking", "decision_started", 1,
                 Map.of("stepOrder", 1, "decision", "ANALYZING")));
@@ -97,8 +99,11 @@ class AgentRuntimeSnapshotServiceTest {
         });
     }
 
-    private AgentRuntimeSnapshotService service(AgentProperties properties, StringRedisTemplate redis) {
+    private AgentRuntimeSnapshotService service(
+            RuntimeConfigUnit runtimeConfigUnit,
+            StringRedisTemplate redis) {
         return new AgentRuntimeSnapshotService(redis, new ObjectMapper(),
-                mock(AgentRunActivityService.class), mock(ConversationTurnCodec.class), properties);
+                mock(AgentRunActivityService.class),
+                mock(ConversationTurnCodec.class), runtimeConfigUnit);
     }
 }

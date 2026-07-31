@@ -1,7 +1,7 @@
 package com.anchr.core.conversation.interfaces.rest;
 
 import com.anchr.core.conversation.application.ConversationService;
-import com.anchr.core.conversation.config.AgentProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,7 @@ class ConversationControllerSseTest {
         ConversationMessageStreamAdapter streamAdapter =
                 mock(ConversationMessageStreamAdapter.class);
         ConversationController controller = new ConversationController(
-                service, streamAdapter, new AgentProperties());
+                service, streamAdapter, RuntimeConfigTestUnits.defaults());
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("hello");
         SseEmitter emitter = new SseEmitter();
@@ -42,7 +42,7 @@ class ConversationControllerSseTest {
         ConversationController controller = new ConversationController(
                 service,
                 mock(ConversationMessageStreamAdapter.class),
-                new AgentProperties());
+                RuntimeConfigTestUnits.defaults());
         ConversationTurnDTO turn = new ConversationTurnDTO();
         turn.setTurnId("turn-1");
         when(service.getMessage("session-1", "turn-1")).thenReturn(turn);

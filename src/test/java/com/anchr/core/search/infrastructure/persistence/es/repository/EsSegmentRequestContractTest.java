@@ -1,7 +1,6 @@
 package com.anchr.core.search.infrastructure.persistence.es.repository;
 
 import co.elastic.clients.elasticsearch._types.SortOrder;
-import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
@@ -95,8 +94,6 @@ class EsSegmentRequestContractTest {
     }
 
     private EsSegmentRepository repository() {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setReadAlias("kb_segment_read");
-        return new EsSegmentRepository(null, config, null, null);
+        return new EsSegmentRepository(null, null, null);
     }
 }

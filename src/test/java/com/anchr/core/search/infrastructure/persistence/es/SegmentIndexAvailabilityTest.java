@@ -1,6 +1,5 @@
 package com.anchr.core.search.infrastructure.persistence.es;
 
-import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
@@ -27,25 +26,17 @@ class SegmentIndexAvailabilityTest {
                 .writable(false)
                 .build();
         SegmentIndexManager manager = new StubSegmentIndexManager(rebuilding);
-        SegmentIndexConfig config = config();
         SegmentIndexWriteBarrier barrier = new SegmentIndexWriteBarrier();
         EsSegmentRepository repository =
-                new EsSegmentRepository(null, config, manager, barrier);
+                new EsSegmentRepository(null, manager, barrier);
         SearchSegmentBulkWriter bulkWriter =
-                new SearchSegmentBulkWriter(null, config, manager, barrier);
+                new SearchSegmentBulkWriter(null, manager, barrier);
 
         assertDoesNotThrow(() -> repository.textSearch("", 0));
         assertThrows(BusinessException.class, () ->
                 bulkWriter.write(List.of(Segment.builder().segmentId("segment-1").build())));
         assertThrows(BusinessException.class, () ->
                 repository.deleteByAssetId("asset-1"));
-    }
-
-    private SegmentIndexConfig config() {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setReadAlias("kb_segment_read");
-        config.setWriteAlias("kb_segment_write");
-        return config;
     }
 
     private record StubSegmentIndexManager(

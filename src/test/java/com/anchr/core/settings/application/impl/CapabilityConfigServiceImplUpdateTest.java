@@ -7,6 +7,7 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
+import com.anchr.core.settings.application.acl.CapabilityRetrievalAcl;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConfigUpdateRequestDTO;
@@ -40,6 +41,7 @@ class CapabilityConfigServiceImplUpdateTest {
     @Mock private CapabilityClientFactory clientFactory;
     @Mock private CapabilityResolver capabilityResolver;
     @Mock private ClientCacheManager clientCacheManager;
+    @Mock private CapabilityRetrievalAcl capabilityRetrievalAcl;
 
     private CapabilityConfigServiceImpl service;
 
@@ -48,7 +50,7 @@ class CapabilityConfigServiceImplUpdateTest {
         UserContextHolder.set(new RequestUserContext("user-a", "ADMIN"));
         service = new CapabilityConfigServiceImpl(
                 repository, aesUtil, idGen, clientFactory,
-                capabilityResolver, clientCacheManager);
+                capabilityResolver, clientCacheManager, capabilityRetrievalAcl);
         lenient().when(aesUtil.decrypt(any())).thenReturn("123456789");
     }
 

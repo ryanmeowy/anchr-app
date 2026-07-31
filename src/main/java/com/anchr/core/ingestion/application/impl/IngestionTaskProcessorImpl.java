@@ -1,6 +1,7 @@
 package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
@@ -9,6 +10,7 @@ import com.anchr.core.ingestion.application.acl.IngestionDoclingAcl;
 import com.anchr.core.ingestion.application.acl.IngestionRetrievalAcl;
 import com.anchr.core.ingestion.application.acl.IngestionStorageAcl;
 import com.anchr.core.ingestion.application.model.IngestionIndexSegment;
+import com.anchr.core.ingestion.application.model.IngestionRuntimeSettings;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
@@ -23,14 +25,12 @@ import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,9 +48,8 @@ import java.util.concurrent.RejectedExecutionException;
 @Slf4j
 @Service
 public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
-    private static final Duration DEFAULT_PARSE_POLL_INTERVAL = Duration.ofSeconds(2);
-    private static final Duration DEFAULT_PARSE_TIMEOUT = Duration.ofMinutes(45);
-
+    private static final long TASK_POLL_INTERVAL_MILLIS = 1_000L;
+    private static final long TASK_POLL_INITIAL_DELAY_MILLIS = 1_000L;
     private final Set<String> locallyDispatchedItems = ConcurrentHashMap.newKeySet();
 
     private final Executor ingestionTaskExecutor;
@@ -63,30 +62,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
     private final IngestionParseStage parseStage;
     private final IngestionEmbeddingStage embeddingStage;
     private final IngestionWorkerFailureClassifier failureClassifier;
-
-    @Value("${app.ingestion.claim-batch-size:32}")
-    private int claimBatchSize = 32;
-
-    @Value("${app.ingestion.parse-poll-interval:2s}")
-    private Duration parsePollInterval = DEFAULT_PARSE_POLL_INTERVAL;
-
-    @Value("${app.ingestion.parse-stage-timeout:45m}")
-    private Duration parseTimeout = DEFAULT_PARSE_TIMEOUT;
-
-    @Value("${app.ingestion.stage-max-retries:5}")
-    private int providerMaxRetries = 5;
-
-    @Value("${app.embedding.ingestion-min-interval-ms:1500}")
-    private long embeddingMinIntervalMs = 1500;
-
-    @Value("${app.embedding.ingestion-rate-limit-max-attempts:5}")
-    private int embeddingRateLimitMaxAttempts = 5;
-
-    @Value("${app.embedding.ingestion-rate-limit-backoff-ms:5000}")
-    private long embeddingRateLimitBackoffMs = 5000;
-
-    @Value("${app.docling.embedded-image-upload-enabled:false}")
-    private boolean embeddedImageUploadEnabled;
+    private final RuntimeConfigUnit runtimeConfigUnit;
 
     public IngestionTaskProcessorImpl(
             @Qualifier("ingestionTaskExecutor") Executor ingestionTaskExecutor,
@@ -103,7 +79,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             DoclingChunkMapper doclingChunkMapper,
             IngestionDoclingAcl ingestionDoclingAcl,
             ObjectMapper objectMapper,
-            IdGen idGen) {
+            IdGen idGen,
+            RuntimeConfigUnit runtimeConfigUnit) {
         this.ingestionTaskExecutor = ingestionTaskExecutor;
         this.ingestionTaskRepository = ingestionTaskRepository;
         this.assetRepository = assetRepository;
@@ -111,6 +88,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         this.ingestionIndexFinalizer = ingestionIndexFinalizer;
         this.ingestionRetrievalAcl = ingestionRetrievalAcl;
         this.transactionCoordinator = transactionCoordinator;
+        this.runtimeConfigUnit = runtimeConfigUnit;
         this.parseStage = new IngestionParseStage(
                 objectStoragePort,
                 ingestionStorageAcl,
@@ -139,11 +117,15 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         }
     }
 
-    @Scheduled(fixedDelayString = "${app.ingestion.poll-interval-ms:1000}",
-            initialDelayString = "${app.ingestion.poll-initial-delay-ms:1000}")
+    @Scheduled(
+            fixedDelay = TASK_POLL_INTERVAL_MILLIS,
+            initialDelay = TASK_POLL_INITIAL_DELAY_MILLIS
+    )
     public void pollPendingItems() {
         try {
-            dispatch(ingestionTaskRepository.listPendingItemIds(effectiveBatchSize()));
+            dispatch(ingestionTaskRepository.listPendingItemIds(
+                    runtimeConfigUnit.getInt(
+                            "INGESTION", "claimBatchSize", 32)));
         } catch (RuntimeException exception) {
             log.warn("failed to scan pending ingestion items: {}",
                     exception.getMessage(), exception);
@@ -155,7 +137,9 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         if (!StringUtils.hasText(taskId)) return;
         try {
             dispatch(ingestionTaskRepository.listPendingItemIds(
-                    taskId, effectiveBatchSize()));
+                    taskId,
+                    runtimeConfigUnit.getInt(
+                            "INGESTION", "claimBatchSize", 32)));
         } catch (RuntimeException exception) {
             log.debug("ingestion wake-up deferred to scheduler, taskId={}, reason={}",
                     taskId, exception.getMessage());
@@ -194,6 +178,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         IngestionTaskItem item = claimedItem;
         Asset asset = null;
         String doclingJobId = null;
+        IngestionRuntimeSettings runtimeConfig =
+                IngestionRuntimeSettings.load(runtimeConfigUnit);
         try {
             item = transactionCoordinator.ensureTargetIndexGeneration(item);
             asset = findAsset(item);
@@ -205,13 +191,17 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             }
 
             IngestionParseStage.ParseRunContext parseContext =
-                    parseStage.createContext(item, asset, embeddedImageUploadEnabled);
+                    parseStage.createContext(
+                            item,
+                            asset,
+                            runtimeConfig.embeddedImageUploadEnabled(),
+                            runtimeConfig.doclingMaxResponseBytes());
             IngestionParseStage.ParsedJob parsedJob = parseStage.parse(
                     parseContext,
                     asset,
-                    effectiveParseTimeout(),
-                    effectiveParsePollInterval(),
-                    effectiveProviderMaxRetries());
+                    runtimeConfig.parseStageTimeout(),
+                    runtimeConfig.parsePollInterval(),
+                    runtimeConfig.stageMaxRetries());
             doclingJobId = parsedJob.jobId();
 
             if (!transactionCoordinator.advanceAndUpdateAssetStatus(
@@ -231,9 +221,9 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     asset,
                     parsedChunks,
                     new IngestionEmbeddingStage.Settings(
-                            embeddingMinIntervalMs,
-                            embeddingRateLimitMaxAttempts,
-                            embeddingRateLimitBackoffMs));
+                            runtimeConfig.embeddingMinIntervalMs(),
+                            runtimeConfig.embeddingRateLimitMaxAttempts(),
+                            runtimeConfig.embeddingRateLimitBackoffMs()));
             if (!transactionCoordinator.advanceAndUpdateAssetStatus(
                     item, IngestionStage.INDEX, 75, asset,
                     DocumentParseStatus.SUCCESS.name(),
@@ -308,28 +298,6 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             log.warn("failed to refresh knowledge-base stats after ingestion, kbId={}, itemId={}: {}",
                     item.getKbId(), item.getId(), exception.getMessage());
         }
-    }
-
-    private int effectiveBatchSize() {
-        return Math.max(1, claimBatchSize);
-    }
-
-    private int effectiveProviderMaxRetries() {
-        return Math.max(0, providerMaxRetries);
-    }
-
-    private Duration effectiveParsePollInterval() {
-        return positiveDuration(parsePollInterval)
-                ? parsePollInterval : DEFAULT_PARSE_POLL_INTERVAL;
-    }
-
-    private Duration effectiveParseTimeout() {
-        return positiveDuration(parseTimeout)
-                ? parseTimeout : DEFAULT_PARSE_TIMEOUT;
-    }
-
-    private boolean positiveDuration(Duration duration) {
-        return duration != null && !duration.isZero() && !duration.isNegative();
     }
 
     private String updatedBy(IngestionTaskItem item) {

@@ -7,7 +7,6 @@ import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.bulk.OperationType;
-import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
@@ -44,11 +43,8 @@ class SearchSegmentBulkWriterTest {
 
     @BeforeEach
     void setUp() {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setWriteAlias("kb_segment_write");
         writer = new SearchSegmentBulkWriter(
                 esClient,
-                config,
                 segmentIndexManager,
                 new SegmentIndexWriteBarrier());
     }

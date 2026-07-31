@@ -42,8 +42,8 @@ class AgentTraceMigrationTest {
                     """);
             connection.createStatement().executeUpdate("""
                     insert into agent_run
-                      (run_id, session_id, turn_id, workflow_version, status, current_step, started_at)
-                    values ('run-1', 'session-1', 'turn-1', 'general-agent-v1', 'RUNNING', 'MODEL_DECISION', now(3))
+                      (run_id, session_id, turn_id, status, current_step, started_at)
+                    values ('run-1', 'session-1', 'turn-1', 'RUNNING', 'MODEL_DECISION', now(3))
                     """);
             connection.createStatement().executeUpdate("""
                     insert into agent_step
@@ -54,8 +54,8 @@ class AgentTraceMigrationTest {
                     """);
             connection.createStatement().executeUpdate("""
                     insert into conversation_turn
-                      (turn_id, session_id, query, answer, agent_run_id, workflow_version, created_at)
-                    values ('turn-1', 'session-1', 'q', 'a', 'run-1', 'general-agent-v1', now(3))
+                      (turn_id, session_id, query, answer, agent_run_id, created_at)
+                    values ('turn-1', 'session-1', 'q', 'a', 'run-1', now(3))
                     """);
 
             try (ResultSet steps = connection.createStatement().executeQuery(
@@ -66,10 +66,9 @@ class AgentTraceMigrationTest {
                 assertThat(steps.getString(1)).isEqualTo("TOOL_RESULT");
             }
             try (ResultSet turn = connection.createStatement().executeQuery(
-                    "select agent_run_id, workflow_version from conversation_turn where turn_id='turn-1'")) {
+                    "select agent_run_id from conversation_turn where turn_id='turn-1'")) {
                 assertThat(turn.next()).isTrue();
                 assertThat(turn.getString("agent_run_id")).isEqualTo("run-1");
-                assertThat(turn.getString("workflow_version")).isEqualTo("general-agent-v1");
             }
         }
     }
@@ -80,8 +79,8 @@ class AgentTraceMigrationTest {
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())) {
             connection.createStatement().executeUpdate("""
                     insert into agent_run
-                      (run_id, session_id, workflow_version, status, current_step, started_at)
-                    values ('run-cascade', 'session-1', 'general-agent-v1', 'FAILED', 'MODEL_DECISION', now(3))
+                      (run_id, session_id, status, current_step, started_at)
+                    values ('run-cascade', 'session-1', 'FAILED', 'MODEL_DECISION', now(3))
                     """);
             connection.createStatement().executeUpdate("""
                     insert into agent_step
@@ -96,6 +95,19 @@ class AgentTraceMigrationTest {
                 assertThat(result.next()).isTrue();
                 assertThat(result.getInt(1)).isZero();
             }
+        }
+    }
+
+    @Test
+    void migration_shouldRemoveWorkflowVersionColumns() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+             ResultSet turnColumn = connection.getMetaData().getColumns(
+                     MYSQL.getDatabaseName(), null, "conversation_turn", "workflow_version");
+             ResultSet runColumn = connection.getMetaData().getColumns(
+                     MYSQL.getDatabaseName(), null, "agent_run", "workflow_version")) {
+            assertThat(turnColumn.next()).isFalse();
+            assertThat(runColumn.next()).isFalse();
         }
     }
 }

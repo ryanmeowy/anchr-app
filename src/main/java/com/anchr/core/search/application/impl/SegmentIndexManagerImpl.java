@@ -1,8 +1,6 @@
 package com.anchr.core.search.application.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import com.anchr.core.common.config.SegmentIndexConfig;
-import com.anchr.core.common.util.IdGen;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.application.acl.RetrievalCapabilityAcl;
@@ -13,12 +11,11 @@ import com.anchr.core.search.domain.model.SegmentIndexStatus;
 import com.anchr.core.search.domain.port.EmbeddingProfileProvider;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort.EmbeddingSession;
-import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.infrastructure.persistence.es.SegmentIndexAliasManager;
 import com.anchr.core.search.infrastructure.persistence.es.SegmentIndexAliasManager.AliasTopology;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -34,15 +31,18 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
+import static com.anchr.core.common.constant.SegmentIndexConstant.READ_ALIAS;
+import static com.anchr.core.common.constant.SegmentIndexConstant.WRITE_ALIAS;
+
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEmbeddingDeploymentApi {
 
     private static final long ALIAS_TOPOLOGY_REFRESH_INTERVAL_MS = 15_000L;
     private static final String ALIAS_TOPOLOGY_ERROR_PREFIX = "Alias topology invalid: ";
 
     private final ElasticsearchClient esClient;
-    private final SegmentIndexConfig kbSegmentConfig;
     private final EmbeddingProfileProvider embeddingProfileProvider;
     private final SearchEmbeddingPort embeddingPort;
 
@@ -54,12 +54,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
     private final SegmentPhysicalIndexFactory physicalIndexFactory;
     private final SegmentIndexMigrationRunner migrationRunner;
     private final SegmentIndexStatusAssembler statusAssembler;
-    private RetrievalCapabilityAcl retrievalCapabilityAcl;
-
-    @Autowired(required = false)
-    void setRetrievalCapabilityAcl(RetrievalCapabilityAcl retrievalCapabilityAcl) {
-        this.retrievalCapabilityAcl = retrievalCapabilityAcl;
-    }
+    private final RetrievalCapabilityAcl retrievalCapabilityAcl;
 
     // Instance-level lock; use a distributed lock for multi-instance deployments.
     private final ReentrantLock indexOpLock = new ReentrantLock();
@@ -68,33 +63,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
     private final AtomicReference<SegmentIndexLifecycleState> stateRef =
             new AtomicReference<>(SegmentIndexLifecycleState.initial());
     private final AtomicLong lastAliasTopologyRefreshMs = new AtomicLong(0);
-
-    public SegmentIndexManagerImpl(
-            ElasticsearchClient esClient,
-            SegmentIndexConfig kbSegmentConfig,
-            EmbeddingProfileProvider embeddingProfileProvider,
-            SearchEmbeddingPort embeddingPort,
-            SearchObjectStoragePort storagePort,
-            IdGen idGen,
-            @Qualifier("indexInitExecutor") Executor indexInitExecutor,
-            SegmentIndexWriteBarrier indexWriteBarrier,
-            SegmentIndexAliasManager aliasManager
-    ) {
-        this.esClient = esClient;
-        this.kbSegmentConfig = kbSegmentConfig;
-        this.embeddingProfileProvider = embeddingProfileProvider;
-        this.embeddingPort = embeddingPort;
-        this.indexInitExecutor = indexInitExecutor;
-        this.indexWriteBarrier = indexWriteBarrier;
-        this.aliasManager = aliasManager;
-        this.topologyInspector =
-                new SegmentIndexTopologyInspector(esClient, aliasManager);
-        this.physicalIndexFactory =
-                new SegmentPhysicalIndexFactory(esClient, kbSegmentConfig);
-        this.migrationRunner =
-                new SegmentIndexMigrationRunner(esClient, storagePort, idGen);
-        this.statusAssembler = new SegmentIndexStatusAssembler();
-    }
 
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
@@ -113,7 +81,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
         } else {
             markReadyFromStatus(s);
             log.info("Boot: index exists via alias [{}], actualDim={}, expectedDim={}",
-                    kbSegmentConfig.getReadTargetName(), s.getActualDim(), s.getExpectedDim());
+                    READ_ALIAS, s.getActualDim(), s.getExpectedDim());
         }
     }
 
@@ -214,21 +182,13 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
         } catch (Exception e) {
             cleanupFailedTargetIndex(
                     physicalIndexName,
-                    kbSegmentConfig.getReadAlias(),
-                    kbSegmentConfig.getWriteAlias());
+                    READ_ALIAS,
+                    WRITE_ALIAS);
             throw e;
         }
     }
 
     private String createPendingRebuildTask(String reason, EmbeddingProfile targetProfile) {
-        String readAlias = kbSegmentConfig.getReadAlias();
-        String writeAlias = kbSegmentConfig.getWriteAlias();
-        if (!StringUtils.hasText(readAlias) || !StringUtils.hasText(writeAlias)) {
-            throw new IllegalStateException(
-                    "Read/write aliases must be configured for rebuild. " +
-                            "Please set app.segment.read-alias and app.segment.write-alias.");
-        }
-
         String taskId = UUID.randomUUID().toString();
         SegmentIndexPendingRebuild pending = new SegmentIndexPendingRebuild(
                 taskId,
@@ -381,9 +341,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
 
     private void doRebuild(EmbeddingProfile targetProfile, EmbeddingSession embeddingSession)
             throws Exception {
-        String readAlias = kbSegmentConfig.getReadAlias();
-        String writeAlias = kbSegmentConfig.getWriteAlias();
-
         // 1. 严格校验 read/write alias 均唯一且指向同一物理索引
         AliasTopology aliasTopology = aliasManager.requireValid();
         String oldPhysicalIndex = aliasTopology.physicalIndex();
@@ -425,7 +382,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
         } catch (Exception e) {
             log.error("Rebuild: migration or alias switch failed for new index [{}]",
                     newPhysicalIndex, e);
-            cleanupFailedTargetIndex(newPhysicalIndex, readAlias, writeAlias);
+            cleanupFailedTargetIndex(newPhysicalIndex, READ_ALIAS, WRITE_ALIAS);
             throw e;
         }
     }
@@ -445,9 +402,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
     ) throws Exception {
         aliasManager.switchAliases(oldPhysicalIndex, newPhysicalIndex);
         try {
-            if (retrievalCapabilityAcl != null) {
-                retrievalCapabilityAcl.activateServingProfile(targetProfile);
-            }
+            retrievalCapabilityAcl.activateServingProfile(targetProfile);
         } catch (Exception activationFailure) {
             aliasManager.switchAliases(newPhysicalIndex, oldPhysicalIndex);
             throw new IllegalStateException(

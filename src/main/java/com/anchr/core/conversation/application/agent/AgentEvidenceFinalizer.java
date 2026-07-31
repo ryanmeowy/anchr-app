@@ -7,7 +7,6 @@ import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.GenerationOptions;
 import com.anchr.core.conversation.application.model.ConversationGenerationResult;
-import com.anchr.core.conversation.config.AgentProperties;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.time.Duration;
 
 @Slf4j
 final class AgentEvidenceFinalizer {
@@ -39,16 +39,13 @@ final class AgentEvidenceFinalizer {
             """;
 
     private final ConversationGenerationPort generationPort;
-    private final AgentProperties properties;
     private final AgentTraceRecorder traceRecorder;
     private final ObjectMapper objectMapper;
 
     AgentEvidenceFinalizer(ConversationGenerationPort generationPort,
-                           AgentProperties properties,
                            AgentTraceRecorder traceRecorder,
                            ObjectMapper objectMapper) {
         this.generationPort = generationPort;
-        this.properties = properties;
         this.traceRecorder = traceRecorder;
         this.objectMapper = objectMapper;
     }
@@ -88,7 +85,10 @@ final class AgentEvidenceFinalizer {
                 ConversationGenerationResult generated = generationPort.generateWithUsage(
                         messages,
                         new GenerationOptions(0D, 1_500,
-                                state.getBudget().boundedTimeout(properties.getModelTimeout())));
+                                state.getBudget().boundedTimeout(
+                                        state.getRuntimeConfig() == null
+                                                ? Duration.ofSeconds(30)
+                                                : state.getRuntimeConfig().modelTimeout())));
                 state.addUsage(generated.promptTokens(), generated.completionTokens());
                 AgentFinalAnswer finalAnswer = parseFinalAnswer(generated.content(), evidence);
                 boolean valid = finalAnswer != null;

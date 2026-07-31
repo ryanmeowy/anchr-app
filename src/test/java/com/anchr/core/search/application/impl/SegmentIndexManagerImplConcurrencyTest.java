@@ -1,6 +1,5 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
@@ -156,10 +155,7 @@ class SegmentIndexManagerImplConcurrencyTest {
 
     @Test
     void statusShouldRestoreWritableWhenExistingAliasIsDetectedOnStartup() {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setReadAlias("kb_segment_read");
-        config.setWriteAlias("kb_segment_write");
-        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null, config) {
+        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null) {
             @Override
             public AliasTopology inspect() {
                 return new AliasTopology(
@@ -173,9 +169,8 @@ class SegmentIndexManagerImplConcurrencyTest {
                         null);
             }
         };
-        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
+        SegmentIndexManagerImpl manager = SegmentIndexManagerTestFactory.create(
                 null,
-                config,
                 PROFILE_PROVIDER,
                 null,
                 null,
@@ -194,18 +189,14 @@ class SegmentIndexManagerImplConcurrencyTest {
 
     @Test
     void prepareRebuildShouldRejectInvalidAliasTopology() {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setReadAlias("kb_segment_read");
-        config.setWriteAlias("kb_segment_write");
-        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null, config) {
+        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null) {
             @Override
             public AliasTopology inspect() {
                 return AliasTopology.unavailable("broken topology");
             }
         };
-        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
+        SegmentIndexManagerImpl manager = SegmentIndexManagerTestFactory.create(
                 null,
-                config,
                 PROFILE_PROVIDER,
                 null,
                 null,
@@ -291,22 +282,18 @@ class SegmentIndexManagerImplConcurrencyTest {
 
     @Test
     void statusShouldThrottleTopologyInspectionAndRefreshReadWriteAvailability() {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setReadAlias("kb_segment_read");
-        config.setWriteAlias("kb_segment_write");
         AtomicInteger inspections = new AtomicInteger();
         AtomicReference<AliasTopology> topology = new AtomicReference<>(
                 AliasTopology.unavailable("aliases unavailable"));
-        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null, config) {
+        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null) {
             @Override
             public AliasTopology inspect() {
                 inspections.incrementAndGet();
                 return topology.get();
             }
         };
-        SegmentIndexManagerImpl manager = new SegmentIndexManagerImpl(
+        SegmentIndexManagerImpl manager = SegmentIndexManagerTestFactory.create(
                 null,
-                config,
                 PROFILE_PROVIDER,
                 null,
                 null,
@@ -367,10 +354,7 @@ class SegmentIndexManagerImplConcurrencyTest {
             Executor executor,
             EmbeddingProfileProvider profileProvider
     ) {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setReadAlias("kb_segment_read");
-        config.setWriteAlias("kb_segment_write");
-        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null, config) {
+        SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null) {
             @Override
             public AliasTopology inspect() {
                 return new AliasTopology(
@@ -384,9 +368,8 @@ class SegmentIndexManagerImplConcurrencyTest {
                         null);
             }
         };
-        return new SegmentIndexManagerImpl(
+        return SegmentIndexManagerTestFactory.create(
                 null,
-                config,
                 profileProvider,
                 null,
                 null,

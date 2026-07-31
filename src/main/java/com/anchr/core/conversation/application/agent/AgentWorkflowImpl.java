@@ -1,9 +1,9 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.model.*;
-import com.anchr.core.conversation.config.AgentProperties;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.port.AgentModelPort;
@@ -61,7 +61,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
     private static final String LOCAL_CLARIFICATION = "我还缺少足够信息来完成这个请求。请补充具体问题或要处理的文档。";
     private static final String LOCAL_PROTOCOL_FALLBACK = "模型未能按要求完成工具调用。请重试，或指定要查询的文档与问题。";
 
-    private final AgentProperties properties;
+    private final RuntimeConfigUnit runtimeConfigUnit;
     private final AgentModelPort modelPort;
     private final AgentToolRegistry toolRegistry;
     private final AgentToolExecutor toolExecutor;
@@ -75,8 +75,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
     private final AgentActionProtocol actionProtocol;
     private final AgentEvidenceFinalizer evidenceFinalizer;
     private final AgentFinalPresentation finalPresentation;
-
-    public AgentWorkflowImpl(AgentProperties properties,
+    public AgentWorkflowImpl(RuntimeConfigUnit runtimeConfigUnit,
                              AgentModelPort modelPort,
                              ConversationGenerationPort generationPort,
                              AgentToolRegistry toolRegistry,
@@ -88,7 +87,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                              AgentRunCancellationRegistry cancellationRegistry,
                              ObjectMapper objectMapper,
                              MeterRegistry meterRegistry) {
-        this.properties = properties;
+        this.runtimeConfigUnit = runtimeConfigUnit;
         this.modelPort = modelPort;
         this.toolRegistry = toolRegistry;
         this.toolExecutor = toolExecutor;
@@ -101,21 +100,23 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         this.meterRegistry = meterRegistry;
         this.actionProtocol = new AgentActionProtocol(objectMapper, meterRegistry);
         this.evidenceFinalizer = new AgentEvidenceFinalizer(
-                generationPort, properties, traceRecorder, objectMapper);
+                generationPort, traceRecorder, objectMapper);
         this.finalPresentation = new AgentFinalPresentation(
-                generationPort, properties, traceRecorder);
+                generationPort, traceRecorder);
     }
 
     @Override
     public ConversationExecutionResult execute(AgentRunRequest request, ConversationProgressListener listener) {
         ConversationProgressListener progress = listener == null ? ConversationProgressListener.NOOP : listener;
         long startedAt = System.currentTimeMillis();
-        AgentBudget budget = new AgentBudget(Math.max(1, properties.getMaxSteps()),
-                Math.max(1, properties.getMaxToolCalls()),
-                startedAt + Math.max(1, properties.getTotalTimeout().toMillis()));
-        AgentRunState state = new AgentRunState(request, budget, startedAt);
+        AgentRuntimeSettings runtimeConfig =
+                AgentRuntimeSettings.load(runtimeConfigUnit);
+        AgentBudget budget = new AgentBudget(Math.max(1, runtimeConfig.maxSteps()),
+                Math.max(1, runtimeConfig.maxToolCalls()),
+                startedAt + Math.max(1, runtimeConfig.totalTimeout().toMillis()));
+        AgentRunState state = new AgentRunState(request, budget, startedAt, runtimeConfig);
         cancellationRegistry.register(request.runId(), request.sessionId());
-        traceRecorder.start(state, properties.getWorkflowVersion());
+        traceRecorder.start(state);
         emit(progress, state, "agent_thinking", "run_started", Map.of(
                 "sessionId", request.sessionId(),
                 "turnId", request.turnId()));
@@ -160,8 +161,10 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 "decision", "ANALYZING"));
         AgentModelRequest modelRequest = new AgentModelRequest(
                 List.copyOf(state.getMessages()), toolsEnabled ? toolRegistry.definitions() : List.of(),
-                new AgentModelOptions(0.2, 1_500, state.getBudget().boundedTimeout(properties.getModelTimeout()),
-                        properties.getToolCallMode().name(), properties.getNativeToolChoice().name(), toolsEnabled));
+                new AgentModelOptions(0.2, 1_500,
+                        state.getBudget().boundedTimeout(state.getRuntimeConfig().modelTimeout()),
+                        state.getRuntimeConfig().toolCallMode().name(),
+                        state.getRuntimeConfig().nativeToolChoice().name(), toolsEnabled));
         AgentModelResponse response;
         try {
             response = modelPort.respond(modelRequest);
@@ -191,7 +194,8 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         List<AgentToolCall> calls = response.toolCalls();
         AgentFinalAnswer jsonFinal = null;
         if (calls.isEmpty() && StringUtils.hasText(response.content())
-                && properties.getToolCallMode() != AgentProperties.ToolCallMode.NATIVE) {
+                && state.getRuntimeConfig().toolCallMode()
+                != AgentRuntimeSettings.ToolCallMode.NATIVE) {
             AgentActionProtocol.ParsedAction parsed = actionProtocol.parse(response.content());
             if (parsed != null) {
                 calls = parsed.toolCalls();
@@ -476,7 +480,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         meterRegistry.counter("agent.run.result", "status", status.name()).increment();
         return new ConversationExecutionResult(null, !state.getEvidence().isEmpty(), null, answer,
                 answerStatus, fallbackReason, citations, List.of(), null,
-                state.getRunRequest().runId(), properties.getWorkflowVersion(),
+                state.getRunRequest().runId(),
                 ConversationExecutionMode.AGENT, deferredTask);
     }
 
@@ -670,7 +674,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
 
     private void safeFinishTrace(AgentRunState state, AgentRunStatus status, String reason) {
         try {
-            traceRecorder.finish(state, properties.getWorkflowVersion(), status, reason,
+            traceRecorder.finish(state, status, reason,
                     status == AgentRunStatus.FAILED ? reason : null);
         } catch (Exception e) {
             log.warn("Failed to persist agent trace, runId={}", state.getRunRequest().runId(), e);

@@ -6,6 +6,7 @@ import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.kb.application.acl.KnowledgeRetrievalCleanupAcl;
 import com.anchr.core.kb.application.acl.KnowledgeStorageAcl;
 import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
@@ -61,12 +62,8 @@ class OutboxEventProcessorTest {
                 new ObjectMapper(),
                 ingestionTaskRepository,
                 objectStoragePort,
-                knowledgeStorageAcl);
-        ReflectionTestUtils.setField(processor, "maxAttempts", 10);
-        ReflectionTestUtils.setField(processor, "batchSize", 20);
-        ReflectionTestUtils.setField(processor, "lockLeaseMinutes", 5L);
-        ReflectionTestUtils.setField(processor, "retentionDays", 90L);
-        ReflectionTestUtils.setField(processor, "cleanupBatchSize", 1000);
+                knowledgeStorageAcl,
+                RuntimeConfigTestUnits.defaults());
     }
 
     @Test
@@ -351,7 +348,7 @@ class OutboxEventProcessorTest {
 
         assertThat(scheduled).isNotNull();
         assertThat(scheduled.cron())
-                .isEqualTo("${app.outbox.cleanup-cron:0 0 3 * * *}");
+                .isEqualTo("0 0 3 * * *");
         assertThat(scheduled.zone()).isEqualTo("Asia/Shanghai");
     }
 

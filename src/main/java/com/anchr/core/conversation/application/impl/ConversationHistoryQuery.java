@@ -143,7 +143,6 @@ final class ConversationHistoryQuery {
         dto.setTurnId(turn.getTurnId());
         dto.setSessionId(turn.getSessionId());
         dto.setAgentRunId(turn.getAgentRunId());
-        dto.setWorkflowVersion(turn.getWorkflowVersion());
         dto.setExecutionMode(StringUtils.hasText(turn.getExecutionMode())
                 ? turn.getExecutionMode() : "TRADITIONAL");
         dto.setAgentTask(agentTask);

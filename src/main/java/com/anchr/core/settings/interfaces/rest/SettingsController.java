@@ -7,6 +7,7 @@ import com.anchr.core.settings.domain.model.EmbedParamEnum;
 import com.anchr.core.settings.domain.model.GenParamEnum;
 import com.anchr.core.settings.domain.model.RerankParamEnum;
 import com.anchr.core.settings.application.CapabilityConfigService;
+import com.anchr.core.settings.application.RuntimeConfigService;
 import com.anchr.core.settings.application.StorageConfigService;
 import com.anchr.core.settings.domain.model.ModelTypeEnum;
 import com.anchr.core.settings.interfaces.rest.dto.*;
@@ -28,6 +29,22 @@ public class SettingsController {
 
     private final CapabilityConfigService capabilityConfigService;
     private final StorageConfigService storageConfigService;
+    private final RuntimeConfigService runtimeConfigService;
+
+    // ── runtime config ─────────────────────────────────────────────────────
+
+    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    @GetMapping("/runtime")
+    public Result<RuntimeConfigResponseDTO> getRuntimeConfig() {
+        return Result.success(runtimeConfigService.getAll());
+    }
+
+    @RequireAuth
+    @PutMapping("/runtime")
+    public Result<RuntimeConfigGroupDTO> updateRuntimeConfig(
+            @Valid @RequestBody RuntimeConfigUpdateRequestDTO request) {
+        return Result.success(runtimeConfigService.update(request));
+    }
 
     // ── capability config ──────────────────────────────────────────────────
 

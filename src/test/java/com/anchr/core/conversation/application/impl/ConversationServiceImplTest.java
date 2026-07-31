@@ -32,7 +32,7 @@ import com.anchr.core.conversation.application.model.ConversationIntentResult;
 import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationIntentType;
 import com.anchr.core.conversation.application.model.RewriteResult;
-import com.anchr.core.conversation.config.AgentProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.ConversationSession;
@@ -157,7 +157,7 @@ class ConversationServiceImplTest {
                 chatResponseService,
                 conversationMessagePipeline,
                 meterRegistry,
-                new AgentProperties(),
+                RuntimeConfigTestUnits.defaults(),
                 mock(AgentWorkflow.class),
                 agentRunFinalizer
         );
@@ -1060,7 +1060,6 @@ class ConversationServiceImplTest {
                 List.of(),
                 null,
                 "run-1",
-                "general-agent-v1",
                 ConversationExecutionMode.AGENT,
                 deferredTask);
     }

@@ -3,6 +3,7 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.api.RetrievalHitQueryApi;
@@ -11,18 +12,15 @@ import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalHitQuery;
 import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
 import com.anchr.core.search.application.api.model.RetrievalTopNResult;
-import com.anchr.core.search.config.AppSearchProperties;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.model.SegmentType;
-import com.anchr.core.search.domain.port.SearchObjectStoragePort;
-import com.anchr.core.search.domain.port.SearchRerankPort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
-import io.micrometer.core.instrument.MeterRegistry;
+import com.anchr.core.search.application.model.SearchRuntimeSettings;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -38,39 +36,17 @@ import java.util.Objects;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, RetrievalTopNQueryApi {
 
     private final SegmentRepository segmentRepository;
     private final QueryEmbeddingService queryEmbeddingService;
     private final SearchKnowledgeAcl searchKnowledgeAcl;
-    private final AppSearchProperties properties;
+    private final RuntimeConfigUnit runtimeConfigUnit;
     private final RetrievalRrfFusionPolicy rrfFusionPolicy;
     private final RetrievalRerankPolicy rerankPolicy;
     private final RetrievalResultAssembler resultAssembler;
     private final RetrievalTopNAssembler topNAssembler;
-
-    public RetrievalQueryServiceImpl(
-            SegmentRepository segmentRepository,
-            QueryEmbeddingService queryEmbeddingService,
-            SearchKnowledgeAcl searchKnowledgeAcl,
-            SearchRerankPort rerankPort,
-            AppSearchProperties properties,
-            MeterRegistry meterRegistry
-    ) {
-        this.segmentRepository = segmentRepository;
-        this.queryEmbeddingService = queryEmbeddingService;
-        this.searchKnowledgeAcl = searchKnowledgeAcl;
-        this.properties = properties;
-        this.rrfFusionPolicy = new RetrievalRrfFusionPolicy();
-        this.rerankPolicy = new RetrievalRerankPolicy(rerankPort, properties, meterRegistry);
-        this.resultAssembler = new RetrievalResultAssembler();
-        this.topNAssembler = new RetrievalTopNAssembler();
-    }
-
-    @Autowired(required = false)
-    void setObjectStoragePort(SearchObjectStoragePort objectStoragePort) {
-        resultAssembler.setObjectStoragePort(objectStoragePort);
-    }
 
     @Override
     public List<RetrievalHit> query(RetrievalHitQuery query) {
@@ -100,8 +76,9 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
             throw new BusinessException(ApiError.INVALID_REQUEST, "query cannot be empty");
         }
         String rawQuery = query.query().trim();
+        SearchRuntimeSettings runtimeConfig = SearchRuntimeSettings.load(runtimeConfigUnit);
         int limit = resolveLimit(query.limit());
-        int recallTopK = resolveRecallTopK(limit);
+        int recallTopK = resolveRecallTopK(limit, runtimeConfig);
         SearchFilter filter = buildFilter(query);
         if (filter.getKbIds().isEmpty()) {
             return emptyResult(startMs);
@@ -112,16 +89,15 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
                 keywords != null && !keywords.isEmpty() ? keywords : List.of();
         List<SegmentHit> textHits =
                 segmentRepository.textSearch(rawQuery, effectiveKeywords, recallTopK, filter);
-        AppSearchProperties.VectorRoutes routes = properties.getVectorRoutes();
         List<SegmentHit> textVectorHits = segmentRepository.vectorSearch(
                 queryVector,
-                Math.min(recallTopK, Math.max(1, routes.getTextTopK())),
-                routes.getTextSimilarity(),
+                Math.min(recallTopK, Math.max(1, runtimeConfig.textTopK())),
+                runtimeConfig.textSimilarity(),
                 routeFilter(filter, false));
         List<SegmentHit> imageVectorHits = segmentRepository.vectorSearch(
                 queryVector,
-                Math.min(recallTopK, Math.max(1, routes.getDocumentImageTopK())),
-                routes.getDocumentImageSimilarity(),
+                Math.min(recallTopK, Math.max(1, runtimeConfig.documentImageTopK())),
+                runtimeConfig.documentImageSimilarity(),
                 routeFilter(filter, true));
         int textHitCount = textHits.size();
         int vectorHitCount = textVectorHits.size() + imageVectorHits.size();
@@ -141,7 +117,7 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
                 textHits,
                 textVectorHits,
                 imageVectorHits,
-                properties.getRrf().getRankConstant()
+                runtimeConfig.rankConstant()
         );
         int recalledCandidateCount = candidates.size();
         candidates = filterActiveIndexGeneration(candidates);
@@ -157,7 +133,7 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
         int fusedCount = candidates.size();
 
         RetrievalRerankPolicy.Outcome rerankOutcome =
-                rerankPolicy.rerank(rawQuery, candidates, limit);
+                rerankPolicy.rerank(rawQuery, candidates, limit, runtimeConfig);
         List<SegmentRerankCandidate> rankedCandidates = rerankOutcome.candidates();
         int rerankCount = rankedCandidates.size();
         List<RetrievalHit> segmentResults = rankedCandidates.stream()
@@ -250,9 +226,9 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
                 .build();
     }
 
-    private int resolveRecallTopK(int limit) {
-        int multiplier = Math.max(1, properties.getRrf().getCandidateMultiplier());
-        int maxCandidates = Math.max(1, properties.getRrf().getMaxCandidates());
+    private int resolveRecallTopK(int limit, SearchRuntimeSettings runtimeConfig) {
+        int multiplier = Math.max(1, runtimeConfig.candidateMultiplier());
+        int maxCandidates = Math.max(1, runtimeConfig.maxCandidates());
         int recallSize = Math.max(1, limit) * multiplier;
         return Math.min(recallSize, maxCandidates);
     }

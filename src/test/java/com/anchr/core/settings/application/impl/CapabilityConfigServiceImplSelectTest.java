@@ -27,15 +27,7 @@ class CapabilityConfigServiceImplSelectTest {
         CapabilityConfig target = config(2L, "new-model", false);
         RecordingRepository repository = new RecordingRepository(active, target);
         RecordingDeploymentApi deploymentApi = new RecordingDeploymentApi();
-
-        CapabilityConfigServiceImpl service = new CapabilityConfigServiceImpl(
-                repository,
-                null,
-                null,
-                null,
-                new CapabilityResolver(repository),
-                null);
-        service.setCapabilityRetrievalAcl(new CapabilityRetrievalAcl(deploymentApi));
+        CapabilityConfigServiceImpl service = service(repository, deploymentApi);
 
         service.select("EMBEDDING", 2L);
 
@@ -48,26 +40,12 @@ class CapabilityConfigServiceImplSelectTest {
     }
 
     @Test
-    void missingOptionalDeploymentCapabilityKeepsImmediateSelectionBehavior() {
-        CapabilityConfig active = config(1L, "old-model", true);
-        CapabilityConfig target = config(2L, "new-model", false);
-        RecordingRepository repository = new RecordingRepository(active, target);
-        CapabilityConfigServiceImpl service = service(repository);
-
-        service.select("EMBEDDING", 2L);
-
-        assertTrue(repository.selected);
-        assertTrue(repository.disabled);
-    }
-
-    @Test
     void sameEmbeddingProfileSelectsImmediatelyWithoutDeployment() {
         CapabilityConfig active = config(1L, "same-model", true);
         CapabilityConfig target = config(2L, "same-model", false);
         RecordingRepository repository = new RecordingRepository(active, target);
         RecordingDeploymentApi deploymentApi = new RecordingDeploymentApi();
-        CapabilityConfigServiceImpl service = service(repository);
-        service.setCapabilityRetrievalAcl(new CapabilityRetrievalAcl(deploymentApi));
+        CapabilityConfigServiceImpl service = service(repository, deploymentApi);
 
         service.select("EMBEDDING", 2L);
 
@@ -81,10 +59,11 @@ class CapabilityConfigServiceImplSelectTest {
         CapabilityConfig active = config(1L, "old-model", true);
         CapabilityConfig target = config(2L, "new-model", false);
         RecordingRepository repository = new RecordingRepository(active, target);
-        CapabilityConfigServiceImpl service = service(repository);
-        service.setCapabilityRetrievalAcl(new CapabilityRetrievalAcl(request -> {
-            throw new IllegalStateException("deployment unavailable");
-        }));
+        CapabilityConfigServiceImpl service = service(
+                repository,
+                request -> {
+                    throw new IllegalStateException("deployment unavailable");
+                });
 
         IllegalStateException failure = assertThrows(
                 IllegalStateException.class,
@@ -95,7 +74,10 @@ class CapabilityConfigServiceImplSelectTest {
         assertFalse(repository.disabled);
     }
 
-    private CapabilityConfigServiceImpl service(RecordingRepository repository) {
+    private CapabilityConfigServiceImpl service(
+            RecordingRepository repository,
+            RetrievalEmbeddingDeploymentApi deploymentApi
+    ) {
         CapabilityClientFactory clientFactory = new CapabilityClientFactory(null) {
             @Override
             public Object build(CapabilityConfig config) {
@@ -108,7 +90,8 @@ class CapabilityConfigServiceImplSelectTest {
                 null,
                 clientFactory,
                 new CapabilityResolver(repository),
-                new ClientCacheManager());
+                new ClientCacheManager(),
+                new CapabilityRetrievalAcl(deploymentApi));
     }
 
     private CapabilityConfig config(Long id, String modelName, boolean enabled) {

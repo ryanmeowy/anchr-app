@@ -8,7 +8,9 @@ import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -22,13 +24,11 @@ import java.util.Objects;
  * Maps ranked Retrieval candidates to the published hit model and aggregates them by Asset.
  */
 @Slf4j
+@Component
+@RequiredArgsConstructor
 final class RetrievalResultAssembler {
 
-    private SearchObjectStoragePort objectStoragePort;
-
-    void setObjectStoragePort(SearchObjectStoragePort objectStoragePort) {
-        this.objectStoragePort = objectStoragePort;
-    }
+    private final SearchObjectStoragePort objectStoragePort;
 
     RetrievalHit toResult(SegmentRerankCandidate candidate, String keyword) {
         Segment segment = candidate.segment();
@@ -254,7 +254,7 @@ final class RetrievalResultAssembler {
     }
 
     private SearchObjectStoragePort.SignedObjectUrl signImagePreview(Segment segment) {
-        if (objectStoragePort == null || segment == null
+        if (segment == null
                 || segment.getSegmentType() != SegmentType.DOCUMENT_IMAGE
                 || !StringUtils.hasText(segment.getSourceRef())) {
             return null;

@@ -25,9 +25,26 @@ public class IngestionDoclingAcl {
         }
     }
 
+    public IngestionDoclingJob submitJob(ParseRequest request, int maxResponseBytes) {
+        try {
+            return map(doclingClient.submitJob(request, maxResponseBytes));
+        } catch (DoclingClientException failure) {
+            throw map(failure);
+        }
+    }
+
     public IngestionDoclingJob getJob(String jobId, String expectedRequestId) {
         try {
             return map(doclingClient.getJob(jobId, expectedRequestId));
+        } catch (DoclingClientException failure) {
+            throw map(failure);
+        }
+    }
+
+    public IngestionDoclingJob getJob(
+            String jobId, String expectedRequestId, int maxResponseBytes) {
+        try {
+            return map(doclingClient.getJob(jobId, expectedRequestId, maxResponseBytes));
         } catch (DoclingClientException failure) {
             throw map(failure);
         }

@@ -3,7 +3,7 @@ package com.anchr.core.conversation.application.agent;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.model.*;
-import com.anchr.core.conversation.config.AgentProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.port.AgentModelPort;
@@ -17,6 +17,7 @@ import jakarta.validation.constraints.NotBlank;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -747,7 +748,6 @@ class AgentWorkflowImplTest {
                                        ConversationRepository conversations,
                                        AgentRunCancellationRegistry cancellationRegistry,
                                        AgentRequestContextResolver contextResolver) {
-        AgentProperties properties = new AgentProperties(); properties.setMaxSteps(6); properties.setMaxToolCalls(4);
         AgentToolRegistry registry = new AgentToolRegistry(tools);
         AgentToolExecutor executor = new AgentToolExecutor(registry, objectMapper,
                 Validation.buildDefaultValidatorFactory().getValidator());
@@ -756,7 +756,11 @@ class AgentWorkflowImplTest {
                 nullable(String.class), anyMap(), anyMap(), any(AgentTokenUsage.class), anyLong(),
                 nullable(String.class))).thenAnswer(invocation ->
                 ((AgentRunState) invocation.getArgument(0)).nextTraceOrder());
-        return new AgentWorkflowImpl(properties, model, generationPort,
+        return new AgentWorkflowImpl(
+                RuntimeConfigTestUnits.values(Map.of(
+                        "AGENT.maxSteps", "6",
+                        "AGENT.maxToolCalls", "4")),
+                model, generationPort,
                 registry, executor, conversations, contextResolver,
                 new ConversationCitationMapper(), traceRecorder,
                 cancellationRegistry, objectMapper,

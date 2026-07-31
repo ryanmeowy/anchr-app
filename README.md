@@ -173,10 +173,10 @@ The template is organized into these groups:
 | --- | --- | --- |
 | Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Tokens, distributed ID segments, rewrite cache, and Agent snapshots. |
 | Elasticsearch | `ES_USERNAME`, `ES_PASSWORD`, `ES_HOST` | Segment indexes, aliases, lexical recall, and vector recall. |
-| MySQL | `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` | Application state. |
+| MySQL | `SPRING_DATASOURCE_URL`, `MYSQL_USER`, `MYSQL_PASSWORD` | Application state. |
 | Security | `APP_ADMIN_SECRET`, `APP_ENCRYPT_KEY`, `APP_ENCRYPT_IV` | Token administration and encryption of provider credentials. |
 | Docling | `APP_DOCLING_BASE_URL`, `APP_DOCLING_API_TOKEN` | Authenticated asynchronous parsing. |
-| Server | `SERVER_HOST`, `SERVER_PORT` | HTTP bind address and port. |
+| Server | `SERVER_HOST`, `SERVER_PORT`, `SPRING_PROFILES_ACTIVE` | HTTP bind address, port, and active Spring profile. |
 
 > [!WARNING]
 > Do not commit either Docker `.env` file. Keep the encryption key and IV stable for existing encrypted configuration records, and use a secret manager in production.
@@ -196,7 +196,7 @@ For local JVM development instead, copy the application environment to the repos
 
 ```bash
 cp docker/app/.env.example .env
-# Set REDIS_HOST, MYSQL_HOST, and ES_HOST for host access.
+# Set REDIS_HOST and ES_HOST for host access, and change the host in SPRING_DATASOURCE_URL.
 set -a
 source .env
 set +a
@@ -253,16 +253,17 @@ All business responses use a common result envelope. Protected endpoints expect 
 
 ## Configuration
 
-Most operational tuning has safe defaults in [`application.yaml`](./src/main/resources/application.yaml). Override these only when the workload requires it:
+Search, Conversation, Agent, Ingestion, and Outbox tuning is managed from
+Settings and stored as runtime KV records. A change applies to the next
+operation; an operation already in progress keeps the values it read when it
+started. If a KV override is absent, the caller uses its built-in default.
 
-- `APP_AGENT_*` — Agent budgets, timeouts, tool-call mode, task leases, and runtime snapshot TTL;
-- `APP_INGESTION_*` — polling, claim batch size, parse timeout, and retries;
-- `APP_EMBEDDING_*` — ingestion rate-limit pacing and backoff;
-- `APP_OUTBOX_*` — polling, leases, retries, retention, and cleanup schedule;
-- `APP_CONVERSATION_*` — intent routing and legacy evidence fallback;
-- `APP_DOCLING_*` — response limit and embedded-image upload behavior.
-
-Model endpoints, API keys, model names, dimensions, and storage credentials are runtime records managed through Settings rather than static environment variables.
+[`application.yaml`](./src/main/resources/application.yaml) contains only
+startup and infrastructure settings such as database/Redis/Elasticsearch
+connections, security material, Docling connection details, segment index
+names, and the Agent workflow version. Model endpoints, API keys, model names,
+dimensions, and storage credentials are also runtime records managed through
+Settings.
 
 ## Development
 

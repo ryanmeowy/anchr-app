@@ -1,12 +1,11 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
-import com.anchr.core.conversation.config.AgentProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -73,8 +72,6 @@ class AgentTaskProcessorSchedulingTest {
     }
 
     private AgentTaskProcessor processor(AgentTaskRepository repository, Executor executor) {
-        AgentProperties properties = new AgentProperties();
-        properties.setTaskLease(Duration.ofMinutes(2));
         return new AgentTaskProcessor(
                 repository,
                 null,
@@ -85,7 +82,7 @@ class AgentTaskProcessorSchedulingTest {
                 null,
                 null,
                 null,
-                properties,
+                RuntimeConfigTestUnits.defaults(),
                 null,
                 null,
                 executor,

@@ -15,6 +15,7 @@ public class AgentRunState {
     private final AgentRunRequest runRequest;
     private final AgentBudget budget;
     private final long startedAt;
+    private final AgentRuntimeSettings runtimeConfig;
     private final List<AgentMessage> messages = new ArrayList<>();
     private final Map<String, ConversationRetrievalCandidate> evidence = new LinkedHashMap<>();
     private final java.util.Set<String> executedToolCalls = new java.util.HashSet<>();
@@ -30,9 +31,19 @@ public class AgentRunState {
     private AgentStepType currentStep = AgentStepType.MODEL_DECISION;
 
     public AgentRunState(AgentRunRequest runRequest, AgentBudget budget, long startedAt) {
+        this(runRequest, budget, startedAt, null);
+    }
+
+    public AgentRunState(
+            AgentRunRequest runRequest,
+            AgentBudget budget,
+            long startedAt,
+            AgentRuntimeSettings runtimeConfig
+    ) {
         this.runRequest = runRequest;
         this.budget = budget;
         this.startedAt = startedAt;
+        this.runtimeConfig = runtimeConfig;
     }
 
     public int nextStep() {

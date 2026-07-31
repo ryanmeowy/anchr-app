@@ -2,11 +2,8 @@ server:
   address: ${SERVER_HOST}
   port: ${SERVER_PORT}
 spring:
-  devtools:
-    livereload:
-      enabled: false
   profiles:
-    active: dev
+    active: ${PROFILES_ACTIVE}
   application:
     name: anchr
   data:
@@ -17,7 +14,7 @@ spring:
       database: 0
       timeout: 3000ms
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    url: ${MYSQL_URL}
     username: ${MYSQL_USER}
     password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -36,75 +33,13 @@ mybatis:
     map-underscore-to-camel-case: true
 
 app:
-  agent:
-    enabled: ${APP_AGENT_ENABLED:true}
-    workflow-version: ${APP_AGENT_WORKFLOW_VERSION:general-agent-v1}
-    tool-call-mode: ${APP_AGENT_TOOL_CALL_MODE:AUTO}
-    native-tool-choice: ${APP_AGENT_NATIVE_TOOL_CHOICE:REQUIRED}
-    fallback-to-traditional: ${APP_AGENT_FALLBACK_TO_TRADITIONAL:true}
-    max-steps: ${APP_AGENT_MAX_STEPS:12}
-    max-tool-calls: ${APP_AGENT_MAX_TOOL_CALLS:8}
-    total-timeout: ${APP_AGENT_TOTAL_TIMEOUT:90s}
-    model-timeout: ${APP_AGENT_MODEL_TIMEOUT:30s}
-    task-timeout: ${APP_AGENT_TASK_TIMEOUT:10m}
-    task-model-timeout: ${APP_AGENT_TASK_MODEL_TIMEOUT:90s}
-    task-lease: ${APP_AGENT_TASK_LEASE:2m}
-    task-max-retries: ${APP_AGENT_TASK_MAX_RETRIES:2}
-    task-poll-interval: ${APP_AGENT_TASK_POLL_INTERVAL:5s}
-    runtime-snapshot-ttl: ${APP_AGENT_RUNTIME_SNAPSHOT_TTL:35m}
-  conversation:
-    legacy-evidence-fallback-enabled: ${APP_CONVERSATION_LEGACY_EVIDENCE_FALLBACK_ENABLED:false}
-    intent-routing:
-      enabled: ${APP_CONVERSATION_INTENT_ROUTING_ENABLED:false}
-      context-turn-limit: ${APP_CONVERSATION_INTENT_CONTEXT_TURN_LIMIT:5}
-      timeout: ${APP_CONVERSATION_INTENT_TIMEOUT:5s}
   security:
     admin-secret: ${APP_ADMIN_SECRET}
     encrypt-key: ${APP_ENCRYPT_KEY}
     encrypt-iv: ${APP_ENCRYPT_IV}
-  embedding:
-    ingestion-min-interval-ms: ${APP_EMBEDDING_INGESTION_MIN_INTERVAL_MS:1500}
-    ingestion-rate-limit-max-attempts: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_MAX_ATTEMPTS:5}
-    ingestion-rate-limit-backoff-ms: ${APP_EMBEDDING_INGESTION_RATE_LIMIT_BACKOFF_MS:5000}
-  ingestion:
-    poll-interval-ms: ${APP_INGESTION_POLL_INTERVAL_MS:1000}
-    poll-initial-delay-ms: ${APP_INGESTION_POLL_INITIAL_DELAY_MS:1000}
-    claim-batch-size: ${APP_INGESTION_CLAIM_BATCH_SIZE:32}
-    parse-poll-interval: ${APP_INGESTION_PARSE_POLL_INTERVAL:2s}
-    parse-stage-timeout: ${APP_INGESTION_PARSE_STAGE_TIMEOUT:45m}
-    stage-max-retries: ${APP_INGESTION_STAGE_MAX_RETRIES:5}
-  outbox:
-    poll-interval-ms: ${APP_OUTBOX_POLL_INTERVAL_MS:3000}
-    batch-size: ${APP_OUTBOX_BATCH_SIZE:20}
-    lock-lease-minutes: ${APP_OUTBOX_LOCK_LEASE_MINUTES:5}
-    max-attempts: ${APP_OUTBOX_MAX_ATTEMPTS:10}
-    retention-days: ${APP_OUTBOX_RETENTION_DAYS:90}
-    cleanup-batch-size: ${APP_OUTBOX_CLEANUP_BATCH_SIZE:1000}
-    cleanup-cron: "${APP_OUTBOX_CLEANUP_CRON:0 0 3 * * *}"
   docling:
     base-url: ${APP_DOCLING_BASE_URL}
     api-token: ${APP_DOCLING_API_TOKEN}
-    max-response-bytes: ${APP_DOCLING_MAX_RESPONSE_BYTES:268435456}
-    embedded-image-upload-enabled: ${APP_DOCLING_EMBEDDED_IMAGE_UPLOAD_ENABLED:false}
-  segment:
-    index-name: kb_segment
-    read-alias: kb_segment_read
-    write-alias: kb_segment_write
-  search:
-    rrf:
-      rank-constant: 60
-      candidate-multiplier: 4
-      max-candidates: 200
-    rerank:
-      max-doc-chars: 1200
-      window-enabled: true
-      window-size: 40
-      window-factor: 3
-      window-min: 20
-      window-max: 80
-      fusion-alpha: 0.6
-      fusion-beta: 0.4
-
 logging:
   level:
     co.elastic.clients: WARN

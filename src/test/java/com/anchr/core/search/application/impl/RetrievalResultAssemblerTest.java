@@ -22,8 +22,7 @@ class RetrievalResultAssemblerTest {
         when(storage.buildPreviewUrl("images/diagram.png"))
                 .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
                         "https://preview/diagram", 123L));
-        RetrievalResultAssembler assembler = new RetrievalResultAssembler();
-        assembler.setObjectStoragePort(storage);
+        RetrievalResultAssembler assembler = new RetrievalResultAssembler(storage);
         RetrievalHit text = assembler.toResult(
                 candidate("text-1", SegmentType.TEXT_CHUNK, "body", null, 0.9D),
                 "body");
@@ -52,8 +51,7 @@ class RetrievalResultAssemblerTest {
         SearchObjectStoragePort storage = mock(SearchObjectStoragePort.class);
         when(storage.buildPreviewUrl("images/broken.png"))
                 .thenThrow(new IllegalStateException("unavailable"));
-        RetrievalResultAssembler assembler = new RetrievalResultAssembler();
-        assembler.setObjectStoragePort(storage);
+        RetrievalResultAssembler assembler = new RetrievalResultAssembler(storage);
 
         RetrievalHit result = assembler.toResult(
                 candidate("image-1", SegmentType.DOCUMENT_IMAGE,

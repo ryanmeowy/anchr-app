@@ -5,6 +5,7 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.ingestion.application.acl.IngestionDoclingAcl;
 import com.anchr.core.ingestion.application.acl.IngestionRetrievalAcl;
 import com.anchr.core.ingestion.application.acl.IngestionStorageAcl;
@@ -25,6 +26,7 @@ import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.application.api.model.RetrievalGenerationWriteReceipt;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,7 +35,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
 import java.util.List;
@@ -74,11 +75,6 @@ class IngestionTaskProcessorImplTest {
     @BeforeEach
     void setUp() {
         processor = newProcessor(Runnable::run);
-        ReflectionTestUtils.setField(processor, "parsePollInterval", Duration.ofMillis(1));
-        ReflectionTestUtils.setField(processor, "parseTimeout", Duration.ofSeconds(2));
-        ReflectionTestUtils.setField(processor, "providerMaxRetries", 2);
-        ReflectionTestUtils.setField(processor, "embeddingMinIntervalMs", 0L);
-        ReflectionTestUtils.setField(processor, "embeddedImageUploadEnabled", false);
     }
 
     @Test
@@ -101,7 +97,7 @@ class IngestionTaskProcessorImplTest {
         when(coordinator.advanceAndUpdateAssetStatus(
                 any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
-        when(ingestionDoclingAcl.submitJob(any())).thenReturn(
+        when(ingestionDoclingAcl.submitJob(any(), anyInt())).thenReturn(
                 new IngestionDoclingJob(
                         "job-1", "task-1:item-1:1", "succeeded", response, null));
         when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of(chunk));
@@ -125,7 +121,7 @@ class IngestionTaskProcessorImplTest {
                 knowledgeBaseRepository);
         order.verify(coordinator).ensureTargetIndexGeneration(item);
         order.verify(coordinator).updateAssetStatus(any(), eq(asset), any(), any());
-        order.verify(ingestionDoclingAcl).submitJob(any());
+        order.verify(ingestionDoclingAcl).submitJob(any(), anyInt());
         order.verify(coordinator).advanceAndUpdateAssetStatus(
                 any(), eq(IngestionStage.EMBED), eq(55), eq(asset), any(), any());
         order.verify(chunkMapper).toTextChunks(asset, response, 1L);
@@ -155,7 +151,7 @@ class IngestionTaskProcessorImplTest {
         when(coordinator.advanceAndUpdateAssetStatus(
                 any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
-        when(ingestionDoclingAcl.submitJob(any()))
+        when(ingestionDoclingAcl.submitJob(any(), anyInt()))
                 .thenReturn(new IngestionDoclingJob(
                         "failed", "task-1:item-1:1", "failed", null,
                         new IngestionDoclingJobError("INTERNAL_ERROR", "retry")))
@@ -174,7 +170,8 @@ class IngestionTaskProcessorImplTest {
 
         processor.processItem(item);
 
-        verify(ingestionDoclingAcl, org.mockito.Mockito.times(2)).submitJob(any());
+        verify(ingestionDoclingAcl, org.mockito.Mockito.times(2))
+                .submitJob(any(), anyInt());
         verify(ingestionDoclingAcl).ackJob("failed");
         verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
         verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
@@ -199,7 +196,7 @@ class IngestionTaskProcessorImplTest {
         when(coordinator.advanceAndUpdateAssetStatus(
                 any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
-        when(ingestionDoclingAcl.submitJob(any()))
+        when(ingestionDoclingAcl.submitJob(any(), anyInt()))
                 .thenThrow(new IngestionDoclingException(
                         IngestionDoclingFailureKind.TRANSIENT,
                         429,
@@ -219,7 +216,7 @@ class IngestionTaskProcessorImplTest {
 
         processor.processItem(item);
 
-        verify(ingestionDoclingAcl, times(2)).submitJob(any());
+        verify(ingestionDoclingAcl, times(2)).submitJob(any(), anyInt());
         verify(ingestionDoclingAcl).ackJob("job-2");
         verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
     }
@@ -243,7 +240,7 @@ class IngestionTaskProcessorImplTest {
         when(coordinator.advanceAndUpdateAssetStatus(
                 any(), any(), anyInt(), eq(asset), any(), any())).thenReturn(true);
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
-        when(ingestionDoclingAcl.submitJob(any())).thenReturn(
+        when(ingestionDoclingAcl.submitJob(any(), anyInt())).thenReturn(
                 new IngestionDoclingJob(
                         "job-1", "task-1:item-1:1", "succeeded", response, null));
         when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of(chunk));
@@ -285,7 +282,7 @@ class IngestionTaskProcessorImplTest {
                 any(), eq(IngestionStage.EMBED), eq(55), eq(asset), any(), any()))
                 .thenReturn(true);
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf")).thenReturn("https://source");
-        when(ingestionDoclingAcl.submitJob(any())).thenReturn(
+        when(ingestionDoclingAcl.submitJob(any(), anyInt())).thenReturn(
                 new IngestionDoclingJob(
                         "job-1", "task-1:item-1:1", "succeeded", response, null));
         when(chunkMapper.toTextChunks(asset, response, 1L)).thenReturn(List.of(chunk));
@@ -314,7 +311,14 @@ class IngestionTaskProcessorImplTest {
 
     @Test
     void processItem_withEmbeddedImages_shouldKeepTargetAadAndCredentialEnvelope() {
-        ReflectionTestUtils.setField(processor, "embeddedImageUploadEnabled", true);
+        processor = newProcessor(
+                Runnable::run,
+                RuntimeConfigTestUnits.values(Map.of(
+                        "INGESTION.parsePollIntervalSeconds", "0",
+                        "INGESTION.parseStageTimeoutMinutes", "1",
+                        "INGESTION.stageMaxRetries", "2",
+                        "INGESTION.embeddingMinIntervalMs", "0",
+                        "INGESTION.embeddedImageUploadEnabled", "true")));
         IngestionTaskItem item = runningItem();
         Asset asset = asset();
         ParseResponse response = response();
@@ -353,7 +357,7 @@ class IngestionTaskProcessorImplTest {
                 .thenReturn(new AesUtil.AeadEnvelope("nonce", "cipher", "tag"));
         when(objectStoragePort.buildDownloadUrl("objects/a.pdf"))
                 .thenReturn("https://source");
-        when(ingestionDoclingAcl.submitJob(any())).thenReturn(
+        when(ingestionDoclingAcl.submitJob(any(), anyInt())).thenReturn(
                 new IngestionDoclingJob(
                         "job-1", "task-1:item-1:1", "succeeded", response, null));
         when(chunkMapper.toTextChunks(asset, response, 1L))
@@ -372,7 +376,7 @@ class IngestionTaskProcessorImplTest {
 
         processor.processItem(item);
 
-        verify(ingestionDoclingAcl).submitJob(request.capture());
+        verify(ingestionDoclingAcl).submitJob(request.capture(), anyInt());
         assertThat(request.getValue().contractVersion()).isEqualTo(3);
         assertThat(request.getValue().oss().endpoint()).isEqualTo("https://oss");
         assertThat(request.getValue().oss().bucket()).isEqualTo("bucket");
@@ -390,7 +394,7 @@ class IngestionTaskProcessorImplTest {
                 ingestionStorageAcl, ingestionDoclingAcl);
         order.verify(ingestionStorageAcl)
                 .issueTemporaryCredential(target, "asset-1", 1L);
-        order.verify(ingestionDoclingAcl).submitJob(any());
+        order.verify(ingestionDoclingAcl).submitJob(any(), anyInt());
     }
 
     @Test
@@ -409,7 +413,7 @@ class IngestionTaskProcessorImplTest {
         verify(coordinator).failRunning(
                 eq(item), eq(asset), eq(com.anchr.core.common.exception.ApiError.INTERNAL_ERROR),
                 any(), eq("FAILED"), eq("FAILED"));
-        verify(ingestionDoclingAcl, never()).submitJob(any());
+        verify(ingestionDoclingAcl, never()).submitJob(any(), anyInt());
     }
 
     @Test
@@ -443,12 +447,22 @@ class IngestionTaskProcessorImplTest {
     }
 
     private IngestionTaskProcessorImpl newProcessor(Executor executor) {
+        return newProcessor(executor, RuntimeConfigTestUnits.values(Map.of(
+                "INGESTION.parsePollIntervalSeconds", "0",
+                "INGESTION.parseStageTimeoutMinutes", "1",
+                "INGESTION.stageMaxRetries", "2",
+                "INGESTION.embeddingMinIntervalMs", "0")));
+    }
+
+    private IngestionTaskProcessorImpl newProcessor(
+            Executor executor,
+            RuntimeConfigUnit runtimeConfigUnit) {
         return new IngestionTaskProcessorImpl(
                 executor, repository, assetRepository, knowledgeBaseRepository,
                 embeddingPort, aesUtil, finalizer,
                 ingestionRetrievalAcl, coordinator,
                 objectStoragePort, ingestionStorageAcl, chunkMapper, ingestionDoclingAcl,
-                new ObjectMapper(), idGen);
+                new ObjectMapper(), idGen, runtimeConfigUnit);
     }
 
     private IngestionTaskItem runningItem() {

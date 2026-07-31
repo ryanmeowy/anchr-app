@@ -211,7 +211,6 @@ public class ConversationRepositoryImpl implements ConversationRepository {
         record.setResultCards(normalizeJson(turn.getResultCardsJson(), "[]"));
         record.setRetrievalTrace(normalizeJson(turn.getRetrievalTraceJson(), "{}"));
         record.setAgentRunId(turn.getAgentRunId());
-        record.setWorkflowVersion(turn.getWorkflowVersion());
         record.setExecutionMode(StringUtils.hasText(turn.getExecutionMode()) ? turn.getExecutionMode() : "TRADITIONAL");
         record.setAgentTaskId(turn.getAgentTaskId());
         record.setCreatedAt(toLocalDateTime(turn.getCreatedAt()));
@@ -239,7 +238,6 @@ public class ConversationRepositoryImpl implements ConversationRepository {
         turn.setResultCardsJson(record.getResultCards());
         turn.setRetrievalTraceJson(record.getRetrievalTrace());
         turn.setAgentRunId(record.getAgentRunId());
-        turn.setWorkflowVersion(record.getWorkflowVersion());
         turn.setExecutionMode(record.getExecutionMode());
         turn.setAgentTaskId(record.getAgentTaskId());
         turn.setCreatedAt(toEpochMillis(record.getCreatedAt()));

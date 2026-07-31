@@ -56,7 +56,8 @@ final class IngestionParseStage {
 
     ParseRunContext createContext(IngestionTaskItem item,
                                   Asset asset,
-                                  boolean embeddedImageUploadEnabled) {
+                                  boolean embeddedImageUploadEnabled,
+                                  int doclingMaxResponseBytes) {
         long generation = requireTargetIndexGeneration(item);
         IngestionStorageTarget storageTarget = embeddedImageUploadEnabled
                 ? ingestionStorageAcl.findTarget(asset.getId(), generation).orElse(null)
@@ -68,7 +69,8 @@ final class IngestionParseStage {
                 IngestionParseIdentity.sourceRevision(asset),
                 asset.getId(),
                 generation,
-                template);
+                template,
+                doclingMaxResponseBytes);
     }
 
     ParsedJob parse(ParseRunContext context,
@@ -83,10 +85,15 @@ final class IngestionParseStage {
             try {
                 IngestionDoclingJob job;
                 if (!StringUtils.hasText(jobId)) {
-                    job = ingestionDoclingAcl.submitJob(buildParseRequest(context, asset));
+                    job = ingestionDoclingAcl.submitJob(
+                            buildParseRequest(context, asset),
+                            context.doclingMaxResponseBytes());
                     jobId = job.jobId();
                 } else {
-                    job = ingestionDoclingAcl.getJob(jobId, context.requestId());
+                    job = ingestionDoclingAcl.getJob(
+                            jobId,
+                            context.requestId(),
+                            context.doclingMaxResponseBytes());
                 }
                 switch (job.normalizedStatus()) {
                     case "succeeded" -> {
@@ -283,7 +290,8 @@ final class IngestionParseStage {
             String sourceRevision,
             String assetId,
             long targetGeneration,
-            IngestionParseRequestTemplate template) {
+            IngestionParseRequestTemplate template,
+            int doclingMaxResponseBytes) {
     }
 
     record ParsedJob(String jobId, ParseResponse result) {

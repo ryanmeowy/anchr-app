@@ -5,7 +5,6 @@ import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
-import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
@@ -94,12 +93,8 @@ class EsSegmentGenerationTest {
     }
 
     private EsSegmentRepository repository() {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setReadAlias("kb_segment_read");
-        config.setWriteAlias("kb_segment_write");
         return new EsSegmentRepository(
                 client,
-                config,
                 indexManager,
                 new SegmentIndexWriteBarrier());
     }

@@ -4,10 +4,11 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
 import co.elastic.clients.elasticsearch.indices.IndexSettings;
 import co.elastic.clients.json.JsonData;
-import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StreamUtils;
 
 import java.io.InputStream;
@@ -15,7 +16,11 @@ import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
+import static com.anchr.core.common.constant.SegmentIndexConstant.INDEX_NAME;
+
 @Slf4j
+@Component
+@RequiredArgsConstructor
 final class SegmentPhysicalIndexFactory {
     private static final String SETTINGS_PATH = "es-settings.json";
     private static final String MAPPING_PATH = "es-kb-segment-mapping.json";
@@ -26,18 +31,9 @@ final class SegmentPhysicalIndexFactory {
     private static final String META_DIMENSION = "embeddingDimension";
 
     private final ElasticsearchClient esClient;
-    private final SegmentIndexConfig segmentIndexConfig;
-
-    SegmentPhysicalIndexFactory(
-            ElasticsearchClient esClient,
-            SegmentIndexConfig segmentIndexConfig
-    ) {
-        this.esClient = esClient;
-        this.segmentIndexConfig = segmentIndexConfig;
-    }
 
     String newPhysicalIndexName() {
-        return segmentIndexConfig.getIndexName() + "_" + System.currentTimeMillis();
+        return INDEX_NAME + "_" + System.currentTimeMillis();
     }
 
     void create(String physicalIndexName, EmbeddingProfile profile) throws Exception {

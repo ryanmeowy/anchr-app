@@ -37,7 +37,6 @@ public class AgentRunActivityService {
         dto.setTurnId(run.getTurnId());
         dto.setStatus(activityStatus(run.getStatus()));
         dto.setCurrentStep(run.getCurrentStep());
-        dto.setWorkflowVersion(run.getWorkflowVersion());
         dto.setToolCallCount(run.getToolCallCount());
         dto.setPromptTokens(run.getPromptTokens());
         dto.setCompletionTokens(run.getCompletionTokens());

@@ -13,7 +13,6 @@ public class AgentRunActivityDTO implements Serializable {
     private String turnId;
     private String status;
     private String currentStep;
-    private String workflowVersion;
     private int stepCount;
     private int toolCallCount;
     private int promptTokens;

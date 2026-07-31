@@ -4,6 +4,7 @@ import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,8 +59,7 @@ class ChatResponseServiceImplTest {
 
     private ChatResponseServiceImpl service() {
         ChatResponseServiceImpl service = new ChatResponseServiceImpl(repository, generationPort,
-                new SimpleMeterRegistry());
-        ReflectionTestUtils.setField(service, "contextTurnLimit", 5);
+                new SimpleMeterRegistry(), RuntimeConfigTestUnits.defaults());
         return service;
     }
 }

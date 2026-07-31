@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.ChatResponseService;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ChatResponseResult;
@@ -13,7 +14,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -44,9 +44,7 @@ public class ChatResponseServiceImpl implements ChatResponseService {
     private final ConversationRepository conversationRepository;
     private final ConversationGenerationPort generationPort;
     private final MeterRegistry meterRegistry;
-
-    @Value("${app.conversation.intent-routing.context-turn-limit:5}")
-    private int contextTurnLimit;
+    private final RuntimeConfigUnit runtimeConfigUnit;
 
     @Override
     public ChatResponseResult generate(String sessionId, String query) {
@@ -67,8 +65,11 @@ public class ChatResponseServiceImpl implements ChatResponseService {
         meterRegistry.counter("conversation.chat.generate.count").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
         AtomicBoolean emitted = new AtomicBoolean(false);
+        int effectiveContextTurnLimit = runtimeConfigUnit.getInt(
+                "CONVERSATION", "intentContextTurnLimit", 5);
         try {
-            List<ConversationModelMessage> messages = buildMessages(sessionId, query);
+            List<ConversationModelMessage> messages =
+                    buildMessages(sessionId, query, effectiveContextTurnLimit);
             GenerationOptions options = new GenerationOptions(0.4D, 500, Duration.ofSeconds(30));
             String answer = progress.supportsAnswerStreaming()
                     ? generationPort.generateStream(messages, options, delta -> {
@@ -95,11 +96,12 @@ public class ChatResponseServiceImpl implements ChatResponseService {
         }
     }
 
-    private List<ConversationModelMessage> buildMessages(String sessionId, String query) {
+    private List<ConversationModelMessage> buildMessages(
+            String sessionId, String query, int effectiveContextTurnLimit) {
         List<ConversationModelMessage> messages = new ArrayList<>();
         messages.add(new ConversationModelMessage("system", SYSTEM_PROMPT));
         List<ConversationTurn> turns = new ArrayList<>(conversationRepository.findRecentTurns(
-                sessionId, Math.max(1, contextTurnLimit)));
+                sessionId, Math.max(1, effectiveContextTurnLimit)));
         Collections.reverse(turns);
         for (ConversationTurn turn : turns) {
             if (turn == null) {

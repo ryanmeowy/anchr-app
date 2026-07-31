@@ -2,8 +2,6 @@
 
 > 本文描述当前 `anchr-app` 后端已经实现的行为，不是设计提案或任务卡。
 >
-> 当前工作流版本：`general-agent-v1`。
-
 ## 1. 先看结论
 
 一次消息请求只有两条主路径：
@@ -85,7 +83,7 @@ flowchart LR
 
 ```text
 request.agentEnabled == true
-app.agent.enabled == true
+运行配置 AGENT.enabled == true
 ```
 
 `AgentWorkflow` 是编排器的必需依赖，不存在“Bean 不可用时静默改走传统路径”的分支。
@@ -96,8 +94,8 @@ app.agent.enabled == true
 - `OTHER`：返回能力范围澄清。
 - `KB_QUERY`：进入传统 RAG Pipeline。
 
-Agent 路径不会先执行 Intent Router。只有 Agent 抛出未预期异常，且
-`APP_AGENT_FALLBACK_TO_TRADITIONAL=true` 时，才重新路由并执行传统路径；该次执行模式记为 `AGENT_FALLBACK`。
+Agent 路径不会先执行 Intent Router。只有 Agent 抛出未预期异常，且运行配置
+`AGENT.fallbackToTraditional=true` 时，才重新路由并执行传统路径；该次执行模式记为 `AGENT_FALLBACK`。
 
 ## 4. Agent Run 初始化与预算
 
@@ -543,7 +541,9 @@ Query Rewrite
 
 传统答案模型必须输出 `ANSWERED|NO_EVIDENCE` 严格 JSON，并使用 `[1]` 引用输入证据。后端校验引用范围、规范化文档索引，并只保留答案真正使用的 Segment。
 
-`APP_CONVERSATION_LEGACY_EVIDENCE_FALLBACK_ENABLED` 默认是 `false`。因此模型失败或格式不合法时，当前默认行为是返回 `GENERATION_FAILED` 文案；只有显式打开该配置，才使用证据拼接旧式保守答案。
+运行配置 `CONVERSATION.legacyEvidenceFallbackEnabled` 默认是 `false`。
+因此模型失败或格式不合法时，当前默认行为是返回 `GENERATION_FAILED`
+文案；只有显式打开该配置，才使用证据拼接旧式保守答案。
 
 ## 15. 可观测性与安全边界
 
@@ -592,24 +592,12 @@ Trace 只保存响应形态和摘要，不保存完整模型回答或思维链�
 
 ## 16. 关键配置
 
-| 配置 | 默认值 | 说明 |
-| --- | --- | --- |
-| `APP_AGENT_ENABLED` | `true` | 服务端 Agent 总开关 |
-| `APP_AGENT_WORKFLOW_VERSION` | `general-agent-v1` | 工作流版本 |
-| `APP_AGENT_TOOL_CALL_MODE` | `AUTO` | `NATIVE/JSON/AUTO` |
-| `APP_AGENT_NATIVE_TOOL_CHOICE` | `REQUIRED` | 原生工具选择约束 |
-| `APP_AGENT_FALLBACK_TO_TRADITIONAL` | `true` | 未预期 Agent 异常时是否进入传统路径 |
-| `APP_AGENT_MAX_STEPS` | `12` | 最大模型决策次数 |
-| `APP_AGENT_MAX_TOOL_CALLS` | `8` | 最大工具调用次数 |
-| `APP_AGENT_TOTAL_TIMEOUT` | `90s` | 同步 Agent 总时限 |
-| `APP_AGENT_MODEL_TIMEOUT` | `30s` | 单次 Agent 模型时限 |
-| `APP_AGENT_TASK_TIMEOUT` | `10m` | 异步总结总时限 |
-| `APP_AGENT_TASK_MODEL_TIMEOUT` | `90s` | 异步单次模型时限 |
-| `APP_AGENT_TASK_LEASE` | `2m` | 任务 Lease |
-| `APP_AGENT_TASK_MAX_RETRIES` | `2` | 异步最大重试次数 |
-| `APP_AGENT_TASK_POLL_INTERVAL` | `5s` | Claim 轮询间隔 |
-| `APP_AGENT_RUNTIME_SNAPSHOT_TTL` | `35m` | Redis Runtime Snapshot 的配置 TTL 下限 |
-| `APP_CONVERSATION_LEGACY_EVIDENCE_FALLBACK_ENABLED` | `false` | 是否启用传统 RAG 的旧式证据拼接降级 |
+Agent 的开关、工具模式、预算、超时、异步重试和总结限制，统一使用
+Settings 中的 `AGENT` 运行配置。Conversation 的传统证据降级使用
+`CONVERSATION.legacyEvidenceFallbackEnabled`。配置在一次 Run 或 Task
+开始时读取并冻结，后续修改只影响下一次操作。
+
+异步任务 Lease 固定为 2 分钟，Claim 轮询间隔固定为 5 秒，不接受外部配置。
 
 ## 17. 代码导航
 
