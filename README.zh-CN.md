@@ -277,6 +277,19 @@ Elasticsearch 配置直接读取 `ES_USERNAME`、`ES_PASSWORD` 和 `ES_HOST`。
 | `java -jar target/anchr-app-0.0.1-SNAPSHOT.jar` | 导出环境变量后运行构建产物。 |
 | `docker compose --env-file docker/infra/.env -f docker/infra/compose.yml logs -f elasticsearch` | 查看 Elasticsearch 启动与插件日志。 |
 
+### 持续集成
+
+Pull Request 会在 JDK 21 上运行 `App CI / Verify` 检查，使用与本地验证相同的命令：
+
+```bash
+mvn -B -ntp -DskipTests compile
+mvn -B -ntp test
+```
+
+检查会汇总 Surefire 的 tests、failures、errors 和 skipped 数量。Docker
+可用时执行依赖 Testcontainers 的测试，并单独报告这些测试是已执行还是已跳过。
+Surefire XML 报告会作为 workflow artifact 保留七天。
+
 ### 项目结构
 
 持续维护的仓库与 Package 地图见 [`project_layout.text`](./project_layout.text)。
@@ -305,7 +318,7 @@ Elasticsearch 配置直接读取 `ES_USERNAME`、`ES_PASSWORD` 和 `ES_HOST`。
 2. 从目标基线创建聚焦的分支。
 3. 除非变更明确要求，否则保持领域状态所有权和现有 REST/SSE 契约。
 4. 为行为、失败路径以及持久化/查询变化补充测试。
-5. 运行相关测试和 `mvn test`，并单独说明 Docker/Testcontainers 跳过项。
+5. 运行相关测试和上述 CI 命令，并单独说明 Docker/Testcontainers 跳过项。
 
 请勿在公开 Issue 中附带访问令牌、模型 Key、存储凭据、私有文档或生产 Trace。
 

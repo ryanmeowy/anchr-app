@@ -279,6 +279,21 @@ Settings.
 | `java -jar target/anchr-app-0.0.1-SNAPSHOT.jar` | Run the packaged application after exporting its environment. |
 | `docker compose --env-file docker/infra/.env -f docker/infra/compose.yml logs -f elasticsearch` | Follow Elasticsearch startup and plugin logs. |
 
+### Continuous integration
+
+Pull Requests run the `App CI / Verify` check on JDK 21. It uses the same
+commands as local verification:
+
+```bash
+mvn -B -ntp -DskipTests compile
+mvn -B -ntp test
+```
+
+The check publishes a Surefire summary with tests, failures, errors, and
+skipped counts. Docker-backed Testcontainers suites run when Docker is
+available; their executed or skipped status is reported separately. Surefire
+XML reports are retained as a workflow artifact for seven days.
+
 ### Project structure
 
 See [`project_layout.text`](./project_layout.text) for the maintained repository and package map.
@@ -307,7 +322,7 @@ Bug reports, ideas, and focused Pull Requests are welcome.
 2. Create a focused branch from the intended base branch.
 3. Preserve domain ownership and existing REST/SSE contracts unless the change explicitly revises them.
 4. Add tests for behavior, failure paths, and persistence/query changes.
-5. Run the relevant focused tests and `mvn test`, then report any Docker/Testcontainers skips separately.
+5. Run the relevant focused tests and the CI commands above, then report any Docker/Testcontainers skips separately.
 
 Please do not include access tokens, provider keys, storage credentials, private documents, or production traces in public issues.
 

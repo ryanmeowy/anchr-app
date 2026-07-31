@@ -30,7 +30,7 @@
 | 207D | 修复 active generation 后置过滤造成的召回损失 | P1 | 待执行 | 补偿召回或 ES 前置过滤方案需确认 |
 | 207E | 让 Search API 的 sort、total、facets 与真实语义一致 | P1 | 完成 | 已选择 Top-N |
 | 207F | 收敛生产运行默认值和搜索参数来源 | P1/P2 | 待执行 | 生产部署方式需确认 |
-| 207G | 建立最小 CI 和合并门禁 | P1 | 待执行 | 跨仓工作流范围需确认 |
+| 207G | 建立最小 CI 和合并门禁 | P1 | 本仓 CI 完成，门禁待配置 | 跨仓工作流未纳入本次执行 |
 | 207H | 准确描述 Ingestion 的恢复能力 | P2 | 完成 | 否 |
 | 207I | 收敛 Agent 状态、依赖和可读性 | P2 | 待执行 | 每阶段单独执行，不一次性重写 |
 
@@ -363,6 +363,14 @@ ES text/vector Top-K
 - 至少一次干净 workflow 运行覆盖完整 app 测试。
 - 明确显示 Docker 集成测试是执行还是跳过。
 - README 或贡献说明记录本地与 CI 验证命令。
+
+### 2026-07-31 实施记录
+
+- 已在 `anchr-app` 增加 `App CI / Verify` PR workflow：使用 JDK 21，分别执行 Maven compile 和完整 test，Maven 缓存仅用于依赖。
+- 测试失败后仍生成 Surefire 汇总并上传 XML 报告，Maven 测试步骤的失败直接使 Job 失败；汇总明确展示 tests、failures、errors、skipped 以及 Docker/Testcontainers 的执行或跳过状态。
+- 中英文 README 已记录与 CI 一致的本地命令和 Testcontainers 报告方式。
+- 本地 JDK 21 验证结果：Maven compile 通过；全量 test 共 569 个，0 failure、0 error、18 skipped。当前本机 Docker 不可用，18 个 Testcontainers 测试均被明确标记为 skipped；仍需由首次 GitHub workflow 运行验证托管 runner 上的 Docker 执行结果。
+- 未修改 `anchr-web` 或 `anchr-docling`。GitHub branch protection 是仓库外部设置，需在 workflow 首次运行后由仓库管理员将 `App CI / Verify` 设为 required check；在此之前不能宣称合并门禁已经生效。
 
 ---
 

@@ -1,0 +1,137 @@
+name: App CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Compile
+        run: mvn -B -ntp -DskipTests compile
+
+      - name: Detect Docker
+        id: docker
+        shell: bash
+        run: |
+          if docker info >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Docker unavailable::Docker-backed Testcontainers tests may be skipped."
+          fi
+
+      - name: Run unit, contract, and integration tests
+        id: tests
+        run: mvn -B -ntp test
+
+      - name: Summarize test results
+        if: always() && hashFiles('target/surefire-reports/TEST-*.xml') != ''
+        env:
+          DOCKER_AVAILABLE: ${{ steps.docker.outputs.available }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          counters = ("tests", "failures", "errors", "skipped")
+          totals = dict.fromkeys(counters, 0)
+          suites = {}
+          for report in Path("target/surefire-reports").glob("TEST-*.xml"):
+              root = ET.parse(report).getroot()
+              values = {key: int(root.attrib.get(key, 0)) for key in counters}
+              suites[root.attrib.get("name", report.stem.removeprefix("TEST-"))] = values
+              for key in counters:
+                  totals[key] += values[key]
+
+          testcontainers = set()
+          for source in Path("src/test/java").rglob("*.java"):
+              content = source.read_text(encoding="utf-8")
+              if "@Testcontainers" not in content:
+                  continue
+              package = re.search(r"^package\s+([^;]+);", content, re.MULTILINE)
+              class_name = f"{package.group(1)}.{source.stem}" if package else source.stem
+              testcontainers.add(class_name)
+
+          container_totals = dict.fromkeys(counters, 0)
+          missing = []
+          for class_name in sorted(testcontainers):
+              values = suites.get(class_name)
+              if values is None:
+                  missing.append(class_name)
+                  continue
+              for key in counters:
+                  container_totals[key] += values[key]
+
+          executed = container_totals["tests"] - container_totals["skipped"]
+          if executed > 0:
+              container_status = "executed"
+          elif container_totals["skipped"] > 0:
+              container_status = "skipped"
+          else:
+              container_status = "no results"
+
+          if container_totals["skipped"]:
+              print(
+                  "::warning title=Testcontainers tests skipped::"
+                  f"{container_totals['skipped']} Docker-backed test(s) were skipped."
+              )
+          if missing:
+              print(
+                  "::warning title=Testcontainers reports missing::"
+                  f"No Surefire report was produced for {', '.join(missing)}."
+              )
+
+          rows = [
+              "## Maven test summary",
+              "",
+              "| Scope | Tests | Failures | Errors | Skipped | Status |",
+              "| --- | ---: | ---: | ---: | ---: | --- |",
+              (
+                  f"| All Surefire tests | {totals['tests']} | {totals['failures']} | "
+                  f"{totals['errors']} | {totals['skipped']} | completed |"
+              ),
+              (
+                  f"| Docker/Testcontainers | {container_totals['tests']} | "
+                  f"{container_totals['failures']} | {container_totals['errors']} | "
+                  f"{container_totals['skipped']} | {container_status} |"
+              ),
+              "",
+              f"Docker available: `{os.environ.get('DOCKER_AVAILABLE', 'unknown')}`",
+          ]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(rows) + "\n")
+          PY
+
+      - name: Upload Surefire reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          if-no-files-found: warn
+          retention-days: 7
