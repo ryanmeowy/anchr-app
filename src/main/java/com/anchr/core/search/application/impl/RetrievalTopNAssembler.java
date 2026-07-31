@@ -4,6 +4,7 @@ import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalFacet;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalInsight;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
@@ -12,11 +13,12 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Pure Page result projections derived from the final aggregated Retrieval hits.
+ * Pure Top-N result projections derived from the final aggregated Retrieval hits.
  */
-final class RetrievalPageAssembler {
+@Component
+final class RetrievalTopNAssembler {
 
-    Map<String, List<RetrievalFacet>> buildFacets(List<RetrievalHit> items) {
+    Map<String, List<RetrievalFacet>> buildWindowFacets(List<RetrievalHit> items) {
         if (items == null || items.isEmpty()) {
             return Map.of("assetTypes", List.of(), "hitTypes", List.of());
         }

@@ -22,8 +22,8 @@ public class AgentTraceRecorder {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
-    public void start(AgentRunState state, String workflowVersion) {
-        try { saveRun(state, workflowVersion, AgentRunStatus.RUNNING, null, null, null); }
+    public void start(AgentRunState state) {
+        try { saveRun(state, AgentRunStatus.RUNNING, null, null, null); }
         catch (Exception e) { log.warn("Agent run trace start failed, runId={}", state.getRunRequest().runId(), e); }
     }
 
@@ -64,13 +64,12 @@ public class AgentTraceRecorder {
         return stepOrder;
     }
 
-    public void checkpoint(AgentRunState state, String workflowVersion) {
-        try { saveRun(state, workflowVersion, AgentRunStatus.RUNNING, null, null, null); }
+    public void checkpoint(AgentRunState state) {
+        try { saveRun(state, AgentRunStatus.RUNNING, null, null, null); }
         catch (Exception e) { log.warn("Agent run checkpoint failed, runId={}", state.getRunRequest().runId(), e); }
     }
 
     public void finish(AgentRunState state,
-                       String workflowVersion,
                        AgentRunStatus status,
                        String fallbackReason,
                        String errorCode) {
@@ -78,7 +77,7 @@ public class AgentTraceRecorder {
                 ? AgentRunStatus.FAILED : status == AgentRunStatus.CANCELLED
                 ? AgentRunStatus.CANCELLED : status == AgentRunStatus.WAITING_TASK
                 ? AgentRunStatus.WAITING_TASK : AgentRunStatus.AWAITING_TURN;
-        try { saveRun(state, workflowVersion, persistedStatus, state.getCurrentStep().name(), fallbackReason, errorCode); }
+        try { saveRun(state, persistedStatus, state.getCurrentStep().name(), fallbackReason, errorCode); }
         catch (Exception e) { log.warn("Agent run trace finish failed, runId={}", state.getRunRequest().runId(), e); }
         if (persistedStatus == AgentRunStatus.FAILED) {
             recordRunMetrics(state, AgentRunStatus.FAILED);
@@ -94,7 +93,6 @@ public class AgentTraceRecorder {
     }
 
     private void saveRun(AgentRunState state,
-                         String workflowVersion,
                          AgentRunStatus status,
                          String currentStep,
                          String fallbackReason,
@@ -103,7 +101,6 @@ public class AgentTraceRecorder {
         run.setRunId(state.getRunRequest().runId());
         run.setSessionId(state.getRunRequest().sessionId());
         run.setTurnId(state.getRunRequest().turnId());
-        run.setWorkflowVersion(workflowVersion);
         run.setStatus(status.name());
         run.setCurrentStep(currentStep == null ? state.getCurrentStep().name() : currentStep);
         run.setStepCount(state.getStepCount());

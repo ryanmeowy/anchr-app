@@ -5,13 +5,17 @@ import co.elastic.clients.elasticsearch.indices.get_mapping.IndexMappingRecord;
 import co.elastic.clients.json.JsonData;
 import com.anchr.core.search.infrastructure.persistence.es.SegmentIndexAliasManager;
 import com.anchr.core.search.infrastructure.persistence.es.SegmentIndexAliasManager.AliasTopology;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.Map;
 import java.util.Objects;
 
 @Slf4j
+@Component
+@RequiredArgsConstructor
 final class SegmentIndexTopologyInspector {
     private static final String META_PROFILE_VERSION = "embeddingProfileVersion";
     private static final String META_PROFILE_FINGERPRINT = "embeddingProfileFingerprint";
@@ -20,14 +24,6 @@ final class SegmentIndexTopologyInspector {
 
     private final ElasticsearchClient esClient;
     private final SegmentIndexAliasManager aliasManager;
-
-    SegmentIndexTopologyInspector(
-            ElasticsearchClient esClient,
-            SegmentIndexAliasManager aliasManager
-    ) {
-        this.esClient = esClient;
-        this.aliasManager = aliasManager;
-    }
 
     IndexInspection inspect(boolean forceMappingLoad, String currentReadIndex) {
         AliasTopology topology = aliasManager.inspect();

@@ -1,8 +1,8 @@
 package com.anchr.core.conversation.application;
 
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.model.AgentProgressEvent;
-import com.anchr.core.conversation.config.AgentProperties;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentRunActivityDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentRuntimeSnapshotDTO;
@@ -36,7 +36,7 @@ public class AgentRuntimeSnapshotService {
     private final ObjectMapper objectMapper;
     private final AgentRunActivityService activityService;
     private final ConversationTurnCodec turnCodec;
-    private final AgentProperties properties;
+    private final RuntimeConfigUnit runtimeConfigUnit;
 
     public AgentRuntimeSnapshotDTO get(String runId, long afterVersion) {
         if (!StringUtils.hasText(runId)) return null;
@@ -69,9 +69,19 @@ public class AgentRuntimeSnapshotService {
     }
 
     Duration effectiveTtl() {
-        Duration configured = positive(properties.getRuntimeSnapshotTtl(), Duration.ofMinutes(35));
-        Duration attemptTimeout = positive(properties.getTaskTimeout(), Duration.ofMinutes(10));
-        int attempts = Math.max(1, properties.getTaskMaxRetries() + 1);
+        Duration configured = positive(
+                runtimeConfigUnit.getDurationSeconds(
+                        "AGENT", "runtimeSnapshotTtlSeconds",
+                        Duration.ofMinutes(35)),
+                Duration.ofMinutes(35));
+        Duration attemptTimeout = positive(
+                runtimeConfigUnit.getDurationSeconds(
+                        "AGENT", "taskTimeoutSeconds",
+                        Duration.ofMinutes(10)),
+                Duration.ofMinutes(10));
+        int attempts = Math.max(1,
+                runtimeConfigUnit.getInt(
+                        "AGENT", "taskMaxRetries", 2) + 1);
         Duration minimum = attemptTimeout.multipliedBy(attempts).plus(SNAPSHOT_SAFETY_MARGIN);
         return configured.compareTo(minimum) >= 0 ? configured : minimum;
     }

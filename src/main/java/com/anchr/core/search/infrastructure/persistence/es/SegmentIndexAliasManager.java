@@ -2,7 +2,6 @@ package com.anchr.core.search.infrastructure.persistence.es;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.indices.get_alias.IndexAliases;
-import com.anchr.core.common.config.SegmentIndexConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -11,40 +10,34 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 import java.util.Map;
 
+import static com.anchr.core.common.constant.SegmentIndexConstant.READ_ALIAS;
+import static com.anchr.core.common.constant.SegmentIndexConstant.WRITE_ALIAS;
+
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class SegmentIndexAliasManager {
 
     private final ElasticsearchClient esClient;
-    private final SegmentIndexConfig config;
 
     public AliasTopology inspect() {
-        String readAlias = config.getReadAlias();
-        String writeAlias = config.getWriteAlias();
-        if (!StringUtils.hasText(readAlias) || !StringUtils.hasText(writeAlias)) {
-            return AliasTopology.unavailable("Read/write aliases are not configured");
-        }
-        if (readAlias.equals(writeAlias)) {
-            return AliasTopology.unavailable("Read/write aliases must be different");
-        }
         try {
             boolean readExists = esClient.indices()
-                    .existsAlias(e -> e.name(readAlias))
+                    .existsAlias(e -> e.name(READ_ALIAS))
                     .value();
             boolean writeExists = esClient.indices()
-                    .existsAlias(e -> e.name(writeAlias))
+                    .existsAlias(e -> e.name(WRITE_ALIAS))
                     .value();
             if (!readExists && !writeExists) {
-                return evaluate(Map.of(), readAlias, writeAlias);
+                return evaluate(Map.of(), READ_ALIAS, WRITE_ALIAS);
             }
             List<String> existingAliases = readExists && writeExists
-                    ? List.of(readAlias, writeAlias)
-                    : List.of(readExists ? readAlias : writeAlias);
+                    ? List.of(READ_ALIAS, WRITE_ALIAS)
+                    : List.of(readExists ? READ_ALIAS : WRITE_ALIAS);
             Map<String, IndexAliases> aliases = esClient.indices()
                     .getAlias(a -> a.name(existingAliases))
                     .result();
-            return evaluate(aliases, readAlias, writeAlias);
+            return evaluate(aliases, READ_ALIAS, WRITE_ALIAS);
         } catch (Exception e) {
             log.warn("Failed to inspect segment aliases: {}", e.getMessage());
             return AliasTopology.unavailable(e.getMessage());
@@ -72,13 +65,11 @@ public class SegmentIndexAliasManager {
                     "Refusing to bind aliases over existing topology: " + current.error());
         }
 
-        String readAlias = config.getReadAlias();
-        String writeAlias = config.getWriteAlias();
         esClient.indices().updateAliases(u -> u
-                .actions(a -> a.add(add -> add.index(physicalIndex).alias(readAlias)))
+                .actions(a -> a.add(add -> add.index(physicalIndex).alias(READ_ALIAS)))
                 .actions(a -> a.add(add -> add
                         .index(physicalIndex)
-                        .alias(writeAlias)
+                        .alias(WRITE_ALIAS)
                         .isWriteIndex(true))));
         AliasTopology updated = requireValid();
         if (!physicalIndex.equals(updated.physicalIndex())) {
@@ -96,16 +87,14 @@ public class SegmentIndexAliasManager {
                             + ", actual " + current.physicalIndex());
         }
 
-        String readAlias = config.getReadAlias();
-        String writeAlias = config.getWriteAlias();
         try {
             esClient.indices().updateAliases(u -> u
-                    .actions(a -> a.remove(r -> r.index(oldIndex).alias(readAlias)))
-                    .actions(a -> a.add(add -> add.index(newIndex).alias(readAlias)))
-                    .actions(a -> a.remove(r -> r.index(oldIndex).alias(writeAlias)))
+                    .actions(a -> a.remove(r -> r.index(oldIndex).alias(READ_ALIAS)))
+                    .actions(a -> a.add(add -> add.index(newIndex).alias(READ_ALIAS)))
+                    .actions(a -> a.remove(r -> r.index(oldIndex).alias(WRITE_ALIAS)))
                     .actions(a -> a.add(add -> add
                             .index(newIndex)
-                            .alias(writeAlias)
+                            .alias(WRITE_ALIAS)
                             .isWriteIndex(true))));
         } catch (Exception e) {
             AliasTopology afterFailure = inspect();

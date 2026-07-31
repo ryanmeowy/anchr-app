@@ -1,6 +1,5 @@
 package com.anchr.core.search.application.impl;
 
-import com.anchr.core.common.config.SegmentIndexConfig;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.application.acl.RetrievalCapabilityAcl;
 import com.anchr.core.search.application.api.model.RetrievalEmbeddingDeploymentRequest;
@@ -45,8 +44,7 @@ class SegmentIndexCapabilityBoundaryTest {
     void successfulAliasSwitchActivatesCapabilityAfterTheSwitch() throws Exception {
         SegmentIndexAliasManager aliasManager = mock(SegmentIndexAliasManager.class);
         RetrievalCapabilityAcl capabilityAcl = mock(RetrievalCapabilityAcl.class);
-        SegmentIndexManagerImpl manager = manager(aliasManager);
-        manager.setRetrievalCapabilityAcl(capabilityAcl);
+        SegmentIndexManagerImpl manager = manager(aliasManager, capabilityAcl);
         EmbeddingProfile profile =
                 new EmbeddingProfile(42L, "EMBEDDING", "new-model", 1024, "fingerprint");
 
@@ -61,8 +59,7 @@ class SegmentIndexCapabilityBoundaryTest {
     void activationFailureSwitchesAliasesBackAndKeepsOldServingPair() throws Exception {
         SegmentIndexAliasManager aliasManager = mock(SegmentIndexAliasManager.class);
         RetrievalCapabilityAcl capabilityAcl = mock(RetrievalCapabilityAcl.class);
-        SegmentIndexManagerImpl manager = manager(aliasManager);
-        manager.setRetrievalCapabilityAcl(capabilityAcl);
+        SegmentIndexManagerImpl manager = manager(aliasManager, capabilityAcl);
         EmbeddingProfile profile =
                 new EmbeddingProfile(42L, "EMBEDDING", "new-model", 1024, "fingerprint");
         doThrow(new IllegalStateException("activation failed"))
@@ -81,12 +78,15 @@ class SegmentIndexCapabilityBoundaryTest {
     }
 
     private SegmentIndexManagerImpl manager(SegmentIndexAliasManager aliasManager) {
-        SegmentIndexConfig config = new SegmentIndexConfig();
-        config.setReadAlias("kb_segment_read");
-        config.setWriteAlias("kb_segment_write");
-        return new SegmentIndexManagerImpl(
+        return manager(aliasManager, mock(RetrievalCapabilityAcl.class));
+    }
+
+    private SegmentIndexManagerImpl manager(
+            SegmentIndexAliasManager aliasManager,
+            RetrievalCapabilityAcl capabilityAcl
+    ) {
+        return SegmentIndexManagerTestFactory.create(
                 null,
-                config,
                 () -> Optional.of(new EmbeddingProfile(
                         1L, "EMBEDDING", "old-model", 768, "old-fingerprint")),
                 null,
@@ -94,6 +94,7 @@ class SegmentIndexCapabilityBoundaryTest {
                 null,
                 Runnable::run,
                 new SegmentIndexWriteBarrier(),
-                aliasManager);
+                aliasManager,
+                capabilityAcl);
     }
 }

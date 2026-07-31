@@ -61,7 +61,6 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
         target.setRunId(source.getRunId());
         target.setSessionId(source.getSessionId());
         target.setTurnId(source.getTurnId());
-        target.setWorkflowVersion(source.getWorkflowVersion());
         target.setStatus(source.getStatus());
         target.setCurrentStep(source.getCurrentStep());
         target.setStepCount(source.getStepCount());
@@ -100,7 +99,6 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
         target.setRunId(source.getRunId());
         target.setSessionId(source.getSessionId());
         target.setTurnId(source.getTurnId());
-        target.setWorkflowVersion(source.getWorkflowVersion());
         target.setStatus(source.getStatus());
         target.setCurrentStep(source.getCurrentStep());
         target.setStepCount(source.getStepCount());

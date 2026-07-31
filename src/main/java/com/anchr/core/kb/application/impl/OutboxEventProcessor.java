@@ -1,9 +1,10 @@
 package com.anchr.core.kb.application.impl;
 
 import com.anchr.core.kb.domain.model.DocumentIndexDeletePayload;
+import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.kb.application.model.OutboxRuntimeSettings;
 import com.anchr.core.kb.domain.model.DocumentIndexGenerationDeletePayload;
 import com.anchr.core.kb.domain.model.OutboxEvent;
-import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.ingestion.application.impl.IngestionImagePaths;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
@@ -14,7 +15,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -33,6 +33,9 @@ import java.util.UUID;
 public class OutboxEventProcessor {
 
     private static final int ERROR_MESSAGE_MAX_LENGTH = 2000;
+    private static final long LOCK_LEASE_MINUTES = 5L;
+    private static final long POLL_INTERVAL_MILLIS = 3_000L;
+    private static final String CLEANUP_CRON = "0 0 3 * * *";
     private static final List<Long> RETRY_DELAYS_MINUTES = List.of(1L, 5L, 30L, 120L, 720L, 1440L);
 
     private final OutboxEventRepository outboxEventRepository;
@@ -41,35 +44,30 @@ public class OutboxEventProcessor {
     private final IngestionTaskRepository ingestionTaskRepository;
     private final KnowledgeObjectStoragePort objectStoragePort;
     private final KnowledgeStorageAcl knowledgeStorageAcl;
+    private final RuntimeConfigUnit runtimeConfigUnit;
 
-    @Value("${app.outbox.batch-size:20}")
-    private int batchSize;
-
-    @Value("${app.outbox.lock-lease-minutes:5}")
-    private long lockLeaseMinutes;
-
-    @Value("${app.outbox.max-attempts:10}")
-    private int maxAttempts;
-
-    @Value("${app.outbox.retention-days:90}")
-    private long retentionDays;
-
-    @Value("${app.outbox.cleanup-batch-size:1000}")
-    private int cleanupBatchSize;
-
-    @Scheduled(fixedDelayString = "${app.outbox.poll-interval-ms:3000}",
-            initialDelayString = "${app.outbox.poll-interval-ms:3000}")
+    @Scheduled(
+            fixedDelay = POLL_INTERVAL_MILLIS,
+            initialDelay = POLL_INTERVAL_MILLIS
+    )
     public void poll() {
+        OutboxRuntimeSettings runtimeConfig =
+                OutboxRuntimeSettings.load(runtimeConfigUnit);
         LocalDateTime now = LocalDateTime.now();
         String lockToken = UUID.randomUUID().toString();
         List<OutboxEvent> events = outboxEventRepository.claimAvailable(
-                now, now.minusMinutes(lockLeaseMinutes), batchSize, lockToken);
+                now, now.minusMinutes(LOCK_LEASE_MINUTES),
+                runtimeConfig.batchSize(), lockToken);
         for (OutboxEvent event : events) {
-            process(event);
+            process(event, runtimeConfig);
         }
     }
 
     void process(OutboxEvent event) {
+        process(event, OutboxRuntimeSettings.load(runtimeConfigUnit));
+    }
+
+    private void process(OutboxEvent event, OutboxRuntimeSettings runtimeConfig) {
         try {
             switch (event.getEventType()) {
                 case DELETE_ASSET -> {
@@ -103,7 +101,7 @@ public class OutboxEventProcessor {
         } catch (PermanentEventException e) {
             failPermanently(event, e.getMessage());
         } catch (Exception e) {
-            retryOrFail(event, e);
+            retryOrFail(event, e, runtimeConfig.maxAttempts());
         }
     }
 
@@ -119,12 +117,16 @@ public class OutboxEventProcessor {
     }
 
     @Scheduled(
-            cron = "${app.outbox.cleanup-cron:0 0 3 * * *}" ,
+            cron = CLEANUP_CRON,
             zone = "Asia/Shanghai"
     )
     public void cleanupDoneEvents() {
-        LocalDateTime processedBefore = LocalDateTime.now().minusDays(retentionDays);
-        int deleted = outboxEventRepository.deleteDoneBefore(processedBefore, cleanupBatchSize);
+        OutboxRuntimeSettings runtimeConfig =
+                OutboxRuntimeSettings.load(runtimeConfigUnit);
+        LocalDateTime processedBefore =
+                LocalDateTime.now().minusDays(runtimeConfig.retentionDays());
+        int deleted = outboxEventRepository.deleteDoneBefore(
+                processedBefore, runtimeConfig.cleanupBatchSize());
         if (deleted > 0) {
             log.info("cleaned completed outbox events, count={}, processedBefore={}", deleted, processedBefore);
         }
@@ -169,11 +171,12 @@ public class OutboxEventProcessor {
         }
     }
 
-    private void retryOrFail(OutboxEvent event, Exception exception) {
+    private void retryOrFail(
+            OutboxEvent event, Exception exception, int effectiveMaxAttempts) {
         int retryCount = event.getRetryCount() + 1;
         String error = clip(exception.getMessage());
         LocalDateTime now = LocalDateTime.now();
-        if (retryCount >= maxAttempts) {
+        if (retryCount >= effectiveMaxAttempts) {
             boolean updated = outboxEventRepository.markFailed(
                     event.getId(), event.getLockToken(), retryCount, error, now);
             if (updated) {

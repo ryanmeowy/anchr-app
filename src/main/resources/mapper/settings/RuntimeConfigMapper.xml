@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.anchr.core.settings.infrastructure.persistence.RuntimeConfigMapper">
+
+    <resultMap id="RuntimeConfigRecordMap"
+               type="com.anchr.core.settings.infrastructure.persistence.RuntimeConfigRecord">
+        <result property="type" column="type"/>
+        <result property="paramKey" column="param_key"/>
+        <result property="paramValue" column="param_value"/>
+        <result property="updatedBy" column="updated_by"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="findByType" resultMap="RuntimeConfigRecordMap">
+        select type, param_key, param_value, updated_by, updated_at
+        from runtime_config
+        where type = #{type}
+        order by param_key
+    </select>
+
+    <insert id="upsertAll">
+        insert into runtime_config (
+            type, param_key, param_value, updated_by, updated_at
+        ) values
+        <foreach collection="entries" item="entry" separator=",">
+            (
+                #{entry.type}, #{entry.paramKey}, #{entry.paramValue},
+                #{entry.updatedBy}, #{entry.updatedAt}
+            )
+        </foreach>
+        on duplicate key update
+            param_value = values(param_value),
+            updated_by = values(updated_by),
+            updated_at = values(updated_at)
+    </insert>
+</mapper>

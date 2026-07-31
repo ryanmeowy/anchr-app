@@ -163,7 +163,6 @@ public class ConversationMessageUseCase {
         turn.setResultCardsJson(turnCodec.serializeResultCards(result.resultCards()));
         turn.setRetrievalTraceJson(buildRetrievalTraceJson(request, result));
         turn.setAgentRunId(result.agentRunId());
-        turn.setWorkflowVersion(result.workflowVersion());
         turn.setExecutionMode(result.executionMode().name());
         turn.setAgentTaskId(
                 result.agentTask() == null ? null : result.agentTask().taskId());
@@ -184,7 +183,6 @@ public class ConversationMessageUseCase {
         response.setTitle(persistedSession.getTitle());
         response.setSessionUpdatedAt(persistedSession.getUpdatedAt());
         response.setAgentRunId(turn.getAgentRunId());
-        response.setWorkflowVersion(turn.getWorkflowVersion());
         response.setExecutionMode(turn.getExecutionMode());
         response.setAgentTask(toAgentTaskDto(turn.getAgentTaskId()));
         response.setRewrittenQuery(result.rewrittenQuery());

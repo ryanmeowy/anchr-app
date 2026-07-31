@@ -5,8 +5,8 @@ import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalFacet;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalInsight;
-import com.anchr.core.search.application.api.model.RetrievalPageResult;
 import com.anchr.core.search.application.api.model.RetrievalTopChunk;
+import com.anchr.core.search.application.api.model.RetrievalTopNResult;
 import com.anchr.core.search.application.api.model.SearchAnswerResult;
 import com.anchr.core.search.application.model.SearchRewriteResult;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,7 @@ class SearchRestAssemblerTest {
     private final SearchRestAssembler assembler = new SearchRestAssembler();
 
     @Test
-    void mapsAllNestedApplicationFieldsBackToExistingRestContract() {
+    void mapsAllNestedApplicationFieldsBackToTopNRestContract() {
         RetrievalExplain explain = new RetrievalExplain(
                 List.of("VECTOR", "OCR"), new RetrievalExplain.MatchedBy(true, false, false, true),
                 null, new RetrievalExplain.ImageSignals(true, true, false, false));
@@ -38,8 +38,8 @@ class SearchRestAssemblerTest {
                 new RetrievalInsight.RelevanceDistribution(1, 1, 0),
                 new RetrievalInsight.Risk(0),
                 new RetrievalInsight.HitSourceDistribution(1, 0, 1, 0, 0), 42L);
-        RetrievalPageResult page = new RetrievalPageResult(
-                List.of(hit), 1, Map.of("assetTypes", List.of(new RetrievalFacet("PDF", 1))), insight);
+        RetrievalTopNResult result = new RetrievalTopNResult(
+                List.of(hit), Map.of("assetTypes", List.of(new RetrievalFacet("PDF", 1))), insight);
         SearchRewriteResult rewrite = new SearchRewriteResult();
         rewrite.setRewrittenQuery("rewritten");
         rewrite.setKeywords(List.of("keyword"));
@@ -50,8 +50,11 @@ class SearchRestAssemblerTest {
                 "answer", List.of(), List.of(hit),
                 new SearchAnswerResult.AnswerTrace("STRICT", true, null));
 
-        var dto = assembler.toPageDto(page, rewrite, answer, List.of("next?"));
+        var dto = assembler.toTopNDto(result, rewrite, answer, List.of("next?"));
 
+        assertThat(dto.getReturnedCount()).isEqualTo(dto.getItems().size());
+        assertThat(dto.getWindowFacets().get("assetTypes")).singleElement()
+                .satisfies(facet -> assertThat(facet.getValue()).isEqualTo("PDF"));
         assertThat(dto.getRewrittenQuery()).isEqualTo("rewritten");
         assertThat(dto.getRewrittenKeywords()).containsExactly("keyword");
         assertThat(dto.getInsight().getQueryIntent().getIntent()).isEqualTo("LOOKUP");

@@ -173,10 +173,10 @@ openssl rand -base64 16
 | --- | --- | --- |
 | Redis | `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` | Token、分布式 ID 分段、查询改写缓存和 Agent 快照。 |
 | Elasticsearch | `ES_USERNAME`、`ES_PASSWORD`、`ES_HOST` | Segment 索引、alias、全文召回和向量召回。 |
-| MySQL | `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD` | 应用状态。 |
+| MySQL | `SPRING_DATASOURCE_URL`、`MYSQL_USER`、`MYSQL_PASSWORD` | 应用状态。 |
 | 安全 | `APP_ADMIN_SECRET`、`APP_ENCRYPT_KEY`、`APP_ENCRYPT_IV` | Token 管理和模型/存储凭据加密。 |
 | Docling | `APP_DOCLING_BASE_URL`、`APP_DOCLING_API_TOKEN` | 带鉴权的异步文档解析。 |
-| Server | `SERVER_HOST`、`SERVER_PORT` | HTTP 监听地址与端口。 |
+| Server | `SERVER_HOST`、`SERVER_PORT`、`SPRING_PROFILES_ACTIVE` | HTTP 监听地址、端口和启用的 Spring Profile。 |
 
 > [!WARNING]
 > 不要提交任一 Docker `.env` 文件。已有加密配置存在时，应保持加密 Key 和 IV 稳定；生产环境请使用 Secret Manager。
@@ -196,7 +196,7 @@ Anchr Docling 仍作为独立服务运行。使用示例端口时，API 地址�
 
 ```bash
 cp docker/app/.env.example .env
-# 为宿主机访问设置 REDIS_HOST、MYSQL_HOST 和 ES_HOST。
+# 为宿主机访问设置 REDIS_HOST 和 ES_HOST，并修改 SPRING_DATASOURCE_URL 中的主机名。
 set -a
 source .env
 set +a
@@ -253,16 +253,15 @@ curl --get http://127.0.0.1:8081/api/v1/auth/refresh-token \
 
 ## 配置说明
 
-大部分运维参数在 [`application.yaml`](./src/main/resources/application.yaml) 中已有安全默认值，仅在工作负载确实需要时覆盖：
+Search、Conversation、Agent、Ingestion 和 Outbox 的调优参数通过 Settings
+管理，并以运行时 KV 记录保存。修改从下一次业务操作开始生效；已经开始的
+操作继续使用启动时读取的值。某个 KV 没有覆盖值时，由调用方使用代码内置
+的默认值。
 
-- `APP_AGENT_*`：Agent 预算、超时、工具调用模式、任务 Lease 和运行时快照 TTL；
-- `APP_INGESTION_*`：轮询、Claim 批量、解析超时和重试；
-- `APP_EMBEDDING_*`：入库向量化的限速节奏和退避；
-- `APP_OUTBOX_*`：轮询、Lease、重试、保留期和清理计划；
-- `APP_CONVERSATION_*`：Intent Routing 与旧证据降级；
-- `APP_DOCLING_*`：响应体限制和内嵌图片上传开关。
-
-模型地址、API Key、模型名、向量维度和存储凭据都通过 Settings 管理为运行时记录，而不是写死在环境变量中。
+[`application.yaml`](./src/main/resources/application.yaml) 只保留数据库、
+Redis、Elasticsearch、安全密钥、Docling 连接信息、Segment 索引名和 Agent
+工作流版本等启动或基础设施配置。模型地址、API Key、模型名、向量维度和
+存储凭据同样由 Settings 管理。
 
 ## 开发
 

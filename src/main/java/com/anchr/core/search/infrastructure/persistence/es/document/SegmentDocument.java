@@ -9,11 +9,13 @@ import org.springframework.data.elasticsearch.annotations.FieldType;
 
 import java.util.List;
 
+import static com.anchr.core.common.constant.SegmentIndexConstant.READ_ALIAS;
+
 /**
  * Unified KB segment document for text and image retrieval in Phase 1.
  */
 @Data
-@Document(indexName = "#{@kbSegmentConfig.getReadTargetName()}", createIndex = false)
+@Document(indexName = READ_ALIAS, createIndex = false)
 public class SegmentDocument {
 
     @Id

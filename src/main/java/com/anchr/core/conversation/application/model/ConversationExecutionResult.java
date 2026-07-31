@@ -16,7 +16,6 @@ public record ConversationExecutionResult(ConversationIntentResult intent,
                                           List<ResultCardDTO> resultCards,
                                           ConversationMessagePipelineResult ragResult,
                                           String agentRunId,
-                                          String workflowVersion,
                                           ConversationExecutionMode executionMode,
                                           AgentDeferredTask agentTask) {
     public ConversationExecutionResult(ConversationIntentResult intent,
@@ -28,10 +27,9 @@ public record ConversationExecutionResult(ConversationIntentResult intent,
                                        List<ConversationCitation> citations,
                                        List<ResultCardDTO> resultCards,
                                        ConversationMessagePipelineResult ragResult,
-                                       String agentRunId,
-                                       String workflowVersion) {
+                                       String agentRunId) {
         this(intent, retrievalExecuted, rewrittenQuery, answer, answerStatus, fallbackReason,
-                citations, resultCards, ragResult, agentRunId, workflowVersion,
+                citations, resultCards, ragResult, agentRunId,
                 agentRunId == null ? ConversationExecutionMode.TRADITIONAL : ConversationExecutionMode.AGENT,
                 null);
     }

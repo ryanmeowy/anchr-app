@@ -2,8 +2,8 @@ package com.anchr.core.search.application.api.model;
 
 import java.util.List;
 
-/** Retrieval request for the public search page. */
-public record RetrievalPageQuery(
+/** Retrieval request for the public bounded Top-N search endpoint. */
+public record RetrievalTopNQuery(
         String query,
         List<String> keywords,
         Integer limit,
@@ -12,10 +12,9 @@ public record RetrievalPageQuery(
         List<String> assetTypes,
         List<String> hitTypes,
         Long createdFrom,
-        Long createdTo,
-        String sort
+        Long createdTo
 ) {
-    public RetrievalPageQuery {
+    public RetrievalTopNQuery {
         keywords = copy(keywords);
         kbIds = copy(kbIds);
         assetIds = copy(assetIds);

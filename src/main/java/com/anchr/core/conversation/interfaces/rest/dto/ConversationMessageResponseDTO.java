@@ -17,7 +17,6 @@ public class ConversationMessageResponseDTO implements Serializable {
     private String title;
     private long sessionUpdatedAt;
     private String agentRunId;
-    private String workflowVersion;
     private String executionMode;
     private AgentTaskDTO agentTask;
     private String rewrittenQuery;

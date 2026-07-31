@@ -6,7 +6,6 @@ import com.anchr.core.conversation.application.model.ConversationGenerationResul
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.GenerationOptions;
-import com.anchr.core.conversation.config.AgentProperties;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +19,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.time.Duration;
 
 @Slf4j
 final class AgentFinalPresentation {
@@ -33,14 +33,11 @@ final class AgentFinalPresentation {
             """;
 
     private final ConversationGenerationPort generationPort;
-    private final AgentProperties properties;
     private final AgentTraceRecorder traceRecorder;
 
     AgentFinalPresentation(ConversationGenerationPort generationPort,
-                           AgentProperties properties,
                            AgentTraceRecorder traceRecorder) {
         this.generationPort = generationPort;
-        this.properties = properties;
         this.traceRecorder = traceRecorder;
     }
 
@@ -84,7 +81,10 @@ final class AgentFinalPresentation {
                             new ConversationModelMessage("system", FINAL_PRESENTATION_PROMPT),
                             new ConversationModelMessage("user", user.toString())),
                     new GenerationOptions(0D, 1_500,
-                            state.getBudget().boundedTimeout(properties.getModelTimeout())),
+                            state.getBudget().boundedTimeout(
+                                    state.getRuntimeConfig() == null
+                                            ? Duration.ofSeconds(30)
+                                            : state.getRuntimeConfig().modelTimeout())),
                     delta -> {
                         if (delta == null || delta.isEmpty()) return;
                         firstTokenAt.compareAndSet(0L, System.currentTimeMillis());

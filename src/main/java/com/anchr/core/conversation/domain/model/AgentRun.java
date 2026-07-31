@@ -7,7 +7,6 @@ public class AgentRun {
     private String runId;
     private String sessionId;
     private String turnId;
-    private String workflowVersion;
     private String status;
     private String currentStep;
     private int stepCount;

@@ -1,6 +1,8 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.ConversationIntentRouter;
+import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.conversation.application.model.ConversationRuntimeSettings;
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
 import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationIntentType;
@@ -15,11 +17,9 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -60,19 +60,15 @@ public class ConversationIntentRouterImpl implements ConversationIntentRouter {
     private final ConversationGenerationPort generationPort;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
-
-    @Value("${app.conversation.intent-routing.enabled:true}")
-    private boolean enabled;
-    @Value("${app.conversation.intent-routing.context-turn-limit:5}")
-    private int contextTurnLimit;
-    @Value("${app.conversation.intent-routing.timeout:10s}")
-    private Duration timeout;
+    private final RuntimeConfigUnit runtimeConfigUnit;
 
     @Override
     public ConversationIntentResult route(String sessionId, String query) {
         Timer.Sample sample = Timer.start(meterRegistry);
+        ConversationRuntimeSettings runtimeConfig =
+                ConversationRuntimeSettings.load(runtimeConfigUnit);
         try {
-            if (!enabled) {
+            if (!runtimeConfig.intentRoutingEnabled()) {
                 return record(new ConversationIntentResult(ConversationIntentType.KB_QUERY, 0.0D,
                         "intent_routing_disabled", ConversationIntentSource.DISABLED, false));
             }
@@ -82,8 +78,8 @@ public class ConversationIntentRouterImpl implements ConversationIntentRouter {
                         "explicit_chat_rule", ConversationIntentSource.RULE, false));
             }
             String raw = generationPort.generate(
-                    buildMessages(sessionId, query),
-                    new GenerationOptions(0.0D, 300, timeout)
+                    buildMessages(sessionId, query, runtimeConfig.intentContextTurnLimit()),
+                    new GenerationOptions(0.0D, 300, runtimeConfig.intentTimeout())
             );
             ConversationIntentResult parsed = parse(raw);
             return record(parsed);
@@ -126,12 +122,13 @@ public class ConversationIntentRouterImpl implements ConversationIntentRouter {
         return result;
     }
 
-    private List<ConversationModelMessage> buildMessages(String sessionId, String query) {
+    private List<ConversationModelMessage> buildMessages(
+            String sessionId, String query, int effectiveContextTurnLimit) {
         List<ConversationModelMessage> messages = new ArrayList<>();
         messages.add(new ConversationModelMessage("system", SYSTEM_PROMPT));
 
         List<ConversationTurn> recentTurns = conversationRepository.findRecentTurns(
-                sessionId, Math.max(1, contextTurnLimit));
+                sessionId, Math.max(1, effectiveContextTurnLimit));
         List<List<ConversationModelMessage>> selectedTurns = new ArrayList<>();
         int contextChars = 0;
         for (ConversationTurn turn : recentTurns) {
@@ -193,4 +190,5 @@ public class ConversationIntentRouterImpl implements ConversationIntentRouter {
         String trimmed = value.trim();
         return trimmed.length() <= limit ? trimmed : trimmed.substring(0, limit);
     }
+
 }

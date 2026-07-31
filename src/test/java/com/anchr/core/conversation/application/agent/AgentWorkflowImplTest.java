@@ -3,7 +3,9 @@ package com.anchr.core.conversation.application.agent;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.model.*;
-import com.anchr.core.conversation.config.AgentProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
+import com.anchr.core.conversation.domain.model.ConversationCitation;
+import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.port.AgentModelPort;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
@@ -15,6 +17,7 @@ import jakarta.validation.constraints.NotBlank;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -274,18 +277,27 @@ class AgentWorkflowImplTest {
     @Test
     void knowledgeTool_shouldOnlyAllowRegisteredEvidenceCitation() {
         AtomicInteger calls = new AtomicInteger();
-        AgentModelPort model = request -> calls.getAndIncrement() == 0
-                ? new AgentModelResponse(null, List.of(new AgentToolCall("call-1", "test_search", "{\"query\":\"权限\"}")),
-                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1")
-                : new AgentModelResponse(null, List.of(new AgentToolCall("call-2", "deliver_answer",
+        AgentModelPort model = request -> switch (calls.getAndIncrement()) {
+            case 0 -> new AgentModelResponse(null, List.of(new AgentToolCall(
+                    "call-1", "test_search", "{\"query\":\"权限\"}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1");
+            case 1 -> new AgentModelResponse(null, List.of(new AgentToolCall("call-2", "deliver_answer",
                     "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"默认关闭 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\",\"seg-2\"]}")),
                     AgentTokenUsage.EMPTY, "model", "tool_calls", "req-2");
+            default -> {
+                assertThat(request.messages().getLast().content()).contains("CITATION_BINDING_MISMATCH");
+                yield new AgentModelResponse(null, List.of(new AgentToolCall("call-3", "deliver_answer",
+                        "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"默认关闭 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\"]}")),
+                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-3");
+            }
+        };
         ConversationRepository conversations = mock(ConversationRepository.class);
         when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
         AgentWorkflowImpl workflow = workflow(model, List.of(new TestSearchTool(), new DeliverOnlyTool()), conversations);
 
         var result = workflow.execute(run("权限默认值是什么"), ConversationProgressListener.NOOP);
 
+        assertThat(calls).hasValue(3);
         assertThat(result.retrievalExecuted()).isTrue();
         assertThat(result.answer()).isEqualTo("默认关闭 [1-1]");
         assertThat(result.citations()).singleElement().satisfies(citation -> {
@@ -293,6 +305,35 @@ class AgentWorkflowImplTest {
             assertThat(citation.getAssetCitationIndex()).isEqualTo(1);
             assertThat(citation.getSegmentCitationIndex()).isEqualTo(1);
         });
+    }
+
+    @Test
+    void knowledgeAnswerWithAuthoredVisibleCitation_shouldRequireRepair() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelPort model = request -> switch (calls.getAndIncrement()) {
+            case 0 -> new AgentModelResponse(null, List.of(new AgentToolCall(
+                    "call-1", "test_search", "{\"query\":\"权限\"}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1");
+            case 1 -> new AgentModelResponse(null, List.of(new AgentToolCall("call-2", "deliver_answer",
+                    "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"伪引用 [1-1]，默认关闭 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\"]}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-2");
+            default -> {
+                assertThat(request.messages().getLast().content()).contains("UNTRUSTED_VISIBLE_CITATION");
+                yield new AgentModelResponse(null, List.of(new AgentToolCall("call-3", "deliver_answer",
+                        "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"默认关闭 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\"]}")),
+                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-3");
+            }
+        };
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentWorkflowImpl workflow = workflow(model,
+                List.of(new TestSearchTool(), new DeliverOnlyTool()), conversations);
+
+        var result = workflow.execute(run("权限默认值是什么"), ConversationProgressListener.NOOP);
+
+        assertThat(calls).hasValue(3);
+        assertThat(result.answer()).isEqualTo("默认关闭 [1-1]");
+        assertThat(result.citations()).hasSize(1);
     }
 
     @Test
@@ -592,9 +633,65 @@ class AgentWorkflowImplTest {
 
     @Test
     void stripHistoricalCitationLabels_shouldPreventVisibleIndexReuse() {
+        ConversationCitation agentCitation = new ConversationCitation();
+        agentCitation.setAssetId("asset-1");
+        agentCitation.setSegmentId("seg-1");
+        agentCitation.setAssetCitationIndex(1);
+        agentCitation.setSegmentCitationIndex(1);
+
         assertThat(AgentWorkflowImpl.stripHistoricalCitationLabels(
-                "结论一 [1-1]，结论二[2]，令牌 [Retrieve-Yes] 保留。"))
-                .isEqualTo("结论一，结论二，令牌 [Retrieve-Yes] 保留。");
+                "结论 [1-1]，普通 [1]，数组 arr[1-1]，区间 [2024-2025]，链接 [1-1](https://example.com)。",
+                List.of(agentCitation)))
+                .isEqualTo("结论，普通 [1]，数组 arr[1-1]，区间 [2024-2025]，链接 [1-1](https://example.com)。");
+    }
+
+    @Test
+    void stripHistoricalCitationLabels_shouldUseLegacyAssetIndexesAndPreserveOnMissingMetadata() {
+        ConversationCitation legacyCitation = new ConversationCitation();
+        legacyCitation.setAssetId("asset-1");
+        legacyCitation.setSegmentId("seg-1");
+
+        assertThat(AgentWorkflowImpl.stripHistoricalCitationLabels(
+                "旧回答 [1]，普通 [2]。", List.of(legacyCitation)))
+                .isEqualTo("旧回答，普通 [2]。");
+        assertThat(AgentWorkflowImpl.stripHistoricalCitationLabels(
+                "没有元数据时保留 [1]。", List.of()))
+                .isEqualTo("没有元数据时保留 [1]。");
+    }
+
+    @Test
+    void buildMessages_shouldCleanStructuredLabelsAndPreserveHistoryWhenCitationJsonIsMalformed() throws Exception {
+        ConversationCitation citation = new ConversationCitation();
+        citation.setAssetId("asset-1");
+        citation.setSegmentId("seg-1");
+        citation.setAssetCitationIndex(1);
+        citation.setSegmentCitationIndex(1);
+        ConversationTurn structured = new ConversationTurn();
+        structured.setQuery("旧问题一");
+        structured.setAnswer("旧结论 [1-1]，普通 [1]。");
+        structured.setCitationsJson(objectMapper.writeValueAsString(List.of(citation)));
+        ConversationTurn malformed = new ConversationTurn();
+        malformed.setQuery("旧问题二");
+        malformed.setAnswer("损坏元数据仍保留 [2]。");
+        malformed.setCitationsJson("{invalid-json");
+
+        AgentModelPort model = request -> {
+            List<String> assistants = request.messages().stream()
+                    .filter(message -> "assistant".equals(message.role()))
+                    .map(AgentMessage::content)
+                    .toList();
+            assertThat(assistants).containsExactly(
+                    "损坏元数据仍保留 [2]。",
+                    "旧结论，普通 [1]。");
+            return new AgentModelResponse(null, List.of(new AgentToolCall("call-1", "deliver_answer",
+                    "{\"answerType\":\"CHAT\",\"answer\":\"完成\",\"citedSegmentIds\":[]}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1");
+        };
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of(structured, malformed));
+        AgentWorkflowImpl workflow = workflow(model, List.of(new DeliverOnlyTool()), conversations);
+
+        assertThat(workflow.execute(run("继续"), ConversationProgressListener.NOOP).answer()).isEqualTo("完成");
     }
 
     @Test
@@ -651,7 +748,6 @@ class AgentWorkflowImplTest {
                                        ConversationRepository conversations,
                                        AgentRunCancellationRegistry cancellationRegistry,
                                        AgentRequestContextResolver contextResolver) {
-        AgentProperties properties = new AgentProperties(); properties.setMaxSteps(6); properties.setMaxToolCalls(4);
         AgentToolRegistry registry = new AgentToolRegistry(tools);
         AgentToolExecutor executor = new AgentToolExecutor(registry, objectMapper,
                 Validation.buildDefaultValidatorFactory().getValidator());
@@ -660,7 +756,11 @@ class AgentWorkflowImplTest {
                 nullable(String.class), anyMap(), anyMap(), any(AgentTokenUsage.class), anyLong(),
                 nullable(String.class))).thenAnswer(invocation ->
                 ((AgentRunState) invocation.getArgument(0)).nextTraceOrder());
-        return new AgentWorkflowImpl(properties, model, generationPort,
+        return new AgentWorkflowImpl(
+                RuntimeConfigTestUnits.values(Map.of(
+                        "AGENT.maxSteps", "6",
+                        "AGENT.maxToolCalls", "4")),
+                model, generationPort,
                 registry, executor, conversations, contextResolver,
                 new ConversationCitationMapper(), traceRecorder,
                 cancellationRegistry, objectMapper,

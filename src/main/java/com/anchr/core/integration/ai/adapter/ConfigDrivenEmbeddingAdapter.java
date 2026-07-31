@@ -16,7 +16,6 @@ import com.google.common.collect.Lists;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -41,12 +40,7 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
     private final CapabilityResolver configResolver;
     private final Map<String, ClientCacheManager.ResolvedClient> profileClients =
             new ConcurrentHashMap<>();
-    private CapabilityConfigRepository capabilityConfigRepository;
-
-    @Autowired(required = false)
-    void setCapabilityConfigRepository(CapabilityConfigRepository repository) {
-        this.capabilityConfigRepository = repository;
-    }
+    private final CapabilityConfigRepository capabilityConfigRepository;
 
     public List<Float> embed(String source, String sourceType) {
         return embed(resolveActiveClient(), source, sourceType);
@@ -63,7 +57,7 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
     }
 
     private ClientCacheManager.ResolvedClient resolveProfileClient(EmbeddingProfile profile) {
-        if (capabilityConfigRepository == null || profile.configId() == null) {
+        if (profile.configId() == null) {
             ClientCacheManager.ResolvedClient active = resolveActiveClient();
             requireMatchingProfile(active.config(), profile);
             return active;

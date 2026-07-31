@@ -16,7 +16,9 @@ import com.anchr.core.search.domain.model.EmbeddingProjection;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort.EmbeddingSession;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -27,6 +29,8 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 @Slf4j
+@Component
+@RequiredArgsConstructor
 final class SegmentIndexMigrationRunner {
     private static final int SCROLL_BATCH_SIZE = 50;
     private static final int SCROLL_KEEP_ALIVE_MINUTES = 5;
@@ -37,16 +41,6 @@ final class SegmentIndexMigrationRunner {
     private final ElasticsearchClient esClient;
     private final SearchObjectStoragePort storagePort;
     private final IdGen idGen;
-
-    SegmentIndexMigrationRunner(
-            ElasticsearchClient esClient,
-            SearchObjectStoragePort storagePort,
-            IdGen idGen
-    ) {
-        this.esClient = esClient;
-        this.storagePort = storagePort;
-        this.idGen = idGen;
-    }
 
     MigrationResult migrate(
             String oldIndex,

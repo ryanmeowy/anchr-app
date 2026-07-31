@@ -9,9 +9,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class RetrievalPageAssemblerTest {
+class RetrievalTopNAssemblerTest {
 
-    private final RetrievalPageAssembler assembler = new RetrievalPageAssembler();
+    private final RetrievalTopNAssembler assembler = new RetrievalTopNAssembler();
 
     @Test
     void facetsAndInsightShouldPreserveCountsThresholdsAndKnownHitSources() {
@@ -20,7 +20,7 @@ class RetrievalPageAssemblerTest {
                 hit("TEXT_CHUNK", "PDF", 0.6D, "TITLE"),
                 hit("DOCUMENT_IMAGE", "DOCX", null, "OCR", "TAG", "CAPTION"));
 
-        var facets = assembler.buildFacets(items);
+        var facets = assembler.buildWindowFacets(items);
         RetrievalInsight insight = assembler.buildInsight(items, 4, 5, 3, 2, 42L);
 
         assertThat(facets.get("assetTypes"))
@@ -39,8 +39,8 @@ class RetrievalPageAssemblerTest {
     }
 
     @Test
-    void emptyPageShouldStillExposeBothFacetKeysAndZeroPipeline() {
-        assertThat(assembler.buildFacets(List.of()))
+    void emptyTopNShouldStillExposeBothWindowFacetKeysAndZeroPipeline() {
+        assertThat(assembler.buildWindowFacets(List.of()))
                 .containsOnlyKeys("assetTypes", "hitTypes")
                 .allSatisfy((key, value) -> assertThat(value).isEmpty());
         assertThat(assembler.buildInsight(List.of(), 0, 0, 0, 0, 1L).pipeline())

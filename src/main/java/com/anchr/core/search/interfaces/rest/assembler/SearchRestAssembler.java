@@ -5,17 +5,17 @@ import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalFacet;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalInsight;
-import com.anchr.core.search.application.api.model.RetrievalPageQuery;
-import com.anchr.core.search.application.api.model.RetrievalPageResult;
+import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
+import com.anchr.core.search.application.api.model.RetrievalTopNResult;
 import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.application.api.model.SearchAnswerResult;
 import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.interfaces.rest.dto.RetrievalInsightDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchAnswerDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchExplainDTO;
-import com.anchr.core.search.interfaces.rest.dto.SearchPageDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchResultDTO;
+import com.anchr.core.search.interfaces.rest.dto.SearchTopNDTO;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -27,27 +27,26 @@ import java.util.Map;
 @Component
 public class SearchRestAssembler {
 
-    public RetrievalPageQuery toPageQuery(SearchQueryDTO source, SearchRewriteResult rewrite) {
+    public RetrievalTopNQuery toTopNQuery(SearchQueryDTO source, SearchRewriteResult rewrite) {
         String rewritten = rewrite == null ? null : rewrite.getRewrittenQuery();
         String effectiveQuery = StringUtils.hasText(rewritten) ? rewritten : source.getQuery();
-        return new RetrievalPageQuery(
+        return new RetrievalTopNQuery(
                 effectiveQuery,
                 rewrite == null ? List.of() : rewrite.getKeywords(),
                 source.getLimit(), source.getKbIds(), source.getAssetIdList(), source.getAssetTypes(),
                 source.getHitTypes(),
                 source.getDateRange() == null ? null : source.getDateRange().getFrom(),
-                source.getDateRange() == null ? null : source.getDateRange().getTo(),
-                source.getSort());
+                source.getDateRange() == null ? null : source.getDateRange().getTo());
     }
 
-    public SearchPageDTO toPageDto(RetrievalPageResult source,
-                                   SearchRewriteResult rewrite,
-                                   SearchAnswerResult answer,
-                                   List<String> suggestedQuestions) {
-        return SearchPageDTO.builder()
+    public SearchTopNDTO toTopNDto(RetrievalTopNResult source,
+                                  SearchRewriteResult rewrite,
+                                  SearchAnswerResult answer,
+                                  List<String> suggestedQuestions) {
+        return SearchTopNDTO.builder()
                 .items(source.items().stream().map(this::toResultDto).toList())
-                .total(source.total())
-                .facets(toFacetDtos(source.facets()))
+                .returnedCount(source.items().size())
+                .windowFacets(toFacetDtos(source.windowFacets()))
                 .answer(toAnswerDto(answer))
                 .rewrittenQuery(rewrite == null ? null : rewrite.getRewrittenQuery())
                 .rewrittenKeywords(rewrite == null ? List.of() : rewrite.getKeywords())
@@ -143,12 +142,12 @@ public class SearchRestAssembler {
                 .textSignals(textSignals).imageSignals(imageSignals).build();
     }
 
-    private Map<String, List<SearchPageDTO.FacetItemDTO>> toFacetDtos(
+    private Map<String, List<SearchTopNDTO.FacetItemDTO>> toFacetDtos(
             Map<String, List<RetrievalFacet>> source) {
         if (source == null || source.isEmpty()) return Map.of();
-        Map<String, List<SearchPageDTO.FacetItemDTO>> result = new LinkedHashMap<>();
+        Map<String, List<SearchTopNDTO.FacetItemDTO>> result = new LinkedHashMap<>();
         source.forEach((key, values) -> result.put(key, values.stream()
-                .map(value -> SearchPageDTO.FacetItemDTO.builder()
+                .map(value -> SearchTopNDTO.FacetItemDTO.builder()
                         .value(value.value()).count(value.count()).build()).toList()));
         return result;
     }

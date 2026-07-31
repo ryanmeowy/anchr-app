@@ -5,7 +5,7 @@ import com.anchr.core.search.application.api.model.RetrievalAnchor;
 import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalTopChunk;
-import com.anchr.core.search.config.AppSearchProperties;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
 import com.anchr.core.search.domain.model.SegmentType;
@@ -31,7 +31,8 @@ class RetrievalQueryTopChunkMappingTest {
 
     @Test
     void visualProjectionShouldRemainAResultWithoutPretendingItsTitleIsEvidence() {
-        RetrievalResultAssembler assembler = new RetrievalResultAssembler();
+        RetrievalResultAssembler assembler =
+                new RetrievalResultAssembler(mock(SearchObjectStoragePort.class));
         Segment segment = Segment.builder()
                 .segmentId("visual-1")
                 .assetId("asset-1")
@@ -62,7 +63,8 @@ class RetrievalQueryTopChunkMappingTest {
 
     @Test
     void toTopChunk_shouldKeepOriginalContentAndDocumentPosition() {
-        RetrievalResultAssembler assembler = new RetrievalResultAssembler();
+        RetrievalResultAssembler assembler =
+                new RetrievalResultAssembler(mock(SearchObjectStoragePort.class));
         RetrievalHit segment = new RetrievalHit(
                 null, "2.1 Retrieval", "full original content", null, null, "short snippet",
                 3, null, new RetrievalExplain(List.of("OCR"), null, null, null),
@@ -85,8 +87,8 @@ class RetrievalQueryTopChunkMappingTest {
         when(objectStoragePort.buildPreviewUrl("embedded/diagram.png"))
                 .thenReturn(new SearchObjectStoragePort.SignedObjectUrl(
                         "https://preview/diagram", 123L));
-        RetrievalResultAssembler assembler = new RetrievalResultAssembler();
-        assembler.setObjectStoragePort(objectStoragePort);
+        RetrievalResultAssembler assembler =
+                new RetrievalResultAssembler(objectStoragePort);
         Segment segment = Segment.builder()
                 .segmentId("document-image-1")
                 .segmentType(SegmentType.DOCUMENT_IMAGE)
@@ -108,7 +110,7 @@ class RetrievalQueryTopChunkMappingTest {
         when(rerankPort.rerank(anyString(), any(), anyInt())).thenThrow(new IllegalStateException("timeout"));
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         RetrievalRerankPolicy policy =
-                new RetrievalRerankPolicy(rerankPort, new AppSearchProperties(), meterRegistry);
+                new RetrievalRerankPolicy(rerankPort, meterRegistry);
         List<SegmentRerankCandidate> candidates = List.of(
                 new SegmentRerankCandidate("s1", null, null, 0.9D, 0.9D, 2, true),
                 new SegmentRerankCandidate("s2", null, null, 0.8D, 0.8D, 1, false));
@@ -128,8 +130,9 @@ class RetrievalQueryTopChunkMappingTest {
         SearchKnowledgeAcl searchKnowledgeAcl = mock(SearchKnowledgeAcl.class);
         when(searchKnowledgeAcl.findActiveIndexGenerations(anyCollection()))
                 .thenReturn(Map.of("asset-active", 2L, "asset-legacy", 0L));
-        RetrievalQueryServiceImpl service = new RetrievalQueryServiceImpl(
-                null, null, searchKnowledgeAcl, null, null, null);
+        RetrievalQueryServiceImpl service = RetrievalQueryServiceTestFactory.create(
+                null, null, searchKnowledgeAcl, null,
+                RuntimeConfigTestUnits.defaults(), null);
         SegmentRerankCandidate active = candidate("active", "asset-active", 2L, 0.7D);
         SegmentRerankCandidate pending = candidate("pending", "asset-active", 3L, 0.9D);
         SegmentRerankCandidate legacy = candidate("legacy", "asset-legacy", 0L, 0.6D);

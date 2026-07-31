@@ -208,7 +208,6 @@ public class ConversationMessageStreamAdapter {
                 !"SKIPPED".equals(response.getRetrievalStage()));
         if (StringUtils.hasText(response.getAgentRunId())) {
             done.put("runId", response.getAgentRunId());
-            done.put("workflowVersion", response.getWorkflowVersion());
         }
         done.put("executionMode", response.getExecutionMode());
         if (response.getAgentTask() != null) {

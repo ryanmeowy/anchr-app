@@ -24,7 +24,6 @@ import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestReque
 import com.anchr.core.settings.interfaces.rest.dto.CapabilityConnectionTestResultDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -48,12 +47,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
     private final CapabilityClientFactory clientFactory;
     private final CapabilityResolver configResolver;
     private final ClientCacheManager clientCacheManager;
-    private CapabilityRetrievalAcl capabilityRetrievalAcl;
-
-    @Autowired(required = false)
-    void setCapabilityRetrievalAcl(CapabilityRetrievalAcl capabilityRetrievalAcl) {
-        this.capabilityRetrievalAcl = capabilityRetrievalAcl;
-    }
+    private final CapabilityRetrievalAcl capabilityRetrievalAcl;
 
     @Override
     public List<CapabilityConfigDTO> get(String capability) {
@@ -229,7 +223,7 @@ public class CapabilityConfigServiceImpl implements CapabilityConfigService {
 
     @Override
     public void select(String capability, Long id) {
-        if (isEmbeddingCapability(capability) && capabilityRetrievalAcl != null) {
+        if (isEmbeddingCapability(capability)) {
             CapabilityConfig selected = repository.findById(id)
                     .filter(config -> capability.equals(config.getCapability()))
                     .orElseThrow(() -> new IllegalArgumentException(

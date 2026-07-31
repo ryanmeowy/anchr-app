@@ -3,6 +3,7 @@ package com.anchr.core.search.application.impl;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -16,6 +17,7 @@ import java.util.Objects;
 /**
  * Pure RRF fusion and per-asset/type diversification used by the Retrieval query use case.
  */
+@Component
 final class RetrievalRrfFusionPolicy {
 
     List<SegmentRerankCandidate> fuse(

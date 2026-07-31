@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.interfaces.rest;
 
 import com.anchr.core.common.infrastructure.RequireAuth;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.conversation.application.ConversationService;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
@@ -12,7 +13,6 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDT
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCapabilitiesDTO;
-import com.anchr.core.conversation.config.AgentProperties;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -42,13 +42,15 @@ public class ConversationController {
 
     private final ConversationService conversationService;
     private final ConversationMessageStreamAdapter messageStreamAdapter;
-    private final AgentProperties agentProperties;
+    private final RuntimeConfigUnit runtimeConfigUnit;
 
     @GetMapping("/capabilities")
     @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     public Result<ConversationCapabilitiesDTO> capabilities() {
-        return Result.success(new ConversationCapabilitiesDTO(agentProperties.isEnabled(),
-                agentProperties.getWorkflowVersion(), agentProperties.getSummaryMaxDocuments()));
+        return Result.success(new ConversationCapabilitiesDTO(
+                runtimeConfigUnit.getBoolean("AGENT", "enabled", true),
+                runtimeConfigUnit.getInt(
+                        "AGENT", "summaryMaxDocuments", 3)));
     }
 
     @PostMapping

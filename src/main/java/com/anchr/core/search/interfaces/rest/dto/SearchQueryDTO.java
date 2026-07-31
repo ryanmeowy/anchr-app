@@ -43,9 +43,6 @@ public class SearchQueryDTO {
 
     private DateRange dateRange;
 
-    @Size(max = 32, message = "sort length cannot exceed 32")
-    private String sort;
-
     private Boolean withAnswer;
 
     @Size(max = 32, message = "answerMode length cannot exceed 32")
