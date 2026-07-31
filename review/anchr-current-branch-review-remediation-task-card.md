@@ -31,7 +31,7 @@
 | 207E | 让 Search API 的 sort、total、facets 与真实语义一致 | P1 | 完成 | 已选择 Top-N |
 | 207F | 收敛生产运行默认值和搜索参数来源 | P1/P2 | 待执行 | 生产部署方式需确认 |
 | 207G | 建立最小 CI 和合并门禁 | P1 | 待执行 | 跨仓工作流范围需确认 |
-| 207H | 准确描述 Ingestion 的恢复能力 | P2 | 待执行 | 否 |
+| 207H | 准确描述 Ingestion 的恢复能力 | P2 | 完成 | 否 |
 | 207I | 收敛 Agent 状态、依赖和可读性 | P2 | 待执行 | 每阶段单独执行，不一次性重写 |
 
 推荐执行顺序：
@@ -397,6 +397,14 @@ Agent 异步任务另行支持持久状态、Lease、取消和恢复。
 - 中英文语义一致。
 - 与 `docs/domain-boundaries-and-interactions.md` 的当前实现说明一致。
 - 不宣称 Ingestion 支持断点续跑、自动恢复或取消。
+
+### 2026-07-31 实施记录
+
+- 已依据 `IngestionTaskProcessorImpl`、`IngestionParseStage` 和入库 REST 接口核实当前能力：任务状态与阶段进度持久化；Provider retry 和 Docling job identity 仅存在于单次 worker 内；启动时残留 `RUNNING` Item 被标记失败；没有入库取消接口。
+- 中英文 README 的 Feature 表将模糊的 `retries/失败重试` 收敛为“失败后人工整文档重试”，设计原则拆分为“文档入库可追踪”和“Agent 任务可恢复”，不再共享恢复与取消承诺。
+- 中英文生产运维说明明确：应用重启后检查失败的入库 Item 并人工整文档重试；Lease 恢复和取消只描述 Agent。
+- 同步修正 README 中已经漂移的 Docker 环境变量名、文档维护 API 路径和 Elasticsearch 配置来源，并将 README 引用的项目地图更新到当前 Flyway V1–V9。
+- 未修改 Ingestion、Agent、REST、数据库或运行配置；`docs/domain-boundaries-and-interactions.md` 已准确描述现状，无需改动。
 
 ---
 
