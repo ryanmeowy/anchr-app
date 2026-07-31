@@ -2,6 +2,8 @@ package com.anchr.core.conversation.interfaces.rest;
 
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.conversation.application.ConversationService;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
@@ -48,9 +50,14 @@ public class ConversationController {
     @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     public Result<ConversationCapabilitiesDTO> capabilities() {
         return Result.success(new ConversationCapabilitiesDTO(
-                runtimeConfigUnit.getBoolean("AGENT", "enabled", true),
+                runtimeConfigUnit.getBoolean(
+                        RuntimeConfigType.AGENT,
+                        AgentRuntimeConfigKey.ENABLED,
+                        true),
                 runtimeConfigUnit.getInt(
-                        "AGENT", "summaryMaxDocuments", 3)));
+                        RuntimeConfigType.AGENT,
+                        AgentRuntimeConfigKey.SUMMARY_MAX_DOCUMENTS,
+                        3)));
     }
 
     @PostMapping

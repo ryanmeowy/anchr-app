@@ -5,6 +5,8 @@ import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.settings.application.support.RuntimeConfigCatalog;
 import com.anchr.core.settings.application.support.RuntimeConfigResolver;
 import com.anchr.core.settings.domain.model.RuntimeConfigEntry;
+import com.anchr.core.settings.domain.model.RuntimeConfigKey;
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.settings.domain.repository.RuntimeConfigRepository;
 import com.anchr.core.settings.infrastructure.cache.RuntimeConfigCache;
@@ -62,10 +64,11 @@ class RuntimeConfigServiceImplTest {
 
     @Test
     void shouldBatchUpsertAndRefreshRedisWithCompleteType() {
-        Map<String, String> current =
+        Map<RuntimeConfigKey, String> current =
                 new LinkedHashMap<>(catalog.defaults(RuntimeConfigType.AGENT));
-        Map<String, String> stored =
-                Map.of("enabled", "false", "maxSteps", "20");
+        Map<RuntimeConfigKey, String> stored = Map.of(
+                AgentRuntimeConfigKey.ENABLED, "false",
+                AgentRuntimeConfigKey.MAX_STEPS, "20");
         when(resolver.loadFromDatabase(RuntimeConfigType.AGENT))
                 .thenReturn(current);
         when(resolver.loadStoredFromDatabase(RuntimeConfigType.AGENT))
@@ -80,13 +83,17 @@ class RuntimeConfigServiceImplTest {
         ArgumentCaptor<List<RuntimeConfigEntry>> entries = ArgumentCaptor.forClass(List.class);
         verify(repository).upsertAll(entries.capture());
         assertThat(entries.getValue()).extracting(RuntimeConfigEntry::key)
-                .containsExactly("enabled", "maxSteps");
+                .containsExactly(
+                        AgentRuntimeConfigKey.ENABLED,
+                        AgentRuntimeConfigKey.MAX_STEPS);
         assertThat(entries.getValue()).allMatch(
                 entry -> "admin-1".equals(entry.updatedBy()));
         verify(cache).replaceAfterDatabaseCommit(
                 RuntimeConfigType.AGENT,
                 stored,
-                java.util.Set.of("enabled", "maxSteps"));
+                java.util.Set.of(
+                        AgentRuntimeConfigKey.ENABLED,
+                        AgentRuntimeConfigKey.MAX_STEPS));
         assertThat(updated.type()).isEqualTo("AGENT");
         assertThat(updated.params()).anySatisfy(param -> {
             assertThat(param.key()).isEqualTo("enabled");

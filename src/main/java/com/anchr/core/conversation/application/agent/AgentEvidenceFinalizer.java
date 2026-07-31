@@ -11,16 +11,16 @@ import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.time.Duration;
 
 @Slf4j
+@Component
 final class AgentEvidenceFinalizer {
     private static final int MAX_FINALIZER_EVIDENCE = 12;
     private static final int MAX_FINALIZER_EVIDENCE_CHARS = 24_000;
@@ -41,13 +41,16 @@ final class AgentEvidenceFinalizer {
     private final ConversationGenerationPort generationPort;
     private final AgentTraceRecorder traceRecorder;
     private final ObjectMapper objectMapper;
+    private final AgentAnswerVerifier answerVerifier;
 
     AgentEvidenceFinalizer(ConversationGenerationPort generationPort,
                            AgentTraceRecorder traceRecorder,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           AgentAnswerVerifier answerVerifier) {
         this.generationPort = generationPort;
         this.traceRecorder = traceRecorder;
         this.objectMapper = objectMapper;
+        this.answerVerifier = answerVerifier;
     }
 
     Result finalizeEvidence(AgentRunState state,
@@ -57,7 +60,7 @@ final class AgentEvidenceFinalizer {
                             Runnable cancellationCheck) {
         List<ConversationRetrievalCandidate> evidence = selectEvidence(state);
         if (evidence.isEmpty() || state.getBudget().remainingMillis() < 500L) {
-            return Result.unavailable();
+            return new Result.Unavailable();
         }
         String evidenceJson = evidenceJson(evidence);
         String userPrompt = "用户问题：\n" + state.getRunRequest().request().getQuery().trim()
@@ -90,8 +93,19 @@ final class AgentEvidenceFinalizer {
                                                 ? Duration.ofSeconds(30)
                                                 : state.getRuntimeConfig().modelTimeout())));
                 state.addUsage(generated.promptTokens(), generated.completionTokens());
-                AgentFinalAnswer finalAnswer = parseFinalAnswer(generated.content(), evidence);
-                boolean valid = finalAnswer != null;
+                FinalizerParseOutcome parsed = parseFinalAnswer(generated.content());
+                AgentAnswerValidationOutcome validation = parsed instanceof FinalizerParseOutcome.Valid valid
+                        ? answerVerifier.verifyEvidenceFinalizer(
+                                state, valid.answer().value(), evidence)
+                        : new AgentAnswerValidationOutcome.Rejected(
+                                "INVALID_FINALIZER_RESPONSE", "回答为空或 JSON 非法",
+                                "invalid_finalizer_response");
+                boolean valid = validation instanceof AgentAnswerValidationOutcome.Verified;
+                VerifiedAgentAnswer verified = valid
+                        ? ((AgentAnswerValidationOutcome.Verified) validation).answer()
+                        : null;
+                int citationCount = verified instanceof VerifiedCitedAnswer cited
+                        ? cited.citations().size() : 0;
                 int finalizationStepOrder = traceRecorder.recordStep(state,
                         valid ? AgentStepType.FINAL_ANSWER : AgentStepType.FAILED,
                         attempt,
@@ -99,7 +113,7 @@ final class AgentEvidenceFinalizer {
                         Map.of("phase", "EVIDENCE_FINALIZATION", "trigger", safe(trigger),
                                 "evidenceCount", evidence.size()),
                         Map.of("hasContent", StringUtils.hasText(generated.content()),
-                                "citationCount", valid ? finalAnswer.citedSegmentIds().size() : 0),
+                                "citationCount", citationCount),
                         new AgentTokenUsage(generated.promptTokens(), generated.completionTokens()),
                         System.currentTimeMillis() - started,
                         valid ? null : "INVALID_FINALIZER_RESPONSE");
@@ -108,9 +122,9 @@ final class AgentEvidenceFinalizer {
                             "stepOrder", finalizationStepOrder,
                             "decision", "FINAL_RESPONSE",
                             "evidenceCount", evidence.size(),
-                            "citationCount", finalAnswer.citedSegmentIds().size(),
+                            "citationCount", citationCount,
                             "durationMs", System.currentTimeMillis() - started));
-                    return Result.completed(finalAnswer);
+                    return new Result.Completed(verified);
                 }
                 lastInvalid = "回答为空、JSON 非法、引用缺失或引用不属于当前证据";
             } catch (Exception e) {
@@ -132,7 +146,7 @@ final class AgentEvidenceFinalizer {
                         "durationMs", System.currentTimeMillis() - started));
             }
         }
-        return Result.failed();
+        return new Result.Failed();
     }
 
     private List<ConversationRetrievalCandidate> selectEvidence(AgentRunState state) {
@@ -167,9 +181,8 @@ final class AgentEvidenceFinalizer {
         }
     }
 
-    private AgentFinalAnswer parseFinalAnswer(String raw,
-                                              List<ConversationRetrievalCandidate> evidence) {
-        if (!StringUtils.hasText(raw)) return null;
+    private FinalizerParseOutcome parseFinalAnswer(String raw) {
+        if (!StringUtils.hasText(raw)) return new FinalizerParseOutcome.Invalid();
         String value = unwrapJsonFence(raw);
         String answer;
         AgentAnswerType answerType = null;
@@ -182,25 +195,16 @@ final class AgentEvidenceFinalizer {
         } catch (Exception ignored) {
             answer = value;
         }
-        if (!StringUtils.hasText(answer)) return null;
-        Set<String> allowed = evidence.stream()
-                .map(ConversationRetrievalCandidate::getSegmentId)
-                .filter(StringUtils::hasText)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        List<String> markers = AgentCitationRenderer.extractSegmentIds(answer);
-        if (answerType == AgentAnswerType.NO_EVIDENCE) {
-            if (!markers.isEmpty() || declared.stream().anyMatch(StringUtils::hasText)) return null;
-            return new AgentFinalAnswer(AgentAnswerType.NO_EVIDENCE, answer.trim(), List.of());
+        if (!StringUtils.hasText(answer)) return new FinalizerParseOutcome.Invalid();
+        if (answerType == null && !AgentCitationRenderer.extractSegmentIds(answer).isEmpty()) {
+            answerType = AgentAnswerType.KNOWLEDGE;
         }
-        if (answerType != null && answerType != AgentAnswerType.KNOWLEDGE) return null;
-        if (markers.isEmpty() || markers.stream().anyMatch(id -> !allowed.contains(id))) return null;
-        List<String> normalized = markers.stream().distinct().toList();
-        if (!declared.isEmpty()) {
-            Set<String> declaredSet = declared.stream().filter(StringUtils::hasText)
-                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-            if (!declaredSet.equals(new LinkedHashSet<>(normalized))) return null;
-        }
-        return new AgentFinalAnswer(AgentAnswerType.KNOWLEDGE, answer.trim(), normalized);
+        return valid(new AgentFinalAnswer(answerType, answer.trim(), List.copyOf(declared)));
+    }
+
+    private FinalizerParseOutcome valid(AgentFinalAnswer answer) {
+        return new FinalizerParseOutcome.Valid(
+                new UnverifiedAgentAnswer(answer, null, null));
     }
 
     private AgentAnswerType parseAnswerType(String value) {
@@ -246,23 +250,23 @@ final class AgentEvidenceFinalizer {
                 state.getStepCount(), details));
     }
 
-    enum Status {
-        COMPLETED,
-        UNAVAILABLE,
-        FAILED
+    private sealed interface FinalizerParseOutcome
+            permits FinalizerParseOutcome.Valid, FinalizerParseOutcome.Invalid {
+        record Valid(UnverifiedAgentAnswer answer) implements FinalizerParseOutcome {
+        }
+
+        record Invalid() implements FinalizerParseOutcome {
+        }
     }
 
-    record Result(Status status, AgentFinalAnswer answer) {
-        static Result completed(AgentFinalAnswer answer) {
-            return new Result(Status.COMPLETED, answer);
+    sealed interface Result permits Result.Completed, Result.Unavailable, Result.Failed {
+        record Completed(VerifiedAgentAnswer answer) implements Result {
         }
 
-        static Result unavailable() {
-            return new Result(Status.UNAVAILABLE, null);
+        record Unavailable() implements Result {
         }
 
-        static Result failed() {
-            return new Result(Status.FAILED, null);
+        record Failed() implements Result {
         }
     }
 }

@@ -81,7 +81,10 @@ class IngestionApplicationServiceImplTest {
     @BeforeEach
     void setUp() {
         UserContextHolder.set(new RequestUserContext("user-a", "ADMIN"));
-        service = new IngestionApplicationServiceImpl(
+        IngestionTaskQuery taskQuery = new IngestionTaskQuery(
+                knowledgeBaseService,
+                ingestionTaskRepository);
+        IngestionTaskCreateUseCase createUseCase = new IngestionTaskCreateUseCase(
                 knowledgeBaseService,
                 assetRepository,
                 knowledgeBaseRepository,
@@ -90,8 +93,17 @@ class IngestionApplicationServiceImplTest {
                 idGen,
                 activityEventService,
                 ingestionTaskProcessor,
-                transactionRunner
-        );
+                transactionRunner,
+                taskQuery);
+        IngestionTaskMaintenanceUseCase maintenanceUseCase = new IngestionTaskMaintenanceUseCase(
+                knowledgeBaseService,
+                assetRepository,
+                ingestionTaskRepository,
+                idGen,
+                activityEventService,
+                ingestionTaskProcessor,
+                taskQuery);
+        service = new IngestionApplicationServiceImpl(createUseCase, maintenanceUseCase, taskQuery);
         lenient().when(transactionRunner.write(any())).thenAnswer(invocation ->
                 ((Supplier<?>) invocation.getArgument(0)).get());
         lenient().when(transactionRunner.read(any())).thenAnswer(invocation ->

@@ -1,9 +1,17 @@
 package com.anchr.core.settings.application.support;
 
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.OutboxRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigEntry;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
+import com.anchr.core.settings.domain.model.SearchRuntimeConfigKey;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -16,51 +24,71 @@ class RuntimeConfigCatalogTest {
     @Test
     void shouldPreserveCurrentBootstrapDefaults() {
         assertThat(catalog.defaults(RuntimeConfigType.SEARCH))
-                .containsEntry("rankConstant", "60")
-                .containsEntry("fusionAlpha", "0.6");
+                .containsEntry(SearchRuntimeConfigKey.RANK_CONSTANT, "60")
+                .containsEntry(SearchRuntimeConfigKey.FUSION_ALPHA, "0.6");
         assertThat(catalog.defaults(RuntimeConfigType.CONVERSATION))
-                .containsEntry("intentRoutingEnabled", "false")
-                .containsEntry("intentTimeoutSeconds", "5");
+                .containsEntry(ConversationRuntimeConfigKey.INTENT_ROUTING_ENABLED, "false")
+                .containsEntry(ConversationRuntimeConfigKey.INTENT_TIMEOUT_SECONDS, "5");
         assertThat(catalog.defaults(RuntimeConfigType.AGENT))
-                .containsEntry("maxSteps", "12")
-                .containsEntry("summaryMaxDocuments", "3");
+                .containsEntry(AgentRuntimeConfigKey.MAX_STEPS, "12")
+                .containsEntry(AgentRuntimeConfigKey.SUMMARY_MAX_DOCUMENTS, "3");
         assertThat(catalog.defaults(RuntimeConfigType.INGESTION))
-                .containsEntry("claimBatchSize", "32")
-                .containsEntry("doclingMaxResponseMiB", "256");
+                .containsEntry(IngestionRuntimeConfigKey.CLAIM_BATCH_SIZE, "32")
+                .containsEntry(IngestionRuntimeConfigKey.DOCLING_MAX_RESPONSE_MIB, "256");
         assertThat(catalog.defaults(RuntimeConfigType.OUTBOX))
-                .containsEntry("retentionDays", "90");
+                .containsEntry(OutboxRuntimeConfigKey.RETENTION_DAYS, "90");
     }
 
     @Test
     void shouldRejectUnknownAndInvalidValues() {
-        assertThatThrownBy(() -> catalog.normalize(
-                RuntimeConfigType.AGENT, "unknown", "1"))
+        assertThatThrownBy(() -> RuntimeConfigKey.parse(
+                RuntimeConfigType.AGENT, "unknown"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unsupported runtime config key");
         assertThatThrownBy(() -> catalog.normalize(
-                RuntimeConfigType.AGENT, "enabled", "yes"))
+                RuntimeConfigType.AGENT, AgentRuntimeConfigKey.ENABLED, "yes"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("true or false");
         assertThatThrownBy(() -> catalog.normalize(
-                RuntimeConfigType.SEARCH, "fusionAlpha", "1.1"))
+                RuntimeConfigType.SEARCH, SearchRuntimeConfigKey.FUSION_ALPHA, "1.1"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("between 0 and 1");
     }
 
     @Test
+    void shouldKeepTheKeyAssociatedWithItsTypeAtTheStringBoundary() {
+        assertThat(RuntimeConfigKey.parse(RuntimeConfigType.SEARCH, "textTopK"))
+                .isSameAs(SearchRuntimeConfigKey.TEXT_TOP_K);
+        assertThat(SearchRuntimeConfigKey.TEXT_TOP_K.type())
+                .isEqualTo(RuntimeConfigType.SEARCH);
+        assertThatThrownBy(() -> RuntimeConfigKey.parse(
+                RuntimeConfigType.AGENT, "textTopK"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported runtime config key for AGENT");
+        assertThatThrownBy(() -> new RuntimeConfigEntry(
+                RuntimeConfigType.AGENT,
+                SearchRuntimeConfigKey.TEXT_TOP_K,
+                "10",
+                "admin",
+                LocalDateTime.now()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not belong to AGENT");
+    }
+
+    @Test
     void shouldValidateCrossFieldRulesAfterPartialMerge() {
-        LinkedHashMap<String, String> search =
+        LinkedHashMap<RuntimeConfigKey, String> search =
                 new LinkedHashMap<>(catalog.defaults(RuntimeConfigType.SEARCH));
-        search.put("windowMin", "81");
+        search.put(SearchRuntimeConfigKey.WINDOW_MIN, "81");
 
         assertThatThrownBy(() ->
                 catalog.validateResolved(RuntimeConfigType.SEARCH, search))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("windowMin must not exceed windowMax");
 
-        LinkedHashMap<String, String> agent =
+        LinkedHashMap<RuntimeConfigKey, String> agent =
                 new LinkedHashMap<>(catalog.defaults(RuntimeConfigType.AGENT));
-        agent.put("summaryBatchChars", "500001");
+        agent.put(AgentRuntimeConfigKey.SUMMARY_BATCH_CHARS, "500001");
 
         assertThatThrownBy(() ->
                 catalog.validateResolved(RuntimeConfigType.AGENT, agent))

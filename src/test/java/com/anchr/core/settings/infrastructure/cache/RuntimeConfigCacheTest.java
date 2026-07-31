@@ -1,6 +1,9 @@
 package com.anchr.core.settings.infrastructure.cache;
 
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.OutboxRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
+import com.anchr.core.settings.domain.model.SearchRuntimeConfigKey;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.SessionCallback;
@@ -36,7 +39,7 @@ class RuntimeConfigCacheTest {
 
         RuntimeConfigCache.LookupResult result =
                 new RuntimeConfigCache(redisTemplate)
-                        .find(RuntimeConfigType.AGENT, "maxSteps");
+                        .find(RuntimeConfigType.AGENT, AgentRuntimeConfigKey.MAX_STEPS);
 
         assertThat(result.cacheReady()).isTrue();
         assertThat(result.value()).contains("20");
@@ -54,7 +57,7 @@ class RuntimeConfigCacheTest {
 
         RuntimeConfigCache.LookupResult result =
                 new RuntimeConfigCache(redisTemplate)
-                        .find(RuntimeConfigType.SEARCH, "rankConstant");
+                        .find(RuntimeConfigType.SEARCH, SearchRuntimeConfigKey.RANK_CONSTANT);
 
         assertThat(result.cacheReady()).isTrue();
         assertThat(result.value()).isEmpty();
@@ -71,9 +74,11 @@ class RuntimeConfigCacheTest {
                 .thenThrow(new IllegalStateException("redis unavailable"));
         RuntimeConfigCache cache = new RuntimeConfigCache(redisTemplate);
 
-        assertThat(cache.find(RuntimeConfigType.OUTBOX, "batchSize").cacheReady())
+        assertThat(cache.find(
+                RuntimeConfigType.OUTBOX, OutboxRuntimeConfigKey.BATCH_SIZE).cacheReady())
                 .isFalse();
-        assertThat(cache.find(RuntimeConfigType.OUTBOX, "batchSize").cacheReady())
+        assertThat(cache.find(
+                RuntimeConfigType.OUTBOX, OutboxRuntimeConfigKey.BATCH_SIZE).cacheReady())
                 .isFalse();
     }
 
@@ -87,8 +92,8 @@ class RuntimeConfigCacheTest {
 
         cache.replaceAfterDatabaseCommit(
                 RuntimeConfigType.SEARCH,
-                Map.of("rankConstant", "60"),
-                Set.of("rankConstant"));
+                Map.of(SearchRuntimeConfigKey.RANK_CONSTANT, "60"),
+                Set.of(SearchRuntimeConfigKey.RANK_CONSTANT));
 
         verify(redisTemplate, times(2)).execute(any(SessionCallback.class));
         verify(redisTemplate, never()).delete("anchr:settings:runtime:SEARCH");
@@ -103,8 +108,8 @@ class RuntimeConfigCacheTest {
 
         cache.replaceAfterDatabaseCommit(
                 RuntimeConfigType.AGENT,
-                Map.of("enabled", "true"),
-                Set.of("enabled"));
+                Map.of(AgentRuntimeConfigKey.ENABLED, "true"),
+                Set.of(AgentRuntimeConfigKey.ENABLED));
 
         verify(redisTemplate, times(3)).execute(any(SessionCallback.class));
         verify(redisTemplate).delete("anchr:settings:runtime:AGENT");
@@ -121,8 +126,8 @@ class RuntimeConfigCacheTest {
 
         cache.replaceAfterDatabaseCommit(
                 RuntimeConfigType.OUTBOX,
-                Map.of("batchSize", "20"),
-                Set.of("batchSize"));
+                Map.of(OutboxRuntimeConfigKey.BATCH_SIZE, "20"),
+                Set.of(OutboxRuntimeConfigKey.BATCH_SIZE));
 
         verify(redisTemplate, times(3)).execute(any(SessionCallback.class));
         verify(redisTemplate).delete("anchr:settings:runtime:OUTBOX");

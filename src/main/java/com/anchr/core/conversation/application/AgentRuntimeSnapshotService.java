@@ -2,6 +2,8 @@ package com.anchr.core.conversation.application;
 
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.conversation.application.model.AgentProgressEvent;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentRunActivityDTO;
@@ -71,17 +73,21 @@ public class AgentRuntimeSnapshotService {
     Duration effectiveTtl() {
         Duration configured = positive(
                 runtimeConfigUnit.getDurationSeconds(
-                        "AGENT", "runtimeSnapshotTtlSeconds",
+                        RuntimeConfigType.AGENT,
+                        AgentRuntimeConfigKey.RUNTIME_SNAPSHOT_TTL_SECONDS,
                         Duration.ofMinutes(35)),
                 Duration.ofMinutes(35));
         Duration attemptTimeout = positive(
                 runtimeConfigUnit.getDurationSeconds(
-                        "AGENT", "taskTimeoutSeconds",
+                        RuntimeConfigType.AGENT,
+                        AgentRuntimeConfigKey.TASK_TIMEOUT_SECONDS,
                         Duration.ofMinutes(10)),
                 Duration.ofMinutes(10));
         int attempts = Math.max(1,
                 runtimeConfigUnit.getInt(
-                        "AGENT", "taskMaxRetries", 2) + 1);
+                        RuntimeConfigType.AGENT,
+                        AgentRuntimeConfigKey.TASK_MAX_RETRIES,
+                        2) + 1);
         Duration minimum = attemptTimeout.multipliedBy(attempts).plus(SNAPSHOT_SAFETY_MARGIN);
         return configured.compareTo(minimum) >= 0 ? configured : minimum;
     }

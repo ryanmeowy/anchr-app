@@ -26,7 +26,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.regex.Pattern;
 
 @Slf4j
 @Component
@@ -34,14 +33,9 @@ import java.util.regex.Pattern;
 public class AgentTaskProcessor {
     private static final long TASK_LEASE_MILLIS = Duration.ofMinutes(2).toMillis();
     private static final long TASK_POLL_INTERVAL_MILLIS = 5_000L;
-    private static final int MAX_VISIBLE_CITATIONS = 10;
-    private static final int MAX_VISIBLE_CITATION_MARKERS = 12;
-    private static final int MAX_CITATIONS_PER_PARAGRAPH = 3;
     private static final int CITATION_EVIDENCE_CHARS = 500;
     private static final int CITATION_CATALOG_CHARS = 8_000;
     private static final int STREAM_TAIL_GUARD_CHARS = 96;
-    private static final Pattern PARAGRAPH_BOUNDARY = java.util.regex.Pattern.compile(
-            "(?:\\R\\s*){2,}|(?m)(?=^\\s*(?:[-*+]\\s+|\\d+[.)]\\s+))");
 
     private final AgentTaskRepository taskRepository;
     private final ConversationRepository conversationRepository;
@@ -58,6 +52,7 @@ public class AgentTaskProcessor {
     @Qualifier("agentTaskExecutor")
     private final Executor executor;
     private final AgentRuntimeSnapshotService runtimeSnapshotService;
+    private final AgentCitationPolicy citationPolicy;
     private final String owner = UUID.randomUUID().toString();
     private final Map<String, Thread> runningThreads = new ConcurrentHashMap<>();
     private final Set<String> scheduledTaskIds = ConcurrentHashMap.newKeySet();
@@ -299,7 +294,7 @@ public class AgentTaskProcessor {
         String result = generateFinalAnswer(task,
                 buildCitationCompactionPrompt(draft, catalog, request),
                 deadline, runtimeConfig);
-        if (!citationDensityWithinLimits(result)) {
+        if (!citationPolicy.withinLimits(result)) {
             log.warn("Agent summary citation density remains high after deterministic compaction, taskId={}",
                     task.getTaskId());
         }
@@ -332,7 +327,7 @@ public class AgentTaskProcessor {
         recordGenerationUsage(task, result.promptTokens(), result.completionTokens(),
                 System.currentTimeMillis() - started, null, false);
         ensureActive(task, deadline);
-        return compactCitationMarkers(visibleSummaryMarkdown(result.content(), true));
+        return citationPolicy.compactMarkers(visibleSummaryMarkdown(result.content(), true));
     }
 
     private String buildCitationCompactionPrompt(String draft,
@@ -341,8 +336,9 @@ public class AgentTaskProcessor {
         return "将下面的总结草稿整理为最终 Markdown。保持用户要求、关键结论和事实边界，不扩写新事实。"
                 + "直接输出 Markdown 正文，不要使用 ```markdown、```md 或其他代码围栏包裹整份回答。"
                 + "每个独立结论只保留一个最直接的 {{segment:实际ID}} 引用；只有确需多处证据共同支持时才保留两个。"
-                + "每个自然段最多保留 " + MAX_CITATIONS_PER_PARAGRAPH + " 个不同引用，全文最多保留 "
-                + MAX_VISIBLE_CITATIONS + " 个不同引用、最多 " + MAX_VISIBLE_CITATION_MARKERS + " 个引用标记。"
+                + "每个自然段最多保留 " + AgentCitationPolicy.MAX_MARKERS_PER_PARAGRAPH
+                + " 个不同引用，全文最多保留 " + AgentCitationPolicy.MAX_UNIQUE_CITATIONS
+                + " 个不同引用、最多 " + AgentCitationPolicy.MAX_MARKERS + " 个引用标记。"
                 + "同一引用在同一自然段只出现一次。删除重复、弱相关和仅作背景的引用，"
                 + "禁止在段尾连续堆叠大量引用。引用必须紧跟其支持的结论，不得新增、修改或解释引用 ID，"
                 + "不得输出 [数字] 引用。"
@@ -367,37 +363,6 @@ public class AgentTaskProcessor {
         String source = stripOpeningMarkdownFence(value);
         if (source.length() <= STREAM_TAIL_GUARD_CHARS) return "";
         return source.substring(0, source.length() - STREAM_TAIL_GUARD_CHARS);
-    }
-
-    static String compactCitationMarkers(String answer) {
-        if (!StringUtils.hasText(answer)) return answer;
-        var matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(answer);
-        Set<String> selectedIds = new LinkedHashSet<>();
-        StringBuilder compacted = new StringBuilder();
-        int totalMarkers = 0;
-        int paragraphMarkers = 0;
-        int previousMarkerEnd = 0;
-        while (matcher.find()) {
-            if (PARAGRAPH_BOUNDARY.matcher(answer.substring(previousMarkerEnd, matcher.start())).find()) {
-                paragraphMarkers = 0;
-            }
-            String segmentId = matcher.group(1).trim();
-            boolean knownId = selectedIds.contains(segmentId);
-            boolean withinUniqueLimit = knownId || selectedIds.size() < MAX_VISIBLE_CITATIONS;
-            boolean keep = StringUtils.hasText(segmentId)
-                    && withinUniqueLimit
-                    && totalMarkers < MAX_VISIBLE_CITATION_MARKERS
-                    && paragraphMarkers < MAX_CITATIONS_PER_PARAGRAPH;
-            matcher.appendReplacement(compacted, keep ? java.util.regex.Matcher.quoteReplacement(matcher.group()) : "");
-            if (keep) {
-                selectedIds.add(segmentId);
-                totalMarkers++;
-                paragraphMarkers++;
-            }
-            previousMarkerEnd = matcher.end();
-        }
-        matcher.appendTail(compacted);
-        return compacted.toString();
     }
 
     private static String stripOpeningMarkdownFence(String value) {
@@ -431,27 +396,6 @@ public class AgentTaskProcessor {
             catalog.append(block);
         }
         return catalog.toString();
-    }
-
-    static boolean citationDensityWithinLimits(String answer) {
-        if (!StringUtils.hasText(answer)) return false;
-        if (AgentCitationRenderer.extractSegmentIds(answer).size() > MAX_VISIBLE_CITATIONS) return false;
-        if (citationMarkerCount(answer) > MAX_VISIBLE_CITATION_MARKERS) return false;
-        String[] paragraphs = answer.split(
-                "(?:\\R\\s*){2,}|(?m)(?=^\\s*(?:[-*+]\\s+|\\d+[.)]\\s+))");
-        for (String paragraph : paragraphs) {
-            if (citationMarkerCount(paragraph) > MAX_CITATIONS_PER_PARAGRAPH) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static int citationMarkerCount(String value) {
-        int count = 0;
-        var matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(value == null ? "" : value);
-        while (matcher.find()) count++;
-        return count;
     }
 
     private String generate(
@@ -496,6 +440,15 @@ public class AgentTaskProcessor {
         Map<String, Object> finalDetails = Map.of(
                 "segmentCount", segmentCount, "citationCount", citationCount);
         recordTaskStage(task, task.getCurrentStage(), "COMPLETED", task.getProgress(), null, finalDetails);
+
+        prepareSuccessfulTask(task, answer, citationsJson);
+        if (!persistSuccessfulTaskAndTurn(task, answer, citationsJson)) {
+            throw new TaskCancelledException();
+        }
+        publishSuccessfulTerminalState(task, finalDetails);
+    }
+
+    private void prepareSuccessfulTask(AgentTask task, String answer, String citationsJson) {
         long now = System.currentTimeMillis();
         task.setStatus(AgentTaskStatus.SUCCEEDED.name());
         task.setProgress(100);
@@ -507,12 +460,25 @@ public class AgentTaskProcessor {
         task.setLeaseUntil(null);
         task.setFinishedAt(now);
         task.setUpdatedAt(now);
+    }
+
+    private boolean persistSuccessfulTaskAndTurn(
+            AgentTask task,
+            String answer,
+            String citationsJson
+    ) {
         Boolean completed = transactionTemplate.execute(ignored -> {
             if (!taskRepository.saveClaimed(task, owner)) return false;
             updateTurn(task, answer, citationsJson, AnswerStatus.ANSWERED, null);
             return true;
         });
-        if (!Boolean.TRUE.equals(completed)) throw new TaskCancelledException();
+        return Boolean.TRUE.equals(completed);
+    }
+
+    private void publishSuccessfulTerminalState(
+            AgentTask task,
+            Map<String, Object> finalDetails
+    ) {
         recordTaskStage(task, "COMPLETED", "COMPLETED", 100, null, finalDetails);
         updateRun(task, AgentRunStatus.COMPLETED, null);
         publishRuntimeTask(task);
@@ -523,6 +489,18 @@ public class AgentTaskProcessor {
         recordTaskStage(task, task.getCurrentStage(), "FAILED", task.getProgress(), code);
         task.setAnswer(null);
         taskStreamService.publishReset(task.getTaskId(), "");
+
+        prepareFailedTask(task, code, message, retry);
+        if (retry) {
+            persistAndPublishRetry(task, code);
+            return;
+        }
+        if (persistTerminalFailureAndTurn(task, code)) {
+            publishFailedTerminalState(task, code);
+        }
+    }
+
+    private void prepareFailedTask(AgentTask task, String code, String message, boolean retry) {
         long now = System.currentTimeMillis();
         task.setErrorCode(code);
         task.setErrorMessage(message);
@@ -539,23 +517,28 @@ public class AgentTaskProcessor {
             task.setFinishedAt(now);
             task.setProgress(100);
         }
-        if (retry) {
-            taskRepository.saveClaimed(task, owner);
-            recordTaskStage(task, "RETRY_WAIT", "RUNNING", task.getProgress(), code);
-            taskStreamService.publishTask(task);
-        } else {
-            Boolean failed = transactionTemplate.execute(ignored -> {
-                if (!taskRepository.saveClaimed(task, owner)) return false;
-                updateTurn(task, "文档处理失败，请稍后重试或缩小文档范围。", "[]", AnswerStatus.MODEL_FALLBACK, code);
-                return true;
-            });
-            if (Boolean.TRUE.equals(failed)) {
-                recordTaskStage(task, "FAILED", "FAILED", 100, code);
-                updateRun(task, AgentRunStatus.FAILED, code);
-                publishRuntimeTask(task);
-                taskStreamService.complete(task);
-            }
-        }
+    }
+
+    private void persistAndPublishRetry(AgentTask task, String code) {
+        taskRepository.saveClaimed(task, owner);
+        recordTaskStage(task, "RETRY_WAIT", "RUNNING", task.getProgress(), code);
+        taskStreamService.publishTask(task);
+    }
+
+    private boolean persistTerminalFailureAndTurn(AgentTask task, String code) {
+        Boolean failed = transactionTemplate.execute(ignored -> {
+            if (!taskRepository.saveClaimed(task, owner)) return false;
+            updateTurn(task, "文档处理失败，请稍后重试或缩小文档范围。", "[]", AnswerStatus.MODEL_FALLBACK, code);
+            return true;
+        });
+        return Boolean.TRUE.equals(failed);
+    }
+
+    private void publishFailedTerminalState(AgentTask task, String code) {
+        recordTaskStage(task, "FAILED", "FAILED", 100, code);
+        updateRun(task, AgentRunStatus.FAILED, code);
+        publishRuntimeTask(task);
+        taskStreamService.complete(task);
     }
 
     private void updateTurn(AgentTask task, String answer, String citations, AnswerStatus status, String reason) {

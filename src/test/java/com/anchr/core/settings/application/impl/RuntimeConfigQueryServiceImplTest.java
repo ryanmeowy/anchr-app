@@ -1,7 +1,8 @@
 package com.anchr.core.settings.application.impl;
 
-import com.anchr.core.settings.application.support.RuntimeConfigCatalog;
 import com.anchr.core.settings.application.support.RuntimeConfigResolver;
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.OutboxRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import org.junit.jupiter.api.Test;
 
@@ -17,33 +18,36 @@ class RuntimeConfigQueryServiceImplTest {
 
     private final RuntimeConfigResolver resolver = mock(RuntimeConfigResolver.class);
     private final RuntimeConfigQueryServiceImpl service =
-            new RuntimeConfigQueryServiceImpl(resolver, new RuntimeConfigCatalog());
+            new RuntimeConfigQueryServiceImpl(resolver);
 
     @Test
-    void shouldNormalizeTypeValidateKeyAndReturnStoredValue() {
-        when(resolver.findStoredValue(RuntimeConfigType.AGENT, "maxSteps"))
+    void shouldReturnStoredValueForTypedKey() {
+        when(resolver.findStoredValue(
+                RuntimeConfigType.AGENT, AgentRuntimeConfigKey.MAX_STEPS))
                 .thenReturn(Optional.of("20"));
 
-        assertThat(service.findValue(" agent ", " maxSteps "))
+        assertThat(service.findValue(
+                RuntimeConfigType.AGENT, AgentRuntimeConfigKey.MAX_STEPS))
                 .contains("20");
-        verify(resolver).findStoredValue(RuntimeConfigType.AGENT, "maxSteps");
+        verify(resolver).findStoredValue(
+                RuntimeConfigType.AGENT, AgentRuntimeConfigKey.MAX_STEPS);
     }
 
     @Test
     void shouldReturnEmptyOnlyForAMissingSupportedValue() {
-        when(resolver.findStoredValue(RuntimeConfigType.OUTBOX, "batchSize"))
+        when(resolver.findStoredValue(
+                RuntimeConfigType.OUTBOX, OutboxRuntimeConfigKey.BATCH_SIZE))
                 .thenReturn(Optional.empty());
 
-        assertThat(service.findValue("OUTBOX", "batchSize")).isEmpty();
+        assertThat(service.findValue(
+                RuntimeConfigType.OUTBOX, OutboxRuntimeConfigKey.BATCH_SIZE)).isEmpty();
     }
 
     @Test
-    void shouldRejectUnknownTypeAndKeyBeforeReadingStorage() {
-        assertThatThrownBy(() -> service.findValue("UNKNOWN", "batchSize"))
+    void shouldRejectAKeyFromAnotherTypeBeforeReadingStorage() {
+        assertThatThrownBy(() -> service.findValue(
+                RuntimeConfigType.OUTBOX, AgentRuntimeConfigKey.MAX_STEPS))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unsupported runtime config type");
-        assertThatThrownBy(() -> service.findValue("OUTBOX", "unknown"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unsupported runtime config key");
+                .hasMessageContaining("does not belong to OUTBOX");
     }
 }

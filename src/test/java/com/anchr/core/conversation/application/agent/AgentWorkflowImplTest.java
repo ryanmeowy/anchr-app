@@ -11,6 +11,7 @@ import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validation;
 import jakarta.validation.constraints.NotBlank;
@@ -337,6 +338,42 @@ class AgentWorkflowImplTest {
     }
 
     @Test
+    void citationDensityExceeded_shouldUseTheExistingSingleAnswerRepair() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelPort model = request -> switch (calls.getAndIncrement()) {
+            case 0 -> new AgentModelResponse(null, List.of(new AgentToolCall(
+                    "call-1", "test_search", "{\"query\":\"权限\"}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1");
+            case 1 -> new AgentModelResponse(null, List.of(new AgentToolCall(
+                    "call-2", "deliver_answer",
+                    "{\"answerType\":\"KNOWLEDGE\","
+                            + "\"answer\":\"默认关闭 {{segment:seg-1}} {{segment:seg-1}} {{segment:seg-1}} {{segment:seg-1}}\","
+                            + "\"citedSegmentIds\":[\"seg-1\"]}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-2");
+            default -> {
+                assertThat(request.messages().getLast().content())
+                        .contains("CITATION_DENSITY_EXCEEDED");
+                yield new AgentModelResponse(null, List.of(new AgentToolCall(
+                        "call-3", "deliver_answer",
+                        "{\"answerType\":\"KNOWLEDGE\","
+                                + "\"answer\":\"默认关闭 {{segment:seg-1}}\","
+                                + "\"citedSegmentIds\":[\"seg-1\"]}")),
+                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-3");
+            }
+        };
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentWorkflowImpl workflow = workflow(model,
+                List.of(new TestSearchTool(), new DeliverOnlyTool()), conversations);
+
+        ConversationExecutionResult result = workflow.execute(
+                run("权限默认值是什么"), ConversationProgressListener.NOOP);
+
+        assertThat(calls).hasValue(3);
+        assertThat(result.answer()).isEqualTo("默认关闭 [1-1]");
+    }
+
+    @Test
     void rawModelText_shouldRequireDeliverAnswerProtocol() {
         AtomicInteger calls = new AtomicInteger();
         AgentModelPort model = request -> calls.getAndIncrement() == 0
@@ -405,6 +442,41 @@ class AgentWorkflowImplTest {
         assertThat(result.fallbackReason()).isNull();
         assertThat(result.citations()).hasSize(1);
         verify(generation).generateWithUsage(any(), any());
+    }
+
+    @Test
+    void evidenceFinalizer_shouldRetryVerifierRejectionAtMostOnce() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelPort model = request -> switch (calls.getAndIncrement()) {
+            case 0 -> new AgentModelResponse(null,
+                    List.of(new AgentToolCall("call-1", "test_search", "{\"query\":\"权限\"}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1");
+            default -> new AgentModelResponse("直接输出但没有 Action", List.of(),
+                    AgentTokenUsage.EMPTY, "model", "stop", "req");
+        };
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        when(generation.generateWithUsage(any(), any()))
+                .thenReturn(new ConversationGenerationResult(
+                        "{\"answerType\":\"KNOWLEDGE\","
+                                + "\"answer\":\"默认关闭 {{segment:seg-1}} {{segment:seg-1}} {{segment:seg-1}} {{segment:seg-1}}\","
+                                + "\"citedSegmentIds\":[\"seg-1\"]}", 20, 8))
+                .thenReturn(new ConversationGenerationResult(
+                        "{\"answerType\":\"KNOWLEDGE\","
+                                + "\"answer\":\"默认关闭 {{segment:seg-1}}\","
+                                + "\"citedSegmentIds\":[\"seg-1\"]}", 20, 8));
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentRequestContextResolver contextResolver = mock(AgentRequestContextResolver.class);
+        when(contextResolver.resolve(any())).thenReturn(AgentRequestContext.empty());
+        AgentWorkflowImpl workflow = workflow(model, generation,
+                List.of(new TestSearchTool(), new DeliverOnlyTool()), conversations,
+                new AgentRunCancellationRegistry(), contextResolver);
+
+        ConversationExecutionResult result = workflow.execute(
+                run("权限默认值是什么"), ConversationProgressListener.NOOP);
+
+        assertThat(result.answer()).isEqualTo("默认关闭 [1-1]");
+        verify(generation, times(2)).generateWithUsage(any(), any());
     }
 
     @Test
@@ -756,15 +828,24 @@ class AgentWorkflowImplTest {
                 nullable(String.class), anyMap(), anyMap(), any(AgentTokenUsage.class), anyLong(),
                 nullable(String.class))).thenAnswer(invocation ->
                 ((AgentRunState) invocation.getArgument(0)).nextTraceOrder());
+        MeterRegistry meterRegistry = new SimpleMeterRegistry();
+        AgentCitationPolicy citationPolicy = new AgentCitationPolicy();
+        AgentAnswerVerifier answerVerifier = new AgentAnswerVerifier(
+                new ConversationCitationMapper(), citationPolicy);
         return new AgentWorkflowImpl(
                 RuntimeConfigTestUnits.values(Map.of(
                         "AGENT.maxSteps", "6",
                         "AGENT.maxToolCalls", "4")),
-                model, generationPort,
+                model,
                 registry, executor, conversations, contextResolver,
-                new ConversationCitationMapper(), traceRecorder,
+                traceRecorder,
                 cancellationRegistry, objectMapper,
-                new SimpleMeterRegistry());
+                meterRegistry,
+                new AgentActionProtocol(objectMapper, meterRegistry),
+                new AgentEvidenceFinalizer(
+                        generationPort, traceRecorder, objectMapper, answerVerifier),
+                new AgentFinalPresentation(generationPort, traceRecorder),
+                answerVerifier);
     }
 
     private AgentRunRequest run(String query) {

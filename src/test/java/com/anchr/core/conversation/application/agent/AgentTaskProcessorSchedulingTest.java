@@ -86,7 +86,8 @@ class AgentTaskProcessorSchedulingTest {
                 null,
                 null,
                 executor,
-                mock(AgentRuntimeSnapshotService.class));
+                mock(AgentRuntimeSnapshotService.class),
+                new AgentCitationPolicy());
     }
 
     private static final class TestTaskRepository implements AgentTaskRepository {

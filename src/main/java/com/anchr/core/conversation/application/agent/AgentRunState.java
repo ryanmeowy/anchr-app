@@ -2,6 +2,7 @@ package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.model.AgentMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -27,6 +28,8 @@ public class AgentRunState {
     private int consecutiveProtocolErrors;
     private int answerValidationErrors;
     private int traceOrder;
+    @Getter(AccessLevel.PACKAGE)
+    private AgentWorkflowPhase phase = AgentWorkflowPhase.PLANNING;
     @Setter
     private AgentStepType currentStep = AgentStepType.MODEL_DECISION;
 
@@ -72,6 +75,13 @@ public class AgentRunState {
     }
 
     public int nextTraceOrder() { return ++traceOrder; }
+
+    public void transitionTo(AgentWorkflowPhase next) {
+        if (next == null || !phase.canTransitionTo(next)) {
+            throw new IllegalStateException("Illegal Agent phase transition: " + phase + " -> " + next);
+        }
+        phase = next;
+    }
 
     public void addUsage(int prompt, int completion) {
         promptTokens += Math.max(0, prompt);

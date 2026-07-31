@@ -3,6 +3,8 @@ package com.anchr.core.conversation.application.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.model.AnswerMode;
@@ -90,7 +92,9 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         AnswerModePolicy policy = resolvedMode.policy();
         List<GroundingSegment> groundingSegments = pickGroundingSegments(topCandidates, citations, policy);
         boolean effectiveLegacyFallback = runtimeConfigUnit.getBoolean(
-                "CONVERSATION", "legacyEvidenceFallbackEnabled", false);
+                RuntimeConfigType.CONVERSATION,
+                ConversationRuntimeConfigKey.LEGACY_EVIDENCE_FALLBACK_ENABLED,
+                false);
         try {
             String noEvidenceReason = resolveNoEvidenceReason(groundingSegments, topCandidates, policy);
             if (StringUtils.hasText(noEvidenceReason)) {

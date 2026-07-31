@@ -1,6 +1,23 @@
 package com.anchr.core.search.application.model;
 
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
+
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.CANDIDATE_MULTIPLIER;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.DOCUMENT_IMAGE_SIMILARITY;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.DOCUMENT_IMAGE_TOP_K;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.FUSION_ALPHA;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.FUSION_BETA;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.MAX_CANDIDATES;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.MAX_DOC_CHARS;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.RANK_CONSTANT;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.TEXT_SIMILARITY;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.TEXT_TOP_K;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.WINDOW_ENABLED;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.WINDOW_FACTOR;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.WINDOW_MAX;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.WINDOW_MIN;
+import static com.anchr.core.settings.domain.model.SearchRuntimeConfigKey.WINDOW_SIZE;
 
 public record SearchRuntimeSettings(
         int rankConstant,
@@ -21,21 +38,22 @@ public record SearchRuntimeSettings(
 ) {
     public static SearchRuntimeSettings load(RuntimeConfigUnit unit) {
         return new SearchRuntimeSettings(
-                unit.getInt("SEARCH", "rankConstant", 60),
-                unit.getInt("SEARCH", "candidateMultiplier", 4),
-                unit.getInt("SEARCH", "maxCandidates", 200),
-                unit.getInt("SEARCH", "textTopK", 80),
-                unit.getInt("SEARCH", "documentImageTopK", 40),
-                unit.getFloat("SEARCH", "textSimilarity", 0.75F),
-                unit.getFloat("SEARCH", "documentImageSimilarity", 0.70F),
-                unit.getInt("SEARCH", "maxDocChars", 1200),
-                unit.getBoolean("SEARCH", "windowEnabled", true),
-                unit.getInt("SEARCH", "windowSize", 40),
-                unit.getInt("SEARCH", "windowFactor", 3),
-                unit.getInt("SEARCH", "windowMin", 20),
-                unit.getInt("SEARCH", "windowMax", 80),
-                unit.getDouble("SEARCH", "fusionAlpha", 0.6D),
-                unit.getDouble("SEARCH", "fusionBeta", 0.4D));
+                unit.getInt(RuntimeConfigType.SEARCH, RANK_CONSTANT, 60),
+                unit.getInt(RuntimeConfigType.SEARCH, CANDIDATE_MULTIPLIER, 4),
+                unit.getInt(RuntimeConfigType.SEARCH, MAX_CANDIDATES, 200),
+                unit.getInt(RuntimeConfigType.SEARCH, TEXT_TOP_K, 80),
+                unit.getInt(RuntimeConfigType.SEARCH, DOCUMENT_IMAGE_TOP_K, 40),
+                unit.getFloat(RuntimeConfigType.SEARCH, TEXT_SIMILARITY, 0.75F),
+                unit.getFloat(
+                        RuntimeConfigType.SEARCH, DOCUMENT_IMAGE_SIMILARITY, 0.70F),
+                unit.getInt(RuntimeConfigType.SEARCH, MAX_DOC_CHARS, 1200),
+                unit.getBoolean(RuntimeConfigType.SEARCH, WINDOW_ENABLED, true),
+                unit.getInt(RuntimeConfigType.SEARCH, WINDOW_SIZE, 40),
+                unit.getInt(RuntimeConfigType.SEARCH, WINDOW_FACTOR, 3),
+                unit.getInt(RuntimeConfigType.SEARCH, WINDOW_MIN, 20),
+                unit.getInt(RuntimeConfigType.SEARCH, WINDOW_MAX, 80),
+                unit.getDouble(RuntimeConfigType.SEARCH, FUSION_ALPHA, 0.6D),
+                unit.getDouble(RuntimeConfigType.SEARCH, FUSION_BETA, 0.4D));
     }
 
     public static SearchRuntimeSettings defaults() {
