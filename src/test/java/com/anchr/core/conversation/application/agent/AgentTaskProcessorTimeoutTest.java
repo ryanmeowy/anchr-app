@@ -7,6 +7,7 @@ import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AgentTaskProcessorTimeoutTest {
+    private final AgentCitationPolicy citationPolicy = new AgentCitationPolicy();
 
     @Test
     void unwrapMarkdownFence_shouldRemoveWholeAnswerFence() {
@@ -77,19 +78,19 @@ class AgentTaskProcessorTimeoutTest {
 
     @Test
     void citationDensity_shouldAllowAtMostThreeUniqueReferencesPerParagraph() {
-        assertThat(AgentTaskProcessor.citationDensityWithinLimits("""
+        assertThat(citationPolicy.withinLimits("""
                 第一段 {{segment:s1}} {{segment:s2}} {{segment:s3}}
 
                 第二段 {{segment:s4}} {{segment:s5}}
                 """)).isTrue();
 
-        assertThat(AgentTaskProcessor.citationDensityWithinLimits(
+        assertThat(citationPolicy.withinLimits(
                 "第一段 {{segment:s1}} {{segment:s2}} {{segment:s3}} {{segment:s4}}"))
                 .isFalse();
-        assertThat(AgentTaskProcessor.citationDensityWithinLimits(
+        assertThat(citationPolicy.withinLimits(
                 "第一段 {{segment:s1}} {{segment:s1}} {{segment:s1}} {{segment:s1}}"))
                 .isFalse();
-        assertThat(AgentTaskProcessor.citationDensityWithinLimits("""
+        assertThat(citationPolicy.withinLimits("""
                 - 要点一 {{segment:s1}}
                 - 要点二 {{segment:s2}}
                 - 要点三 {{segment:s3}}
@@ -103,7 +104,7 @@ class AgentTaskProcessorTimeoutTest {
                 .mapToObj(index -> "段落 " + index + " {{segment:s" + index + "}}")
                 .collect(java.util.stream.Collectors.joining("\n\n"));
 
-        assertThat(AgentTaskProcessor.citationDensityWithinLimits(answer)).isFalse();
+        assertThat(citationPolicy.withinLimits(answer)).isFalse();
     }
 
     @Test
@@ -113,9 +114,9 @@ class AgentTaskProcessorTimeoutTest {
                 .mapToObj(index -> "段落 " + index + " {{segment:s" + index + "}}")
                 .collect(java.util.stream.Collectors.joining("\n\n"));
 
-        String compacted = AgentTaskProcessor.compactCitationMarkers(answer);
+        String compacted = citationPolicy.compactMarkers(answer);
 
-        assertThat(AgentTaskProcessor.citationDensityWithinLimits(compacted)).isTrue();
+        assertThat(citationPolicy.withinLimits(compacted)).isTrue();
         assertThat(AgentCitationRenderer.extractSegmentIds(compacted)).hasSize(10);
         assertThat(compacted).contains("第一段", "段落 14");
         assertThat(compacted).doesNotContain("{{segment:s4}}", "{{segment:s14}}");
@@ -126,8 +127,8 @@ class AgentTaskProcessorTimeoutTest {
         String prefix = "第一段 {{segment:s1}} {{segment:s2}} {{segment:s3}} {{segment:s4}}\n\n第二段 ";
         String complete = prefix + "{{segment:s5}} 后续内容 {{segment:s6}}";
 
-        String compactedPrefix = AgentTaskProcessor.compactCitationMarkers(prefix);
-        String compactedComplete = AgentTaskProcessor.compactCitationMarkers(complete);
+        String compactedPrefix = citationPolicy.compactMarkers(prefix);
+        String compactedComplete = citationPolicy.compactMarkers(complete);
 
         assertThat(compactedComplete).startsWith(compactedPrefix);
     }

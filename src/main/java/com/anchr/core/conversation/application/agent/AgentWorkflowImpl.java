@@ -2,12 +2,10 @@ package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.common.util.RuntimeConfigUnit;
-import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.model.*;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.port.AgentModelPort;
-import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,7 +65,6 @@ public class AgentWorkflowImpl implements AgentWorkflow {
     private final AgentToolExecutor toolExecutor;
     private final ConversationRepository conversationRepository;
     private final AgentRequestContextResolver requestContextResolver;
-    private final ConversationCitationMapper citationMapper;
     private final AgentTraceRecorder traceRecorder;
     private final AgentRunCancellationRegistry cancellationRegistry;
     private final ObjectMapper objectMapper;
@@ -75,34 +72,35 @@ public class AgentWorkflowImpl implements AgentWorkflow {
     private final AgentActionProtocol actionProtocol;
     private final AgentEvidenceFinalizer evidenceFinalizer;
     private final AgentFinalPresentation finalPresentation;
+    private final AgentAnswerVerifier answerVerifier;
     public AgentWorkflowImpl(RuntimeConfigUnit runtimeConfigUnit,
                              AgentModelPort modelPort,
-                             ConversationGenerationPort generationPort,
                              AgentToolRegistry toolRegistry,
                              AgentToolExecutor toolExecutor,
                              ConversationRepository conversationRepository,
                              AgentRequestContextResolver requestContextResolver,
-                             ConversationCitationMapper citationMapper,
                              AgentTraceRecorder traceRecorder,
                              AgentRunCancellationRegistry cancellationRegistry,
                              ObjectMapper objectMapper,
-                             MeterRegistry meterRegistry) {
+                             MeterRegistry meterRegistry,
+                             AgentActionProtocol actionProtocol,
+                             AgentEvidenceFinalizer evidenceFinalizer,
+                             AgentFinalPresentation finalPresentation,
+                             AgentAnswerVerifier answerVerifier) {
         this.runtimeConfigUnit = runtimeConfigUnit;
         this.modelPort = modelPort;
         this.toolRegistry = toolRegistry;
         this.toolExecutor = toolExecutor;
         this.conversationRepository = conversationRepository;
         this.requestContextResolver = requestContextResolver;
-        this.citationMapper = citationMapper;
         this.traceRecorder = traceRecorder;
         this.cancellationRegistry = cancellationRegistry;
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
-        this.actionProtocol = new AgentActionProtocol(objectMapper, meterRegistry);
-        this.evidenceFinalizer = new AgentEvidenceFinalizer(
-                generationPort, traceRecorder, objectMapper);
-        this.finalPresentation = new AgentFinalPresentation(
-                generationPort, traceRecorder);
+        this.actionProtocol = actionProtocol;
+        this.evidenceFinalizer = evidenceFinalizer;
+        this.finalPresentation = finalPresentation;
+        this.answerVerifier = answerVerifier;
     }
 
     @Override
@@ -124,21 +122,31 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             state.getMessages().addAll(buildMessages(request, requestContextResolver.resolve(request)));
             while (!budget.exhausted(state.getStepCount(), state.getToolCallCount())) {
                 ensureNotCancelled(state);
-                ConversationExecutionResult terminal = decideAndExecute(state, progress, true);
-                if (terminal != null) return terminal;
+                AgentWorkflowOutcome outcome = decideAndExecute(state, progress, true);
+                if (outcome instanceof AgentWorkflowOutcome.AnswerSubmitted submitted) {
+                    outcome = handleSubmittedAnswer(state, submitted.answer(), progress);
+                }
+                if (outcome instanceof AgentWorkflowOutcome.Terminal terminal) {
+                    return terminal.result();
+                }
             }
             if (!state.getEvidence().isEmpty() && budget.remainingMillis() > 0) {
-                return finalizeFromEvidence(state, progress, "agent_budget_exhausted");
+                AgentWorkflowOutcome outcome = finalizeFromEvidence(
+                        state, progress, "agent_budget_exhausted");
+                if (outcome instanceof AgentWorkflowOutcome.Terminal terminal) {
+                    return terminal.result();
+                }
             }
-            return finish(state, LOCAL_CLARIFICATION, AnswerStatus.NO_EVIDENCE,
+            return finishSystemAnswer(state, LOCAL_CLARIFICATION, AnswerStatus.NO_EVIDENCE,
                     "agent_budget_exhausted", List.of(), null, AgentRunStatus.DEGRADED);
         } catch (Exception e) {
             if (cancellationRegistry.isCancellationRequested(request.runId())) {
                 Thread.interrupted();
-                return finish(state, "查询已取消。", AnswerStatus.CANCELLED,
+                return finishSystemAnswer(state, "查询已取消。", AnswerStatus.CANCELLED,
                         "agent_run_cancelled", List.of(), null, AgentRunStatus.CANCELLED);
             }
             log.error("Agent workflow failed, runId={}", request.runId(), e);
+            state.transitionTo(AgentWorkflowPhase.FAILED);
             safeFinishTrace(state, AgentRunStatus.FAILED, "agent_workflow_failed");
             throw new AgentWorkflowException("agent_workflow_failed", e);
         } finally {
@@ -146,9 +154,10 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         }
     }
 
-    private ConversationExecutionResult decideAndExecute(AgentRunState state,
-                                                           ConversationProgressListener progress,
-                                                           boolean toolsEnabled) {
+    private AgentWorkflowOutcome decideAndExecute(AgentRunState state,
+                                                   ConversationProgressListener progress,
+                                                   boolean toolsEnabled) {
+        state.transitionTo(AgentWorkflowPhase.PLANNING);
         int step = state.nextStep();
         state.setCurrentStep(AgentStepType.MODEL_DECISION);
         long started = System.currentTimeMillis();
@@ -192,14 +201,15 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         ensureNotCancelled(state);
         state.addUsage(response.usage().promptTokens(), response.usage().completionTokens());
         List<AgentToolCall> calls = response.toolCalls();
-        AgentFinalAnswer jsonFinal = null;
+        Optional<AgentFinalAnswer> jsonFinal = Optional.empty();
         if (calls.isEmpty() && StringUtils.hasText(response.content())
                 && state.getRuntimeConfig().toolCallMode()
                 != AgentRuntimeSettings.ToolCallMode.NATIVE) {
-            AgentActionProtocol.ParsedAction parsed = actionProtocol.parse(response.content());
-            if (parsed != null) {
-                calls = parsed.toolCalls();
-                jsonFinal = parsed.finalAnswer();
+            AgentActionProtocol.ParseOutcome parsed = actionProtocol.parse(response.content());
+            if (parsed instanceof AgentActionProtocol.ParseOutcome.ToolCalls toolCalls) {
+                calls = toolCalls.calls();
+            } else if (parsed instanceof AgentActionProtocol.ParseOutcome.FinalAnswer finalAnswer) {
+                jsonFinal = Optional.of(finalAnswer.answer());
             }
         }
         int decisionStepOrder = traceRecorder.recordStep(state, AgentStepType.MODEL_DECISION, step, response.finishReason(),
@@ -218,24 +228,27 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 "decision", !calls.isEmpty() ? "TOOL_SELECTION"
                         : StringUtils.hasText(response.content()) ? "FINAL_RESPONSE" : "PROTOCOL_RETRY"));
 
-        if (jsonFinal != null) return validateAndFinish(state, jsonFinal, progress, null, null);
+        if (jsonFinal.isPresent()) {
+            return AgentWorkflowOutcome.submitted(jsonFinal.orElseThrow(), null, null);
+        }
         if (!calls.isEmpty()) {
             if (!toolsEnabled) return protocolError(state, progress, "TOOLS_DISABLED");
             actionProtocol.resetErrors(state);
             state.getMessages().add(AgentMessage.assistantToolCalls(response.content(), calls));
             for (AgentToolCall call : calls) {
                 if (state.getBudget().exhausted(state.getStepCount(), state.getToolCallCount())) break;
-                ConversationExecutionResult terminal = executeTool(state, call, progress);
-                if (terminal != null) return terminal;
+                AgentWorkflowOutcome outcome = executeTool(state, call, progress);
+                if (!(outcome instanceof AgentWorkflowOutcome.ContinuePlanning)) return outcome;
             }
-            return null;
+            return AgentWorkflowOutcome.continuePlanning();
         }
         return protocolError(state, progress, "MISSING_ACTION");
     }
 
-    private ConversationExecutionResult executeTool(AgentRunState state,
-                                                     AgentToolCall call,
-                                                     ConversationProgressListener progress) {
+    private AgentWorkflowOutcome executeTool(AgentRunState state,
+                                             AgentToolCall call,
+                                             ConversationProgressListener progress) {
+        state.transitionTo(AgentWorkflowPhase.TOOL_EXECUTION);
         ensureNotCancelled(state);
         if (!state.markToolCall(call.id(), call.name(), call.arguments())) {
             state.getMessages().add(AgentMessage.tool(call.id(), call.name(),
@@ -243,7 +256,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             emit(progress, state, "tool_result", "duplicate_rejected", Map.of(
                     "tool", safe(call.name()), "callId", safe(call.id()),
                     "success", false, "errorCode", "DUPLICATE_TOOL_CALL"));
-            return null;
+            return AgentWorkflowOutcome.continuePlanning();
         }
         if ("read_document".equals(call.name())
                 && state.toolExecutionCount(call.name()) >= MAX_READ_DOCUMENT_CALLS
@@ -300,7 +313,8 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         emit(progress, state, "tool_result", result.success() ? "completed" : "failed",
                 progressDetails);
         if (result.finalAnswer() != null) {
-            return validateAndFinish(state, result.finalAnswer(), progress, call.id(), call.name());
+            return AgentWorkflowOutcome.submitted(
+                    result.finalAnswer(), call.id(), call.name());
         }
         if (result.deferredTask() != null) {
             Map<String, Object> taskDetails = new LinkedHashMap<>();
@@ -310,115 +324,72 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             Object documentCount = outputSummary.get("documentCount");
             if (documentCount != null) taskDetails.put("documentCount", documentCount);
             emit(progress, state, "task_queued", "completed", taskDetails);
-            return finish(state, "已创建文档处理任务，完成后会更新本条回复。", AnswerStatus.PROCESSING,
-                    null, List.of(), result.deferredTask(), AgentRunStatus.WAITING_TASK);
+            return AgentWorkflowOutcome.terminal(finishSystemAnswer(
+                    state, "已创建文档处理任务，完成后会更新本条回复。", AnswerStatus.PROCESSING,
+                    null, List.of(), result.deferredTask(), AgentRunStatus.WAITING_TASK));
         }
-        return null;
+        return AgentWorkflowOutcome.continuePlanning();
     }
 
-    private ConversationExecutionResult validateAndFinish(AgentRunState state,
-                                                            AgentFinalAnswer answer,
-                                                            ConversationProgressListener progress,
-                                                            String validationToolCallId,
-                                                            String validationToolName) {
-        if (answer == null || answer.answerType() == null || !StringUtils.hasText(answer.answer())) {
-            return validationFailure(state, progress, "INVALID_FINAL_ANSWER",
-                    "必须通过 deliver_answer 提交非空回答，并明确填写 answerType", "invalid_agent_final_answer",
-                    validationToolCallId, validationToolName);
+    private AgentWorkflowOutcome handleSubmittedAnswer(
+            AgentRunState state,
+            UnverifiedAgentAnswer submitted,
+            ConversationProgressListener progress
+    ) {
+        state.transitionTo(AgentWorkflowPhase.EVIDENCE_VALIDATION);
+        AgentAnswerValidationOutcome validation = answerVerifier.verify(state, submitted.value());
+        if (validation instanceof AgentAnswerValidationOutcome.Rejected rejected) {
+            return validationFailure(state, progress, rejected.code(), rejected.message(),
+                    rejected.fallbackReason(), submitted.validationToolCallId(),
+                    submitted.validationToolName());
         }
-        List<String> requested = answer.citedSegmentIds() == null ? List.of() : answer.citedSegmentIds();
-        List<String> markers = AgentCitationRenderer.extractSegmentIds(answer.answer());
-        if (answer.answerType() == AgentAnswerType.NO_EVIDENCE) {
-            if (!requested.isEmpty() || !markers.isEmpty()) {
-                return validationFailure(state, progress, "UNEXPECTED_NO_EVIDENCE_CITATION",
-                        "NO_EVIDENCE 不得携带知识引用；不要用无关片段证明资料未提及",
-                        "invalid_no_evidence_citation", validationToolCallId, validationToolName);
-            }
+        VerifiedAgentAnswer verified =
+                ((AgentAnswerValidationOutcome.Verified) validation).answer();
+        if (verified instanceof VerifiedNoEvidenceAnswer) {
             meterRegistry.counter("no_evidence.answer.rate", "source", "agent_declared").increment();
-            return finish(state, noEvidenceAnswer(state), AnswerStatus.NO_EVIDENCE,
-                    "agent_declared_no_evidence", List.of(), null, AgentRunStatus.COMPLETED);
         }
-        if (answer.answerType() != AgentAnswerType.KNOWLEDGE) {
-            if (!requested.isEmpty() || !markers.isEmpty()) {
-                return validationFailure(state, progress, "UNEXPECTED_CITATION",
-                        "CHAT、CLARIFICATION 和 NO_EVIDENCE 不得携带知识引用；证据直接支持核心答案时必须改用 KNOWLEDGE",
-                        "unexpected_agent_citation", validationToolCallId, validationToolName);
-            }
-            String presented = finalPresentation.present(
-                    state, answer.answer().trim(), List.of(), List.of(), progress);
-            return finish(state, presented, AnswerStatus.ANSWERED,
-                    null, List.of(), null, AgentRunStatus.COMPLETED);
-        }
-        if (state.getEvidence().isEmpty()) {
-            return validationFailure(state, progress, "GROUNDING_REQUIRED",
-                    "KNOWLEDGE 回答缺少当前 Run 的证据，请先调用 search_knowledge、read_document 或 find_documents",
-                    "missing_agent_evidence", validationToolCallId, validationToolName);
-        }
-        Set<String> requestedSet = requested.stream()
-                .filter(StringUtils::hasText)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        Set<String> markerSet = new LinkedHashSet<>(markers);
-        List<String> illegal = requestedSet.stream().filter(id -> !state.getEvidence().containsKey(id)).toList();
-        boolean containsBlankRequest = requested.stream().anyMatch(id -> !StringUtils.hasText(id));
-        if (!illegal.isEmpty() || requestedSet.isEmpty() || containsBlankRequest) {
-            return validationFailure(state, progress, "INVALID_CITATION",
-                    illegal.isEmpty() ? "KNOWLEDGE 回答必须引用本轮证据" : "引用不属于本轮证据: " + illegal,
-                    "invalid_agent_citation", validationToolCallId, validationToolName);
-        }
-        if (!requestedSet.equals(markerSet)) {
-            return validationFailure(state, progress, "CITATION_BINDING_MISMATCH",
-                    "citedSegmentIds 必须与 answer 中实际出现的证据 Marker 一一对应",
-                    "invalid_agent_citation_binding", validationToolCallId, validationToolName);
-        }
-        List<ConversationRetrievalCandidate> selected = requestedSet.stream()
-                .map(state.getEvidence()::get).filter(Objects::nonNull).toList();
-        AgentCitationRenderResult rendered = AgentCitationRenderer.render(answer.answer(), selected);
-        if (AgentCitationRenderer.containsAuthoredVisibleCitation(answer.answer(), rendered.references())) {
-            return validationFailure(state, progress, "UNTRUSTED_VISIBLE_CITATION",
-                    "不要自行生成数字引用；只使用当前证据的 {{segment:实际ID}} Marker",
-                    "untrusted_visible_citation", validationToolCallId, validationToolName);
-        }
-        if (!selected.isEmpty() && rendered.references().isEmpty()) {
-            return validationFailure(state, progress, "MISSING_CITATION_MARKER",
-                    "KNOWLEDGE 回答必须把最直接的证据 Marker 放在对应结论之后；不要只填写 citedSegmentIds",
-                    "missing_agent_citation_marker", validationToolCallId, validationToolName);
-        }
-        List<ConversationRetrievalCandidate> citedEvidence = selected.stream()
-                .filter(candidate -> rendered.references().containsKey(candidate.getSegmentId()))
-                .toList();
-        List<ConversationCitation> citations = citationMapper.mapFromSearchResults(citedEvidence);
-        AgentCitationIndexPlan.apply(citations, rendered.references());
-        String presented = finalPresentation.present(
-                state, rendered.answer(), citations, citedEvidence, progress);
-        return finish(state, presented, AnswerStatus.ANSWERED, null, citations, null, AgentRunStatus.COMPLETED);
+        state.transitionTo(AgentWorkflowPhase.FINALIZING);
+        PresentedAgentAnswer presented = finalPresentation.present(state, verified, progress);
+        return AgentWorkflowOutcome.terminal(
+                finishPresentedAnswer(state, presented, null, AgentRunStatus.COMPLETED));
     }
 
-    private ConversationExecutionResult finalizeFromEvidence(AgentRunState state,
-                                                             ConversationProgressListener progress,
-                                                             String trigger) {
+    private AgentWorkflowOutcome finalizeFromEvidence(AgentRunState state,
+                                                      ConversationProgressListener progress,
+                                                      String trigger) {
+        state.transitionTo(AgentWorkflowPhase.EVIDENCE_VALIDATION);
         AgentEvidenceFinalizer.Result result = evidenceFinalizer.finalizeEvidence(
                 state, progress, trigger, answerModeInstruction(state.getRunRequest()),
                 () -> ensureNotCancelled(state));
-        if (result.status() == AgentEvidenceFinalizer.Status.COMPLETED) {
-            return validateAndFinish(state, result.answer(), progress, null, null);
+        if (result instanceof AgentEvidenceFinalizer.Result.Completed completed) {
+            VerifiedAgentAnswer verified = completed.answer();
+            if (verified instanceof VerifiedNoEvidenceAnswer) {
+                meterRegistry.counter("no_evidence.answer.rate", "source", "agent_declared").increment();
+            }
+            state.transitionTo(AgentWorkflowPhase.FINALIZING);
+            PresentedAgentAnswer presented = finalPresentation.present(state, verified, progress);
+            return AgentWorkflowOutcome.terminal(
+                    finishPresentedAnswer(state, presented, null, AgentRunStatus.COMPLETED));
         }
-        if (result.status() == AgentEvidenceFinalizer.Status.UNAVAILABLE) {
-            return finish(state, "已检索到相关资料，但当前处理时间不足以生成可靠回答，请重试。",
+        if (result instanceof AgentEvidenceFinalizer.Result.Unavailable) {
+            return AgentWorkflowOutcome.terminal(finishSystemAnswer(
+                    state, "已检索到相关资料，但当前处理时间不足以生成可靠回答，请重试。",
                     AnswerStatus.MODEL_FALLBACK, "agent_evidence_finalization_unavailable",
-                    List.of(), null, AgentRunStatus.DEGRADED);
+                    List.of(), null, AgentRunStatus.DEGRADED));
         }
-        return finish(state, "已检索到相关资料，但模型未能完成可靠的证据回答，请重试。",
+        return AgentWorkflowOutcome.terminal(finishSystemAnswer(
+                state, "已检索到相关资料，但模型未能完成可靠的证据回答，请重试。",
                 AnswerStatus.MODEL_FALLBACK, "agent_evidence_finalization_failed",
-                List.of(), null, AgentRunStatus.DEGRADED);
+                List.of(), null, AgentRunStatus.DEGRADED));
     }
 
-    private ConversationExecutionResult validationFailure(AgentRunState state,
-                                                          ConversationProgressListener progress,
-                                                          String code,
-                                                          String message,
-                                                          String fallbackReason,
-                                                          String validationToolCallId,
-                                                          String validationToolName) {
+    private AgentWorkflowOutcome validationFailure(AgentRunState state,
+                                                   ConversationProgressListener progress,
+                                                   String code,
+                                                   String message,
+                                                   String fallbackReason,
+                                                   String validationToolCallId,
+                                                   String validationToolName) {
         if (state.nextAnswerValidationError() <= 1
                 && !state.getBudget().exhausted(state.getStepCount(), state.getToolCallCount())) {
             String validationError = errorJson(code, message);
@@ -440,15 +411,17 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 details.put("toolCallOrder", state.getToolCallCount());
             }
             emit(progress, state, "tool_result", "answer_repair_required", details);
-            return null;
+            state.transitionTo(AgentWorkflowPhase.PLANNING);
+            return AgentWorkflowOutcome.continuePlanning();
         }
-        return finish(state, "当前证据不足以生成可靠回答。请缩小问题范围或指定文档后重试。",
-                AnswerStatus.NO_EVIDENCE, fallbackReason, List.of(), null, AgentRunStatus.COMPLETED);
+        return AgentWorkflowOutcome.terminal(finishSystemAnswer(
+                state, "当前证据不足以生成可靠回答。请缩小问题范围或指定文档后重试。",
+                AnswerStatus.NO_EVIDENCE, fallbackReason, List.of(), null, AgentRunStatus.COMPLETED));
     }
 
-    private ConversationExecutionResult protocolError(AgentRunState state,
-                                                       ConversationProgressListener progress,
-                                                       String code) {
+    private AgentWorkflowOutcome protocolError(AgentRunState state,
+                                               ConversationProgressListener progress,
+                                               String code) {
         int errors = actionProtocol.recordError(state, code);
         if (actionProtocol.shouldFallback(errors)) {
             if (!state.getEvidence().isEmpty() && state.getBudget().remainingMillis() > 0) {
@@ -460,21 +433,47 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             log.warn("Agent protocol fallback, runId={}, code={}, consecutiveErrors={}",
                     state.getRunRequest().runId(), code, errors);
             emit(progress, state, "agent_thinking", "protocol_fallback", Map.of("errorCode", code));
-            return finish(state, LOCAL_PROTOCOL_FALLBACK, AnswerStatus.MODEL_FALLBACK,
-                    fallbackReason, List.of(), null, AgentRunStatus.DEGRADED);
+            return AgentWorkflowOutcome.terminal(finishSystemAnswer(
+                    state, LOCAL_PROTOCOL_FALLBACK, AnswerStatus.MODEL_FALLBACK,
+                    fallbackReason, List.of(), null, AgentRunStatus.DEGRADED));
         }
         state.getMessages().add(AgentMessage.user("协议错误：" + code + "。请调用工具或提交最终回答，不要输出额外文本。"));
         emit(progress, state, "agent_thinking", "protocol_retry", Map.of("errorCode", code));
-        return null;
+        return AgentWorkflowOutcome.continuePlanning();
     }
 
-    private ConversationExecutionResult finish(AgentRunState state,
-                                                String answer,
-                                                AnswerStatus answerStatus,
-                                                String fallbackReason,
-                                                List<ConversationCitation> citations,
-                                                AgentDeferredTask deferredTask,
-                                                AgentRunStatus status) {
+    private ConversationExecutionResult finishPresentedAnswer(
+            AgentRunState state,
+            PresentedAgentAnswer answer,
+            AgentDeferredTask deferredTask,
+            AgentRunStatus status
+    ) {
+        return finishTerminal(state, answer.answer(), answer.answerStatus(), answer.fallbackReason(),
+                answer.citations(), deferredTask, status);
+    }
+
+    private ConversationExecutionResult finishSystemAnswer(AgentRunState state,
+                                                            String answer,
+                                                            AnswerStatus answerStatus,
+                                                            String fallbackReason,
+                                                            List<ConversationCitation> citations,
+                                                            AgentDeferredTask deferredTask,
+                                                            AgentRunStatus status) {
+        return finishTerminal(state, answer, answerStatus, fallbackReason, citations, deferredTask, status);
+    }
+
+    private ConversationExecutionResult finishTerminal(AgentRunState state,
+                                                        String answer,
+                                                        AnswerStatus answerStatus,
+                                                        String fallbackReason,
+                                                        List<ConversationCitation> citations,
+                                                        AgentDeferredTask deferredTask,
+                                                        AgentRunStatus status) {
+        state.transitionTo(status == AgentRunStatus.FAILED
+                ? AgentWorkflowPhase.FAILED
+                : status == AgentRunStatus.CANCELLED
+                ? AgentWorkflowPhase.CANCELLED
+                : AgentWorkflowPhase.COMPLETED);
         state.setCurrentStep(status == AgentRunStatus.FAILED ? AgentStepType.FAILED : AgentStepType.FINAL_ANSWER);
         safeFinishTrace(state, status, fallbackReason);
         meterRegistry.counter("agent.run.result", "status", status.name()).increment();
@@ -510,15 +509,6 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 ? null : request.request().getAnswerMode());
         return "当前回答模式：" + mode.name() + "。" + mode.policy().styleInstruction()
                 + "无论回答模式为何，引用都必须直接支持对应结论；核心问题无直接证据时必须提交 NO_EVIDENCE，且引用为空。";
-    }
-
-    private String noEvidenceAnswer(AgentRunState state) {
-        AnswerMode mode = AnswerMode.from(state.getRunRequest().request().getAnswerMode());
-        return switch (mode) {
-            case STRICT -> "当前证据不足以回答该问题。请补充相关资料、缩小问题范围或指定文档后重试。";
-            case SUMMARY -> "当前证据不足以形成可靠摘要。请补充相关资料或明确需要总结的文档范围。";
-            case EXPLORE -> "当前证据不足以回答核心问题。请补充相关资料、缩小问题范围或明确希望探索的方向。";
-        };
     }
 
     private String renderRequestContext(AgentRequestContext requestContext) {

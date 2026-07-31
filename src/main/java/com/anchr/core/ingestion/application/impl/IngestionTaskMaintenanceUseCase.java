@@ -19,6 +19,8 @@ import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
@@ -26,7 +28,8 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.List;
 
-final class IngestionTaskMaintenanceUseCase {
+@Component
+class IngestionTaskMaintenanceUseCase {
     private final KnowledgeBaseService knowledgeBaseService;
     private final AssetRepository assetRepository;
     private final IngestionTaskRepository ingestionTaskRepository;
@@ -34,7 +37,7 @@ final class IngestionTaskMaintenanceUseCase {
     private final IngestionActivityAcl ingestionActivityAcl;
     private final IngestionTaskProcessor ingestionTaskProcessor;
     private final IngestionTaskQuery taskQuery;
-    private final IngestionTaskFactory taskFactory;
+    private final IngestionTaskFactory taskFactory = new IngestionTaskFactory();
 
     IngestionTaskMaintenanceUseCase(KnowledgeBaseService knowledgeBaseService,
                                     AssetRepository assetRepository,
@@ -42,8 +45,7 @@ final class IngestionTaskMaintenanceUseCase {
                                     IdGen idGen,
                                     IngestionActivityAcl ingestionActivityAcl,
                                     IngestionTaskProcessor ingestionTaskProcessor,
-                                    IngestionTaskQuery taskQuery,
-                                    IngestionTaskFactory taskFactory) {
+                                    IngestionTaskQuery taskQuery) {
         this.knowledgeBaseService = knowledgeBaseService;
         this.assetRepository = assetRepository;
         this.ingestionTaskRepository = ingestionTaskRepository;
@@ -51,10 +53,10 @@ final class IngestionTaskMaintenanceUseCase {
         this.ingestionActivityAcl = ingestionActivityAcl;
         this.ingestionTaskProcessor = ingestionTaskProcessor;
         this.taskQuery = taskQuery;
-        this.taskFactory = taskFactory;
     }
 
-    IngestionTask retryItem(String kbId, String taskId, String itemId) {
+    @Transactional
+    public IngestionTask retryItem(String kbId, String taskId, String itemId) {
         IngestionTask task = taskQuery.get(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         String normalizedItemId = requireText(itemId, "itemId");
@@ -78,7 +80,8 @@ final class IngestionTaskMaintenanceUseCase {
         return taskQuery.get(kbId, task.getId());
     }
 
-    IngestionTask retryFailed(String kbId, String taskId) {
+    @Transactional
+    public IngestionTask retryFailed(String kbId, String taskId) {
         IngestionTask task = taskQuery.get(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         List<IngestionTaskItem> failedItems =
@@ -96,11 +99,13 @@ final class IngestionTaskMaintenanceUseCase {
         return taskQuery.get(kbId, task.getId());
     }
 
-    IngestionTask createReparseTask(String kbId, String assetId) {
+    @Transactional
+    public IngestionTask createReparseTask(String kbId, String assetId) {
         return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REPARSE);
     }
 
-    IngestionTask createReembedTask(String kbId, String assetId) {
+    @Transactional
+    public IngestionTask createReembedTask(String kbId, String assetId) {
         return createDocumentMaintenanceTask(kbId, assetId, IngestionSourceType.REEMBED);
     }
 

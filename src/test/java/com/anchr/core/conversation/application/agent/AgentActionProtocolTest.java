@@ -13,16 +13,17 @@ class AgentActionProtocolTest {
         AgentActionProtocol protocol = new AgentActionProtocol(
                 new ObjectMapper(), new SimpleMeterRegistry());
 
-        AgentActionProtocol.ParsedAction parsed = protocol.parse("""
+        AgentActionProtocol.ParseOutcome parsed = protocol.parse("""
                 ```json
                 {"action":"final","answerType":"knowledge","answer":"结论 {{segment:seg-1}}","citedSegmentIds":["seg-1"]}
                 ```
                 """);
 
-        assertThat(parsed.toolCalls()).isEmpty();
-        assertThat(parsed.finalAnswer().answerType()).isEqualTo(AgentAnswerType.KNOWLEDGE);
-        assertThat(parsed.finalAnswer().answer()).isEqualTo("结论 {{segment:seg-1}}");
-        assertThat(parsed.finalAnswer().citedSegmentIds()).containsExactly("seg-1");
+        assertThat(parsed).isInstanceOf(AgentActionProtocol.ParseOutcome.FinalAnswer.class);
+        AgentFinalAnswer answer = ((AgentActionProtocol.ParseOutcome.FinalAnswer) parsed).answer();
+        assertThat(answer.answerType()).isEqualTo(AgentAnswerType.KNOWLEDGE);
+        assertThat(answer.answer()).isEqualTo("结论 {{segment:seg-1}}");
+        assertThat(answer.citedSegmentIds()).containsExactly("seg-1");
     }
 
     @Test
@@ -30,18 +31,28 @@ class AgentActionProtocolTest {
         AgentActionProtocol protocol = new AgentActionProtocol(
                 new ObjectMapper(), new SimpleMeterRegistry());
 
-        AgentActionProtocol.ParsedAction parsed = protocol.parse("""
+        AgentActionProtocol.ParseOutcome parsed = protocol.parse("""
                 {"action":"call_tools","toolCalls":[
                   {"id":"call-1","name":"search_knowledge","arguments":{"query":"权限"}},
                   {"id":"call-2","name":"read_document","arguments":"{\\"assetId\\":\\"asset-1\\"}"}
                 ]}
                 """);
 
-        assertThat(parsed.finalAnswer()).isNull();
-        assertThat(parsed.toolCalls()).extracting(call -> call.name())
+        assertThat(parsed).isInstanceOf(AgentActionProtocol.ParseOutcome.ToolCalls.class);
+        var calls = ((AgentActionProtocol.ParseOutcome.ToolCalls) parsed).calls();
+        assertThat(calls).extracting(call -> call.name())
                 .containsExactly("search_knowledge", "read_document");
-        assertThat(parsed.toolCalls().get(0).arguments()).isEqualTo("{\"query\":\"权限\"}");
-        assertThat(parsed.toolCalls().get(1).arguments()).isEqualTo("{\"assetId\":\"asset-1\"}");
+        assertThat(calls.get(0).arguments()).isEqualTo("{\"query\":\"权限\"}");
+        assertThat(calls.get(1).arguments()).isEqualTo("{\"assetId\":\"asset-1\"}");
+    }
+
+    @Test
+    void invalidProtocolOutput_shouldReturnExplicitOutcome() {
+        AgentActionProtocol protocol = new AgentActionProtocol(
+                new ObjectMapper(), new SimpleMeterRegistry());
+
+        assertThat(protocol.parse("not-json"))
+                .isInstanceOf(AgentActionProtocol.ParseOutcome.Invalid.class);
     }
 
     @Test

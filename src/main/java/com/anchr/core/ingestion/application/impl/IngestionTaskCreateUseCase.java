@@ -26,6 +26,7 @@ import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.CollectionUtils;
@@ -37,6 +38,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+@Component
 final class IngestionTaskCreateUseCase {
     private static final int MAX_BATCH_ITEMS = 50;
     private static final String CLIENT_REQUEST_ID_PATTERN = "[A-Za-z0-9._:-]+";
@@ -51,7 +53,7 @@ final class IngestionTaskCreateUseCase {
     private final IngestionTaskProcessor ingestionTaskProcessor;
     private final IngestionCreateTransactionRunner transactionRunner;
     private final IngestionTaskQuery taskQuery;
-    private final IngestionTaskFactory taskFactory;
+    private final IngestionTaskFactory taskFactory = new IngestionTaskFactory();
 
     IngestionTaskCreateUseCase(KnowledgeBaseService knowledgeBaseService,
                                AssetRepository assetRepository,
@@ -62,8 +64,7 @@ final class IngestionTaskCreateUseCase {
                                IngestionActivityAcl ingestionActivityAcl,
                                IngestionTaskProcessor ingestionTaskProcessor,
                                IngestionCreateTransactionRunner transactionRunner,
-                               IngestionTaskQuery taskQuery,
-                               IngestionTaskFactory taskFactory) {
+                               IngestionTaskQuery taskQuery) {
         this.knowledgeBaseService = knowledgeBaseService;
         this.assetRepository = assetRepository;
         this.knowledgeBaseRepository = knowledgeBaseRepository;
@@ -74,7 +75,6 @@ final class IngestionTaskCreateUseCase {
         this.ingestionTaskProcessor = ingestionTaskProcessor;
         this.transactionRunner = transactionRunner;
         this.taskQuery = taskQuery;
-        this.taskFactory = taskFactory;
     }
 
     IngestionTaskCreateResult create(String kbId, IngestionCreateCommand command) {

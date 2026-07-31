@@ -32,7 +32,7 @@
 | 207F | 收敛生产运行默认值和搜索参数来源 | P1/P2 | 待执行 | 生产部署方式需确认 |
 | 207G | 建立最小 CI 和合并门禁 | P1 | 本仓 CI 完成，门禁待配置 | 跨仓工作流未纳入本次执行 |
 | 207H | 准确描述 Ingestion 的恢复能力 | P2 | 完成 | 否 |
-| 207I | 收敛 Agent 状态、依赖和可读性 | P2 | 待执行 | 每阶段单独执行，不一次性重写 |
+| 207I | 收敛 Agent 状态、依赖和可读性 | P2 | 完成 | 已按 207I1 → 207I4 分阶段实施和验证 |
 
 推荐执行顺序：
 
@@ -499,6 +499,15 @@ PLANNING
 - `AgentTaskProcessor` 的终态字段、事务保存、Trace、Runtime Snapshot 和 SSE 顺序可从代码直接阅读。
 - 现有 Agent characterization、Tool、citation、budget、fallback、cancel、async task、Trace 和 SSE golden tests 全部保持。
 - 新增阶段迁移和非法迁移测试，但不使用 ArchUnit。
+
+### 2026-07-31 实施记录
+
+- 207I1：将 `AgentTaskProcessor` 的成功、重试和终态失败路径拆为终态字段准备、事务保存 Task/Turn、Run/Trace 更新、Runtime Snapshot 发布和 SSE 完成步骤；新增成功、终态失败、重试和 claim 丢失的顺序特征测试。
+- 207I2：`AgentActionProtocol`、`AgentEvidenceFinalizer`、`AgentFinalPresentation` 改为 Spring 构造注入；Ingestion Create、Maintenance、Query 改为独立注入组件，Facade 只转发，四个维护事务入口迁移到 Maintenance Use Case；`IngestionTaskFactory` 仍为普通无状态对象。未修改已正确注入的 Search 组件。
+- 207I3：新增仅存在于内存的 `AgentWorkflowPhase`，以及协议解析、主循环、Evidence finalization 和回答验证的 sealed outcome；引入 Unverified、Verified 和 Presented 答案类型，未验证模型回答不能直接进入完成路径。既有 `AgentStepType/currentStep` 持久化协议保持不变。
+- 207I4：新增注入的 `AgentAnswerVerifier`，集中校验 answerType、当前 Run Evidence 所有权、Marker 绑定、空白/伪造 ID、模型自写可见引用、Citation 映射和稳定编号；同步 Agent 与异步总结共用 `AgentCitationPolicy` 的 10 个唯一引用、12 个 Marker、每段 3 个 Marker 限制。同步超限仍只触发现有一次回答修复，Evidence finalizer 仍最多尝试两次，异步总结仍执行确定性压缩。
+- 未修改 REST/SSE、数据库、ES、Tool 名称与参数、Prompt、预算、模型调用顺序、fallback、Lease/claim 或前端；保留工作区中既有的 `qodana.yml` 删除，未自动 commit。
+- Temurin JDK 21 `mvn -DskipTests compile` 通过；完整 `mvn test`：654 tests、0 failures、0 errors、33 skipped。Testcontainers 检测到本机无可用 Docker（缺少 `/var/run/docker.sock`），相关集成用例跳过；`git diff --check` 通过。
 
 ---
 

@@ -8,10 +8,12 @@ import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.kb.application.KnowledgeBaseService;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
 
+@Component
 final class IngestionTaskQuery {
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;

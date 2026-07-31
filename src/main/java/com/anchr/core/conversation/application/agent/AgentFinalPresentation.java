@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.AgentTokenUsage;
 import com.anchr.core.conversation.application.model.ConversationGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
@@ -9,6 +10,7 @@ import com.anchr.core.conversation.application.model.GenerationOptions;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
@@ -22,6 +24,7 @@ import java.util.regex.Pattern;
 import java.time.Duration;
 
 @Slf4j
+@Component
 final class AgentFinalPresentation {
     private static final Pattern VISIBLE_AGENT_CITATION_PATTERN =
             Pattern.compile("\\[(\\d+(?:-\\d+)?)\\]");
@@ -41,11 +44,29 @@ final class AgentFinalPresentation {
         this.traceRecorder = traceRecorder;
     }
 
-    String present(AgentRunState state,
-                   String validatedDraft,
-                   List<ConversationCitation> citations,
-                   List<ConversationRetrievalCandidate> citedEvidence,
-                   ConversationProgressListener progress) {
+    PresentedAgentAnswer present(AgentRunState state,
+                                 VerifiedAgentAnswer verified,
+                                 ConversationProgressListener progress) {
+        if (verified instanceof VerifiedNoEvidenceAnswer noEvidence) {
+            return new PresentedAgentAnswer(noEvidence.answer(), AnswerStatus.NO_EVIDENCE,
+                    "agent_declared_no_evidence", List.of());
+        }
+        List<ConversationCitation> citations = verified instanceof VerifiedCitedAnswer cited
+                ? cited.citations() : List.of();
+        List<ConversationRetrievalCandidate> citedEvidence = verified instanceof VerifiedCitedAnswer cited
+                ? cited.citedEvidence() : List.of();
+        String validatedDraft = verified.answer();
+        String presented = presentPlainOrCited(
+                state, validatedDraft, citations, citedEvidence, progress);
+        return new PresentedAgentAnswer(
+                presented, AnswerStatus.ANSWERED, null, citations);
+    }
+
+    private String presentPlainOrCited(AgentRunState state,
+                                       String validatedDraft,
+                                       List<ConversationCitation> citations,
+                                       List<ConversationRetrievalCandidate> citedEvidence,
+                                       ConversationProgressListener progress) {
         if (!progress.supportsAnswerStreaming()
                 || !StringUtils.hasText(validatedDraft)
                 || state.getBudget().remainingMillis() < 1_000L) {
