@@ -1,7 +1,10 @@
 package com.anchr.core.settings.application.support;
 
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigEntry;
+import com.anchr.core.settings.domain.model.RuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
+import com.anchr.core.settings.domain.model.SearchRuntimeConfigKey;
 import com.anchr.core.settings.domain.repository.RuntimeConfigRepository;
 import com.anchr.core.settings.infrastructure.cache.RuntimeConfigCache;
 import org.junit.jupiter.api.Test;
@@ -29,82 +32,76 @@ class RuntimeConfigResolverTest {
 
     @Test
     void shouldUseCachedStoredValueWithoutReadingMysql() {
-        when(cache.find(RuntimeConfigType.AGENT, "maxSteps"))
+        when(cache.find(RuntimeConfigType.AGENT, AgentRuntimeConfigKey.MAX_STEPS))
                 .thenReturn(new RuntimeConfigCache.LookupResult(
                         true, Optional.of("20")));
 
         assertThat(resolver.findStoredValue(
-                RuntimeConfigType.AGENT, "maxSteps")).contains("20");
+                RuntimeConfigType.AGENT, AgentRuntimeConfigKey.MAX_STEPS)).contains("20");
         verify(repository, never()).findByType(RuntimeConfigType.AGENT);
     }
 
     @Test
     void shouldNegativeCacheMissingSupportedValue() {
-        when(cache.find(RuntimeConfigType.AGENT, "maxSteps"))
+        when(cache.find(RuntimeConfigType.AGENT, AgentRuntimeConfigKey.MAX_STEPS))
                 .thenReturn(new RuntimeConfigCache.LookupResult(
                         true, Optional.empty()));
 
         assertThat(resolver.findStoredValue(
-                RuntimeConfigType.AGENT, "maxSteps")).isEmpty();
+                RuntimeConfigType.AGENT, AgentRuntimeConfigKey.MAX_STEPS)).isEmpty();
         verify(repository, never()).findByType(RuntimeConfigType.AGENT);
     }
 
     @Test
     void shouldLoadAndPopulateStoredOverridesWhenCacheIsUnavailable() {
-        when(cache.find(RuntimeConfigType.SEARCH, "rankConstant"))
+        when(cache.find(RuntimeConfigType.SEARCH, SearchRuntimeConfigKey.RANK_CONSTANT))
                 .thenReturn(new RuntimeConfigCache.LookupResult(
                         false, Optional.empty()));
         when(repository.findByType(RuntimeConfigType.SEARCH))
                 .thenReturn(List.of(entry(
-                        RuntimeConfigType.SEARCH, "rankConstant", "80")));
+                        RuntimeConfigType.SEARCH,
+                        SearchRuntimeConfigKey.RANK_CONSTANT,
+                        "80")));
 
         assertThat(resolver.findStoredValue(
-                RuntimeConfigType.SEARCH, "rankConstant")).contains("80");
+                RuntimeConfigType.SEARCH,
+                SearchRuntimeConfigKey.RANK_CONSTANT)).contains("80");
         verify(cache).populate(
-                RuntimeConfigType.SEARCH, Map.of("rankConstant", "80"));
+                RuntimeConfigType.SEARCH,
+                Map.of(SearchRuntimeConfigKey.RANK_CONSTANT, "80"));
     }
 
     @Test
     void shouldFailWhenPersistedValueIsInvalid() {
-        when(cache.find(RuntimeConfigType.AGENT, "enabled"))
+        when(cache.find(RuntimeConfigType.AGENT, AgentRuntimeConfigKey.ENABLED))
                 .thenReturn(new RuntimeConfigCache.LookupResult(
                         false, Optional.empty()));
         when(repository.findByType(RuntimeConfigType.AGENT))
                 .thenReturn(List.of(entry(
-                        RuntimeConfigType.AGENT, "enabled", "yes")));
+                        RuntimeConfigType.AGENT, AgentRuntimeConfigKey.ENABLED, "yes")));
 
         assertThatThrownBy(() ->
-                resolver.findStoredValue(RuntimeConfigType.AGENT, "enabled"))
+                resolver.findStoredValue(
+                        RuntimeConfigType.AGENT, AgentRuntimeConfigKey.ENABLED))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("true or false");
     }
 
     @Test
     void shouldValidateCachedStoredValuesBeforeReturningThem() {
-        when(cache.find(RuntimeConfigType.SEARCH, "textSimilarity"))
+        when(cache.find(
+                RuntimeConfigType.SEARCH, SearchRuntimeConfigKey.TEXT_SIMILARITY))
                 .thenReturn(new RuntimeConfigCache.LookupResult(
                         true, Optional.of("2.5")));
 
         assertThatThrownBy(() -> resolver.findStoredValue(
-                RuntimeConfigType.SEARCH, "textSimilarity"))
+                RuntimeConfigType.SEARCH, SearchRuntimeConfigKey.TEXT_SIMILARITY))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("between 0 and 1");
     }
 
-    @Test
-    void shouldFailWhenMysqlContainsAnUnsupportedKey() {
-        when(repository.findByType(RuntimeConfigType.OUTBOX))
-                .thenReturn(List.of(entry(
-                        RuntimeConfigType.OUTBOX, "unknownKey", "20")));
-
-        assertThatThrownBy(() ->
-                resolver.loadStoredFromDatabase(RuntimeConfigType.OUTBOX))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unsupported runtime config key");
-    }
-
     private RuntimeConfigEntry entry(
-            RuntimeConfigType type, String key, String value) {
+            RuntimeConfigType type, RuntimeConfigKey key, String value) {
         return new RuntimeConfigEntry(
                 type, key, value, "admin", LocalDateTime.now());
     }

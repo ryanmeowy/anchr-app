@@ -2,6 +2,8 @@ package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
@@ -125,7 +127,9 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
         try {
             dispatch(ingestionTaskRepository.listPendingItemIds(
                     runtimeConfigUnit.getInt(
-                            "INGESTION", "claimBatchSize", 32)));
+                            RuntimeConfigType.INGESTION,
+                            IngestionRuntimeConfigKey.CLAIM_BATCH_SIZE,
+                            32)));
         } catch (RuntimeException exception) {
             log.warn("failed to scan pending ingestion items: {}",
                     exception.getMessage(), exception);
@@ -139,7 +143,9 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
             dispatch(ingestionTaskRepository.listPendingItemIds(
                     taskId,
                     runtimeConfigUnit.getInt(
-                            "INGESTION", "claimBatchSize", 32)));
+                            RuntimeConfigType.INGESTION,
+                            IngestionRuntimeConfigKey.CLAIM_BATCH_SIZE,
+                            32)));
         } catch (RuntimeException exception) {
             log.debug("ingestion wake-up deferred to scheduler, taskId={}, reason={}",
                     taskId, exception.getMessage());

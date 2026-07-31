@@ -5,6 +5,7 @@ import com.anchr.core.settings.application.RuntimeConfigService;
 import com.anchr.core.settings.application.support.RuntimeConfigCatalog;
 import com.anchr.core.settings.application.support.RuntimeConfigResolver;
 import com.anchr.core.settings.domain.model.RuntimeConfigEntry;
+import com.anchr.core.settings.domain.model.RuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.settings.domain.repository.RuntimeConfigRepository;
 import com.anchr.core.settings.infrastructure.cache.RuntimeConfigCache;
@@ -46,8 +47,10 @@ public class RuntimeConfigServiceImpl implements RuntimeConfigService {
     @Override
     public RuntimeConfigGroupDTO update(RuntimeConfigUpdateRequestDTO request) {
         RuntimeConfigType type = RuntimeConfigType.parse(request.type());
-        LinkedHashMap<String, String> normalized = normalize(type, request.params());
-        Map<String, String> proposed = new LinkedHashMap<>(resolver.loadFromDatabase(type));
+        LinkedHashMap<RuntimeConfigKey, String> normalized =
+                normalize(type, request.params());
+        Map<RuntimeConfigKey, String> proposed =
+                new LinkedHashMap<>(resolver.loadFromDatabase(type));
         proposed.putAll(normalized);
         catalog.validateResolved(type, proposed);
 
@@ -59,30 +62,30 @@ public class RuntimeConfigServiceImpl implements RuntimeConfigService {
                 .toList();
         transactionTemplate.executeWithoutResult(status -> repository.upsertAll(entries));
 
-        Map<String, String> stored = resolver.loadStoredFromDatabase(type);
+        Map<RuntimeConfigKey, String> stored = resolver.loadStoredFromDatabase(type);
         cache.replaceAfterDatabaseCommit(type, stored, normalized.keySet());
-        LinkedHashMap<String, String> effective =
+        LinkedHashMap<RuntimeConfigKey, String> effective =
                 new LinkedHashMap<>(catalog.defaults(type));
         effective.putAll(stored);
         catalog.validateResolved(type, effective);
         return toGroup(type, effective);
     }
 
-    private LinkedHashMap<String, String> normalize(
+    private LinkedHashMap<RuntimeConfigKey, String> normalize(
             RuntimeConfigType type, List<RuntimeConfigParamDTO> params) {
         if (params == null || params.isEmpty()) {
             throw new IllegalArgumentException("runtime config params cannot be empty");
         }
-        Set<String> keys = new HashSet<>();
-        LinkedHashMap<String, String> values = new LinkedHashMap<>();
+        Set<RuntimeConfigKey> keys = new HashSet<>();
+        LinkedHashMap<RuntimeConfigKey, String> values = new LinkedHashMap<>();
         for (RuntimeConfigParamDTO param : params) {
             if (param == null || param.key() == null || param.key().isBlank()) {
                 throw new IllegalArgumentException("runtime config key is required");
             }
-            String key = param.key().trim();
+            RuntimeConfigKey key = RuntimeConfigKey.parse(type, param.key());
             if (!keys.add(key)) {
                 throw new IllegalArgumentException(
-                        "duplicate runtime config key: " + key);
+                        "duplicate runtime config key: " + key.propertyName());
             }
             values.put(key, catalog.normalize(type, key, param.value()));
         }
@@ -90,9 +93,10 @@ public class RuntimeConfigServiceImpl implements RuntimeConfigService {
     }
 
     private RuntimeConfigGroupDTO toGroup(
-            RuntimeConfigType type, Map<String, String> values) {
+            RuntimeConfigType type, Map<RuntimeConfigKey, String> values) {
         List<RuntimeConfigParamDTO> params = catalog.keys(type).stream()
-                .map(key -> new RuntimeConfigParamDTO(key, values.get(key)))
+                .map(key -> new RuntimeConfigParamDTO(
+                        key.propertyName(), values.get(key)))
                 .toList();
         return new RuntimeConfigGroupDTO(type.name(), params);
     }

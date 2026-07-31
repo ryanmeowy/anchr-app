@@ -1,5 +1,6 @@
 package com.anchr.core.settings.infrastructure.cache;
 
+import com.anchr.core.settings.domain.model.RuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +28,9 @@ public class RuntimeConfigCache {
 
     private final StringRedisTemplate redisTemplate;
 
-    public LookupResult find(RuntimeConfigType type, String field) {
+    public LookupResult find(RuntimeConfigType type, RuntimeConfigKey configKey) {
+        configKey.requireType(type);
+        String field = configKey.propertyName();
         try {
             List<Object> values = redisTemplate.opsForHash().multiGet(
                     key(type), List.of(COMPLETE_FIELD, field));
@@ -47,13 +50,13 @@ public class RuntimeConfigCache {
         }
     }
 
-    public Optional<Map<String, String>> getStored(RuntimeConfigType type) {
+    public Optional<Map<RuntimeConfigKey, String>> getStored(RuntimeConfigType type) {
         try {
             Map<Object, Object> cached = redisTemplate.opsForHash().entries(key(type));
             if (!"true".equals(cached.get(COMPLETE_FIELD))) {
                 return Optional.empty();
             }
-            LinkedHashMap<String, String> values = new LinkedHashMap<>();
+            LinkedHashMap<RuntimeConfigKey, String> values = new LinkedHashMap<>();
             for (Map.Entry<Object, Object> entry : cached.entrySet()) {
                 if (COMPLETE_FIELD.equals(entry.getKey())) {
                     continue;
@@ -61,7 +64,7 @@ public class RuntimeConfigCache {
                 if (entry.getKey() instanceof String field
                         && entry.getValue() instanceof String text
                         && !text.isBlank()) {
-                    values.put(field, text);
+                    values.put(RuntimeConfigKey.parse(type, field), text);
                 }
             }
             return Optional.of(Map.copyOf(values));
@@ -72,7 +75,8 @@ public class RuntimeConfigCache {
         }
     }
 
-    public void populate(RuntimeConfigType type, Map<String, String> values) {
+    public void populate(
+            RuntimeConfigType type, Map<RuntimeConfigKey, String> values) {
         try {
             replace(type, values);
         } catch (RuntimeException exception) {
@@ -83,8 +87,8 @@ public class RuntimeConfigCache {
 
     public void replaceAfterDatabaseCommit(
             RuntimeConfigType type,
-            Map<String, String> values,
-            Set<String> updatedKeys
+            Map<RuntimeConfigKey, String> values,
+            Set<RuntimeConfigKey> updatedKeys
     ) {
         RuntimeException lastFailure = null;
         for (int attempt = 1; attempt <= WRITE_ATTEMPTS; attempt++) {
@@ -116,8 +120,13 @@ public class RuntimeConfigCache {
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private void replace(RuntimeConfigType type, Map<String, String> values) {
-        LinkedHashMap<String, String> cacheValues = new LinkedHashMap<>(values);
+    private void replace(
+            RuntimeConfigType type, Map<RuntimeConfigKey, String> values) {
+        LinkedHashMap<String, String> cacheValues = new LinkedHashMap<>();
+        values.forEach((configKey, value) -> {
+            configKey.requireType(type);
+            cacheValues.put(configKey.propertyName(), value);
+        });
         cacheValues.put(COMPLETE_FIELD, "true");
         List<Object> result = redisTemplate.execute(new SessionCallback<>() {
             @Override

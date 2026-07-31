@@ -10,6 +10,7 @@ import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -27,7 +28,7 @@ class RuntimeConfigDefaultsContractTest {
         IngestionRuntimeSettings ingestion = IngestionRuntimeSettings.load(unit);
         OutboxRuntimeSettings outbox = OutboxRuntimeSettings.load(unit);
 
-        assertThat(catalog.defaults(RuntimeConfigType.SEARCH)).isEqualTo(Map.ofEntries(
+        assertThat(serializedDefaults(RuntimeConfigType.SEARCH)).isEqualTo(Map.ofEntries(
                 Map.entry("rankConstant", Integer.toString(search.rankConstant())),
                 Map.entry("candidateMultiplier", Integer.toString(search.candidateMultiplier())),
                 Map.entry("maxCandidates", Integer.toString(search.maxCandidates())),
@@ -43,14 +44,15 @@ class RuntimeConfigDefaultsContractTest {
                 Map.entry("windowMax", Integer.toString(search.windowMax())),
                 Map.entry("fusionAlpha", Double.toString(search.fusionAlpha())),
                 Map.entry("fusionBeta", Double.toString(search.fusionBeta()))));
-        assertThat(catalog.defaults(RuntimeConfigType.CONVERSATION)).containsExactlyInAnyOrderEntriesOf(
+        assertThat(serializedDefaults(RuntimeConfigType.CONVERSATION))
+                .containsExactlyInAnyOrderEntriesOf(
                 Map.of(
                         "intentRoutingEnabled", Boolean.toString(conversation.intentRoutingEnabled()),
                         "intentContextTurnLimit", Integer.toString(conversation.intentContextTurnLimit()),
                         "intentTimeoutSeconds", Long.toString(conversation.intentTimeout().toSeconds()),
                         "legacyEvidenceFallbackEnabled",
                         Boolean.toString(conversation.legacyEvidenceFallbackEnabled())));
-        assertThat(catalog.defaults(RuntimeConfigType.AGENT))
+        assertThat(serializedDefaults(RuntimeConfigType.AGENT))
                 .containsExactlyInAnyOrderEntriesOf(Map.ofEntries(
                         Map.entry("enabled", Boolean.toString(agent.enabled())),
                         Map.entry("toolCallMode", agent.toolCallMode().name()),
@@ -92,7 +94,7 @@ class RuntimeConfigDefaultsContractTest {
                         Map.entry(
                                 "summaryBatchChars",
                                 Integer.toString(agent.summaryBatchChars()))));
-        assertThat(catalog.defaults(RuntimeConfigType.INGESTION))
+        assertThat(serializedDefaults(RuntimeConfigType.INGESTION))
                 .containsExactlyInAnyOrderEntriesOf(Map.ofEntries(
                         Map.entry(
                                 "claimBatchSize",
@@ -125,11 +127,18 @@ class RuntimeConfigDefaultsContractTest {
                                 Integer.toString(
                                         ingestion.doclingMaxResponseBytes()
                                                 / 1024 / 1024))));
-        assertThat(catalog.defaults(RuntimeConfigType.OUTBOX))
+        assertThat(serializedDefaults(RuntimeConfigType.OUTBOX))
                 .containsExactlyInAnyOrderEntriesOf(Map.of(
                         "batchSize", Integer.toString(outbox.batchSize()),
                         "maxAttempts", Integer.toString(outbox.maxAttempts()),
                         "retentionDays", Long.toString(outbox.retentionDays()),
                         "cleanupBatchSize", Integer.toString(outbox.cleanupBatchSize())));
+    }
+
+    private Map<String, String> serializedDefaults(RuntimeConfigType type) {
+        return catalog.defaults(type).entrySet().stream()
+                .collect(Collectors.toMap(
+                        entry -> entry.getKey().propertyName(),
+                        Map.Entry::getValue));
     }
 }

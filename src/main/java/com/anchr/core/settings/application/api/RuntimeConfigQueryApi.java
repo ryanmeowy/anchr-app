@@ -1,5 +1,8 @@
 package com.anchr.core.settings.application.api;
 
+import com.anchr.core.settings.domain.model.RuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
+
 import java.util.Optional;
 
 /**
@@ -7,5 +10,5 @@ import java.util.Optional;
  */
 public interface RuntimeConfigQueryApi {
 
-    Optional<String> findValue(String type, String key);
+    Optional<String> findValue(RuntimeConfigType type, RuntimeConfigKey key);
 }

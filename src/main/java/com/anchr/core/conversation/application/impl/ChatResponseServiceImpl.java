@@ -2,6 +2,8 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.ChatResponseService;
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ChatResponseResult;
@@ -66,7 +68,9 @@ public class ChatResponseServiceImpl implements ChatResponseService {
         Timer.Sample sample = Timer.start(meterRegistry);
         AtomicBoolean emitted = new AtomicBoolean(false);
         int effectiveContextTurnLimit = runtimeConfigUnit.getInt(
-                "CONVERSATION", "intentContextTurnLimit", 5);
+                RuntimeConfigType.CONVERSATION,
+                ConversationRuntimeConfigKey.INTENT_CONTEXT_TURN_LIMIT,
+                5);
         try {
             List<ConversationModelMessage> messages =
                     buildMessages(sessionId, query, effectiveContextTurnLimit);

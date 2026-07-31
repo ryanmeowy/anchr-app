@@ -4,9 +4,12 @@ import java.time.LocalDateTime;
 
 public record RuntimeConfigEntry(
         RuntimeConfigType type,
-        String key,
+        RuntimeConfigKey key,
         String value,
         String updatedBy,
         LocalDateTime updatedAt
 ) {
+    public RuntimeConfigEntry {
+        key.requireType(type);
+    }
 }

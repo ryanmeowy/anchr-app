@@ -2,6 +2,8 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.ChatResponseService;
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.conversation.application.ConversationIntentRouter;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.agent.AgentRunRequest;
@@ -61,9 +63,14 @@ public class ConversationMessageOrchestrator {
                                                ConversationProgressListener listener) {
         ConversationProgressListener progress = listener == null ? ConversationProgressListener.NOOP : listener;
         boolean agentEnabled =
-                runtimeConfigUnit.getBoolean("AGENT", "enabled", true);
+                runtimeConfigUnit.getBoolean(
+                        RuntimeConfigType.AGENT,
+                        AgentRuntimeConfigKey.ENABLED,
+                        true);
         boolean fallbackToTraditional = runtimeConfigUnit.getBoolean(
-                "AGENT", "fallbackToTraditional", true);
+                RuntimeConfigType.AGENT,
+                AgentRuntimeConfigKey.FALLBACK_TO_TRADITIONAL,
+                true);
         if (Boolean.TRUE.equals(request.getAgentEnabled()) && agentEnabled) {
             try {
                 return agentWorkflow.execute(new AgentRunRequest(runId, turnId, sessionId,

@@ -17,7 +17,7 @@ class RuntimeConfigOperationSnapshotTest {
     void shouldApplyAnUpdateToTheNextOperationWithoutMutatingTheCurrentSettings() {
         Map<String, String> stored = new HashMap<>();
         RuntimeConfigQueryApi api = (type, key) ->
-                Optional.ofNullable(stored.get(type + "." + key));
+                Optional.ofNullable(stored.get(type + "." + key.propertyName()));
         RuntimeConfigUnit unit = new RuntimeConfigUnit(api);
 
         SearchRuntimeSettings currentOperation =
