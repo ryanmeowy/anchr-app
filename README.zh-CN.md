@@ -35,7 +35,7 @@ Anchr App 是 Anchr 知识系统的后端。它把文档转化为可检索、可
 | 领域 | 能力 |
 | --- | --- |
 | **知识内容** | 知识库与文档生命周期、健康度与统计、对象存储引用、去重、Asset generation 版本管理和可靠清理。 |
-| **文档入库** | 异步批量任务、客户端请求幂等、解析/向量化/索引阶段、进度追踪、失败重试、重新解析、重新向量化和 Docling 集成。 |
+| **文档入库** | 异步批量任务、客户端请求幂等、解析/向量化/索引阶段追踪、失败后人工整文档重试、重新解析、重新向量化和 Docling 集成。 |
 | **混合检索** | 全文与向量双路召回、中文 IK 分词、RRF 融合、受控 Rerank、元数据/模态过滤和 generation 可见性校验。 |
 | **证据优先回答** | 查询改写、答案生成、来源引用、结果卡片、追问建议、Segment 预览和原文上下文恢复。 |
 | **Agentic RAG** | 带预算的工具执行、知识搜索、文档定位与顺序阅读、异步总结、Trace 持久化、运行恢复、取消和传统 RAG 降级。 |
@@ -47,7 +47,8 @@ Anchr App 是 Anchr 知识系统的后端。它把文档转化为可检索、可
 
 - **证据先于表达**：知识型答案必须关联已注册的 Segment 和可恢复的原文预览。
 - **状态所有权清晰**：MySQL 保存业务事实，Elasticsearch 是可以重建的检索投影。
-- **异步任务可恢复**：入库和 Agent 任务都显式保存进度、失败、重试与取消状态。
+- **文档入库可追踪**：入库任务保存状态和阶段进度；失败 Item 可以人工按整文档重试，但进程重启不会续跑中断的处理阶段。
+- **Agent 任务可恢复**：Agent 任务另行持久化运行状态，并支持基于 Lease 的恢复和取消。
 - **索引演进安全**：Asset generation 与物理索引版本分开管理，并通过 alias 完成激活。
 - **隔离外部提供方**：通过窄 Port 隔离 OpenAI 兼容模型、Docling 和对象存储。
 - **控制系统复杂度**：在一个可部署的模块化单体内维护领域边界，不做过早的微服务拆分。
@@ -173,10 +174,10 @@ openssl rand -base64 16
 | --- | --- | --- |
 | Redis | `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` | Token、分布式 ID 分段、查询改写缓存和 Agent 快照。 |
 | Elasticsearch | `ES_USERNAME`、`ES_PASSWORD`、`ES_HOST` | Segment 索引、alias、全文召回和向量召回。 |
-| MySQL | `SPRING_DATASOURCE_URL`、`MYSQL_USER`、`MYSQL_PASSWORD` | 应用状态。 |
+| MySQL | `MYSQL_URL`、`MYSQL_USER`、`MYSQL_PASSWORD` | 应用状态。 |
 | 安全 | `APP_ADMIN_SECRET`、`APP_ENCRYPT_KEY`、`APP_ENCRYPT_IV` | Token 管理和模型/存储凭据加密。 |
 | Docling | `APP_DOCLING_BASE_URL`、`APP_DOCLING_API_TOKEN` | 带鉴权的异步文档解析。 |
-| Server | `SERVER_HOST`、`SERVER_PORT`、`SPRING_PROFILES_ACTIVE` | HTTP 监听地址、端口和启用的 Spring Profile。 |
+| Server | `SERVER_HOST`、`SERVER_PORT`、`PROFILES_ACTIVE` | HTTP 监听地址、端口和启用的 Spring Profile。 |
 
 > [!WARNING]
 > 不要提交任一 Docker `.env` 文件。已有加密配置存在时，应保持加密 Key 和 IV 稳定；生产环境请使用 Secret Manager。
@@ -196,7 +197,7 @@ Anchr Docling 仍作为独立服务运行。使用示例端口时，API 地址�
 
 ```bash
 cp docker/app/.env.example .env
-# 为宿主机访问设置 REDIS_HOST 和 ES_HOST，并修改 SPRING_DATASOURCE_URL 中的主机名。
+# 为宿主机访问设置 REDIS_HOST 和 ES_HOST，并修改 MYSQL_URL 中的主机名。
 set -a
 source .env
 set +a
@@ -243,7 +244,8 @@ curl --get http://127.0.0.1:8081/api/v1/auth/refresh-token \
 | `/api/v1/auth` | Token 校验与管理、上传 STS 临时凭据。 |
 | `/api/v1/settings` | 模型能力与对象存储配置。 |
 | `/api/v1/kbs` | 知识库、文档、健康度、预览与统计。 |
-| `/api/v1/kbs/{kbId}/ingestion-tasks` | 创建入库任务、查询进度、失败 Item 重试、重新解析与重新向量化。 |
+| `/api/v1/kbs/{kbId}/ingestion-tasks` | 创建入库任务、查询进度与失败 Item 重试。 |
+| `/api/v1/kbs/{kbId}/documents/{assetId}` | 文档重新解析与重新向量化。 |
 | `/api/v1/search` | 带过滤条件的混合检索与可选生成式回答。 |
 | `/api/v1/conversations` | 会话、历史消息、同步回答与 SSE 回答。 |
 | `/api/v1/agent/runs` · `/api/v1/agent/tasks` | Agent Trace、快照、恢复、任务流式输出与取消。 |
@@ -258,10 +260,10 @@ Search、Conversation、Agent、Ingestion 和 Outbox 的调优参数通过 Setti
 操作继续使用启动时读取的值。某个 KV 没有覆盖值时，由调用方使用代码内置
 的默认值。
 
-[`application.yaml`](./src/main/resources/application.yaml) 只保留数据库、
-Redis、Elasticsearch、安全密钥、Docling 连接信息、Segment 索引名和 Agent
-工作流版本等启动或基础设施配置。模型地址、API Key、模型名、向量维度和
-存储凭据同样由 Settings 管理。
+[`application.yaml`](./src/main/resources/application.yaml) 配置数据库、
+Redis、安全密钥和 Docling 等启动配置。Elasticsearch 连接由应用的
+Elasticsearch 配置直接读取 `ES_USERNAME`、`ES_PASSWORD` 和 `ES_HOST`。
+模型地址、API Key、模型名、向量维度和存储凭据由 Settings 运行时管理。
 
 ## 开发
 
@@ -274,6 +276,19 @@ Redis、Elasticsearch、安全密钥、Docling 连接信息、Segment 索引名�
 | `mvn -DskipTests package` | 构建可执行 Spring Boot JAR。 |
 | `java -jar target/anchr-app-0.0.1-SNAPSHOT.jar` | 导出环境变量后运行构建产物。 |
 | `docker compose --env-file docker/infra/.env -f docker/infra/compose.yml logs -f elasticsearch` | 查看 Elasticsearch 启动与插件日志。 |
+
+### 持续集成
+
+Pull Request 会在 JDK 21 上运行 `App CI / Verify` 检查，使用与本地验证相同的命令：
+
+```bash
+mvn -B -ntp -DskipTests compile
+mvn -B -ntp test
+```
+
+检查会汇总 Surefire 的 tests、failures、errors 和 skipped 数量。Docker
+可用时执行依赖 Testcontainers 的测试，并单独报告这些测试是已执行还是已跳过。
+Surefire XML 报告会作为 workflow artifact 保留七天。
 
 ### 项目结构
 
@@ -292,6 +307,7 @@ Redis、Elasticsearch、安全密钥、Docling 连接信息、Segment 索引名�
 - 在源码之外保存 Admin、加密、Docling、模型与存储密钥。
 - 持久化并备份 MySQL 与对象存储；将 Elasticsearch 索引作为可重建投影管理。
 - 监控 `/actuator/health`、`/actuator/metrics`、入库失败、Agent Task Lease、Outbox 重试和索引 alias 状态。
+- 应用重启后需要检查被中断的入库 Item：它们会被标记为失败，必须人工按整文档重试。Agent 的恢复和取消是另一套基于 Lease 的能力。
 - 上线前使用接近生产的数据验证数据库迁移与索引重建。
 
 ## 参与贡献
@@ -302,7 +318,7 @@ Redis、Elasticsearch、安全密钥、Docling 连接信息、Segment 索引名�
 2. 从目标基线创建聚焦的分支。
 3. 除非变更明确要求，否则保持领域状态所有权和现有 REST/SSE 契约。
 4. 为行为、失败路径以及持久化/查询变化补充测试。
-5. 运行相关测试和 `mvn test`，并单独说明 Docker/Testcontainers 跳过项。
+5. 运行相关测试和上述 CI 命令，并单独说明 Docker/Testcontainers 跳过项。
 
 请勿在公开 Issue 中附带访问令牌、模型 Key、存储凭据、私有文档或生产 Trace。
 

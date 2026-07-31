@@ -75,7 +75,7 @@ anchr-app/
 │   │   │       └── interfaces/rest(/dto)
 │   │   └── resources/
 │   │       ├── application.yaml            # Spring 与 app.* 默认配置
-│   │       ├── db/migration/               # Flyway V1-V7 数据库迁移
+│   │       ├── db/migration/               # Flyway
 │   │       ├── mapper/                     # MyBatis XML Mapper
 │   │       ├── es-kb-segment-mapping.json  # 动态向量维度的 Segment Mapping
 │   │       └── es-settings.json            # IK Analyzer 与索引设置

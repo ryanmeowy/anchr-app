@@ -35,7 +35,7 @@ The application is a Java 21 and Spring Boot modular monolith. MySQL owns busine
 | Area | What it provides |
 | --- | --- |
 | **Knowledge content** | Knowledge-base and document lifecycle, health and statistics, object-storage references, deduplication, versioned asset generations, and reliable cleanup. |
-| **Document ingestion** | Asynchronous batch ingestion, idempotent client requests, parse/embed/index stages, progress tracking, retries, reparse/re-embed operations, and Docling integration. |
+| **Document ingestion** | Asynchronous batch ingestion, idempotent client requests, parse/embed/index stage tracking, manual whole-document retry after failure, reparse/re-embed operations, and Docling integration. |
 | **Hybrid retrieval** | Full-text and vector recall, Chinese IK analysis, Reciprocal Rank Fusion, bounded reranking, metadata and modality filters, and generation-aware visibility. |
 | **Evidence-first answers** | Query rewriting, answer generation, source citations, result cards, follow-up questions, segment preview, and document-context restoration. |
 | **Agentic RAG** | Budgeted tool execution, knowledge search, document discovery and reading, asynchronous summaries, trace persistence, runtime recovery, cancellation, and traditional RAG fallback. |
@@ -47,7 +47,8 @@ The application is a Java 21 and Spring Boot modular monolith. MySQL owns busine
 
 - **Evidence before eloquence** — knowledge answers are tied to registered segments and source previews.
 - **Explicit state ownership** — MySQL stores business truth; Elasticsearch remains a replaceable retrieval projection.
-- **Recoverable asynchronous work** — ingestion and Agent tasks persist progress, failure, retry, and cancellation state.
+- **Trackable document ingestion** — ingestion persists task status and stage progress; failed items can be manually retried as whole documents, but a process restart does not resume interrupted processing stages.
+- **Recoverable Agent work** — Agent tasks separately persist runtime state and support Lease-based recovery and cancellation.
 - **Safe index evolution** — asset generations and physical index versions are handled separately, with alias-based activation.
 - **Provider independence** — narrow ports isolate OpenAI-compatible model endpoints, Docling, and object storage from domain workflows.
 - **Bounded complexity** — domain boundaries live inside one deployable modular monolith instead of premature microservices.
@@ -173,10 +174,10 @@ The template is organized into these groups:
 | --- | --- | --- |
 | Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Tokens, distributed ID segments, rewrite cache, and Agent snapshots. |
 | Elasticsearch | `ES_USERNAME`, `ES_PASSWORD`, `ES_HOST` | Segment indexes, aliases, lexical recall, and vector recall. |
-| MySQL | `SPRING_DATASOURCE_URL`, `MYSQL_USER`, `MYSQL_PASSWORD` | Application state. |
+| MySQL | `MYSQL_URL`, `MYSQL_USER`, `MYSQL_PASSWORD` | Application state. |
 | Security | `APP_ADMIN_SECRET`, `APP_ENCRYPT_KEY`, `APP_ENCRYPT_IV` | Token administration and encryption of provider credentials. |
 | Docling | `APP_DOCLING_BASE_URL`, `APP_DOCLING_API_TOKEN` | Authenticated asynchronous parsing. |
-| Server | `SERVER_HOST`, `SERVER_PORT`, `SPRING_PROFILES_ACTIVE` | HTTP bind address, port, and active Spring profile. |
+| Server | `SERVER_HOST`, `SERVER_PORT`, `PROFILES_ACTIVE` | HTTP bind address, port, and active Spring profile. |
 
 > [!WARNING]
 > Do not commit either Docker `.env` file. Keep the encryption key and IV stable for existing encrypted configuration records, and use a secret manager in production.
@@ -196,7 +197,7 @@ For local JVM development instead, copy the application environment to the repos
 
 ```bash
 cp docker/app/.env.example .env
-# Set REDIS_HOST and ES_HOST for host access, and change the host in SPRING_DATASOURCE_URL.
+# Set REDIS_HOST and ES_HOST for host access, and change the host in MYSQL_URL.
 set -a
 source .env
 set +a
@@ -243,7 +244,8 @@ All business responses use a common result envelope. Protected endpoints expect 
 | `/api/v1/auth` | Token validation and administration; upload STS credentials. |
 | `/api/v1/settings` | Model capability and object-storage configuration. |
 | `/api/v1/kbs` | Knowledge bases, documents, health, previews, and statistics. |
-| `/api/v1/kbs/{kbId}/ingestion-tasks` | Ingestion creation, progress, failed-item retry, reparse, and re-embed. |
+| `/api/v1/kbs/{kbId}/ingestion-tasks` | Ingestion creation, progress, and failed-item retry. |
+| `/api/v1/kbs/{kbId}/documents/{assetId}` | Document reparse and re-embed operations. |
 | `/api/v1/search` | Filtered hybrid retrieval with optional generated answers. |
 | `/api/v1/conversations` | Sessions, history, synchronous answers, and SSE answers. |
 | `/api/v1/agent/runs` · `/api/v1/agent/tasks` | Agent traces, snapshots, recovery, task streaming, and cancellation. |
@@ -258,11 +260,11 @@ Settings and stored as runtime KV records. A change applies to the next
 operation; an operation already in progress keeps the values it read when it
 started. If a KV override is absent, the caller uses its built-in default.
 
-[`application.yaml`](./src/main/resources/application.yaml) contains only
-startup and infrastructure settings such as database/Redis/Elasticsearch
-connections, security material, Docling connection details, segment index
-names, and the Agent workflow version. Model endpoints, API keys, model names,
-dimensions, and storage credentials are also runtime records managed through
+[`application.yaml`](./src/main/resources/application.yaml) defines the
+database, Redis, security, and Docling startup settings. The Elasticsearch
+connection is loaded from `ES_USERNAME`, `ES_PASSWORD`, and `ES_HOST` by the
+application's Elasticsearch configuration. Model endpoints, API keys, model
+names, dimensions, and storage credentials are runtime records managed through
 Settings.
 
 ## Development
@@ -276,6 +278,21 @@ Settings.
 | `mvn -DskipTests package` | Build the executable Spring Boot JAR. |
 | `java -jar target/anchr-app-0.0.1-SNAPSHOT.jar` | Run the packaged application after exporting its environment. |
 | `docker compose --env-file docker/infra/.env -f docker/infra/compose.yml logs -f elasticsearch` | Follow Elasticsearch startup and plugin logs. |
+
+### Continuous integration
+
+Pull Requests run the `App CI / Verify` check on JDK 21. It uses the same
+commands as local verification:
+
+```bash
+mvn -B -ntp -DskipTests compile
+mvn -B -ntp test
+```
+
+The check publishes a Surefire summary with tests, failures, errors, and
+skipped counts. Docker-backed Testcontainers suites run when Docker is
+available; their executed or skipped status is reported separately. Surefire
+XML reports are retained as a workflow artifact for seven days.
 
 ### Project structure
 
@@ -294,6 +311,7 @@ See [`project_layout.text`](./project_layout.text) for the maintained repository
 - Store admin, encryption, Docling, model, and storage secrets outside source control.
 - Persist and back up MySQL and object storage; manage Elasticsearch indexes as rebuildable projections.
 - Monitor `/actuator/health`, `/actuator/metrics`, ingestion failures, Agent task leases, outbox retries, and index alias state.
+- After an application restart, review interrupted ingestion items: they are marked failed and require a manual whole-document retry. Agent recovery and cancellation are separate Lease-based capabilities.
 - Validate migrations and index rebuilds against production-like data before deployment.
 
 ## Contributing
@@ -304,7 +322,7 @@ Bug reports, ideas, and focused Pull Requests are welcome.
 2. Create a focused branch from the intended base branch.
 3. Preserve domain ownership and existing REST/SSE contracts unless the change explicitly revises them.
 4. Add tests for behavior, failure paths, and persistence/query changes.
-5. Run the relevant focused tests and `mvn test`, then report any Docker/Testcontainers skips separately.
+5. Run the relevant focused tests and the CI commands above, then report any Docker/Testcontainers skips separately.
 
 Please do not include access tokens, provider keys, storage credentials, private documents, or production traces in public issues.
 
