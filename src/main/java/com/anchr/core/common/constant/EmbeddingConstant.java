@@ -8,4 +8,8 @@ public class EmbeddingConstant {
 
     public static final int DEFAULT_TOP_K = 10;
 
+    public static final int CHUNK_MAX_TOKENS = 200;
+
+    public static final int CHUNK_MIN_TOKENS = 1200;
+
 }

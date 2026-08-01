@@ -5,6 +5,9 @@ import lombok.Builder;
 
 import java.util.Map;
 
+import static com.anchr.core.common.constant.EmbeddingConstant.CHUNK_MAX_TOKENS;
+import static com.anchr.core.common.constant.EmbeddingConstant.CHUNK_MIN_TOKENS;
+
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ParseRequest(
@@ -33,7 +36,7 @@ public record ParseRequest(
         }
 
         public static Options chunkModel(boolean includeEmbeddedImages) {
-            return new Options("chunks", true, true, true, true, 200, 500, true,
+            return new Options("chunks", true, true, true, true, CHUNK_MIN_TOKENS, CHUNK_MAX_TOKENS, true,
                     includeEmbeddedImages);
         }
     }
