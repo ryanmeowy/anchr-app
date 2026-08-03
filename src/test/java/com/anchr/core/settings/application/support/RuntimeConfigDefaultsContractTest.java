@@ -123,6 +123,12 @@ class RuntimeConfigDefaultsContractTest {
                                 Boolean.toString(
                                         ingestion.embeddedImageUploadEnabled())),
                         Map.entry(
+                                "chunkMinTokens",
+                                Integer.toString(ingestion.chunkMinTokens())),
+                        Map.entry(
+                                "chunkMaxTokens",
+                                Integer.toString(ingestion.chunkMaxTokens())),
+                        Map.entry(
                                 "doclingMaxResponseMiB",
                                 Integer.toString(
                                         ingestion.doclingMaxResponseBytes()

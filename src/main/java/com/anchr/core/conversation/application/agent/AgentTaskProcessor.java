@@ -3,6 +3,7 @@ package com.anchr.core.conversation.application.agent;
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
 import com.anchr.core.conversation.application.AnswerIdentity;
 import com.anchr.core.conversation.application.AnswerEventPublisher;
+import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
 import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
@@ -55,6 +56,7 @@ public class AgentTaskProcessor {
     private final Executor executor;
     private final AgentRuntimeSnapshotService runtimeSnapshotService;
     private final AgentCitationPolicy citationPolicy;
+    private final ConversationCitationReasonEnricher citationReasonEnricher;
     private final String owner = UUID.randomUUID().toString();
     private final Map<String, Thread> runningThreads = new ConcurrentHashMap<>();
     private final Set<String> scheduledTaskIds = ConcurrentHashMap.newKeySet();
@@ -152,6 +154,11 @@ public class AgentTaskProcessor {
             }
             List<ConversationCitation> citations = citationMapper.mapFromSearchResults(selected);
             AgentCitationIndexPlan.apply(citations, rendered.references());
+            // Citation reason generation is post-processing, outside the Agent workflow budget.
+            // Renew the task claim first because final answer generation may already have consumed
+            // most of the current lease window.
+            renew(task);
+            enrichCitationReasons(task, request, rendered.answer(), citations);
             String citationsJson = turnCodec.serializeCitations(citations);
             complete(task, rendered.answer(), citationsJson, citations,
                     evidence.size(), rendered.references().size());
@@ -819,6 +826,19 @@ public class AgentTaskProcessor {
         for (JsonNode n : root.path("assets"))
             assets.add(new AssetRef(n.path("assetId").asText(), n.path("kbId").asText(), n.path("fileName").asText()));
         return new SummaryRequest(assets, root.path("instruction").asText(), root.path("language").asText("中文"));
+    }
+
+    private void enrichCitationReasons(AgentTask task,
+                                       SummaryRequest request,
+                                       String answer,
+                                       List<ConversationCitation> citations) {
+        ConversationTurn turn = conversationRepository
+                .findTurn(task.getSessionId(), task.getTurnId())
+                .orElse(null);
+        String question = turn != null && StringUtils.hasText(turn.getQuery())
+                ? turn.getQuery() : request.instruction();
+        String rewrittenQuery = turn == null ? null : turn.getRewrittenQuery();
+        citationReasonEnricher.enrich(question, rewrittenQuery, answer, citations);
     }
 
     private record AssetRef(String assetId, String kbId, String fileName) {

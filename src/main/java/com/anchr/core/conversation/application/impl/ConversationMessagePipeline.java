@@ -2,16 +2,13 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
-import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
-import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
-import com.anchr.core.conversation.application.model.ConversationCitationReasonRequest;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
@@ -20,7 +17,6 @@ import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
-import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -41,8 +37,6 @@ public class ConversationMessagePipeline {
     private final ConversationCitationMapper conversationCitationMapper;
     private final ConversationResultCardMapper conversationResultCardMapper;
     private final AnswerGenerationService answerGenerationService;
-    private final ConversationTurnCodec conversationTurnCodec;
-    private final ConversationRetrievalAcl conversationRetrievalAcl;
 
     public ConversationMessagePipelineResult execute(String sessionId, ConversationMessageRequestDTO request) {
         return execute(sessionId, request, ConversationProgressListener.NOOP);
@@ -98,12 +92,6 @@ public class ConversationMessagePipeline {
                 answerGenerationResult.getAnswerInputSegmentIds(),
                 AnswerStatus.from(answerGenerationResult)
         );
-        enrichCitationReasons(
-                request.getQuery().trim(),
-                rewriteResult.getRewrittenQuery(),
-                answerGenerationResult.getAnswerText(),
-                answerCitations
-        );
         return new ConversationMessagePipelineResult(
                 rewriteResult,
                 retrievalResult,
@@ -111,42 +99,6 @@ public class ConversationMessagePipeline {
                 answerCitations,
                 answerGenerationResult
         );
-    }
-
-    private void enrichCitationReasons(String question,
-                                       String rewrittenQuery,
-                                       String answer,
-                                       List<ConversationCitation> citations) {
-        if (citations == null || citations.isEmpty()) {
-            return;
-        }
-        List<ConversationTurnDTO.CitationDTO> groups = conversationTurnCodec.toCitationDTOs(citations);
-        ConversationCitationReasonRequest reasonRequest = new ConversationCitationReasonRequest(
-                question,
-                rewrittenQuery,
-                answer,
-                groups.stream().map(group -> new ConversationCitationReasonRequest.CitationGroup(
-                        group.getCitationIndex(),
-                        group.getAssetId(),
-                        group.getChunks().stream().map(chunk -> new ConversationCitationReasonRequest.CitationChunk(
-                                chunk.getSegmentId(),
-                                chunk.getContent(),
-                                chunk.getWhy() == null ? null : chunk.getWhy().getScore(),
-                                chunk.getWhy() == null ? List.of() : chunk.getWhy().getHitSources(),
-                                chunk.getWhy() == null ? null : chunk.getWhy().getMatchSummary()
-                        )).toList()
-                )).toList()
-        );
-        Map<String, String> reasons = conversationRetrievalAcl.generateCitationReasons(reasonRequest);
-        for (ConversationCitation citation : citations) {
-            if (citation == null || citation.getWhy() == null || !StringUtils.hasText(citation.getSegmentId())) {
-                continue;
-            }
-            String reason = reasons.get(citation.getSegmentId());
-            if (StringUtils.hasText(reason)) {
-                citation.getWhy().setReason(reason);
-            }
-        }
     }
 
     private List<ConversationCitation> filterEffectiveCitations(List<ConversationCitation> candidateCitations,

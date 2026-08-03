@@ -34,6 +34,8 @@ class RuntimeConfigCatalogTest {
                 .containsEntry(AgentRuntimeConfigKey.SUMMARY_MAX_DOCUMENTS, "3");
         assertThat(catalog.defaults(RuntimeConfigType.INGESTION))
                 .containsEntry(IngestionRuntimeConfigKey.CLAIM_BATCH_SIZE, "32")
+                .containsEntry(IngestionRuntimeConfigKey.CHUNK_MIN_TOKENS, "200")
+                .containsEntry(IngestionRuntimeConfigKey.CHUNK_MAX_TOKENS, "1200")
                 .containsEntry(IngestionRuntimeConfigKey.DOCLING_MAX_RESPONSE_MIB, "256");
         assertThat(catalog.defaults(RuntimeConfigType.OUTBOX))
                 .containsEntry(OutboxRuntimeConfigKey.RETENTION_DAYS, "90");
@@ -94,5 +96,14 @@ class RuntimeConfigCatalogTest {
                 catalog.validateResolved(RuntimeConfigType.AGENT, agent))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("summaryBatchChars must not exceed summaryMaxChars");
+
+        LinkedHashMap<RuntimeConfigKey, String> ingestion =
+                new LinkedHashMap<>(catalog.defaults(RuntimeConfigType.INGESTION));
+        ingestion.put(IngestionRuntimeConfigKey.CHUNK_MIN_TOKENS, "1201");
+
+        assertThatThrownBy(() ->
+                catalog.validateResolved(RuntimeConfigType.INGESTION, ingestion))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("chunkMinTokens must not exceed chunkMaxTokens");
     }
 }

@@ -201,6 +201,8 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                             item,
                             asset,
                             runtimeConfig.embeddedImageUploadEnabled(),
+                            runtimeConfig.chunkMinTokens(),
+                            runtimeConfig.chunkMaxTokens(),
                             runtimeConfig.doclingMaxResponseBytes());
             IngestionParseStage.ParsedJob parsedJob = parseStage.parse(
                     parseContext,

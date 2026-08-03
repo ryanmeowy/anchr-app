@@ -318,6 +318,8 @@ class IngestionTaskProcessorImplTest {
                         "INGESTION.parseStageTimeoutMinutes", "1",
                         "INGESTION.stageMaxRetries", "2",
                         "INGESTION.embeddingMinIntervalMs", "0",
+                        "INGESTION.chunkMinTokens", "300",
+                        "INGESTION.chunkMaxTokens", "900",
                         "INGESTION.embeddedImageUploadEnabled", "true")));
         IngestionTaskItem item = runningItem();
         Asset asset = asset();
@@ -378,6 +380,8 @@ class IngestionTaskProcessorImplTest {
 
         verify(ingestionDoclingAcl).submitJob(request.capture(), anyInt());
         assertThat(request.getValue().contractVersion()).isEqualTo(3);
+        assertThat(request.getValue().options().chunkMinTokens()).isEqualTo(300);
+        assertThat(request.getValue().options().chunkMaxTokens()).isEqualTo(900);
         assertThat(request.getValue().oss().endpoint()).isEqualTo("https://oss");
         assertThat(request.getValue().oss().bucket()).isEqualTo("bucket");
         assertThat(request.getValue().oss().basePath()).isEqualTo(

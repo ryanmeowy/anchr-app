@@ -1,23 +1,19 @@
 package com.anchr.core.conversation.application.impl;
 
-import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
-import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.conversation.application.model.RewriteResult;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.search.domain.model.SegmentType;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -34,8 +30,6 @@ class ConversationMessagePipelineVisualEvidenceTest {
         retrieval.setTopCandidates(List.of(visual, ocr));
         AtomicReference<List<ConversationRetrievalCandidate>> answerInput =
                 new AtomicReference<>();
-        ConversationRetrievalAcl retrievalAcl = mock(ConversationRetrievalAcl.class);
-        when(retrievalAcl.generateCitationReasons(any())).thenReturn(java.util.Map.of());
         ConversationMessagePipeline pipeline = new ConversationMessagePipeline(
                 null,
                 (query, limit, kbIds, modalities, assetIds) -> retrieval,
@@ -44,9 +38,7 @@ class ConversationMessagePipelineVisualEvidenceTest {
                 (userQuery, rewrittenQuery, answerMode, candidates, citations) -> {
                     answerInput.set(candidates);
                     return new AnswerGenerationResult();
-                },
-                new ConversationTurnCodec(new ObjectMapper()),
-                retrievalAcl);
+                });
         ConversationMessageRequestDTO request =
                 new ConversationMessageRequestDTO();
         request.setQuery("question");

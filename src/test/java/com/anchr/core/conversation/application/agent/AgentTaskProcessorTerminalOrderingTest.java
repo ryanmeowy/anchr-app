@@ -3,6 +3,7 @@ package com.anchr.core.conversation.application.agent;
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
 import com.anchr.core.conversation.application.AnswerEventPublisher;
 import com.anchr.core.conversation.application.AnswerIdentity;
+import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
@@ -10,6 +11,7 @@ import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.domain.model.AgentRun;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
+import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
@@ -38,6 +40,8 @@ class AgentTaskProcessorTerminalOrderingTest {
     private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
     private final AnswerEventPublisher eventPublisher = mock(AnswerEventPublisher.class);
     private final AgentRuntimeSnapshotService snapshotService = mock(AgentRuntimeSnapshotService.class);
+    private final ConversationCitationReasonEnricher citationReasonEnricher =
+            mock(ConversationCitationReasonEnricher.class);
     private AgentTaskProcessor processor;
 
     @BeforeEach
@@ -66,7 +70,8 @@ class AgentTaskProcessorTerminalOrderingTest {
                 eventPublisher,
                 Runnable::run,
                 snapshotService,
-                new AgentCitationPolicy());
+                new AgentCitationPolicy(),
+                citationReasonEnricher);
     }
 
     @Test
@@ -140,6 +145,27 @@ class AgentTaskProcessorTerminalOrderingTest {
         verify(traceRepository, never()).saveRun(any());
         verify(snapshotService, never()).publishTask(any(), any());
         verify(eventPublisher, never()).completed(any());
+    }
+
+    @Test
+    void asyncSummaryEnrichesReasonsOutsideWorkflowUsingPersistedTurnQuestion() {
+        AgentTask task = task();
+        ConversationTurn turn = turn();
+        turn.setQuery("用户的原始总结问题");
+        turn.setRewrittenQuery("改写后的总结问题");
+        when(conversationRepository.findTurn("session-1", "turn-1"))
+                .thenReturn(Optional.of(turn));
+        Object request = ReflectionTestUtils.invokeMethod(
+                processor,
+                "parseRequest",
+                "{\"assets\":[],\"instruction\":\"工具生成的总结指令\",\"language\":\"中文\"}");
+        List<ConversationCitation> citations = List.of(new ConversationCitation());
+
+        ReflectionTestUtils.invokeMethod(
+                processor, "enrichCitationReasons", task, request, "最终总结", citations);
+
+        verify(citationReasonEnricher).enrich(
+                "用户的原始总结问题", "改写后的总结问题", "最终总结", citations);
     }
 
     private AgentTask task() {

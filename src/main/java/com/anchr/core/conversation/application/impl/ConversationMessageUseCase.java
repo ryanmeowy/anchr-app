@@ -3,6 +3,7 @@ package com.anchr.core.conversation.application.impl;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
 import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
@@ -58,6 +59,7 @@ public class ConversationMessageUseCase {
     private final AgentRunFinalizer agentRunFinalizer;
     private final AgentTaskProcessor agentTaskProcessor;
     private final ConversationAgentTaskDtoAssembler agentTaskAssembler;
+    private final ConversationCitationReasonEnricher citationReasonEnricher;
 
     public ConversationMessageResponseDTO execute(
             String sessionId,
@@ -97,6 +99,11 @@ public class ConversationMessageUseCase {
         meterRegistry.counter("conversation.active.count").increment();
         ConversationExecutionResult executionResult = conversationMessageOrchestrator.execute(
                 session.getSessionId(), turnId, runId, request, progressListener);
+        citationReasonEnricher.enrich(
+                request.getQuery().trim(),
+                executionResult.rewrittenQuery(),
+                executionResult.answer(),
+                executionResult.citations());
         ConversationTurn turn = buildTurn(
                 session, request, answerMode, executionResult, turnId, requestStartedAt);
         String generatedTitle = autoGenerateTitle

@@ -14,6 +14,7 @@ import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
 import com.anchr.core.conversation.application.agent.AgentWorkflow;
 import com.anchr.core.conversation.application.ConversationIntentRouter;
 import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
@@ -148,10 +149,11 @@ class ConversationServiceImplTest {
                 conversationRetrievalOrchestrator,
                 new ConversationCitationMapper(),
                 new ConversationResultCardMapper(),
-                answerGenerationService,
-                conversationTurnCodec,
-                conversationRetrievalAcl
+                answerGenerationService
         );
+        ConversationCitationReasonEnricher citationReasonEnricher =
+                new ConversationCitationReasonEnricher(
+                        conversationTurnCodec, conversationRetrievalAcl);
         lenient().when(conversationIntentRouter.route(any(), any())).thenReturn(new ConversationIntentResult(
                 ConversationIntentType.KB_QUERY, 1.0D, "test", ConversationIntentSource.MODEL, false));
         ConversationMessageOrchestrator orchestrator = new ConversationMessageOrchestrator(
@@ -181,7 +183,8 @@ class ConversationServiceImplTest {
                 transactionTemplate,
                 agentRunFinalizer,
                 agentTaskProcessor,
-                taskAssembler);
+                taskAssembler,
+                citationReasonEnricher);
         service = new ConversationServiceImpl(
                 new ConversationSessionUseCase(
                         repository,
@@ -267,6 +270,44 @@ class ConversationServiceImplTest {
                 List.of());
         assertThat(repository.findRecentTurns(session.getSessionId(), 1).getFirst().getQuery())
                 .isEqualTo("对话框里的原始问题");
+    }
+
+    @Test
+    void createMessage_shouldEnrichAgentCitationReasonBeforeResponseAndPersistence() {
+        ConversationMessageOrchestrator agentOrchestrator = mock(ConversationMessageOrchestrator.class);
+        ConversationCitation citation = new ConversationCitation();
+        citation.setSegmentId("seg-agent-1");
+        citation.setAssetId("asset-agent-1");
+        citation.setAssetCitationIndex(1);
+        citation.setSegmentCitationIndex(1);
+        citation.setContent("Agent 使用的证据正文");
+        citation.setWhy(ConversationCitation.CitationWhy.builder()
+                .matchSummary("语义匹配")
+                .build());
+        when(agentOrchestrator.execute(any(), any(), any(), any(), any()))
+                .thenReturn(new ConversationExecutionResult(
+                        null, true, null, "Agent 回答 [1-1]", AnswerStatus.ANSWERED,
+                        null, List.of(citation), List.of(), null, "run-1",
+                        ConversationExecutionMode.AGENT, null));
+        when(conversationRetrievalAcl.generateCitationReasons(any()))
+                .thenReturn(Map.of("seg-agent-1", "该段直接支持 Agent 回答。"));
+        ConversationServiceImpl agentService = buildService(agentOrchestrator);
+        ConversationSessionDTO session = agentService.createSession(new ConversationCreateRequestDTO());
+        ConversationMessageRequestDTO request = buildMessageRequest("Agent 为什么这样回答");
+        request.setAgentEnabled(true);
+
+        ConversationMessageResponseDTO response =
+                agentService.createMessage(session.getSessionId(), request);
+
+        assertThat(response.getCitations())
+                .flatExtracting(ConversationTurnDTO.CitationDTO::getChunks)
+                .extracting(chunk -> chunk.getWhy().getReason())
+                .containsExactly("该段直接支持 Agent 回答。");
+        assertThat(agentService.listMessages(session.getSessionId(), 20, null).getTurns())
+                .flatExtracting(ConversationTurnDTO::getCitations)
+                .flatExtracting(ConversationTurnDTO.CitationDTO::getChunks)
+                .extracting(chunk -> chunk.getWhy().getReason())
+                .containsExactly("该段直接支持 Agent 回答。");
     }
 
     @Test
@@ -1107,7 +1148,9 @@ class ConversationServiceImplTest {
                         transactionTemplate,
                         agentRunFinalizer,
                         agentTaskProcessor,
-                        taskAssembler),
+                        taskAssembler,
+                        new ConversationCitationReasonEnricher(
+                                codec, conversationRetrievalAcl)),
                 new ConversationHistoryQuery(
                         repository,
                         agentTaskRepository,

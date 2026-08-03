@@ -57,13 +57,19 @@ final class IngestionParseStage {
     ParseRunContext createContext(IngestionTaskItem item,
                                   Asset asset,
                                   boolean embeddedImageUploadEnabled,
+                                  int chunkMinTokens,
+                                  int chunkMaxTokens,
                                   int doclingMaxResponseBytes) {
         long generation = requireTargetIndexGeneration(item);
         IngestionStorageTarget storageTarget = embeddedImageUploadEnabled
                 ? ingestionStorageAcl.findTarget(asset.getId(), generation).orElse(null)
                 : null;
         IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
-                asset, embeddedImageUploadEnabled, storageTarget).validated();
+                asset,
+                embeddedImageUploadEnabled,
+                chunkMinTokens,
+                chunkMaxTokens,
+                storageTarget).validated();
         return new ParseRunContext(
                 IngestionParseIdentity.requestId(item.getTaskId(), item.getId(), generation),
                 IngestionParseIdentity.sourceRevision(asset),
