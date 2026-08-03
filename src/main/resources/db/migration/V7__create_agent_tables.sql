@@ -2,7 +2,6 @@ create table if not exists agent_run (
     run_id varchar(64) primary key comment 'Agent 运行标识',
     session_id varchar(64) not null comment '会话标识',
     turn_id varchar(64) null comment '对话轮次标识',
-    workflow_version varchar(64) not null comment '工作流版本',
     status varchar(32) not null comment '运行状态',
     current_step varchar(64) null comment '当前步骤',
     step_count int not null default 0 comment '步骤数量',
