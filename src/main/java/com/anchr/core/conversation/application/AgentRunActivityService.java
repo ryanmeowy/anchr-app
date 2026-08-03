@@ -19,12 +19,13 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.AGENT_ACTIVITY_MAX_STEPS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.AGENT_ACTIVITY_DEFAULT_STEP_LIMIT;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.SINGLE_USER_ID;
+
 @Service
 @RequiredArgsConstructor
 public class AgentRunActivityService {
-    private static final int MAX_STEPS = 50;
-    private static final String SINGLE_USER_ID = "single_user";
-
     private final AgentTraceRepository traceRepository;
     private final ConversationRepository conversationRepository;
     private final ObjectMapper objectMapper;
@@ -47,11 +48,11 @@ public class AgentRunActivityService {
 
         List<AgentRunActivityDTO.StepDTO> steps = new ArrayList<>(traceRepository.findSteps(runId).stream()
                 .sorted(Comparator.comparingInt(AgentStep::getStepOrder))
-                .limit(MAX_STEPS)
+                .limit(AGENT_ACTIVITY_MAX_STEPS)
                 .map(this::toStep)
                 .toList());
         boolean hasFinalStep = steps.stream().anyMatch(step -> "FINAL".equals(step.getType()));
-        if (isTerminal(dto.getStatus()) && !hasFinalStep && steps.size() < MAX_STEPS) {
+        if (isTerminal(dto.getStatus()) && !hasFinalStep && steps.size() < AGENT_ACTIVITY_MAX_STEPS) {
             steps.add(finalStep(run, steps));
         }
         dto.setStepCount(steps.size());
@@ -64,7 +65,7 @@ public class AgentRunActivityService {
     }
 
     public List<AgentRunSummaryDTO> listRecoverable(int limit) {
-        int boundedLimit = Math.max(1, Math.min(limit, 20));
+        int boundedLimit = Math.max(1, Math.min(limit, AGENT_ACTIVITY_DEFAULT_STEP_LIMIT));
         return traceRepository.findRecoverableRuns(SINGLE_USER_ID, boundedLimit).stream()
                 .map(this::toSummary)
                 .toList();

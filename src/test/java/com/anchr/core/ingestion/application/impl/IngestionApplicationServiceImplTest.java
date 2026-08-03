@@ -8,6 +8,8 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.IngestionApplicationService;
 import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
+import com.anchr.core.ingestion.application.acl.IngestionActivityAcl;
+import com.anchr.core.ingestion.application.constant.IngestionConstant;
 import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
@@ -17,7 +19,6 @@ import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
-import com.anchr.core.ingestion.application.acl.IngestionActivityAcl;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
@@ -43,8 +44,8 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
@@ -172,6 +173,61 @@ class IngestionApplicationServiceImplTest {
         assertThat(item.getDuplicateAssetId()).isNull();
         assertThat(item.getTargetIndexGeneration()).isEqualTo(1L);
         verify(assetRepository).save(any());
+    }
+
+    @Test
+    void createTask_shouldRejectRegularFileLargerThanBackendLimit() {
+        BusinessException error = assertThrows(BusinessException.class, () ->
+                service.createTask("kb-1", command(
+                        DedupeStrategy.SKIP,
+                        IngestionSourceType.UPLOAD,
+                        "PDF",
+                        IngestionConstant.MAX_FILE_SIZE_BYTES + 1)));
+
+        assertThat(error.getError()).isEqualTo(ApiError.UPLOAD_TOO_LARGE);
+        verifyNoInteractions(knowledgeBaseService);
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void createTask_shouldUseSeparateImageFileLimit() {
+        long imageSize = IngestionConstant.MAX_IMAGE_FILE_SIZE_BYTES;
+
+        IngestionTask task = service.createTask("kb-1", command(
+                DedupeStrategy.SKIP,
+                IngestionSourceType.UPLOAD,
+                "IMAGE",
+                imageSize)).task();
+
+        assertThat(task.getItems()).hasSize(1);
+        verify(assetRepository).save(argThat(asset -> asset.getSizeBytes().equals(imageSize)));
+    }
+
+    @Test
+    void createTask_shouldRejectImageLargerThanBackendImageLimit() {
+        BusinessException error = assertThrows(BusinessException.class, () ->
+                service.createTask("kb-1", command(
+                        DedupeStrategy.SKIP,
+                        IngestionSourceType.UPLOAD,
+                        "IMAGE",
+                        IngestionConstant.MAX_IMAGE_FILE_SIZE_BYTES + 1)));
+
+        assertThat(error.getError()).isEqualTo(ApiError.UPLOAD_TOO_LARGE);
+        verifyNoInteractions(knowledgeBaseService);
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void createTask_shouldRejectNegativeDeclaredFileSize() {
+        BusinessException error = assertThrows(BusinessException.class, () ->
+                service.createTask("kb-1", command(
+                        DedupeStrategy.SKIP,
+                        IngestionSourceType.UPLOAD,
+                        "PDF",
+                        -1L)));
+
+        assertThat(error.getError()).isEqualTo(ApiError.INVALID_REQUEST);
+        verifyNoInteractions(knowledgeBaseService);
     }
 
     @Test
@@ -698,6 +754,26 @@ class IngestionApplicationServiceImplTest {
                         1024L,
                         "objects/mysql.pdf",
                         fileHash
+                ))
+        );
+    }
+
+    private IngestionApplicationService.IngestionCreateCommand command(DedupeStrategy strategy,
+                                                                       IngestionSourceType sourceType,
+                                                                       String fileType,
+                                                                       long sizeBytes) {
+        return new IngestionApplicationService.IngestionCreateCommand(
+                null,
+                sourceType,
+                strategy,
+                List.of(new IngestionApplicationService.IngestionCreateItemCommand(
+                        "upload." + fileType.toLowerCase(),
+                        "Upload",
+                        fileType,
+                        "IMAGE".equals(fileType) ? "image/png" : "application/pdf",
+                        sizeBytes,
+                        "objects/upload",
+                        "hash-size"
                 ))
         );
     }

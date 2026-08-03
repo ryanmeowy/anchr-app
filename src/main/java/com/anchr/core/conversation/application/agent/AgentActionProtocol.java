@@ -12,10 +12,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_PROTOCOL_ERRORS;
+
 @Component
 final class AgentActionProtocol {
-    private static final int MAX_PROTOCOL_ERRORS = 2;
-
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 

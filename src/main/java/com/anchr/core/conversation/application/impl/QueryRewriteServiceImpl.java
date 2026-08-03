@@ -16,12 +16,19 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static com.anchr.core.conversation.application.constant.ConversationConstant.DEFAULT_TIMEOUT;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.QUERY_REWRITE_CONTEXT_TURN_LIMIT;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.QUERY_REWRITE_MAX_CONTEXT_CHARS;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.QUERY_REWRITE_MAX_FIELD_CHARS;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.QUERY_REWRITE_MAX_QUERY_CHARS;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.STRUCTURED_OUTPUT_MAX_TOKENS;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.STRUCTURED_OUTPUT_TEMPERATURE;
 
 /**
  * Default query rewrite service.
@@ -31,11 +38,7 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class QueryRewriteServiceImpl implements QueryRewriteService {
 
-    private static final int CONTEXT_TURN_LIMIT = 5;
-    private static final int MAX_CONTEXT_CHARS = 6_000;
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
-    private static final int MAX_CONTEXT_FIELD_CHARS = 1_200;
-    private static final int MAX_LATEST_QUERY_CHARS = 2_000;
     private static final String SYSTEM_PROMPT = """
             你是 Anchr 的知识库检索 Query 重写器。
             你的任务是结合多轮对话历史，将最后一条用户消息改写为适合知识库检索的独立、单行查询。
@@ -65,10 +68,14 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 meterRegistry.counter("query.rewrite.fallback.count").increment();
                 return fallback;
             }
-            List<ConversationTurn> recentTurns = conversationRepository.findRecentTurns(sessionId, CONTEXT_TURN_LIMIT);
+            List<ConversationTurn> recentTurns = conversationRepository.findRecentTurns(
+                    sessionId, QUERY_REWRITE_CONTEXT_TURN_LIMIT);
             String raw = generationPort.generate(
                     buildMessages(latestQuery.trim(), recentTurns),
-                    new GenerationOptions(0.0D, 300, Duration.ofSeconds(30))
+                    new GenerationOptions(
+                            STRUCTURED_OUTPUT_TEMPERATURE,
+                            STRUCTURED_OUTPUT_MAX_TOKENS,
+                            DEFAULT_TIMEOUT)
             );
             RewriteResult parsed = parseRewriteResult(latestQuery.trim(), raw);
             if (parsed.isFallbackUsed()) {
@@ -171,7 +178,7 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 continue;
             }
             int turnChars = turnMessages.stream().mapToInt(message -> message.content().length()).sum();
-            if (contextChars + turnChars > MAX_CONTEXT_CHARS) {
+            if (contextChars + turnChars > QUERY_REWRITE_MAX_CONTEXT_CHARS) {
                 break;
             }
             selectedTurns.add(turnMessages);
@@ -179,7 +186,8 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
         }
         Collections.reverse(selectedTurns);
         selectedTurns.forEach(messages::addAll);
-        messages.add(new ConversationModelMessage("user", truncate(latestQuery, MAX_LATEST_QUERY_CHARS)));
+        messages.add(new ConversationModelMessage(
+                "user", truncate(latestQuery, QUERY_REWRITE_MAX_QUERY_CHARS)));
         return messages;
     }
 
@@ -195,7 +203,8 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
 
     private void addMessage(List<ConversationModelMessage> messages, String role, String content) {
         if (StringUtils.hasText(content)) {
-            messages.add(new ConversationModelMessage(role, truncate(content, MAX_CONTEXT_FIELD_CHARS)));
+            messages.add(new ConversationModelMessage(
+                    role, truncate(content, QUERY_REWRITE_MAX_FIELD_CHARS)));
         }
     }
 

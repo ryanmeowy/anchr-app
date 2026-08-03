@@ -6,13 +6,13 @@ import com.anchr.core.conversation.domain.model.AgentStep;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
+import java.util.Map;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-
-import java.util.Map;
-import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
@@ -56,7 +56,7 @@ public class AgentTraceRecorder {
         try { repository.saveStep(step); }
         catch (Exception e) { log.warn("Agent step trace failed, runId={}, step={}", state.getRunRequest().runId(), type, e); }
         meterRegistry.timer("agent.step.latency", "step", type.name()).record(
-                java.time.Duration.ofMillis(Math.max(0L, latencyMs)));
+                Duration.ofMillis(Math.max(0L, latencyMs)));
         if (safeUsage.totalTokens() > 0) {
             meterRegistry.summary("agent.model.tokens", "step", type.name(), "type", "total")
                     .record(safeUsage.totalTokens());

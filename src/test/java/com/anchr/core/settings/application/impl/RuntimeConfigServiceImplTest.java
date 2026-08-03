@@ -4,25 +4,25 @@ import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.settings.application.support.RuntimeConfigCatalog;
 import com.anchr.core.settings.application.support.RuntimeConfigResolver;
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigEntry;
 import com.anchr.core.settings.domain.model.RuntimeConfigKey;
-import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.settings.domain.repository.RuntimeConfigRepository;
 import com.anchr.core.settings.infrastructure.cache.RuntimeConfigCache;
 import com.anchr.core.settings.interfaces.rest.dto.RuntimeConfigParamDTO;
 import com.anchr.core.settings.interfaces.rest.dto.RuntimeConfigUpdateRequestDTO;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
-
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -91,7 +91,7 @@ class RuntimeConfigServiceImplTest {
         verify(cache).replaceAfterDatabaseCommit(
                 RuntimeConfigType.AGENT,
                 stored,
-                java.util.Set.of(
+                Set.of(
                         AgentRuntimeConfigKey.ENABLED,
                         AgentRuntimeConfigKey.MAX_STEPS));
         assertThat(updated.type()).isEqualTo("AGENT");

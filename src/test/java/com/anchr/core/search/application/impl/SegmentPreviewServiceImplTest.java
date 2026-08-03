@@ -2,6 +2,8 @@ package com.anchr.core.search.application.impl;
 
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
+import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.model.BboxInfo;
 import com.anchr.core.kb.application.api.model.DocumentSummary;
 import com.anchr.core.kb.application.api.model.KnowledgeBaseSummary;
@@ -12,9 +14,12 @@ import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchObjectStoragePort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
-import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
-import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.search.interfaces.rest.dto.CitationChunkSnapshotDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewRequestDTO;
+import com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,14 +28,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Optional;
-import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -79,8 +81,8 @@ class SegmentPreviewServiceImplTest {
 
         assertThat(result.getContent()).isEqualTo("Original content");
         assertThat(result.getCitationContext().getCitationReason()).isEqualTo("预先生成的引用理由");
-        ArgumentCaptor<com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO> previewCaptor =
-                ArgumentCaptor.forClass(com.anchr.core.search.interfaces.rest.dto.PreviewSegmentDTO.class);
+        ArgumentCaptor<PreviewSegmentDTO> previewCaptor =
+                ArgumentCaptor.forClass(PreviewSegmentDTO.class);
         ArgumentCaptor<PreviewRequestDTO> requestCaptor = ArgumentCaptor.forClass(PreviewRequestDTO.class);
         verify(activityEventService).recordCitationOpened(previewCaptor.capture(), requestCaptor.capture());
         assertThat(previewCaptor.getValue().getContent()).isEqualTo("Original content");
@@ -217,9 +219,9 @@ class SegmentPreviewServiceImplTest {
                 Optional.of(document("asset-1", null, null, null, 4L)));
 
         assertThatThrownBy(() -> service.getSegmentPreview("seg-1", new PreviewRequestDTO()))
-                .isInstanceOf(com.anchr.core.common.exception.BusinessException.class)
-                .extracting(error -> ((com.anchr.core.common.exception.BusinessException) error).getError())
-                .isEqualTo(com.anchr.core.common.exception.ApiError.SEGMENT_NOT_FOUND);
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getError())
+                .isEqualTo(ApiError.SEGMENT_NOT_FOUND);
 
         verifyNoInteractions(objectStoragePort, activityEventService);
     }

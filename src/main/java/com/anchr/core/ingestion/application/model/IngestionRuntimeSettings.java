@@ -5,6 +5,8 @@ import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import java.time.Duration;
 
 import static com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey.CLAIM_BATCH_SIZE;
+import static com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey.CHUNK_MAX_TOKENS;
+import static com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey.CHUNK_MIN_TOKENS;
 import static com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey.DOCLING_MAX_RESPONSE_MIB;
 import static com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey.EMBEDDED_IMAGE_UPLOAD_ENABLED;
 import static com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey.EMBEDDING_MIN_INTERVAL_MS;
@@ -22,6 +24,8 @@ public record IngestionRuntimeSettings(
         long embeddingMinIntervalMs,
         int embeddingRateLimitMaxAttempts,
         long embeddingRateLimitBackoffMs,
+        int chunkMinTokens,
+        int chunkMaxTokens,
         boolean embeddedImageUploadEnabled,
         int doclingMaxResponseBytes
 ) {
@@ -45,6 +49,8 @@ public record IngestionRuntimeSettings(
                 unit.getLong(
                         RuntimeConfigType.INGESTION,
                         EMBEDDING_RATE_LIMIT_BACKOFF_MS, 5000L),
+                unit.getInt(RuntimeConfigType.INGESTION, CHUNK_MIN_TOKENS, 200),
+                unit.getInt(RuntimeConfigType.INGESTION, CHUNK_MAX_TOKENS, 1200),
                 unit.getBoolean(
                         RuntimeConfigType.INGESTION,
                         EMBEDDED_IMAGE_UPLOAD_ENABLED, false),

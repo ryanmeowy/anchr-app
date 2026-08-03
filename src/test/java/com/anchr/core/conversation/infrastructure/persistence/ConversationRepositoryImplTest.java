@@ -1,28 +1,28 @@
 package com.anchr.core.conversation.infrastructure.persistence;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationSessionStatus;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.inOrder;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationRepositoryImplTest {
@@ -141,7 +141,7 @@ class ConversationRepositoryImplTest {
         legacy.setCreatedAt(1_700_000_000_124L);
         repository.saveTurn(legacy);
 
-        verify(mapper).upsertTurn(org.mockito.ArgumentMatchers.argThat(record ->
+        verify(mapper).upsertTurn(ArgumentMatchers.argThat(record ->
                 "KB_QUERY".equals(record.getIntentType()) && "LEGACY".equals(record.getIntentSource())));
     }
 

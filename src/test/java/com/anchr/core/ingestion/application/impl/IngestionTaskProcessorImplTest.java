@@ -2,6 +2,7 @@ package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.common.model.ParseRequest;
 import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.util.IdGen;
@@ -26,16 +27,10 @@ import com.anchr.core.ingestion.infrastructure.parser.DoclingChunkMapper;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
-import com.anchr.core.testsupport.RuntimeConfigTestUnits;
-import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.application.api.model.RetrievalGenerationWriteReceipt;
+import com.anchr.core.search.domain.model.SegmentType;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +38,14 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -111,7 +114,7 @@ class IngestionTaskProcessorImplTest {
 
         processor.processItem(item);
 
-        var order = org.mockito.Mockito.inOrder(
+        var order = Mockito.inOrder(
                 coordinator,
                 ingestionDoclingAcl,
                 chunkMapper,
@@ -170,7 +173,7 @@ class IngestionTaskProcessorImplTest {
 
         processor.processItem(item);
 
-        verify(ingestionDoclingAcl, org.mockito.Mockito.times(2))
+        verify(ingestionDoclingAcl, Mockito.times(2))
                 .submitJob(any(), anyInt());
         verify(ingestionDoclingAcl).ackJob("failed");
         verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
@@ -255,7 +258,7 @@ class IngestionTaskProcessorImplTest {
         verify(finalizer, never()).activateGeneration(
                 any(), any(), anyInt(), any());
         verify(coordinator).failRunning(
-                org.mockito.ArgumentMatchers.argThat(failed ->
+                ArgumentMatchers.argThat(failed ->
                         failed.getStage() == IngestionStage.INDEX),
                 eq(asset), eq(ApiError.SEARCH_BACKEND_UNAVAILABLE),
                 any(), eq("FAILED"), eq("FAILED"));
@@ -297,7 +300,7 @@ class IngestionTaskProcessorImplTest {
         processor.processItem(item);
 
         verify(coordinator).failRunning(
-                org.mockito.ArgumentMatchers.argThat(failed ->
+                ArgumentMatchers.argThat(failed ->
                         failed.getStage() == IngestionStage.EMBED),
                 eq(asset),
                 eq(ApiError.EMBEDDING_FAILED),
@@ -318,6 +321,8 @@ class IngestionTaskProcessorImplTest {
                         "INGESTION.parseStageTimeoutMinutes", "1",
                         "INGESTION.stageMaxRetries", "2",
                         "INGESTION.embeddingMinIntervalMs", "0",
+                        "INGESTION.chunkMinTokens", "300",
+                        "INGESTION.chunkMaxTokens", "900",
                         "INGESTION.embeddedImageUploadEnabled", "true")));
         IngestionTaskItem item = runningItem();
         Asset asset = asset();
@@ -370,14 +375,15 @@ class IngestionTaskProcessorImplTest {
                 .thenReturn(receipt());
         when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
                 .thenReturn(true);
-        org.mockito.ArgumentCaptor<com.anchr.core.common.model.ParseRequest> request =
-                org.mockito.ArgumentCaptor.forClass(
-                        com.anchr.core.common.model.ParseRequest.class);
+        ArgumentCaptor<ParseRequest> request =
+                ArgumentCaptor.forClass(ParseRequest.class);
 
         processor.processItem(item);
 
         verify(ingestionDoclingAcl).submitJob(request.capture(), anyInt());
         assertThat(request.getValue().contractVersion()).isEqualTo(3);
+        assertThat(request.getValue().options().chunkMinTokens()).isEqualTo(300);
+        assertThat(request.getValue().options().chunkMaxTokens()).isEqualTo(900);
         assertThat(request.getValue().oss().endpoint()).isEqualTo("https://oss");
         assertThat(request.getValue().oss().bucket()).isEqualTo("bucket");
         assertThat(request.getValue().oss().basePath()).isEqualTo(
@@ -390,7 +396,7 @@ class IngestionTaskProcessorImplTest {
                         "ciphertext", "cipher",
                         "tag", "tag",
                         "expiration", "expiry"));
-        var order = org.mockito.Mockito.inOrder(
+        var order = Mockito.inOrder(
                 ingestionStorageAcl, ingestionDoclingAcl);
         order.verify(ingestionStorageAcl)
                 .issueTemporaryCredential(target, "asset-1", 1L);
@@ -411,7 +417,7 @@ class IngestionTaskProcessorImplTest {
         processor.failInterruptedItemsAfterRestart();
 
         verify(coordinator).failRunning(
-                eq(item), eq(asset), eq(com.anchr.core.common.exception.ApiError.INTERNAL_ERROR),
+                eq(item), eq(asset), eq(ApiError.INTERNAL_ERROR),
                 any(), eq("FAILED"), eq("FAILED"));
         verify(ingestionDoclingAcl, never()).submitJob(any(), anyInt());
     }

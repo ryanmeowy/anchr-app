@@ -5,12 +5,18 @@ import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
+import com.anchr.core.conversation.application.AnswerEvent;
+import com.anchr.core.conversation.application.AnswerEventBroker;
+import com.anchr.core.conversation.application.AnswerIdentity;
+import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
+import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.impl.ConversationMessageUseCase;
 import com.anchr.core.conversation.application.model.AgentProgressEvent;
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -18,6 +24,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -25,6 +32,10 @@ import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.UUID;
+
+import static com.anchr.core.conversation.application.constant.AnswerStreamConstant.CONVERSATION_TIMEOUT_MILLIS;
+import static com.anchr.core.conversation.application.constant.AnswerStreamConstant.PADDING;
 
 /**
  * Spring MVC transport adapter for the synchronous Conversation message use case.
@@ -33,33 +44,49 @@ import java.util.concurrent.atomic.AtomicReference;
 @Component
 public class ConversationMessageStreamAdapter {
 
-    static final long STREAM_TIMEOUT_MILLIS = 120_000L;
-    static final String TRACE_PADDING = " ".repeat(2_048);
-    static final int ANSWER_CHUNK_SIZE = 48;
-
     private final ConversationMessageUseCase messageUseCase;
     private final Executor streamExecutor;
     private final AgentRuntimeSnapshotService agentRuntimeSnapshotService;
+    private final AnswerEventBroker answerEventBroker;
+    private final ConversationTurnCodec turnCodec;
 
     public ConversationMessageStreamAdapter(
             ConversationMessageUseCase messageUseCase,
             @Qualifier("streamEventExecutor") Executor streamExecutor,
-            AgentRuntimeSnapshotService agentRuntimeSnapshotService
+            AgentRuntimeSnapshotService agentRuntimeSnapshotService,
+            AnswerEventBroker answerEventBroker,
+            ConversationTurnCodec turnCodec
     ) {
         this.messageUseCase = messageUseCase;
         this.streamExecutor = streamExecutor;
         this.agentRuntimeSnapshotService = agentRuntimeSnapshotService;
+        this.answerEventBroker = answerEventBroker;
+        this.turnCodec = turnCodec;
     }
 
     public SseEmitter stream(
             String sessionId,
             ConversationMessageRequestDTO request
     ) {
-        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        SseEmitter emitter = new SseEmitter(CONVERSATION_TIMEOUT_MILLIS);
         AtomicBoolean clientDisconnected = new AtomicBoolean(false);
         AtomicReference<String> activeRunId = new AtomicReference<>();
-        emitter.onError(error -> clientDisconnected.set(true));
-        emitter.onTimeout(() -> clientDisconnected.set(true));
+        String channelId = UUID.randomUUID().toString();
+        AtomicReference<AnswerIdentity> identityRef = new AtomicReference<>(
+                new AnswerIdentity(channelId, null, sessionId, null, null, 1));
+        AtomicReference<ConversationMessageResponseDTO> responseRef = new AtomicReference<>();
+        AtomicReference<AnswerEventBroker.Subscription> subscriptionRef = new AtomicReference<>();
+        Runnable disconnect = () -> {
+            clientDisconnected.set(true);
+            AnswerEventBroker.Subscription subscription = subscriptionRef.get();
+            if (subscription != null) subscription.close();
+        };
+        emitter.onCompletion(disconnect);
+        emitter.onError(error -> disconnect.run());
+        emitter.onTimeout(disconnect);
+        AnswerEventBroker.Subscription subscription = answerEventBroker.subscribe(channelId, event ->
+                sendAnswerEvent(emitter, event, responseRef, clientDisconnected));
+        subscriptionRef.set(subscription);
         RequestUserContext context = UserContextHolder.get();
         streamExecutor.execute(() -> {
             UserContextHolder.set(context);
@@ -68,7 +95,7 @@ public class ConversationMessageStreamAdapter {
                         sessionId,
                         request,
                         progressListener(
-                                request, emitter, clientDisconnected, activeRunId));
+                                request, emitter, clientDisconnected, activeRunId, identityRef));
                 if (StringUtils.hasText(response.getAgentRunId())) {
                     agentRuntimeSnapshotService.publishMessage(
                             response.getAgentRunId(), response);
@@ -79,26 +106,23 @@ public class ConversationMessageStreamAdapter {
                                     + "sessionId={}, runId={}",
                             sessionId,
                             activeRunId.get());
-                    return;
                 }
-                streamAnswer(emitter, response.getAnswer());
-                sendEvent(
-                        emitter,
-                        "citations",
-                        response.getCitations() == null
-                                ? List.of() : response.getCitations());
-                sendEvent(emitter, "done", doneEvent(response));
-                emitter.complete();
+                AnswerIdentity identity = ensureIdentity(identityRef, channelId, sessionId, response);
+                responseRef.set(response);
+                answerEventBroker.snapshot(identity, response.getAnswer());
+                answerEventBroker.citations(identity, toDomainCitations(response.getCitations()));
+                answerEventBroker.completed(identity);
             } catch (SseClientDisconnectedException exception) {
                 log.debug("SSE client disconnected, sessionId={}, runId={}",
                         sessionId, activeRunId.get());
             } catch (BusinessException exception) {
+                String errorCode = exception.getError() == null
+                        ? ApiError.INTERNAL_ERROR.name() : exception.getError().name();
                 sendError(
                         emitter,
-                        exception.getError() == null
-                                ? ApiError.INTERNAL_ERROR.name()
-                                : exception.getError().name(),
+                        errorCode,
                         exception.getMessage());
+                answerEventBroker.failed(identityRef.get(), errorCode);
             } catch (Exception exception) {
                 if (isClientDisconnect(exception)) {
                     clientDisconnected.set(true);
@@ -109,8 +133,10 @@ public class ConversationMessageStreamAdapter {
                             emitter,
                             ApiError.INTERNAL_ERROR.name(),
                             ApiError.INTERNAL_ERROR.getMessage());
+                    answerEventBroker.failed(identityRef.get(), ApiError.INTERNAL_ERROR.name());
                 }
             } finally {
+                subscription.close();
                 UserContextHolder.clear();
             }
         });
@@ -121,11 +147,18 @@ public class ConversationMessageStreamAdapter {
             ConversationMessageRequestDTO request,
             SseEmitter emitter,
             AtomicBoolean clientDisconnected,
-            AtomicReference<String> activeRunId
+            AtomicReference<String> activeRunId,
+            AtomicReference<AnswerIdentity> identityRef
     ) {
         return new ConversationProgressListener() {
             @Override
             public void onExecutionStarted(String turnId, String runId) {
+                activeRunId.compareAndSet(null, runId);
+                AnswerIdentity current = identityRef.get();
+                AnswerIdentity identity = new AnswerIdentity(
+                        current.channelId(), turnId, current.sessionId(), null, runId, 1);
+                identityRef.set(identity);
+                answerEventBroker.started(identity);
                 Map<String, Object> initialTrace = new LinkedHashMap<>();
                 initialTrace.put(
                         "stage",
@@ -182,10 +215,104 @@ public class ConversationMessageStreamAdapter {
 
             @Override
             public boolean supportsAnswerStreaming() {
-                // Only the finalized, citation-normalized answer is safe to expose.
-                return false;
+                return true;
+            }
+
+            @Override
+            public void onAnswerDelta(String delta) {
+                if (!StringUtils.hasText(delta)) return;
+                answerEventBroker.delta(identityRef.get(), delta);
+            }
+
+            @Override
+            public void onAnswerReset(String answer) {
+                answerEventBroker.snapshot(identityRef.get(), answer);
             }
         };
+    }
+
+    private AnswerIdentity ensureIdentity(
+            AtomicReference<AnswerIdentity> identityRef,
+            String channelId,
+            String sessionId,
+            ConversationMessageResponseDTO response
+    ) {
+        AnswerIdentity current = identityRef.get();
+        if (StringUtils.hasText(current.answerId())) return current;
+        AnswerIdentity resolved = new AnswerIdentity(
+                channelId, response.getTurnId(), sessionId, null, response.getAgentRunId(), 1);
+        identityRef.set(resolved);
+        answerEventBroker.started(resolved);
+        return resolved;
+    }
+
+    private void sendAnswerEvent(
+            SseEmitter emitter,
+            AnswerEvent event,
+            AtomicReference<ConversationMessageResponseDTO> responseRef,
+            AtomicBoolean clientDisconnected
+    ) {
+        if (clientDisconnected.get()) return;
+        try {
+            switch (event.type()) {
+                case DELTA -> sendEvent(emitter, "delta", answerPayload(event));
+                case SNAPSHOT -> sendEvent(emitter, "answer_reset", answerPayload(event));
+                case CITATIONS -> sendEvent(
+                        emitter, "citations", turnCodec.toCitationDTOs(event.citations()));
+                case COMPLETED -> {
+                    ConversationMessageResponseDTO response = responseRef.get();
+                    if (response != null) sendEvent(emitter, "done", doneEvent(response));
+                    emitter.complete();
+                }
+                case FAILED, CANCELLED -> emitter.complete();
+                case STARTED, PROGRESS -> {
+                    // Trace/progress keeps its existing transport contract.
+                }
+            }
+        } catch (IOException | IllegalStateException exception) {
+            clientDisconnected.set(true);
+        }
+    }
+
+    private Map<String, Object> answerPayload(AnswerEvent event) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (StringUtils.hasText(event.identity().answerId())) {
+            payload.put("answerId", event.identity().answerId());
+        }
+        payload.put("revision", event.identity().revision());
+        payload.put("sequence", event.sequence());
+        payload.put("text", event.text() == null ? "" : event.text());
+        return payload;
+    }
+
+    private List<ConversationCitation> toDomainCitations(
+            List<ConversationTurnDTO.CitationDTO> groups
+    ) {
+        if (groups == null || groups.isEmpty()) return List.of();
+        List<ConversationCitation> citations = new ArrayList<>();
+        for (ConversationTurnDTO.CitationDTO group : groups) {
+            if (group == null || group.getChunks() == null) continue;
+            for (ConversationTurnDTO.CitationChunkDTO chunk : group.getChunks()) {
+                if (chunk == null) continue;
+                ConversationCitation citation = new ConversationCitation();
+                citation.setAssetCitationIndex(group.getCitationIndex());
+                citation.setFileName(group.getFileName());
+                citation.setKbId(group.getKbId());
+                citation.setAssetId(group.getAssetId());
+                citation.setSegmentId(chunk.getSegmentId());
+                citation.setSegmentCitationIndex(chunk.getSegmentIndex());
+                citation.setPageNo(chunk.getPageNo());
+                citation.setChunkOrder(chunk.getChunkOrder());
+                citation.setTitle(chunk.getTitle());
+                citation.setContent(chunk.getContent());
+                citation.setSnippet(chunk.getSnippet());
+                citation.setHitType(chunk.getHitType());
+                citation.setAnchor(chunk.getAnchor());
+                citation.setWhy(chunk.getWhy());
+                citations.add(citation);
+            }
+        }
+        return List.copyOf(citations);
     }
 
     private Map<String, Object> doneEvent(ConversationMessageResponseDTO response) {
@@ -226,7 +353,7 @@ public class ConversationMessageStreamAdapter {
         try {
             emitter.send(SseEmitter.event()
                     .name("trace")
-                    .comment(TRACE_PADDING)
+                    .comment(PADDING)
                     .data(data));
         } catch (IOException exception) {
             throw new SseClientDisconnectedException(exception);
@@ -245,19 +372,6 @@ public class ConversationMessageStreamAdapter {
             sendProgressEvent(emitter, data);
         } catch (SseClientDisconnectedException exception) {
             clientDisconnected.set(true);
-        }
-    }
-
-    private void streamAnswer(SseEmitter emitter, String answer) throws IOException {
-        if (!StringUtils.hasText(answer)) {
-            return;
-        }
-        for (int start = 0; start < answer.length(); start += ANSWER_CHUNK_SIZE) {
-            int end = Math.min(answer.length(), start + ANSWER_CHUNK_SIZE);
-            sendEvent(
-                    emitter,
-                    "delta",
-                    Map.of("text", answer.substring(start, end)));
         }
     }
 
@@ -333,4 +447,5 @@ public class ConversationMessageStreamAdapter {
             super(cause);
         }
     }
+
 }

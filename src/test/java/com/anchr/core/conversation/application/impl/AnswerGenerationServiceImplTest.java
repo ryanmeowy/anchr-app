@@ -1,30 +1,30 @@
 package com.anchr.core.conversation.application.impl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.ConversationGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.testsupport.RuntimeConfigTestUnits;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
-import java.util.Map;
-import java.util.function.Consumer;
-import java.util.concurrent.atomic.AtomicReference;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -450,7 +450,7 @@ class AnswerGenerationServiceImplTest {
 
     @SuppressWarnings("unchecked")
     private org.mockito.ArgumentCaptor<List<ConversationModelMessage>> modelMessagesCaptor() {
-        return org.mockito.ArgumentCaptor.forClass(List.class);
+        return ArgumentCaptor.forClass(List.class);
     }
 
     private ConversationRetrievalCandidate buildCandidate(String segmentId, String snippet) {

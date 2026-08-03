@@ -9,11 +9,11 @@ import com.anchr.core.activity.domain.model.ActivityEventType;
 import com.anchr.core.activity.domain.repository.ActivityEventRepository;
 import com.anchr.core.common.util.IdGen;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -63,7 +63,7 @@ class ActivityEventCitationAnchorTest {
     void findCitation_shouldRestoreCompleteActivityOwnedSnapshot() throws Exception {
         ActivityEventRepository repository = mock(ActivityEventRepository.class);
         ObjectMapper objectMapper = new ObjectMapper();
-        String payload = objectMapper.writeValueAsString(java.util.Map.of(
+        String payload = objectMapper.writeValueAsString(Map.of(
                 "segmentId", "seg-1",
                 "anchor", anchor(7, 31),
                 "chunks", List.of(

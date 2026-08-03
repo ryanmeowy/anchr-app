@@ -5,10 +5,15 @@ import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.ApiErrorResponseWriter;
 import com.anchr.core.common.exception.UploadCleanupPolicy;
+import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 import com.anchr.core.ingestion.interfaces.rest.KnowledgeBaseIngestionController;
 import com.anchr.core.ingestion.interfaces.rest.dto.IngestionTaskCreateRequestDTO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.HashMap;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,11 +22,6 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.method.HandlerMethod;
-
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-import java.util.HashMap;
-import java.util.Map;
 
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -174,7 +174,7 @@ class AccessTokenInterceptorTest {
     private HandlerMethod ingestionListHandler() throws NoSuchMethodException {
         Method method = KnowledgeBaseIngestionController.class.getMethod(
                 "listTasks", String.class,
-                com.anchr.core.ingestion.domain.model.IngestionTaskStatus.class, int.class);
+                IngestionTaskStatus.class, int.class);
         return new HandlerMethod(controller(), method);
     }
 

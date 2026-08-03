@@ -1,6 +1,9 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
+import com.anchr.core.conversation.application.AnswerEventPublisher;
+import com.anchr.core.conversation.application.AnswerIdentity;
+import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
@@ -8,6 +11,7 @@ import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.domain.model.AgentRun;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
+import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
@@ -34,8 +38,10 @@ class AgentTaskProcessorTerminalOrderingTest {
     private final ConversationRepository conversationRepository = mock(ConversationRepository.class);
     private final AgentTraceRepository traceRepository = mock(AgentTraceRepository.class);
     private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
-    private final AgentTaskStreamService streamService = mock(AgentTaskStreamService.class);
+    private final AnswerEventPublisher eventPublisher = mock(AnswerEventPublisher.class);
     private final AgentRuntimeSnapshotService snapshotService = mock(AgentRuntimeSnapshotService.class);
+    private final ConversationCitationReasonEnricher citationReasonEnricher =
+            mock(ConversationCitationReasonEnricher.class);
     private AgentTaskProcessor processor;
 
     @BeforeEach
@@ -61,10 +67,11 @@ class AgentTaskProcessorTerminalOrderingTest {
                 new ObjectMapper(),
                 RuntimeConfigTestUnits.defaults(),
                 transactionTemplate,
-                streamService,
+                eventPublisher,
                 Runnable::run,
                 snapshotService,
-                new AgentCitationPolicy());
+                new AgentCitationPolicy(),
+                citationReasonEnricher);
     }
 
     @Test
@@ -72,15 +79,20 @@ class AgentTaskProcessorTerminalOrderingTest {
         AgentTask task = task();
         when(taskRepository.saveClaimed(task, owner())).thenReturn(true);
 
-        ReflectionTestUtils.invokeMethod(processor, "complete", task, "answer", "[]", 3, 1);
+        ReflectionTestUtils.invokeMethod(
+                processor, "complete", task, "answer", "[]", List.of(), 3, 1);
 
         InOrder order = inOrder(taskRepository, conversationRepository, traceRepository,
-                snapshotService, streamService);
+                snapshotService, eventPublisher);
         order.verify(taskRepository).saveClaimed(task, owner());
         order.verify(conversationRepository).saveTurn(any(ConversationTurn.class));
         order.verify(traceRepository).saveRun(any(AgentRun.class));
         order.verify(snapshotService).publishTask("run-1", task);
-        order.verify(streamService).complete(task);
+        AnswerIdentity identity = AnswerIdentity.forTask(task);
+        order.verify(eventPublisher).progress(identity, "COMPLETED", 100);
+        order.verify(eventPublisher).snapshot(identity, "answer");
+        order.verify(eventPublisher).citations(identity, List.of());
+        order.verify(eventPublisher).completed(identity);
     }
 
     @Test
@@ -90,14 +102,17 @@ class AgentTaskProcessorTerminalOrderingTest {
 
         ReflectionTestUtils.invokeMethod(processor, "fail", task, "FAILED_CODE", "failed", false);
 
-        InOrder order = inOrder(streamService, taskRepository, conversationRepository,
+        InOrder order = inOrder(eventPublisher, taskRepository, conversationRepository,
                 traceRepository, snapshotService);
-        order.verify(streamService).publishReset("task-1", "");
+        AnswerIdentity identity = AnswerIdentity.forTask(task);
+        order.verify(eventPublisher).snapshot(identity, "");
         order.verify(taskRepository).saveClaimed(task, owner());
         order.verify(conversationRepository).saveTurn(any(ConversationTurn.class));
         order.verify(traceRepository).saveRun(any(AgentRun.class));
         order.verify(snapshotService).publishTask("run-1", task);
-        order.verify(streamService).complete(task);
+        order.verify(eventPublisher).progress(identity, "FAILED", 100);
+        order.verify(eventPublisher).citations(identity, List.of());
+        order.verify(eventPublisher).failed(identity, "FAILED_CODE");
     }
 
     @Test
@@ -106,14 +121,15 @@ class AgentTaskProcessorTerminalOrderingTest {
 
         ReflectionTestUtils.invokeMethod(processor, "fail", task, "RETRY_CODE", "retry", true);
 
-        InOrder order = inOrder(streamService, taskRepository);
-        order.verify(streamService).publishReset("task-1", "");
+        InOrder order = inOrder(eventPublisher, taskRepository);
+        AnswerIdentity identity = AnswerIdentity.forTask(task);
+        order.verify(eventPublisher).snapshot(identity, "");
         order.verify(taskRepository).saveClaimed(task, owner());
-        order.verify(streamService).publishTask(task);
+        order.verify(eventPublisher).progress(identity, "RETRY_WAIT", task.getProgress());
         verify(conversationRepository, never()).saveTurn(any());
         verify(traceRepository, never()).saveRun(any());
         verify(snapshotService, never()).publishTask(any(), any());
-        verify(streamService, never()).complete(any(AgentTask.class));
+        verify(eventPublisher, never()).completed(any());
     }
 
     @Test
@@ -128,7 +144,28 @@ class AgentTaskProcessorTerminalOrderingTest {
         verify(conversationRepository, never()).saveTurn(any());
         verify(traceRepository, never()).saveRun(any());
         verify(snapshotService, never()).publishTask(any(), any());
-        verify(streamService, never()).complete(any(AgentTask.class));
+        verify(eventPublisher, never()).completed(any());
+    }
+
+    @Test
+    void asyncSummaryEnrichesReasonsOutsideWorkflowUsingPersistedTurnQuestion() {
+        AgentTask task = task();
+        ConversationTurn turn = turn();
+        turn.setQuery("用户的原始总结问题");
+        turn.setRewrittenQuery("改写后的总结问题");
+        when(conversationRepository.findTurn("session-1", "turn-1"))
+                .thenReturn(Optional.of(turn));
+        Object request = ReflectionTestUtils.invokeMethod(
+                processor,
+                "parseRequest",
+                "{\"assets\":[],\"instruction\":\"工具生成的总结指令\",\"language\":\"中文\"}");
+        List<ConversationCitation> citations = List.of(new ConversationCitation());
+
+        ReflectionTestUtils.invokeMethod(
+                processor, "enrichCitationReasons", task, request, "最终总结", citations);
+
+        verify(citationReasonEnricher).enrich(
+                "用户的原始总结问题", "改写后的总结问题", "最终总结", citations);
     }
 
     private AgentTask task() {

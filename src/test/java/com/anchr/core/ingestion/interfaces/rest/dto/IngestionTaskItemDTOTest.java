@@ -3,12 +3,13 @@ package com.anchr.core.ingestion.interfaces.rest.dto;
 import com.anchr.core.ingestion.domain.model.IngestionPublicProjection;
 import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
+import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
+import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-
 import java.util.Set;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,15 +21,15 @@ class IngestionTaskItemDTOTest {
                 IngestionPublicProjectionPolicy.pending(IngestionSourceType.REEMBED),
                 "EMBED", "PENDING", 60);
         assertProjection(new IngestionPublicProjection(
-                        com.anchr.core.ingestion.domain.model.IngestionStage.PARSE,
-                        com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus.RUNNING, 60),
+                        IngestionStage.PARSE,
+                        IngestionTaskItemStatus.RUNNING, 60),
                 "PARSE", "RUNNING", 60);
         assertProjection(
                 IngestionPublicProjectionPolicy.explicitRetry(),
                 "UPLOAD", "PENDING", 0);
         assertProjection(new IngestionPublicProjection(
-                        com.anchr.core.ingestion.domain.model.IngestionStage.PARSE,
-                        com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus.RUNNING, 20),
+                        IngestionStage.PARSE,
+                        IngestionTaskItemStatus.RUNNING, 20),
                 "PARSE", "RUNNING", 20);
         assertProjection(
                 IngestionPublicProjectionPolicy.preflightFailure(),

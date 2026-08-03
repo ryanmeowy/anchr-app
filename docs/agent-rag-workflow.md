@@ -30,7 +30,7 @@ flowchart LR
 | 场景 | API | 当前行为 |
 | --- | --- | --- |
 | 同步问答 | `POST /api/v1/conversations/{sessionId}/messages` | 执行完成并保存 Turn 后返回 JSON |
-| 消息 SSE | `POST /api/v1/conversations/{sessionId}/messages/stream` | 实时发送过程事件；工作流完成后分块发送最终答案 |
+| 消息 SSE | `POST /api/v1/conversations/{sessionId}/messages/stream` | 实时发送过程事件和安全的模型答案增量，终态使用完整答案校准 |
 | 查询 Run | `GET /api/v1/agent/runs/{runId}/activity` | 返回持久化的 Run、Step、工具、Token 和耗时 |
 | 查询可恢复 Run | `GET /api/v1/agent/runs/recoverable?limit=10` | 返回最多 20 个活动 Run，以及最近 10 分钟内启动的 Run |
 | 查询运行快照 | `GET /api/v1/agent/runs/{runId}/runtime-snapshot?afterVersion=0` | 仅在快照版本较新时返回 Redis 中的最新运行态 |
@@ -390,7 +390,7 @@ flowchart LR
 1. `READING`：按文档原始 Segment 顺序读取全文。
 2. `MAP_SUMMARY`：按约 12000 字符分批生成局部总结，并保留 Marker。
 3. `REDUCE_SUMMARY`：分层合并，直到形成单一草稿。
-4. `FINALIZING`：执行一次最终模型压缩。
+4. `FINALIZING`：执行一次最终模型压缩，并将安全的可见正文增量发送到任务 SSE。
 5. 后端再用确定性 `compactCitationMarkers` 收敛引用：最多 10 个不同引用、12 个 Marker、每段最多 3 个 Marker。
 
 任务用 Lease 和 Owner 保证单任务单执行者；Lease 过期的 RUNNING 任务可以重新 Claim。可重试失败的延迟为 `30 秒 × 当前 attempt`，上限 120 秒。
@@ -398,10 +398,12 @@ flowchart LR
 任务 SSE 当前发送：
 
 - `task`：状态、进度和阶段。
-- `answer_reset`：终态完整答案。
+- `delta`：仅 Final 阶段的安全可见增量；Map/Reduce 中间结果不会发送。
+- `answer_reset`：持久化后的 canonical 完整答案，用于校准 provisional 内容。
+- `citations`：最终 Citation 列表。
 - `done`：任务结束。
 
-`AgentTaskStreamService` 具备 `delta` 能力，但当前 `AgentTaskProcessor` 没有发布增量正文，因此不能把异步总结描述成正在逐 Token 输出。
+Final 模型使用不含 Segment ID 的临时引用 token；增量渲染器缓存不完整 token 和 Markdown fence，转换为可见引用后才发送。完整答案通过引用范围和密度校验、事务保存 Task 与 Turn 后，再按 `answer_reset → citations → done` 完成。
 
 ## 11. 持久化与 Run 状态
 
@@ -457,7 +459,7 @@ API 展示时，`DEGRADED` 映射为 `AGENT_DEGRADED`，`FALLBACK` 映射为 `AG
 
 ### 12.1 消息 SSE
 
-消息 SSE 不是模型逐 Token 透传。`ConversationMessageStreamAdapter.supportsAnswerStreaming()` 返回 `false`，因此工作流完成后才把最终答案按最多 48 字符一块发送。
+消息 SSE 开启回答流能力。CHAT 直接转发模型增量，传统 RAG 通过增量 JSON 解码器只发送回答正文；需要整体校验的 Agent 引用答案只发送已经验证的文本。最终答案与 provisional 内容不一致时使用 `answer_reset` 校准。
 
 典型事件：
 
@@ -470,7 +472,8 @@ API 展示时，`DEGRADED` 映射为 `AGENT_DEGRADED`，`FALLBACK` 映射为 `AG
 | `trace` | `agent_thinking/protocol_retry|protocol_fallback|protocol_finalizing_evidence` |
 | `trace` | `agent_thinking/evidence_finalization_started|evidence_finalized|evidence_finalization_failed` |
 | `trace` | `task_queued/completed` |
-| `delta` | 最终答案分块 |
+| `delta` | 带 `answerId/revision/sequence` 的安全答案增量 |
+| `answer_reset` | canonical 完整答案校准 |
 | `citations` | 最终 Citation 列表 |
 | `done` | Turn、Run、状态、模式和 Task 元数据 |
 | `error` | 业务错误码或内部错误 |
@@ -493,6 +496,7 @@ SSE 断开或 120 秒传输超时时：
 - Snapshot 使用单调递增 `version`，客户端可以用 `afterVersion` 避免重复获取旧快照。
 - 默认 TTL 为 35 分钟；实际 TTL 取配置值与“任务总时限 × 最大尝试次数 + 5 分钟”中的较大值。
 - 可恢复列表最多返回 20 条，优先活动状态 `RUNNING/WAITING_TASK/AWAITING_TURN`，并包含最近 10 分钟启动的终态 Run。
+- Conversation 与 Task 共用的 Answer Event Broker 只覆盖单 JVM。多实例部署中，连接实例与任务执行实例不同时不保证实时 delta；客户端必须以 Task/Turn 轮询和 Runtime Snapshot 恢复最终状态。
 
 ## 13. 降级与错误矩阵
 

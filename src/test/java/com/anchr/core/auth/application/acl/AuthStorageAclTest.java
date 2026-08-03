@@ -3,9 +3,9 @@ package com.anchr.core.auth.application.acl;
 import com.anchr.core.settings.application.api.StorageRuntimeApi;
 import com.anchr.core.settings.application.api.model.StorageLocationSnapshot;
 import com.anchr.core.settings.application.api.model.StorageTemporaryCredential;
-import org.junit.jupiter.api.Test;
-
 import java.util.Optional;
+import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -31,14 +31,14 @@ class AuthStorageAclTest {
         assertThatCode(acl::requireConfigured).doesNotThrowAnyException();
         assertThat(acl.issueUploadCredential().toResponseMap())
                 .containsExactly(
-                        org.assertj.core.api.Assertions.entry("endpoint", "https://oss"),
-                        org.assertj.core.api.Assertions.entry("bucket", "bucket"),
-                        org.assertj.core.api.Assertions.entry("region", "cn-test"),
-                        org.assertj.core.api.Assertions.entry("prefix", "uploads/"),
-                        org.assertj.core.api.Assertions.entry("accessKeyId", "ak"),
-                        org.assertj.core.api.Assertions.entry("accessKeySecret", "sk"),
-                        org.assertj.core.api.Assertions.entry("securityToken", "token"),
-                        org.assertj.core.api.Assertions.entry("expiration", "expiry"));
+                        Assertions.entry("endpoint", "https://oss"),
+                        Assertions.entry("bucket", "bucket"),
+                        Assertions.entry("region", "cn-test"),
+                        Assertions.entry("prefix", "uploads/"),
+                        Assertions.entry("accessKeyId", "ak"),
+                        Assertions.entry("accessKeySecret", "sk"),
+                        Assertions.entry("securityToken", "token"),
+                        Assertions.entry("expiration", "expiry"));
     }
 
     @Test

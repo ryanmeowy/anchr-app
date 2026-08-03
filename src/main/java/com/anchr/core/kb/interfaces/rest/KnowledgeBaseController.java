@@ -2,9 +2,8 @@ package com.anchr.core.kb.interfaces.rest;
 
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
-import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.application.AssetPreviewService;
-import com.anchr.core.kb.domain.model.Asset;
+import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;
@@ -21,6 +20,11 @@ import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseStatsDTO;
 import com.anchr.core.kb.interfaces.rest.dto.KnowledgeBaseUpdateRequestDTO;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
@@ -33,10 +37,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.time.LocalDateTime;
-import java.time.format.DateTimeParseException;
-import java.util.List;
 
 /**
  * Knowledge base product APIs.
@@ -169,8 +169,8 @@ public class KnowledgeBaseController {
         try {
             if (value.chars().allMatch(Character::isDigit)) {
                 return LocalDateTime.ofInstant(
-                        java.time.Instant.ofEpochMilli(Long.parseLong(value)),
-                        java.time.ZoneOffset.UTC);
+                        Instant.ofEpochMilli(Long.parseLong(value)),
+                        ZoneOffset.UTC);
             }
             return LocalDateTime.parse(value);
         } catch (DateTimeParseException | NumberFormatException e) {

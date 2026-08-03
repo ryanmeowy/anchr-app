@@ -12,14 +12,14 @@ import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import com.anchr.core.search.infrastructure.persistence.es.repository.EsSegmentRepository;
 import com.anchr.core.search.interfaces.rest.dto.SegmentIndexStatusDTO;
+import java.io.IOException;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.io.IOException;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +42,7 @@ class EsSegmentGenerationTest {
             throws IOException {
         EsSegmentRepository repository = repository();
         when(indexManager.status()).thenReturn(writable());
-        DeleteByQueryResponse response = org.mockito.Mockito.mock(
+        DeleteByQueryResponse response = Mockito.mock(
                 DeleteByQueryResponse.class);
         when(response.timedOut()).thenReturn(false);
         when(response.versionConflicts()).thenReturn(0L);
@@ -54,7 +54,7 @@ class EsSegmentGenerationTest {
 
         ArgumentCaptor<DeleteByQueryRequest> request =
                 ArgumentCaptor.forClass(DeleteByQueryRequest.class);
-        org.mockito.Mockito.verify(client).deleteByQuery(request.capture());
+        Mockito.verify(client).deleteByQuery(request.capture());
         var filters = request.getValue().query().bool().filter();
         assertThat(filters).hasSize(2);
         var generationFilter = filters.get(1).bool();

@@ -4,22 +4,21 @@ import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationIntentType;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.GenerationOptions;
+import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.anchr.core.testsupport.RuntimeConfigTestUnits;
-import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import java.time.Duration;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,7 +41,7 @@ class ConversationIntentRouterImplTest {
         router = new ConversationIntentRouterImpl(repository, generationPort,
                 new ObjectMapper(), new SimpleMeterRegistry(),
                 RuntimeConfigTestUnits.values(
-                        java.util.Map.of("CONVERSATION.intentRoutingEnabled", "true")));
+                        Map.of("CONVERSATION.intentRoutingEnabled", "true")));
     }
 
     @Test

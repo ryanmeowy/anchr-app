@@ -1,14 +1,14 @@
 package com.anchr.core.conversation.application.agent;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
-
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
@@ -55,7 +55,7 @@ public class AgentToolExecutor {
 
     private String jsonError(String code, String message) {
         try {
-            return objectMapper.writeValueAsString(java.util.Map.of(
+            return objectMapper.writeValueAsString(Map.of(
                     "success", false, "errorCode", code,
                     "message", message == null ? code : message));
         } catch (Exception ignored) {

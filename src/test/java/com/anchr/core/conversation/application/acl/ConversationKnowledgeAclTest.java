@@ -3,10 +3,10 @@ package com.anchr.core.conversation.application.acl;
 import com.anchr.core.kb.application.api.KnowledgeContentQueryApi;
 import com.anchr.core.kb.application.api.model.DocumentSummary;
 import com.anchr.core.kb.application.api.model.KnowledgeBaseSummary;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.Optional;
+import org.assertj.core.groups.Tuple;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -50,8 +50,8 @@ class ConversationKnowledgeAclTest {
         assertThat(acl.searchActiveDocuments(List.of("kb-2", "kb-1", "kb-2"), " report ", 10))
                 .extracting("id", "fileName")
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("asset-1", "first.pdf"),
-                        org.assertj.core.groups.Tuple.tuple("asset-2", "second.pdf"));
+                        Tuple.tuple("asset-1", "first.pdf"),
+                        Tuple.tuple("asset-2", "second.pdf"));
     }
 
     private DocumentSummary document(String id, String kbId, String fileName, int segmentCount) {

@@ -1,16 +1,16 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import org.springframework.util.StringUtils;
-
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Comparator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import org.springframework.util.StringUtils;
 
 /**
  * Keeps segment ids as an internal evidence protocol while rendering hierarchical Agent citations.
@@ -34,6 +34,14 @@ public final class AgentCitationRenderer {
             String answer,
             List<ConversationRetrievalCandidate> selectedEvidence
     ) {
+        return render(answer, selectedEvidence, null);
+    }
+
+    static AgentCitationRenderResult render(
+            String answer,
+            List<ConversationRetrievalCandidate> selectedEvidence,
+            Map<String, AgentCitationReference> fixedReferences
+    ) {
         String source = answer == null ? "" : answer.trim();
         List<ConversationRetrievalCandidate> evidence = selectedEvidence == null
                 ? List.of() : selectedEvidence;
@@ -44,7 +52,9 @@ public final class AgentCitationRenderer {
             }
         }
         if (evidenceBySegment.isEmpty()) return new AgentCitationRenderResult(source, Map.of());
-        Map<String, AgentCitationReference> references = AgentCitationIndexPlan.build(source, evidence);
+        Map<String, AgentCitationReference> references = fixedReferences == null
+                ? AgentCitationIndexPlan.build(source, evidence)
+                : fixedReferences;
 
         Matcher matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(source);
         StringBuilder rendered = new StringBuilder();
@@ -77,7 +87,7 @@ public final class AgentCitationRenderer {
         Set<String> labels = references.values().stream()
                 .map(AgentCitationReference::label)
                 .filter(StringUtils::hasText)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         for (String label : labels) {
             Pattern authoredLabel = Pattern.compile(
                     "(?<![A-Za-z0-9_])\\[" + Pattern.quote(label) + "](?!\\s*\\()"

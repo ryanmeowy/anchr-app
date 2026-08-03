@@ -79,6 +79,12 @@ public class RuntimeConfigCatalog {
             throw new IllegalArgumentException(
                     "summaryBatchChars must not exceed summaryMaxChars");
         }
+        if (type == RuntimeConfigType.INGESTION
+                && intValue(values, IngestionRuntimeConfigKey.CHUNK_MIN_TOKENS)
+                > intValue(values, IngestionRuntimeConfigKey.CHUNK_MAX_TOKENS)) {
+            throw new IllegalArgumentException(
+                    "chunkMinTokens must not exceed chunkMaxTokens");
+        }
     }
 
     private Map<RuntimeConfigKey, String> searchDefaults() {
@@ -141,6 +147,8 @@ public class RuntimeConfigCatalog {
         values.put(IngestionRuntimeConfigKey.EMBEDDING_MIN_INTERVAL_MS, "1500");
         values.put(IngestionRuntimeConfigKey.EMBEDDING_RATE_LIMIT_MAX_ATTEMPTS, "5");
         values.put(IngestionRuntimeConfigKey.EMBEDDING_RATE_LIMIT_BACKOFF_MS, "5000");
+        values.put(IngestionRuntimeConfigKey.CHUNK_MIN_TOKENS, "200");
+        values.put(IngestionRuntimeConfigKey.CHUNK_MAX_TOKENS, "1200");
         values.put(IngestionRuntimeConfigKey.EMBEDDED_IMAGE_UPLOAD_ENABLED, "false");
         values.put(IngestionRuntimeConfigKey.DOCLING_MAX_RESPONSE_MIB, "256");
         return values;

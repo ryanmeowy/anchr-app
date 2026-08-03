@@ -9,6 +9,7 @@ import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionSynchronizationUtils;
 
@@ -38,7 +39,7 @@ class IngestionActivityAclTest {
         TransactionSynchronizationManager.initSynchronization();
 
         acl.recordDocumentImported(task());
-        verify(activityRecordApi, never()).recordDocumentImported(org.mockito.ArgumentMatchers.any());
+        verify(activityRecordApi, never()).recordDocumentImported(ArgumentMatchers.any());
         UserContextHolder.clear();
 
         TransactionSynchronizationUtils.triggerAfterCommit();
@@ -59,7 +60,7 @@ class IngestionActivityAclTest {
         acl.recordDocumentImported(task());
         TransactionSynchronizationManager.clearSynchronization();
 
-        verify(activityRecordApi, never()).recordDocumentImported(org.mockito.ArgumentMatchers.any());
+        verify(activityRecordApi, never()).recordDocumentImported(ArgumentMatchers.any());
     }
 
     @Test
@@ -67,7 +68,7 @@ class IngestionActivityAclTest {
         UserContextHolder.set(new RequestUserContext("user-a", "ADMIN"));
         TransactionSynchronizationManager.initSynchronization();
         doThrow(new IllegalStateException("activity unavailable"))
-                .when(activityRecordApi).recordDocumentImported(org.mockito.ArgumentMatchers.any());
+                .when(activityRecordApi).recordDocumentImported(ArgumentMatchers.any());
 
         acl.recordDocumentImported(task());
 

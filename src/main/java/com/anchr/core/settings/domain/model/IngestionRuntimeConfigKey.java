@@ -8,6 +8,8 @@ public enum IngestionRuntimeConfigKey implements RuntimeConfigKey {
     EMBEDDING_MIN_INTERVAL_MS("embeddingMinIntervalMs"),
     EMBEDDING_RATE_LIMIT_MAX_ATTEMPTS("embeddingRateLimitMaxAttempts"),
     EMBEDDING_RATE_LIMIT_BACKOFF_MS("embeddingRateLimitBackoffMs"),
+    CHUNK_MIN_TOKENS("chunkMinTokens"),
+    CHUNK_MAX_TOKENS("chunkMaxTokens"),
     EMBEDDED_IMAGE_UPLOAD_ENABLED("embeddedImageUploadEnabled"),
     DOCLING_MAX_RESPONSE_MIB("doclingMaxResponseMiB");
 

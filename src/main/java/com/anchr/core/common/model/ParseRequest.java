@@ -28,12 +28,12 @@ public record ParseRequest(
             Boolean useNativeChunker,
             Boolean includeEmbeddedImages
     ) {
-        public static Options chunkModel() {
-            return chunkModel(false);
-        }
 
-        public static Options chunkModel(boolean includeEmbeddedImages) {
-            return new Options("chunks", true, true, true, true, 200, 500, true,
+        public static Options chunkModel(
+                boolean includeEmbeddedImages,
+                int chunkMinTokens,
+                int chunkMaxTokens) {
+            return new Options("chunks", true, true, true, true, chunkMinTokens, chunkMaxTokens, true,
                     includeEmbeddedImages);
         }
     }

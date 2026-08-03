@@ -1,31 +1,31 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.agent.tool.DeliverAnswerTool;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.model.*;
-import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.port.AgentModelPort;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validation;
 import jakarta.validation.constraints.NotBlank;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -241,7 +241,7 @@ class AgentWorkflowImplTest {
     }
 
     @Test
-    void citedAnswer_shouldSkipGenerativePresentationAndPreserveVerifiedDraft() {
+    void citedAnswer_shouldStreamVerifiedDraftWithoutAnotherModelPass() {
         AtomicInteger calls = new AtomicInteger();
         AgentModelPort model = request -> calls.getAndIncrement() == 0
                 ? new AgentModelResponse(null,
@@ -271,7 +271,7 @@ class AgentWorkflowImplTest {
 
         assertThat(result.answer()).isEqualTo("文中未提及相关原则的明确定义 [1-1][1-2]");
         assertThat(result.citations()).hasSize(2);
-        assertThat(streamed).isEmpty();
+        assertThat(streamed.toString()).isEqualTo(result.answer());
         verify(generation, never()).generateStream(any(), any(), any());
     }
 
@@ -895,5 +895,5 @@ class AgentWorkflowImplTest {
             return AgentToolResult.success("{\"segmentId\":\"seg-read\"}", List.of(evidence));
         }
     }
-    static class DeliverOnlyTool extends com.anchr.core.conversation.application.agent.tool.DeliverAnswerTool {}
+    static class DeliverOnlyTool extends DeliverAnswerTool {}
 }

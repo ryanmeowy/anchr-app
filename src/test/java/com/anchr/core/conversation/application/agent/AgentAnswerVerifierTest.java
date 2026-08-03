@@ -3,10 +3,10 @@ package com.anchr.core.conversation.application.agent;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -85,7 +85,7 @@ class AgentAnswerVerifierTest {
 
         String tenUnique = IntStream.rangeClosed(1, 10)
                 .mapToObj(index -> "段落 " + index + " {{segment:seg-" + index + "}}")
-                .collect(java.util.stream.Collectors.joining("\n\n"));
+                .collect(Collectors.joining("\n\n"));
         assertThat(verifier.verify(state, knowledge(tenUnique,
                 IntStream.rangeClosed(1, 10).mapToObj(index -> "seg-" + index).toList())))
                 .isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
@@ -97,7 +97,7 @@ class AgentAnswerVerifierTest {
 
         String twelveMarkers = IntStream.rangeClosed(1, 12)
                 .mapToObj(index -> "段落 " + index + " {{segment:seg-1}}")
-                .collect(java.util.stream.Collectors.joining("\n\n"));
+                .collect(Collectors.joining("\n\n"));
         assertThat(verifier.verify(state, knowledge(twelveMarkers, List.of("seg-1"))))
                 .isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
         assertRejected(verifier.verify(state, knowledge(

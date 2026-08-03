@@ -1,7 +1,6 @@
 package com.anchr.core.conversation.application;
 
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
-import com.anchr.core.conversation.application.agent.AgentTaskStreamService;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.model.ConversationSession;
@@ -10,6 +9,7 @@ import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -29,11 +29,11 @@ class AgentTaskQueryServiceTest {
         ConversationRepository conversations = mock(ConversationRepository.class);
         AgentTraceRepository traces = mock(AgentTraceRepository.class);
         AgentTaskProcessor processor = mock(AgentTaskProcessor.class);
-        AgentTaskStreamService taskStreams = mock(AgentTaskStreamService.class);
+        AnswerEventPublisher events = mock(AnswerEventPublisher.class);
         ConversationTurnCodec codec = mock(ConversationTurnCodec.class);
         TransactionTemplate transactions = immediateTransactions();
         AgentTaskQueryService service = new AgentTaskQueryService(
-                tasks, conversations, traces, processor, taskStreams, codec, transactions);
+                tasks, conversations, traces, processor, events, codec, transactions);
         AgentTask running = task("RUNNING");
         AgentTask cancelled = task("CANCELLED");
         cancelled.setAnswer("任务已取消。");
@@ -51,12 +51,21 @@ class AgentTaskQueryServiceTest {
         var result = service.cancel("task-1");
 
         assertThat(result.getStatus()).isEqualTo("CANCELLED");
+        assertThat(result.getSessionId()).isEqualTo("session-1");
+        assertThat(result.getTurnId()).isEqualTo("turn-1");
+        assertThat(result.getRunId()).isEqualTo("run-1");
+        assertThat(result.getRevision()).isEqualTo(1);
         assertThat(turn.getAnswerStatus()).isEqualTo("CANCELLED");
         assertThat(turn.getAnswer()).isEqualTo("任务已取消。");
         verify(conversations).saveTurn(turn);
         verify(processor).recordCancellation(running);
         verify(processor).interrupt("task-1");
-        verify(taskStreams).complete(result);
+        AnswerIdentity identity = AnswerIdentity.forTask(cancelled);
+        InOrder order = inOrder(events);
+        order.verify(events).progress(identity, "CANCELLED", 100);
+        order.verify(events).snapshot(identity, "任务已取消。");
+        order.verify(events).citations(identity, List.of());
+        order.verify(events).cancelled(identity);
     }
 
     @Test
@@ -65,7 +74,7 @@ class AgentTaskQueryServiceTest {
         ConversationRepository conversations = mock(ConversationRepository.class);
         AgentTaskQueryService service = new AgentTaskQueryService(tasks, conversations,
                 mock(AgentTraceRepository.class), mock(AgentTaskProcessor.class),
-                mock(AgentTaskStreamService.class),
+                mock(AnswerEventPublisher.class),
                 mock(ConversationTurnCodec.class), mock(TransactionTemplate.class));
         when(tasks.findById("task-1")).thenReturn(Optional.of(task("CANCELLED")));
         when(conversations.findSession("session-1")).thenReturn(Optional.of(session()));

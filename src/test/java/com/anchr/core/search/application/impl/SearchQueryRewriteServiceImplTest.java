@@ -4,12 +4,12 @@ import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.domain.port.SearchGenerationPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -46,9 +46,9 @@ class SearchQueryRewriteServiceImplTest {
                 .contains("rewrittenQuery", "不得生成同义词", "每个 keyword 必须代表不同的信息维度")
                 .contains("请问 PDF 上传后为什么搜不到里面的图片呢？");
         verify(context.valueOperations()).set(
-                org.mockito.ArgumentMatchers.contains(":v2:"),
+                ArgumentMatchers.contains(":v2:"),
                 anyString(),
-                org.mockito.ArgumentMatchers.any());
+                ArgumentMatchers.any());
     }
 
     @Test

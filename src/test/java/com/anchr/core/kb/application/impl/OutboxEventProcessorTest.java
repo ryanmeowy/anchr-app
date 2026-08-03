@@ -2,30 +2,29 @@ package com.anchr.core.kb.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
+import com.anchr.core.kb.application.acl.KnowledgeRetrievalCleanupAcl;
+import com.anchr.core.kb.application.acl.KnowledgeStorageAcl;
 import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
+import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.testsupport.RuntimeConfigTestUnits;
-import com.anchr.core.kb.application.acl.KnowledgeRetrievalCleanupAcl;
-import com.anchr.core.kb.application.acl.KnowledgeStorageAcl;
-import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
-import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.test.util.ReflectionTestUtils;
-
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.scheduling.annotation.Scheduled;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -294,10 +293,10 @@ class OutboxEventProcessorTest {
                 eq(1L), eq("claim-2"), any())).thenReturn(true);
         processor.process(event);
 
-        verify(objectStoragePort, org.mockito.Mockito.times(2))
+        verify(objectStoragePort, Mockito.times(2))
                 .deleteObjectsByPrefix(
                         "embedded/ingestion/assets/asset-1/generations/4/images/");
-        verify(knowledgeRetrievalCleanupAcl, org.mockito.Mockito.times(2))
+        verify(knowledgeRetrievalCleanupAcl, Mockito.times(2))
                 .deleteGeneration("kb-1", "asset-1", 4L);
         verify(outboxEventRepository).markDone(
                 eq(1L), eq("claim-2"), any());
@@ -315,7 +314,7 @@ class OutboxEventProcessorTest {
 
         processor.process(event);
 
-        var ordered = org.mockito.Mockito.inOrder(
+        var ordered = Mockito.inOrder(
                 objectStoragePort, knowledgeRetrievalCleanupAcl);
         ordered.verify(objectStoragePort).deleteObjectsByPrefix(
                 "embedded/ingestion/assets/asset-1/generations/2/images/");

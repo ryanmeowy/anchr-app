@@ -4,20 +4,20 @@ import com.anchr.core.search.application.QueryEmbeddingService;
 import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
 import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
 import com.anchr.core.search.application.api.model.RetrievalTopNResult;
-import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.port.SearchRerankPort;
 import com.anchr.core.search.domain.repository.SegmentRepository;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
-
-import java.util.List;
-import java.util.Map;
+import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -96,7 +96,7 @@ class RetrievalQueryServiceImplCharacterizationTest {
         assertThat(result.insight().pipeline().rerankAdopted()).isEqualTo(1);
 
         ArgumentCaptor<SearchFilter> vectorFilters = ArgumentCaptor.forClass(SearchFilter.class);
-        verify(repository, org.mockito.Mockito.times(2))
+        verify(repository, Mockito.times(2))
                 .vectorSearch(eq(List.of(0.1F)), anyInt(), anyFloat(), vectorFilters.capture());
         assertThat(vectorFilters.getAllValues().get(0).getHitTypes())
                 .doesNotContain(SegmentType.DOCUMENT_IMAGE.name());
@@ -107,7 +107,7 @@ class RetrievalQueryServiceImplCharacterizationTest {
         order.verify(embedding).embedQuery("retrieval");
         order.verify(repository).textSearch(
                 eq("retrieval"), eq(List.of("architecture")), eq(6), any(SearchFilter.class));
-        order.verify(repository, org.mockito.Mockito.times(2))
+        order.verify(repository, Mockito.times(2))
                 .vectorSearch(eq(List.of(0.1F)), anyInt(), anyFloat(), any(SearchFilter.class));
         order.verify(knowledgeAcl).findActiveIndexGenerations(anyCollection());
         order.verify(rerankPort).rerank(eq("retrieval"), anyList(), eq(1));

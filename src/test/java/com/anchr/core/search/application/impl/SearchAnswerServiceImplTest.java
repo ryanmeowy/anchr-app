@@ -7,10 +7,10 @@ import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.application.api.model.SearchAnswerRequest;
 import com.anchr.core.search.domain.model.SegmentType;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.Map;
+import org.assertj.core.groups.Tuple;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -92,8 +92,8 @@ class SearchAnswerServiceImplTest {
                     .containsExactly("第一处说明核心机制。", "第二处补充应用场景。");
             assertThat(citation.chunks()).extracting("segmentId", "chunkOrder")
                     .containsExactly(
-                            org.assertj.core.groups.Tuple.tuple("seg-1", 4),
-                            org.assertj.core.groups.Tuple.tuple("seg-2", 20));
+                            Tuple.tuple("seg-1", 4),
+                            Tuple.tuple("seg-2", 20));
         });
     }
 

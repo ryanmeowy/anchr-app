@@ -2,45 +2,48 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
-import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
-import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
+import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ChatResponseService;
+import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
+import com.anchr.core.conversation.application.ConversationIntentRouter;
+import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
+import com.anchr.core.conversation.application.LocalAnswerEventBroker;
+import com.anchr.core.conversation.application.QueryRewriteService;
+import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
+import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
+import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
 import com.anchr.core.conversation.application.agent.AgentDeferredTask;
 import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
 import com.anchr.core.conversation.application.agent.AgentWorkflow;
-import com.anchr.core.conversation.application.ConversationIntentRouter;
-import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
-import com.anchr.core.conversation.application.QueryRewriteService;
-import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
-import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
+import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
-import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
-import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
+import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ChatResponseResult;
 import com.anchr.core.conversation.application.model.ConversationExecutionMode;
 import com.anchr.core.conversation.application.model.ConversationExecutionResult;
-import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
 import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationIntentType;
+import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
+import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.conversation.application.model.RewriteResult;
-import com.anchr.core.testsupport.RuntimeConfigTestUnits;
-import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.AgentTask;
+import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationSessionPosition;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationTurnPosition;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.conversation.interfaces.rest.ConversationMessageStreamAdapter;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationCreateRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
@@ -50,22 +53,10 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationSessionListDT
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnListDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
-import com.anchr.core.conversation.interfaces.rest.ConversationMessageStreamAdapter;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -79,18 +70,30 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceImplTest {
@@ -146,10 +149,11 @@ class ConversationServiceImplTest {
                 conversationRetrievalOrchestrator,
                 new ConversationCitationMapper(),
                 new ConversationResultCardMapper(),
-                answerGenerationService,
-                conversationTurnCodec,
-                conversationRetrievalAcl
+                answerGenerationService
         );
+        ConversationCitationReasonEnricher citationReasonEnricher =
+                new ConversationCitationReasonEnricher(
+                        conversationTurnCodec, conversationRetrievalAcl);
         lenient().when(conversationIntentRouter.route(any(), any())).thenReturn(new ConversationIntentResult(
                 ConversationIntentType.KB_QUERY, 1.0D, "test", ConversationIntentSource.MODEL, false));
         ConversationMessageOrchestrator orchestrator = new ConversationMessageOrchestrator(
@@ -179,7 +183,8 @@ class ConversationServiceImplTest {
                 transactionTemplate,
                 agentRunFinalizer,
                 agentTaskProcessor,
-                taskAssembler);
+                taskAssembler,
+                citationReasonEnricher);
         service = new ConversationServiceImpl(
                 new ConversationSessionUseCase(
                         repository,
@@ -197,7 +202,8 @@ class ConversationServiceImplTest {
                         objectMapper,
                         meterRegistry));
         streamAdapter = new ConversationMessageStreamAdapter(
-                messageUseCase, Runnable::run, agentRuntimeSnapshotService);
+                messageUseCase, Runnable::run, agentRuntimeSnapshotService,
+                new LocalAnswerEventBroker(), conversationTurnCodec);
     }
 
     @Test
@@ -264,6 +270,44 @@ class ConversationServiceImplTest {
                 List.of());
         assertThat(repository.findRecentTurns(session.getSessionId(), 1).getFirst().getQuery())
                 .isEqualTo("对话框里的原始问题");
+    }
+
+    @Test
+    void createMessage_shouldEnrichAgentCitationReasonBeforeResponseAndPersistence() {
+        ConversationMessageOrchestrator agentOrchestrator = mock(ConversationMessageOrchestrator.class);
+        ConversationCitation citation = new ConversationCitation();
+        citation.setSegmentId("seg-agent-1");
+        citation.setAssetId("asset-agent-1");
+        citation.setAssetCitationIndex(1);
+        citation.setSegmentCitationIndex(1);
+        citation.setContent("Agent 使用的证据正文");
+        citation.setWhy(ConversationCitation.CitationWhy.builder()
+                .matchSummary("语义匹配")
+                .build());
+        when(agentOrchestrator.execute(any(), any(), any(), any(), any()))
+                .thenReturn(new ConversationExecutionResult(
+                        null, true, null, "Agent 回答 [1-1]", AnswerStatus.ANSWERED,
+                        null, List.of(citation), List.of(), null, "run-1",
+                        ConversationExecutionMode.AGENT, null));
+        when(conversationRetrievalAcl.generateCitationReasons(any()))
+                .thenReturn(Map.of("seg-agent-1", "该段直接支持 Agent 回答。"));
+        ConversationServiceImpl agentService = buildService(agentOrchestrator);
+        ConversationSessionDTO session = agentService.createSession(new ConversationCreateRequestDTO());
+        ConversationMessageRequestDTO request = buildMessageRequest("Agent 为什么这样回答");
+        request.setAgentEnabled(true);
+
+        ConversationMessageResponseDTO response =
+                agentService.createMessage(session.getSessionId(), request);
+
+        assertThat(response.getCitations())
+                .flatExtracting(ConversationTurnDTO.CitationDTO::getChunks)
+                .extracting(chunk -> chunk.getWhy().getReason())
+                .containsExactly("该段直接支持 Agent 回答。");
+        assertThat(agentService.listMessages(session.getSessionId(), 20, null).getTurns())
+                .flatExtracting(ConversationTurnDTO::getCitations)
+                .flatExtracting(ConversationTurnDTO.CitationDTO::getChunks)
+                .extracting(chunk -> chunk.getWhy().getReason())
+                .containsExactly("该段直接支持 Agent 回答。");
     }
 
     @Test
@@ -404,7 +448,7 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void streamMessage_shouldGenerateFinalizedAnswerBeforePublishingText() {
+    void streamMessage_shouldPublishModelDeltasBeforeTerminalMetadata() {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         String sessionId = session.getSessionId();
         when(queryRewriteService.rewrite(sessionId, "mysql 架构是什么")).thenReturn(buildRewrite(
@@ -412,17 +456,23 @@ class ConversationServiceImplTest {
         when(conversationRetrievalOrchestrator.retrieve(
                 eq("mysql 架构是什么"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of()));
-        when(answerGenerationService.generate(
-                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList()
-        )).thenReturn(buildAnswer("最终规范回答", false, null, List.of()));
+        when(answerGenerationService.generateStream(
+                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT),
+                anyList(), anyList(), any()
+        )).thenAnswer(invocation -> {
+            ConversationProgressListener progress = invocation.getArgument(5);
+            progress.onAnswerDelta("最终规范回答");
+            return buildAnswer("最终规范回答", false, null, List.of());
+        });
 
         SseEmitter emitter = streamAdapter.stream(
                 sessionId, buildMessageRequest("mysql 架构是什么"));
 
-        verify(answerGenerationService).generate(
-                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList());
-        verify(answerGenerationService, never()).generateStream(
-                any(), any(), any(), anyList(), anyList(), any());
+        verify(answerGenerationService).generateStream(
+                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT),
+                anyList(), anyList(), any());
+        verify(answerGenerationService, never()).generate(
+                any(), any(), any(), anyList(), anyList());
 
         @SuppressWarnings("unchecked")
         Set<ResponseBodyEmitter.DataWithMediaType> earlyEvents =
@@ -435,10 +485,12 @@ class ConversationServiceImplTest {
                 .map(String.class::cast)
                 .collect(Collectors.joining());
         assertThat(sseFraming)
-                .contains("event:trace", "event:delta", "event:citations", "event:done");
+                .contains("event:trace", "event:delta", "event:answer_reset", "event:citations", "event:done");
         assertThat(sseFraming.indexOf("event:trace"))
                 .isLessThan(sseFraming.indexOf("event:delta"));
         assertThat(sseFraming.indexOf("event:delta"))
+                .isLessThan(sseFraming.indexOf("event:answer_reset"));
+        assertThat(sseFraming.indexOf("event:answer_reset"))
                 .isLessThan(sseFraming.indexOf("event:citations"));
         assertThat(sseFraming.indexOf("event:citations"))
                 .isLessThan(sseFraming.indexOf("event:done"));
@@ -465,6 +517,9 @@ class ConversationServiceImplTest {
         ConversationTurn storedTurn = repository.findRecentTurns(sessionId, 1).getFirst();
         assertThat(initialTrace.get("turnId")).isEqualTo(storedTurn.getTurnId());
         assertThat(answerDelta.get("text")).isEqualTo(storedTurn.getAnswer());
+        assertThat(answerDelta.get("answerId")).isEqualTo(storedTurn.getTurnId());
+        assertThat(answerDelta.get("revision")).isEqualTo(1L);
+        assertThat((Long) answerDelta.get("sequence")).isPositive();
         assertThat(done.get("sessionUpdatedAt")).isEqualTo(
                 repository.findSession(sessionId).orElseThrow().getUpdatedAt());
 
@@ -968,7 +1023,7 @@ class ConversationServiceImplTest {
         ConversationTurnDTO runningTurn = response.getTurns().get(1);
         assertThat(runningTurn.getAgentTask().getTaskId()).isEqualTo("task_running");
         assertThat(runningTurn.getAgentTask().getProgress()).isEqualTo(40);
-        verify(agentTaskRepository).findByIds(org.mockito.ArgumentMatchers.argThat(ids ->
+        verify(agentTaskRepository).findByIds(ArgumentMatchers.argThat(ids ->
                 ids.size() == 1 && ids.contains("task_running") && !ids.contains("task_done")));
         verify(agentTaskRepository, never()).findById("task_done");
     }
@@ -1093,7 +1148,9 @@ class ConversationServiceImplTest {
                         transactionTemplate,
                         agentRunFinalizer,
                         agentTaskProcessor,
-                        taskAssembler),
+                        taskAssembler,
+                        new ConversationCitationReasonEnricher(
+                                codec, conversationRetrievalAcl)),
                 new ConversationHistoryQuery(
                         repository,
                         agentTaskRepository,

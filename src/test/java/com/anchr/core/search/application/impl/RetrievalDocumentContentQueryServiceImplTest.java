@@ -5,9 +5,9 @@ import com.anchr.core.search.application.api.model.RetrievalDocumentContentQuery
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.domain.repository.SegmentRepository;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
+import org.assertj.core.groups.Tuple;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -43,8 +43,8 @@ class RetrievalDocumentContentQueryServiceImplTest {
 
         assertThat(chunks).extracting("segmentId", "content", "segmentType")
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("seg-1", "text content", "TEXT_CHUNK"),
-                        org.assertj.core.groups.Tuple.tuple("seg-2", "ocr content", "IMAGE_OCR_BLOCK"));
+                        Tuple.tuple("seg-1", "text content", "TEXT_CHUNK"),
+                        Tuple.tuple("seg-2", "ocr content", "IMAGE_OCR_BLOCK"));
         verify(segmentRepository).listByAssetId("kb-1", "asset-1", 7L, 8, "seg-1", 20);
         assertThatThrownBy(() -> chunks.add(chunks.getFirst()))
                 .isInstanceOf(UnsupportedOperationException.class);

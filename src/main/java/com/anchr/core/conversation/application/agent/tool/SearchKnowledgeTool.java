@@ -19,13 +19,20 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.SEARCH_KNOWLEDGE_CONTENT_MAX_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.SEARCH_KNOWLEDGE_DEFAULT_LIMIT;
+import static com.anchr.core.conversation.application.constant.AgentConstant.SEARCH_KNOWLEDGE_MAX_ASSETS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.SEARCH_KNOWLEDGE_MAX_LIMIT;
+import static com.anchr.core.conversation.application.constant.AgentConstant.SEARCH_KNOWLEDGE_MAX_MODALITIES;
+import static com.anchr.core.conversation.application.constant.AgentConstant.SEARCH_KNOWLEDGE_QUERY_MAX_CHARS;
+
 @Component
 @RequiredArgsConstructor
 public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input> {
-    public record Input(@NotBlank @Size(max = 1_000) String query,
-                        @Size(max = 100) List<String> assetIds,
-                        @Min(1) @Max(10) Integer limit,
-                        @Size(max = 3) List<String> modalities) {
+    public record Input(@NotBlank @Size(max = SEARCH_KNOWLEDGE_QUERY_MAX_CHARS) String query,
+                        @Size(max = SEARCH_KNOWLEDGE_MAX_ASSETS) List<String> assetIds,
+                        @Min(1) @Max(SEARCH_KNOWLEDGE_MAX_LIMIT) Integer limit,
+                        @Size(max = SEARCH_KNOWLEDGE_MAX_MODALITIES) List<String> modalities) {
     }
 
     private final QueryRewriteService queryRewriteService;
@@ -44,7 +51,9 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
         List<String> assets = resolveAssets(input.assetIds(), context);
         var rewrite = queryRewriteService.rewrite(context.sessionId(), input.query().trim());
         var retrieval = retrievalOrchestrator.retrieve(
-                rewrite.getRewrittenQuery(), input.limit() == null ? 8 : input.limit(), context.kbIds(),
+                rewrite.getRewrittenQuery(),
+                input.limit() == null ? SEARCH_KNOWLEDGE_DEFAULT_LIMIT : input.limit(),
+                context.kbIds(),
                 normalizeModalities(input.modalities()), assets);
         List<ConversationRetrievalCandidate> evidence = retrieval.getTopCandidates() == null
                 ? List.of()
@@ -87,7 +96,9 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
         return Map.of(
                 "segmentId", safe(item.getSegmentId()), "assetId", safe(item.getAssetId()),
                 "title", safe(item.getTitle()), "pageNo", item.getPageNo() == null ? -1 : item.getPageNo(),
-                "content", clip(StringUtils.hasText(item.getContent()) ? item.getContent() : item.getSnippet(), 2_000));
+                "content", clip(
+                        StringUtils.hasText(item.getContent()) ? item.getContent() : item.getSnippet(),
+                        SEARCH_KNOWLEDGE_CONTENT_MAX_CHARS));
     }
 
     private String safe(String value) { return value == null ? "" : value; }

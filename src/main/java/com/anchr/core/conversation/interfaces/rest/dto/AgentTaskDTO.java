@@ -7,6 +7,10 @@ import java.util.List;
 @Data
 public class AgentTaskDTO implements Serializable {
     private String taskId;
+    private String sessionId;
+    private String turnId;
+    private String runId;
+    private long revision;
     private String type;
     private String status;
     private int progress;

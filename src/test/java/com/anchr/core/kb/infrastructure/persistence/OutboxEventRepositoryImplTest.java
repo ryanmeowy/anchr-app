@@ -1,12 +1,12 @@
 package com.anchr.core.kb.infrastructure.persistence;
 
+import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-
 import java.time.LocalDateTime;
 import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -67,7 +67,7 @@ class OutboxEventRepositoryImplTest {
 
     @Test
     void save_shouldKeepPersistedTypePayloadAndAggregateIdentity() {
-        var event = com.anchr.core.kb.domain.model.OutboxEvent.builder()
+        var event = OutboxEvent.builder()
                 .eventType(OutboxEventType.DELETE_ASSET_GENERATION)
                 .aggregateType("ASSET")
                 .aggregateId("asset-1")

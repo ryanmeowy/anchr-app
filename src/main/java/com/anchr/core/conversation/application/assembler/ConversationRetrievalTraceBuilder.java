@@ -1,21 +1,21 @@
 package com.anchr.core.conversation.application.assembler;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
 import com.anchr.core.conversation.application.model.RewriteResult;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 @Component
 @RequiredArgsConstructor
@@ -77,7 +77,7 @@ public class ConversationRetrievalTraceBuilder {
             if (candidate == null || !StringUtils.hasText(candidate.getSegmentType())) {
                 continue;
             }
-            String segmentType = candidate.getSegmentType().trim().toUpperCase(java.util.Locale.ROOT);
+            String segmentType = candidate.getSegmentType().trim().toUpperCase(Locale.ROOT);
             String modality = segmentType.startsWith("TEXT") ? "TEXT"
                     : segmentType.startsWith("IMAGE") ? "IMAGE" : "OTHER";
             groupedCounts.merge(modality, 1, Integer::sum);

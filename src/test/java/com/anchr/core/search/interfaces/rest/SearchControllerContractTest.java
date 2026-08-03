@@ -1,9 +1,9 @@
 package com.anchr.core.search.interfaces.rest;
 
-import com.anchr.core.search.application.acl.SearchActivityAcl;
 import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.SearchFollowUpService;
 import com.anchr.core.search.application.SearchQueryRewriteService;
+import com.anchr.core.search.application.acl.SearchActivityAcl;
 import com.anchr.core.search.application.api.RetrievalTopNQueryApi;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalInsight;
@@ -11,17 +11,16 @@ import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
 import com.anchr.core.search.application.api.model.RetrievalTopNResult;
 import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.interfaces.rest.assembler.SearchRestAssembler;
-import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -85,7 +84,7 @@ class SearchControllerContractTest {
         assertThat(capturedQuery.get().query()).isEqualTo("rewritten query");
         assertThat(capturedQuery.get().kbIds()).containsExactly("kb-1");
         ArgumentCaptor<SearchQueryDTO> activityQuery = ArgumentCaptor.forClass(SearchQueryDTO.class);
-        verify(activity).recordSearchExecuted(activityQuery.capture(), org.mockito.ArgumentMatchers.eq(1));
+        verify(activity).recordSearchExecuted(activityQuery.capture(), ArgumentMatchers.eq(1));
         assertThat(activityQuery.getValue().getQuery()).isEqualTo("original query");
     }
 }

@@ -2,21 +2,12 @@ package com.anchr.core.common.infrastructure;
 
 import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
-import com.anchr.core.common.exception.ApiErrorResponseWriter;
 import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.exception.ApiErrorResponseWriter;
 import com.anchr.core.common.exception.UploadCleanupPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.jspecify.annotations.NonNull;
-import org.springframework.core.annotation.AnnotatedElementUtils;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Component;
-import org.springframework.web.method.HandlerMethod;
-import org.springframework.web.servlet.AsyncHandlerInterceptor;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -24,6 +15,15 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.servlet.AsyncHandlerInterceptor;
 
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 
@@ -186,7 +186,7 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
     }
 
     private void reject(HttpServletResponse response, Object handler, int httpStatus, ApiError error) {
-        errorResponseWriter.write(response, org.springframework.http.HttpStatus.valueOf(httpStatus), error,
+        errorResponseWriter.write(response, HttpStatus.valueOf(httpStatus), error,
                 error.getMessage(), UUID.randomUUID().toString(),
                 uploadCleanupPolicy.forPreControllerRejection(handler));
     }

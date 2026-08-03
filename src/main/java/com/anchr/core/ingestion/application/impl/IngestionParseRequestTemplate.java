@@ -25,6 +25,8 @@ public record IngestionParseRequestTemplate(
 
     static IngestionParseRequestTemplate capture(Asset asset,
                                                  boolean includeEmbeddedImages,
+                                                 int chunkMinTokens,
+                                                 int chunkMaxTokens,
                                                  IngestionStorageTarget storageTarget) {
         if (asset == null || !StringUtils.hasText(asset.getFileName())) {
             throw new IllegalArgumentException("Asset file name is required for a Docling request.");
@@ -36,7 +38,8 @@ public record IngestionParseRequestTemplate(
                         ? EMBEDDED_IMAGE_CONTRACT_VERSION
                         : LEGACY_DOCLING_CONTRACT_VERSION,
                 asset.getFileName(),
-                ParseRequest.Options.chunkModel(includeEmbeddedImages),
+                ParseRequest.Options.chunkModel(
+                        includeEmbeddedImages, chunkMinTokens, chunkMaxTokens),
                 target);
     }
 

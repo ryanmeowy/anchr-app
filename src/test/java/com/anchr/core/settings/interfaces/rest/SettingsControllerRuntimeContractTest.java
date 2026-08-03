@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.lang.reflect.Method;
 import java.util.Set;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SettingsControllerRuntimeContractTest {

@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 import java.util.stream.Collectors;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RuntimeConfigDefaultsContractTest {
@@ -122,6 +121,12 @@ class RuntimeConfigDefaultsContractTest {
                                 "embeddedImageUploadEnabled",
                                 Boolean.toString(
                                         ingestion.embeddedImageUploadEnabled())),
+                        Map.entry(
+                                "chunkMinTokens",
+                                Integer.toString(ingestion.chunkMinTokens())),
+                        Map.entry(
+                                "chunkMaxTokens",
+                                Integer.toString(ingestion.chunkMaxTokens())),
                         Map.entry(
                                 "doclingMaxResponseMiB",
                                 Integer.toString(

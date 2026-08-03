@@ -3,17 +3,17 @@ package com.anchr.core.conversation.application;
 import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AgentProgressEvent;
-import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentRunActivityDTO;
+import com.anchr.core.conversation.interfaces.rest.dto.AgentRuntimeSnapshotDTO;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-
-import java.time.Duration;
-import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -91,7 +91,7 @@ class AgentRuntimeSnapshotServiceTest {
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
         verify(values).set(eq("anchr:agent:runtime:snapshot:run-1"), json.capture(), eq(Duration.ofMinutes(35)));
         var snapshot = objectMapper.readValue(json.getValue(),
-                com.anchr.core.conversation.interfaces.rest.dto.AgentRuntimeSnapshotDTO.class);
+                AgentRuntimeSnapshotDTO.class);
         assertThat(snapshot.getActivity().getSteps()).singleElement().satisfies(step -> {
             assertThat(step.getStepOrder()).isEqualTo(1);
             assertThat(step.getStatus()).isEqualTo("RUNNING");

@@ -32,8 +32,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class SearchController {
 
-    private static final int REWRITE_TIMEOUT_MS = 1500;
-
     private final RetrievalTopNQueryApi retrievalTopNQueryApi;
     private final SearchAnswerService kbSearchAnswerService;
     private final SearchQueryRewriteService searchQueryRewriteService;

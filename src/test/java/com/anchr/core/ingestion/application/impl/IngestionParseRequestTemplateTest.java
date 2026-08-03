@@ -6,7 +6,6 @@ import com.anchr.core.kb.domain.model.Asset;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -15,7 +14,7 @@ class IngestionParseRequestTemplateTest {
     @Test
     void templateRebuildsV3RequestWithRuntimeUrlAndCredentials() {
         IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
-                asset(), true, storageTarget());
+                asset(), true, 300, 900, storageTarget());
 
         ParseRequest request = template.toRequest(
                 "task-1:item-1:1",
@@ -26,6 +25,8 @@ class IngestionParseRequestTemplateTest {
         assertThat(request.contractVersion()).isEqualTo(3);
         assertThat(request.sourceUrl()).contains("signed.example.test");
         assertThat(request.options().includeEmbeddedImages()).isTrue();
+        assertThat(request.options().chunkMinTokens()).isEqualTo(300);
+        assertThat(request.options().chunkMaxTokens()).isEqualTo(900);
         assertThat(request.oss().endpoint()).isEqualTo("oss.example.test");
         assertThat(request.oss().basePath())
                 .isEqualTo("embedded/ingestion/assets/asset-1/generations/1/images/");
@@ -37,7 +38,7 @@ class IngestionParseRequestTemplateTest {
     @Test
     void disabledEmbeddedImagesDoNotCaptureStorageTargetOrRequireCredentials() {
         IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
-                asset(), false, storageTarget());
+                asset(), false, 200, 1200, storageTarget());
 
         ParseRequest request = template.toRequest(
                 "task-1:item-1:1",
@@ -52,7 +53,7 @@ class IngestionParseRequestTemplateTest {
     @Test
     void inMemoryOutputTargetRequiresRuntimeCredentials() {
         IngestionParseRequestTemplate template = IngestionParseRequestTemplate.capture(
-                asset(), true, storageTarget());
+                asset(), true, 200, 1200, storageTarget());
 
         assertThatThrownBy(() -> template.toRequest(
                 "task-1:item-1:1",
