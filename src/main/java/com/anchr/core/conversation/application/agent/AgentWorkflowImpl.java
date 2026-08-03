@@ -120,6 +120,9 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         AgentRunState state = new AgentRunState(request, budget, startedAt, runtimeConfig);
         cancellationRegistry.register(request.runId(), request.sessionId());
         traceRecorder.start(state);
+        log.info("Agent workflow started, runId={}, sessionId={}, turnId={}, maxSteps={}, maxToolCalls={}",
+                request.runId(), request.sessionId(), request.turnId(),
+                runtimeConfig.maxSteps(), runtimeConfig.maxToolCalls());
         emit(progress, state, "agent_thinking", "run_started", Map.of(
                 "sessionId", request.sessionId(),
                 "turnId", request.turnId()));
@@ -147,6 +150,9 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         } catch (Exception e) {
             if (cancellationRegistry.isCancellationRequested(request.runId())) {
                 Thread.interrupted();
+                log.info("Agent workflow cancelled, runId={}, steps={}, toolCalls={}, latencyMs={}",
+                        request.runId(), state.getStepCount(), state.getToolCallCount(),
+                        System.currentTimeMillis() - state.getStartedAt());
                 return finishSystemAnswer(state, "查询已取消。", AnswerStatus.CANCELLED,
                         "agent_run_cancelled", List.of(), null, AgentRunStatus.CANCELLED);
             }
@@ -168,16 +174,18 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         long started = System.currentTimeMillis();
         ensureNotCancelled(state);
         int expectedStepOrder = state.getTraceOrder() + 1;
+        String toolCallMode = effectiveToolCallMode(state);
         emit(progress, state, "agent_thinking", "decision_started", Map.of(
                 "stepOrder", expectedStepOrder,
                 "messageCount", state.getMessages().size(),
                 "toolsEnabled", toolsEnabled,
+                "toolCallMode", toolCallMode,
                 "decision", "ANALYZING"));
         AgentModelRequest modelRequest = new AgentModelRequest(
                 List.copyOf(state.getMessages()), toolsEnabled ? toolRegistry.definitions() : List.of(),
                 new AgentModelOptions(PLANNING_TEMPERATURE, PLANNING_MAX_TOKENS,
                         state.getBudget().boundedTimeout(state.getRuntimeConfig().modelTimeout()),
-                        state.getRuntimeConfig().toolCallMode().name(),
+                        toolCallMode,
                         state.getRuntimeConfig().nativeToolChoice().name(), toolsEnabled));
         AgentModelResponse response;
         try {
@@ -232,6 +240,11 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 "model", safe(response.model()),
                 "decision", !calls.isEmpty() ? "TOOL_SELECTION"
                         : StringUtils.hasText(response.content()) ? "FINAL_RESPONSE" : "PROTOCOL_RETRY"));
+        log.info("Agent model decision completed, runId={}, step={}, traceStep={}, model={}, toolCallMode={}, "
+                        + "toolCalls={}, promptTokens={}, completionTokens={}, durationMs={}, finishReason={}",
+                state.getRunRequest().runId(), step, decisionStepOrder, safe(response.model()), toolCallMode,
+                calls.size(), response.usage().promptTokens(), response.usage().completionTokens(),
+                System.currentTimeMillis() - started, safe(response.finishReason()));
 
         if (jsonFinal.isPresent()) {
             return AgentWorkflowOutcome.submitted(jsonFinal.orElseThrow(), null, null);
@@ -239,7 +252,8 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         if (!calls.isEmpty()) {
             if (!toolsEnabled) return protocolError(state, progress, "TOOLS_DISABLED");
             actionProtocol.resetErrors(state);
-            state.getMessages().add(AgentMessage.assistantToolCalls(response.content(), calls));
+            state.getMessages().add(AgentMessage.assistantToolCalls(
+                    response.content(), response.reasoningContent(), calls));
             for (AgentToolCall call : calls) {
                 if (state.getBudget().exhausted(state.getStepCount(), state.getToolCallCount())) break;
                 AgentWorkflowOutcome outcome = executeTool(state, call, progress);
@@ -248,6 +262,15 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             return AgentWorkflowOutcome.continuePlanning();
         }
         return protocolError(state, progress, "MISSING_ACTION");
+    }
+
+    private String effectiveToolCallMode(AgentRunState state) {
+        AgentRuntimeSettings.ToolCallMode configured = state.getRuntimeConfig().toolCallMode();
+        if (configured == AgentRuntimeSettings.ToolCallMode.AUTO
+                && state.getConsecutiveProtocolErrors() > 0) {
+            return AgentRuntimeSettings.ToolCallMode.JSON.name();
+        }
+        return configured.name();
     }
 
     private AgentWorkflowOutcome executeTool(AgentRunState state,
@@ -261,6 +284,8 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             emit(progress, state, "tool_result", "duplicate_rejected", Map.of(
                     "tool", safe(call.name()), "callId", safe(call.id()),
                     "success", false, "errorCode", "DUPLICATE_TOOL_CALL"));
+            log.warn("Agent duplicate tool call rejected, runId={}, tool={}, callId={}",
+                    state.getRunRequest().runId(), safe(call.name()), safe(call.id()));
             return AgentWorkflowOutcome.continuePlanning();
         }
         if ("read_document".equals(call.name())
@@ -289,6 +314,10 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             progressDetails.put("toolCallOrder", guardedAttempt);
             progressDetails.put("success", true);
             emit(progress, state, "tool_result", "read_limit_reached", progressDetails);
+            log.info("Agent read-document limit reached, runId={}, step={}, toolCallOrder={}, "
+                            + "tool={}, callId={}, evidenceCount={}",
+                    state.getRunRequest().runId(), guardStepOrder, guardedAttempt,
+                    safe(call.name()), safe(call.id()), state.getEvidence().size());
             return finalizeFromEvidence(state, progress, "read_document_call_limit");
         }
         int attempt = state.nextToolCall(call.name());
@@ -297,6 +326,9 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         emit(progress, state, "tool_call", "started", Map.of(
                 "tool", safe(call.name()), "callId", safe(call.id()),
                 "toolCallOrder", attempt, "stepOrder", expectedStepOrder));
+        log.info("Agent tool execution started, runId={}, step={}, toolCallOrder={}, tool={}, callId={}",
+                state.getRunRequest().runId(), expectedStepOrder, attempt,
+                safe(call.name()), safe(call.id()));
         long started = System.currentTimeMillis();
         AgentExecutionContext context = new AgentExecutionContext(state.getRunRequest().runId(),
                 state.getRunRequest().turnId(), state.getRunRequest().sessionId(), state.getRunRequest().userId(),
@@ -317,6 +349,17 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         progressDetails.put("toolCallOrder", attempt);
         emit(progress, state, "tool_result", result.success() ? "completed" : "failed",
                 progressDetails);
+        if (result.success()) {
+            log.info("Agent tool execution completed, runId={}, step={}, toolCallOrder={}, tool={}, "
+                            + "callId={}, durationMs={}, evidenceCount={}",
+                    state.getRunRequest().runId(), toolStepOrder, attempt, safe(call.name()),
+                    safe(call.id()), durationMs, result.evidence().size());
+        } else {
+            log.warn("Agent tool execution failed, runId={}, step={}, toolCallOrder={}, tool={}, "
+                            + "callId={}, errorCode={}, durationMs={}",
+                    state.getRunRequest().runId(), toolStepOrder, attempt, safe(call.name()),
+                    safe(call.id()), safe(result.errorCode()), durationMs);
+        }
         if (result.finalAnswer() != null) {
             return AgentWorkflowOutcome.submitted(
                     result.finalAnswer(), call.id(), call.name());
@@ -395,7 +438,13 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                                                    String fallbackReason,
                                                    String validationToolCallId,
                                                    String validationToolName) {
-        if (state.nextAnswerValidationError() <= 1
+        int validationAttempt = state.nextAnswerValidationError();
+        log.warn("Agent answer validation rejected, runId={}, attempt={}, tool={}, callId={}, "
+                        + "errorCode={}, fallbackReason={}, message={}",
+                state.getRunRequest().runId(), validationAttempt,
+                StringUtils.hasText(validationToolName) ? validationToolName : "deliver_answer",
+                safe(validationToolCallId), safe(code), safe(fallbackReason), safe(message));
+        if (validationAttempt <= 1
                 && !state.getBudget().exhausted(state.getStepCount(), state.getToolCallCount())) {
             String validationError = errorJson(code, message);
             if (StringUtils.hasText(validationToolCallId)) {
@@ -428,6 +477,9 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                                                ConversationProgressListener progress,
                                                String code) {
         int errors = actionProtocol.recordError(state, code);
+        log.warn("Agent protocol error, runId={}, code={}, consecutiveErrors={}, step={}, toolCalls={}",
+                state.getRunRequest().runId(), code, errors,
+                state.getStepCount(), state.getToolCallCount());
         if (actionProtocol.shouldFallback(errors)) {
             if (!state.getEvidence().isEmpty() && state.getBudget().remainingMillis() > 0) {
                 emit(progress, state, "agent_thinking", "protocol_finalizing_evidence",
@@ -435,8 +487,6 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 return finalizeFromEvidence(state, progress, "agent_protocol_error:" + code);
             }
             String fallbackReason = "agent_protocol_error:" + code;
-            log.warn("Agent protocol fallback, runId={}, code={}, consecutiveErrors={}",
-                    state.getRunRequest().runId(), code, errors);
             emit(progress, state, "agent_thinking", "protocol_fallback", Map.of("errorCode", code));
             return AgentWorkflowOutcome.terminal(finishSystemAnswer(
                     state, LOCAL_PROTOCOL_FALLBACK, AnswerStatus.MODEL_FALLBACK,
@@ -482,6 +532,12 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         state.setCurrentStep(status == AgentRunStatus.FAILED ? AgentStepType.FAILED : AgentStepType.FINAL_ANSWER);
         safeFinishTrace(state, status, fallbackReason);
         meterRegistry.counter("agent.run.result", "status", status.name()).increment();
+        log.info("Agent workflow finished, runId={}, status={}, answerStatus={}, steps={}, toolCalls={}, "
+                        + "promptTokens={}, completionTokens={}, evidenceCount={}, latencyMs={}, fallbackReason={}",
+                state.getRunRequest().runId(), status, answerStatus,
+                state.getStepCount(), state.getToolCallCount(), state.getPromptTokens(),
+                state.getCompletionTokens(), state.getEvidence().size(),
+                System.currentTimeMillis() - state.getStartedAt(), safe(fallbackReason));
         return new ConversationExecutionResult(null, !state.getEvidence().isEmpty(), null, answer,
                 answerStatus, fallbackReason, citations, List.of(), null,
                 state.getRunRequest().runId(),

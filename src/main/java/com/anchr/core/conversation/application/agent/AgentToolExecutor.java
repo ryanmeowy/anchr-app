@@ -8,10 +8,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class AgentToolExecutor {
     private final AgentToolRegistry registry;
     private final ObjectMapper objectMapper;
@@ -43,6 +45,9 @@ public class AgentToolExecutor {
         } catch (IllegalArgumentException e) {
             return AgentToolResult.failure("INVALID_ARGUMENTS", jsonError("INVALID_ARGUMENTS", e.getMessage()));
         } catch (Exception e) {
+            log.error("Agent tool threw an unexpected exception, runId={}, tool={}, errorType={}, message={}",
+                    context == null ? "" : context.runId(), name,
+                    e.getClass().getSimpleName(), e.getMessage(), e);
             return AgentToolResult.failure("TOOL_EXECUTION_FAILED",
                     jsonError("TOOL_EXECUTION_FAILED", e.getMessage()));
         }

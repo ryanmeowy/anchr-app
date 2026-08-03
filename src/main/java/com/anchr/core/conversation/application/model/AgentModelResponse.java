@@ -7,7 +7,14 @@ public record AgentModelResponse(String content,
                                  AgentTokenUsage usage,
                                  String model,
                                  String finishReason,
-                                 String requestId) {
+                                 String requestId,
+                                 String reasoningContent) {
+
+    public AgentModelResponse(String content, List<AgentToolCall> toolCalls,
+                              AgentTokenUsage usage, String model,
+                              String finishReason, String requestId) {
+        this(content, toolCalls, usage, model, finishReason, requestId, null);
+    }
 
     public AgentModelResponse {
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
