@@ -183,10 +183,10 @@ class OutboxMysqlIntegrationTest {
         try (Connection connection = connection(); Statement statement = connection.createStatement()) {
             statement.executeUpdate("""
                     insert into asset (
-                        id, kb_id, file_name, file_type, parse_status, index_status,
+                        id, kb_id, file_name, file_type, object_key, parse_status, index_status,
                         created_at, updated_at
                     ) values (
-                        1001, 2001, 'test.pdf', 'PDF', 'SUCCESS', 'RUNNING', now(), now()
+                        1001, 2001, 'test.pdf', 'PDF', 'objects/test.pdf', 'SUCCESS', 'RUNNING', now(), now()
                     )
                     """);
         }

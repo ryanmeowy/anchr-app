@@ -35,7 +35,6 @@ create table if not exists conversation_turn (
     result_cards json comment '结果卡片',
     retrieval_trace json comment '检索过程追踪',
     agent_run_id varchar(64) null comment 'Agent 运行标识',
-    workflow_version varchar(64) null comment '工作流版本',
     execution_mode varchar(32) not null default 'TRADITIONAL' comment '执行模式',
     agent_task_id varchar(64) null comment 'Agent 任务标识',
     created_at datetime(3) not null comment '创建时间',
