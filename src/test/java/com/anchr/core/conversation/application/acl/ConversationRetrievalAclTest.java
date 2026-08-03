@@ -14,20 +14,21 @@ import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalHitQuery;
 import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.List;
+import java.util.Map;
+import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationRetrievalAclTest {
@@ -49,7 +50,7 @@ class ConversationRetrievalAclTest {
                 retrievalCitationReasonApi,
                 new SimpleMeterRegistry()
         );
-        org.mockito.Mockito.lenient().when(retrievalHitQueryApi.query(any(RetrievalHitQuery.class))).thenReturn(List.of(
+        Mockito.lenient().when(retrievalHitQueryApi.query(any(RetrievalHitQuery.class))).thenReturn(List.of(
                 result("seg_text", "TEXT_CHUNK"),
                 result("seg_image", "IMAGE_CAPTION")
         ));
@@ -93,8 +94,8 @@ class ConversationRetrievalAclTest {
         assertThat(result.getTopCandidates())
                 .extracting("segmentId", "assetId", "pageNo")
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("seg-earlier", "asset-1", 2),
-                        org.assertj.core.groups.Tuple.tuple("seg-later", "asset-1", 5));
+                        Tuple.tuple("seg-earlier", "asset-1", 2),
+                        Tuple.tuple("seg-later", "asset-1", 5));
         assertThat(result.getTopCandidates())
                 .extracting(candidate -> candidate.getAnchor().getChunkOrder())
                 .containsExactly(4, 20);

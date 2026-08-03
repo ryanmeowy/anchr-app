@@ -7,13 +7,13 @@ import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.search.application.api.RetrievalGenerationIndexApi;
 import com.anchr.core.search.application.api.model.RetrievalGenerationIndexRequest;
 import com.anchr.core.search.application.api.model.RetrievalGenerationWriteReceipt;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -31,7 +31,7 @@ class IngestionRetrievalAclTest {
         IngestionRetrievalAcl acl = new IngestionRetrievalAcl(api);
         RetrievalGenerationWriteReceipt receipt = new RetrievalGenerationWriteReceipt(
                 "kb-1", "asset-1", 2L, 1, "index", "profile");
-        when(api.replaceGeneration(org.mockito.ArgumentMatchers.any())).thenReturn(receipt);
+        when(api.replaceGeneration(ArgumentMatchers.any())).thenReturn(receipt);
         IngestionIndexSegment source = segment("asset-1", 2L);
 
         assertThat(acl.replaceGeneration(item(), asset("kb-1", "PDF"), List.of(source)))
@@ -59,7 +59,7 @@ class IngestionRetrievalAclTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("generation");
 
-        verify(api, never()).replaceGeneration(org.mockito.ArgumentMatchers.any());
+        verify(api, never()).replaceGeneration(ArgumentMatchers.any());
     }
 
     @Test
@@ -70,7 +70,7 @@ class IngestionRetrievalAclTest {
                 item(), asset("kb-1", "PDF"), List.of()))
                 .isInstanceOf(BusinessException.class);
 
-        verify(api, never()).replaceGeneration(org.mockito.ArgumentMatchers.any());
+        verify(api, never()).replaceGeneration(ArgumentMatchers.any());
     }
 
     private IngestionTaskItem item() {

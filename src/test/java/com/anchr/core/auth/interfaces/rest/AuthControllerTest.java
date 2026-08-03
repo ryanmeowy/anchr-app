@@ -6,6 +6,7 @@ import com.anchr.core.auth.interfaces.rest.dto.TokenValidationDTO;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.model.Result;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -94,14 +95,14 @@ class AuthControllerTest {
 
         assertThat(result.getCode()).isEqualTo(200);
         assertThat(result.getData()).containsExactly(
-                org.assertj.core.api.Assertions.entry("endpoint", "https://oss"),
-                org.assertj.core.api.Assertions.entry("bucket", "bucket"),
-                org.assertj.core.api.Assertions.entry("region", "cn-test"),
-                org.assertj.core.api.Assertions.entry("prefix", "uploads/"),
-                org.assertj.core.api.Assertions.entry("accessKeyId", "temp-ak"),
-                org.assertj.core.api.Assertions.entry("accessKeySecret", "temp-sk"),
-                org.assertj.core.api.Assertions.entry("securityToken", "token"),
-                org.assertj.core.api.Assertions.entry(
+                Assertions.entry("endpoint", "https://oss"),
+                Assertions.entry("bucket", "bucket"),
+                Assertions.entry("region", "cn-test"),
+                Assertions.entry("prefix", "uploads/"),
+                Assertions.entry("accessKeyId", "temp-ak"),
+                Assertions.entry("accessKeySecret", "temp-sk"),
+                Assertions.entry("securityToken", "token"),
+                Assertions.entry(
                         "expiration", "2026-07-29T19:00:00Z"));
     }
 }

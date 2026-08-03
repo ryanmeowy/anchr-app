@@ -3,24 +3,24 @@ package com.anchr.core.conversation.application.agent;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.model.AgentProgressEvent;
 import com.anchr.core.conversation.application.model.AgentTokenUsage;
+import com.anchr.core.conversation.application.model.ConversationGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.GenerationOptions;
-import com.anchr.core.conversation.application.model.ConversationGenerationResult;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
-import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_MAX_TOKENS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_EVIDENCE_ITEM_CHARS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_MAX_ATTEMPTS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_MAX_TOKENS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_MIN_REMAINING_MILLIS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_TEMPERATURE;
 import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_FINALIZER_EVIDENCE;
@@ -220,7 +220,7 @@ final class AgentEvidenceFinalizer {
     private AgentAnswerType parseAnswerType(String value) {
         if (!StringUtils.hasText(value)) return null;
         try {
-            return AgentAnswerType.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+            return AgentAnswerType.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ignored) {
             return null;
         }

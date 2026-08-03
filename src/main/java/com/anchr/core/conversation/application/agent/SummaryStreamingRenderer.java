@@ -1,14 +1,14 @@
 package com.anchr.core.conversation.application.agent;
 
-import org.springframework.util.StringUtils;
-
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.springframework.util.StringUtils;
 
 import static com.anchr.core.conversation.application.constant.AnswerStreamConstant.TAIL_GUARD_CHARS;
 
@@ -81,7 +81,7 @@ final class SummaryStreamingRenderer {
     }
 
     private void rejectAuthoredOrInternalContent(String source) {
-        String normalized = source.toLowerCase(java.util.Locale.ROOT);
+        String normalized = source.toLowerCase(Locale.ROOT);
         if (normalized.contains("{{segment:")) {
             throw new IllegalStateException("Summary stream exposed an internal segment marker");
         }

@@ -1,10 +1,10 @@
 package com.anchr.core.conversation.application.agent;
 
-import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
-import com.anchr.core.conversation.application.AnswerIdentity;
-import com.anchr.core.conversation.application.AnswerEventPublisher;
-import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
+import com.anchr.core.conversation.application.AnswerEventPublisher;
+import com.anchr.core.conversation.application.AnswerIdentity;
+import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
@@ -17,26 +17,30 @@ import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 import org.springframework.transaction.support.TransactionTemplate;
-
-import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
+import org.springframework.util.StringUtils;
 
 import static com.anchr.core.conversation.application.constant.AgentConstant.CITATION_CATALOG_CHARS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.CITATION_EVIDENCE_CHARS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CITATION_MARKERS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CITATION_MARKERS_PER_PARAGRAPH;
 import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_UNIQUE_CITATIONS;
-import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_MAX_DOCUMENTS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_MAX_CITATIONS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_MAX_DOCUMENTS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_MAX_TOKENS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_READ_PAGE_SIZE;
 import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_TEMPERATURE;
@@ -152,7 +156,7 @@ public class AgentTaskProcessor {
                     .filter(Objects::nonNull).limit(SUMMARY_MAX_CITATIONS).toList();
             if (selected.isEmpty()) throw new IllegalStateException("Summary citations are outside task evidence");
             Set<String> selectedIds = selected.stream().map(ConversationRetrievalCandidate::getSegmentId)
-                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
             if (!selectedIds.containsAll(citedIds)) {
                 throw new IllegalStateException("Summary contains unregistered segment citations");
             }
@@ -341,7 +345,7 @@ public class AgentTaskProcessor {
                         deadline,
                         System.currentTimeMillis()));
         long started = System.currentTimeMillis();
-        java.util.concurrent.atomic.AtomicLong firstTokenAt = new java.util.concurrent.atomic.AtomicLong();
+        AtomicLong firstTokenAt = new AtomicLong();
         ConversationGenerationResult result;
         SummaryStreamingRenderer renderer = new SummaryStreamingRenderer(
                 citationPlan.tokenToSegment(), citationPlan.references(), delta -> {
@@ -385,7 +389,7 @@ public class AgentTaskProcessor {
     static String unwrapMarkdownFence(String value) {
         if (!StringUtils.hasText(value)) return value;
         String trimmed = value.trim();
-        var matcher = java.util.regex.Pattern.compile(
+        var matcher = Pattern.compile(
                         "(?is)^```[ \\t]*(?:markdown|md)?[ \\t]*\\R(.*?)\\R```[ \\t]*$")
                 .matcher(trimmed);
         return matcher.matches() ? matcher.group(1).trim() : trimmed;
@@ -467,14 +471,14 @@ public class AgentTaskProcessor {
     }
 
     private String encodeSummaryDraft(String draft, SummaryCitationPlan plan) {
-        java.util.regex.Matcher matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(draft);
+        Matcher matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(draft);
         StringBuilder encoded = new StringBuilder();
         while (matcher.find()) {
             String token = plan.segmentToToken().get(matcher.group(1).trim());
             if (token == null) {
                 throw new IllegalStateException("Summary draft contains an unknown segment citation");
             }
-            matcher.appendReplacement(encoded, java.util.regex.Matcher.quoteReplacement(token));
+            matcher.appendReplacement(encoded, Matcher.quoteReplacement(token));
         }
         matcher.appendTail(encoded);
         String value = encoded.toString();
@@ -719,7 +723,7 @@ public class AgentTaskProcessor {
             log.warn("Agent task stage lookup failed, taskId={}, stage={}", task.getTaskId(), stage, e);
         }
         AgentStep step = new AgentStep();
-        step.setStepId(UUID.nameUUIDFromBytes((task.getRunId() + ":" + stage).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString());
+        step.setStepId(UUID.nameUUIDFromBytes((task.getRunId() + ":" + stage).getBytes(StandardCharsets.UTF_8)).toString());
         step.setRunId(task.getRunId());
         step.setStepOrder(order);
         step.setStepType(AgentStepType.TASK_STAGE.name());

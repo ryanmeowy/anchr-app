@@ -1,11 +1,11 @@
 package com.anchr.core.conversation.application.agent;
 
-import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
-
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CITATION_MARKERS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CITATION_MARKERS_PER_PARAGRAPH;
@@ -46,7 +46,7 @@ final class AgentCitationPolicy {
                     && totalMarkers < MAX_CITATION_MARKERS
                     && paragraphMarkers < MAX_CITATION_MARKERS_PER_PARAGRAPH;
             matcher.appendReplacement(compacted,
-                    keep ? java.util.regex.Matcher.quoteReplacement(matcher.group()) : "");
+                    keep ? Matcher.quoteReplacement(matcher.group()) : "");
             if (keep) {
                 selectedIds.add(segmentId);
                 totalMarkers++;

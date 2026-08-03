@@ -1,27 +1,27 @@
 package com.anchr.core.conversation.application;
 
-import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.common.util.RuntimeConfigUnit;
-import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
-import com.anchr.core.settings.domain.model.RuntimeConfigType;
+import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AgentProgressEvent;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentRunActivityDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentRuntimeSnapshotDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentTaskDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
+import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
-
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * Best-effort cache of the latest running Agent state. Conversation and trace tables remain authoritative.
@@ -191,7 +191,7 @@ public class AgentRuntimeSnapshotService {
         for (int index = 0; index < steps.size(); index++) {
             AgentRunActivityDTO.StepDTO current = steps.get(index);
             if (current.getStepOrder() == next.getStepOrder()
-                    && java.util.Objects.equals(current.getType(), next.getType())) {
+                    && Objects.equals(current.getType(), next.getType())) {
                 if (replaceExisting) steps.set(index, next);
                 return;
             }

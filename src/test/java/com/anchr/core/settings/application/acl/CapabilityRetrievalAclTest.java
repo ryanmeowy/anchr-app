@@ -5,6 +5,7 @@ import com.anchr.core.search.application.api.model.RetrievalEmbeddingDeploymentR
 import com.anchr.core.settings.application.model.CapabilityEmbeddingProfileSnapshot;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -16,7 +17,7 @@ class CapabilityRetrievalAclTest {
     @Test
     void mapsCapabilitySnapshotToRetrievalPublishedLanguage() {
         RetrievalEmbeddingDeploymentApi api = mock(RetrievalEmbeddingDeploymentApi.class);
-        when(api.requestDeployment(org.mockito.ArgumentMatchers.any())).thenReturn("task-1");
+        when(api.requestDeployment(ArgumentMatchers.any())).thenReturn("task-1");
         CapabilityRetrievalAcl acl = new CapabilityRetrievalAcl(api);
 
         String taskId = acl.requestDeployment(new CapabilityEmbeddingProfileSnapshot(

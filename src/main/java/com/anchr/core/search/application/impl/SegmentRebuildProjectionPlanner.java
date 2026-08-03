@@ -1,18 +1,18 @@
 package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.domain.model.EmbeddingProjection;
-import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy;
 import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy.Profile;
+import com.anchr.core.search.domain.model.EmbeddingProjectionPolicy;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
-import org.springframework.util.StringUtils;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
+import org.springframework.util.StringUtils;
 
 /**
  * Changes existing index documents into the segment shape required by a target profile.
@@ -28,7 +28,7 @@ final class SegmentRebuildProjectionPlanner {
             Supplier<String> segmentIdSupplier
     ) {
         this.targetProfile = Profile.fromCapability(targetCapability);
-        this.segmentIdSupplier = java.util.Objects.requireNonNull(
+        this.segmentIdSupplier = Objects.requireNonNull(
                 segmentIdSupplier, "segmentIdSupplier");
     }
 

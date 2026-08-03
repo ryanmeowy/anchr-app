@@ -1,20 +1,20 @@
 package com.anchr.core.conversation.application.assembler;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.type.CollectionType;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationTurnDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.type.CollectionType;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 @Component
 @RequiredArgsConstructor
@@ -103,7 +103,7 @@ public class ConversationTurnCodec {
                 return dto;
             });
             boolean alreadyPresent = group.getChunks().stream()
-                    .anyMatch(chunk -> java.util.Objects.equals(chunk.getSegmentId(), citation.getSegmentId()));
+                    .anyMatch(chunk -> Objects.equals(chunk.getSegmentId(), citation.getSegmentId()));
             if (!alreadyPresent) {
                 group.getChunks().add(toCitationChunkDTO(citation));
             }

@@ -1,18 +1,13 @@
 package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.application.api.RetrievalCitationReasonApi;
-import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
 import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest.CitationChunk;
+import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
 import com.anchr.core.search.domain.port.SearchGenerationPort;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
-
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -20,6 +15,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import static com.anchr.core.common.constant.CitationConstant.REASON_MAX_LENGTH;
 
@@ -91,7 +92,7 @@ public class CitationReasonGenerationServiceImpl implements RetrievalCitationRea
         }
         Set<String> allowedIds = eligibleChunks.stream()
                 .map(CitationChunk::segmentId)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         Map<String, String> reasons = new LinkedHashMap<>();
         try {
             JsonNode items = objectMapper.readTree(json).path("items");
@@ -137,7 +138,7 @@ public class CitationReasonGenerationServiceImpl implements RetrievalCitationRea
         }
         return request.citations().stream()
                 .filter(java.util.Objects::nonNull)
-                .flatMap(group -> group.chunks() == null ? java.util.stream.Stream.empty() : group.chunks().stream())
+                .flatMap(group -> group.chunks() == null ? Stream.empty() : group.chunks().stream())
                 .filter(java.util.Objects::nonNull)
                 .filter(chunk -> StringUtils.hasText(chunk.segmentId()) && StringUtils.hasText(chunk.content()))
                 .toList();
@@ -150,7 +151,7 @@ public class CitationReasonGenerationServiceImpl implements RetrievalCitationRea
         Map<String, String> reasons = new LinkedHashMap<>();
         request.citations().stream()
                 .filter(java.util.Objects::nonNull)
-                .flatMap(group -> group.chunks() == null ? java.util.stream.Stream.empty() : group.chunks().stream())
+                .flatMap(group -> group.chunks() == null ? Stream.empty() : group.chunks().stream())
                 .filter(java.util.Objects::nonNull)
                 .filter(chunk -> StringUtils.hasText(chunk.segmentId()) && StringUtils.hasText(chunk.matchSummary()))
                 .forEach(chunk -> reasons.putIfAbsent(

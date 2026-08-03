@@ -1,11 +1,11 @@
 package com.anchr.core.conversation.application.assembler;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
-import org.junit.jupiter.api.Test;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import org.assertj.core.groups.Tuple;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -95,8 +95,8 @@ class ConversationCitationMapperTest {
             assertThat(group.getCitationIndex()).isEqualTo(1);
             assertThat(group.getChunks()).extracting("segmentId", "segmentIndex", "citationLabel")
                     .containsExactly(
-                            org.assertj.core.groups.Tuple.tuple("seg-2", 1, "1-1"),
-                            org.assertj.core.groups.Tuple.tuple("seg-1", 2, "1-2"));
+                            Tuple.tuple("seg-2", 1, "1-1"),
+                            Tuple.tuple("seg-1", 2, "1-2"));
         });
     }
 

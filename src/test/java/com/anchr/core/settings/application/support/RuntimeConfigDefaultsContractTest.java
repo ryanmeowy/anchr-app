@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 import java.util.stream.Collectors;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RuntimeConfigDefaultsContractTest {

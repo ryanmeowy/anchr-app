@@ -4,11 +4,11 @@ import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.kb.domain.model.Asset;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-
+import com.anchr.core.search.domain.model.SegmentType;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -179,7 +179,7 @@ class DoclingChunkMapperTest {
 
         assertThat(images).singleElement().satisfies(image -> {
             assertThat(image.getSegmentType()).isEqualTo(
-                    com.anchr.core.search.domain.model.SegmentType.DOCUMENT_IMAGE);
+                    SegmentType.DOCUMENT_IMAGE);
             assertThat(image.getSegmentId()).isEqualTo("1001");
             assertThat(image.getSourceRef()).isEqualTo("embedded/picture-0.png");
             assertThat(image.getChunkText()).isEqualTo("caption\nalt\ncontext");

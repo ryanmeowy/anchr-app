@@ -1,16 +1,17 @@
 package com.anchr.core.integration.ai.adapter;
 
+import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.integration.ai.client.EmbeddingClient;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
-import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -52,11 +53,11 @@ class ConfigDrivenEmbeddingAdapterTest {
         assertThat(client.contexts.get(0).contentMap())
                 .containsEntry(
                         "contents",
-                        List.of(java.util.Map.of("text", "query text")));
+                        List.of(Map.of("text", "query text")));
         assertThat(client.contexts.get(1).contentMap())
                 .containsEntry(
                         "contents",
-                        List.of(java.util.Map.of(
+                        List.of(Map.of(
                                 "image",
                                 "https://example.test/original.png")));
     }
@@ -75,8 +76,8 @@ class ConfigDrivenEmbeddingAdapterTest {
                 .createProfile(target)
                 .orElseThrow();
         RecordingEmbeddingClient targetClient = new RecordingEmbeddingClient();
-        com.anchr.core.integration.ai.client.CapabilityClientFactory clientFactory =
-                new com.anchr.core.integration.ai.client.CapabilityClientFactory(null) {
+        CapabilityClientFactory clientFactory =
+                new CapabilityClientFactory(null) {
                     @Override
                     public Object build(CapabilityConfig config) {
                         return targetClient;

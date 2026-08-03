@@ -5,6 +5,7 @@ import com.anchr.core.integration.ai.client.ClientCacheManager;
 import com.anchr.core.settings.application.api.model.CapabilityServingConfigActivation;
 import com.anchr.core.settings.domain.repository.CapabilityConfigRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
@@ -45,7 +46,7 @@ class CapabilityServingConfigServiceImplTest {
                 .isInstanceOf(IllegalArgumentException.class);
 
         verify(repository, never()).select(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        verify(cacheManager, never()).invalidate(org.mockito.ArgumentMatchers.any());
+                ArgumentMatchers.any(), ArgumentMatchers.any());
+        verify(cacheManager, never()).invalidate(ArgumentMatchers.any());
     }
 }

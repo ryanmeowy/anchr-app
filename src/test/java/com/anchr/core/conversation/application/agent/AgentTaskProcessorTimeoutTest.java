@@ -1,8 +1,9 @@
 package com.anchr.core.conversation.application.agent;
 
-import org.junit.jupiter.api.Test;
-
 import java.time.Duration;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -100,9 +101,9 @@ class AgentTaskProcessorTimeoutTest {
 
     @Test
     void citationDensity_shouldRejectMoreThanTenUniqueReferencesOverall() {
-        String answer = java.util.stream.IntStream.rangeClosed(1, 11)
+        String answer = IntStream.rangeClosed(1, 11)
                 .mapToObj(index -> "段落 " + index + " {{segment:s" + index + "}}")
-                .collect(java.util.stream.Collectors.joining("\n\n"));
+                .collect(Collectors.joining("\n\n"));
 
         assertThat(citationPolicy.withinLimits(answer)).isFalse();
     }
@@ -110,9 +111,9 @@ class AgentTaskProcessorTimeoutTest {
     @Test
     void citationCompaction_shouldEnforceAllLimitsWithoutRewritingTheAnswer() {
         String answer = "第一段 {{segment:s1}} {{segment:s2}} {{segment:s3}} {{segment:s4}}\n\n"
-                + java.util.stream.IntStream.rangeClosed(5, 14)
+                + IntStream.rangeClosed(5, 14)
                 .mapToObj(index -> "段落 " + index + " {{segment:s" + index + "}}")
-                .collect(java.util.stream.Collectors.joining("\n\n"));
+                .collect(Collectors.joining("\n\n"));
 
         String compacted = citationPolicy.compactMarkers(answer);
 

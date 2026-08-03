@@ -1,7 +1,7 @@
 package com.anchr.core.conversation.application.agent.tool;
 
-import com.anchr.core.conversation.application.agent.AgentExecutionContext;
 import com.anchr.core.conversation.application.agent.AgentAnswerType;
+import com.anchr.core.conversation.application.agent.AgentExecutionContext;
 import com.anchr.core.conversation.application.agent.AgentFinalAnswer;
 import com.anchr.core.conversation.application.agent.AgentTool;
 import com.anchr.core.conversation.application.agent.AgentToolResult;
@@ -9,9 +9,9 @@ import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
-import org.springframework.stereotype.Component;
-
 import java.util.List;
+import java.util.Map;
+import org.springframework.stereotype.Component;
 
 import static com.anchr.core.conversation.application.constant.AgentConstant.DELIVER_ANSWER_MAX_CHARS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.DELIVER_ANSWER_MAX_CITATIONS;
@@ -43,7 +43,7 @@ public class DeliverAnswerTool implements AgentTool<DeliverAnswerTool.Input> {
         AgentFinalAnswer answer = new AgentFinalAnswer(
                 input.answerType(), input.answer().trim(),
                 input.citedSegmentIds() == null ? List.of() : input.citedSegmentIds());
-        return AgentToolResult.finalAnswer(answer, java.util.Map.of(
+        return AgentToolResult.finalAnswer(answer, Map.of(
                 "answerType", input.answerType().name(),
                 "citationCount", answer.citedSegmentIds().size()));
     }

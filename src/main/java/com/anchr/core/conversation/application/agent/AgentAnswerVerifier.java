@@ -4,9 +4,6 @@ import com.anchr.core.conversation.application.assembler.ConversationCitationMap
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
-import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
-
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -15,6 +12,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 @Component
 final class AgentAnswerVerifier {
@@ -94,7 +94,7 @@ final class AgentAnswerVerifier {
         Set<String> requestedSet = requested.stream()
                 .filter(StringUtils::hasText)
                 .map(String::trim)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<String> markerSet = new LinkedHashSet<>(markers);
         List<String> illegal = requestedSet.stream()
                 .filter(id -> !allowedById.containsKey(id)).toList();

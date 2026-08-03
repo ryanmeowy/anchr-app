@@ -2,22 +2,22 @@ package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.application.SearchAnswerService;
 import com.anchr.core.search.application.api.RetrievalCitationReasonApi;
+import com.anchr.core.search.application.api.model.RetrievalAnchor;
+import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
 import com.anchr.core.search.application.api.model.RetrievalExplain;
 import com.anchr.core.search.application.api.model.RetrievalHit;
 import com.anchr.core.search.application.api.model.RetrievalTopChunk;
 import com.anchr.core.search.application.api.model.SearchAnswerRequest;
 import com.anchr.core.search.application.api.model.SearchAnswerResult;
-import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
 import com.anchr.core.search.domain.model.SegmentType;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /** Extractive search answer service grounded by already returned retrieval hits. */
 @Service
@@ -193,7 +193,7 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
             var anchor = topChunk == null ? result.anchor() : topChunk.anchor();
             return anchor == null ? null : anchor.chunkOrder();
         }
-        private com.anchr.core.search.application.api.model.RetrievalAnchor anchor() {
+        private RetrievalAnchor anchor() {
             return topChunk == null ? result.anchor() : topChunk.anchor();
         }
         private String sourceRef() {

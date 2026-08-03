@@ -11,11 +11,11 @@ import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentTaskDTO;
+import java.util.List;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
-
-import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -65,7 +65,7 @@ public class AgentTaskQueryService {
             AnswerIdentity identity = AnswerIdentity.forTask(completedTask);
             answerEventPublisher.progress(identity, "CANCELLED", 100);
             answerEventPublisher.snapshot(identity, "任务已取消。");
-            answerEventPublisher.citations(identity, java.util.List.of());
+            answerEventPublisher.citations(identity, List.of());
             answerEventPublisher.cancelled(identity);
         }
         return toDto(completedTask);

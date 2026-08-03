@@ -1,16 +1,16 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import org.springframework.util.StringUtils;
-
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Comparator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import org.springframework.util.StringUtils;
 
 /**
  * Keeps segment ids as an internal evidence protocol while rendering hierarchical Agent citations.
@@ -87,7 +87,7 @@ public final class AgentCitationRenderer {
         Set<String> labels = references.values().stream()
                 .map(AgentCitationReference::label)
                 .filter(StringUtils::hasText)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         for (String label : labels) {
             Pattern authoredLabel = Pattern.compile(
                     "(?<![A-Za-z0-9_])\\[" + Pattern.quote(label) + "](?!\\s*\\()"

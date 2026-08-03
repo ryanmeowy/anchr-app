@@ -1,24 +1,25 @@
 package com.anchr.core.ingestion.infrastructure.parser;
 
 import com.anchr.core.common.model.BboxInfo;
+import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.domain.model.Chunk;
-import com.anchr.core.common.model.ParseResponse;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.google.common.collect.Lists;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.stream.IntStream;
 
 /**
  * Maps docling chunks into the ingestion pipeline's TextChunk model.
@@ -165,10 +166,10 @@ public class DoclingChunkMapper {
     }
 
     private String joinText(String... values) {
-        return java.util.Arrays.stream(values)
+        return Arrays.stream(values)
                 .map(this::trimToNull)
                 .filter(Objects::nonNull)
-                .collect(java.util.stream.Collectors.joining("\n"));
+                .collect(Collectors.joining("\n"));
     }
 
     private String trimToNull(String value) {
