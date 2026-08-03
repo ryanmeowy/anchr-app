@@ -11,7 +11,6 @@ import com.anchr.core.search.application.api.model.RetrievalTopNQuery;
 import com.anchr.core.search.application.api.model.RetrievalTopNResult;
 import com.anchr.core.search.application.model.SearchRewriteResult;
 import com.anchr.core.search.interfaces.rest.assembler.SearchRestAssembler;
-import com.anchr.core.search.interfaces.rest.dto.PreviewAnchorDTO;
 import com.anchr.core.search.interfaces.rest.dto.SearchQueryDTO;
 import java.util.List;
 import java.util.Map;

@@ -5,7 +5,6 @@ import co.elastic.clients.elasticsearch.indices.get_alias.IndexAliases;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Map;

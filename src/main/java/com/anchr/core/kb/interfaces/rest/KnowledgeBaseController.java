@@ -4,7 +4,6 @@ import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.kb.application.AssetPreviewService;
 import com.anchr.core.kb.application.KnowledgeBaseService;
-import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentAvailabilityStatus;
 import com.anchr.core.kb.domain.model.KnowledgeBase;
 import com.anchr.core.kb.domain.model.KnowledgeBaseStatus;

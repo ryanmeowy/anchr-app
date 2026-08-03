@@ -44,7 +44,6 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -192,7 +191,7 @@ class IngestionApplicationServiceImplTest {
 
     @Test
     void createTask_shouldUseSeparateImageFileLimit() {
-        long imageSize = IngestionConstant.MAX_FILE_SIZE_BYTES + 1;
+        long imageSize = IngestionConstant.MAX_IMAGE_FILE_SIZE_BYTES;
 
         IngestionTask task = service.createTask("kb-1", command(
                 DedupeStrategy.SKIP,
