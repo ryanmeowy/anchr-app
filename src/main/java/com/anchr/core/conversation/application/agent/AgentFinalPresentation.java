@@ -48,6 +48,9 @@ final class AgentFinalPresentation {
                                  VerifiedAgentAnswer verified,
                                  ConversationProgressListener progress) {
         if (verified instanceof VerifiedNoEvidenceAnswer noEvidence) {
+            if (progress.supportsAnswerStreaming() && StringUtils.hasText(noEvidence.answer())) {
+                progress.onAnswerDelta(noEvidence.answer());
+            }
             return new PresentedAgentAnswer(noEvidence.answer(), AnswerStatus.NO_EVIDENCE,
                     "agent_declared_no_evidence", List.of());
         }
@@ -73,10 +76,11 @@ final class AgentFinalPresentation {
             return validatedDraft;
         }
         // Citation-bearing drafts have already been grounded, validated, and assigned stable labels.
-        // A second generative presentation pass can split one multi-source claim into duplicate
-        // sentences merely to place each citation separately. Preserve the verified text verbatim;
-        // ConversationService will still stream it after the workflow completes.
+        // Do not expose their model output before validation and do not run a second model pass that
+        // may move citations. Once verified, publish the canonical text as one safe delta; the single
+        // frontend writer owns its visual pacing.
         if (citations != null && !citations.isEmpty()) {
+            progress.onAnswerDelta(validatedDraft);
             return validatedDraft;
         }
         Set<String> allowedLabels = new LinkedHashSet<>();

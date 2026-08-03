@@ -400,6 +400,8 @@ Agent 模式复用相同的知识范围和检索边界：
 - Agent Run、Step 和 Task 持久化到 MySQL；异步任务先保存，再在事务提交后触发，调度器可继续认领未完成任务。
 - Redis Runtime Snapshot 仅用于快速展示最新运行状态，读取或写入失败不改变 MySQL 中的权威状态。
 - SSE 是传输和订阅机制，不另建一套问答业务流程。
+- Conversation SSE、异步 Task SSE、轮询和 Snapshot 使用同一 `turnId` 回答身份；实时 delta 是 provisional，MySQL Turn 中的 canonical 终态是最终事实。
+- Conversation 与 Task 共用的 Answer Event Broker 只保证单 JVM 内实时分发；当前未使用 Redis Pub/Sub，多实例依赖 Task/Turn 查询恢复最终答案。
 
 ### 6.4 Embedding 配置部署与索引切换
 

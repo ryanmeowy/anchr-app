@@ -141,6 +141,10 @@ public class AgentRuntimeSnapshotService {
         if (task == null) return null;
         AgentTaskDTO dto = new AgentTaskDTO();
         dto.setTaskId(task.getTaskId());
+        dto.setSessionId(task.getSessionId());
+        dto.setTurnId(task.getTurnId());
+        dto.setRunId(task.getRunId());
+        dto.setRevision(Math.max(1, task.getAttemptCount()));
         dto.setType(task.getTaskType());
         dto.setStatus(task.getStatus());
         dto.setProgress(task.getProgress());

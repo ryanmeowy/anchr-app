@@ -4,7 +4,6 @@ import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.agent.AgentRunStatus;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
-import com.anchr.core.conversation.application.agent.AgentTaskStreamService;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.domain.model.AgentTask;
@@ -25,7 +24,7 @@ public class AgentTaskQueryService {
     private final ConversationRepository conversationRepository;
     private final AgentTraceRepository traceRepository;
     private final AgentTaskProcessor taskProcessor;
-    private final AgentTaskStreamService taskStreamService;
+    private final AnswerEventPublisher answerEventPublisher;
     private final ConversationTurnCodec codec;
     private final TransactionTemplate transactionTemplate;
 
@@ -61,9 +60,15 @@ public class AgentTaskQueryService {
             taskProcessor.recordCancellation(task);
             taskProcessor.interrupt(taskId);
         }
-        AgentTaskDTO result = get(taskId);
-        if (Boolean.TRUE.equals(cancelled)) taskStreamService.complete(result);
-        return result;
+        AgentTask completedTask = requireAccessible(taskId);
+        if (Boolean.TRUE.equals(cancelled)) {
+            AnswerIdentity identity = AnswerIdentity.forTask(completedTask);
+            answerEventPublisher.progress(identity, "CANCELLED", 100);
+            answerEventPublisher.snapshot(identity, "任务已取消。");
+            answerEventPublisher.citations(identity, java.util.List.of());
+            answerEventPublisher.cancelled(identity);
+        }
+        return toDto(completedTask);
     }
 
     private AgentTask requireAccessible(String taskId) {
@@ -82,7 +87,9 @@ public class AgentTaskQueryService {
     }
 
     private AgentTaskDTO toDto(AgentTask task) {
-        AgentTaskDTO dto = new AgentTaskDTO(); dto.setTaskId(task.getTaskId()); dto.setType(task.getTaskType());
+        AgentTaskDTO dto = new AgentTaskDTO(); dto.setTaskId(task.getTaskId());
+        dto.setSessionId(task.getSessionId()); dto.setTurnId(task.getTurnId()); dto.setRunId(task.getRunId());
+        dto.setRevision(Math.max(1, task.getAttemptCount())); dto.setType(task.getTaskType());
         dto.setStatus(task.getStatus()); dto.setProgress(task.getProgress()); dto.setCurrentStage(task.getCurrentStage());
         dto.setAnswer(task.getAnswer()); dto.setCitations(codec.parseCitations(task.getCitationsJson()));
         dto.setErrorCode(task.getErrorCode()); dto.setErrorMessage(task.getErrorMessage()); return dto;

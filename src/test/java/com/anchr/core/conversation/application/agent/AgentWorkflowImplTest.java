@@ -241,7 +241,7 @@ class AgentWorkflowImplTest {
     }
 
     @Test
-    void citedAnswer_shouldSkipGenerativePresentationAndPreserveVerifiedDraft() {
+    void citedAnswer_shouldStreamVerifiedDraftWithoutAnotherModelPass() {
         AtomicInteger calls = new AtomicInteger();
         AgentModelPort model = request -> calls.getAndIncrement() == 0
                 ? new AgentModelResponse(null,
@@ -271,7 +271,7 @@ class AgentWorkflowImplTest {
 
         assertThat(result.answer()).isEqualTo("文中未提及相关原则的明确定义 [1-1][1-2]");
         assertThat(result.citations()).hasSize(2);
-        assertThat(streamed).isEmpty();
+        assertThat(streamed.toString()).isEqualTo(result.answer());
         verify(generation, never()).generateStream(any(), any(), any());
     }
 

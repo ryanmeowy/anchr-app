@@ -5,6 +5,7 @@ import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
+import com.anchr.core.conversation.application.LocalAnswerEventBroker;
 import com.anchr.core.conversation.application.ChatResponseService;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
 import com.anchr.core.conversation.application.agent.AgentDeferredTask;
@@ -12,6 +13,7 @@ import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
 import com.anchr.core.conversation.application.agent.AgentWorkflow;
 import com.anchr.core.conversation.application.ConversationIntentRouter;
+import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
 import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.conversation.application.acl.ConversationRetrievalAcl;
@@ -197,7 +199,8 @@ class ConversationServiceImplTest {
                         objectMapper,
                         meterRegistry));
         streamAdapter = new ConversationMessageStreamAdapter(
-                messageUseCase, Runnable::run, agentRuntimeSnapshotService);
+                messageUseCase, Runnable::run, agentRuntimeSnapshotService,
+                new LocalAnswerEventBroker(), conversationTurnCodec);
     }
 
     @Test
@@ -404,7 +407,7 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void streamMessage_shouldGenerateFinalizedAnswerBeforePublishingText() {
+    void streamMessage_shouldPublishModelDeltasBeforeTerminalMetadata() {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         String sessionId = session.getSessionId();
         when(queryRewriteService.rewrite(sessionId, "mysql 架构是什么")).thenReturn(buildRewrite(
@@ -412,17 +415,23 @@ class ConversationServiceImplTest {
         when(conversationRetrievalOrchestrator.retrieve(
                 eq("mysql 架构是什么"), eq(20), anyList(), anyList(), eq(null)
         )).thenReturn(buildRetrievalResult(List.of()));
-        when(answerGenerationService.generate(
-                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList()
-        )).thenReturn(buildAnswer("最终规范回答", false, null, List.of()));
+        when(answerGenerationService.generateStream(
+                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT),
+                anyList(), anyList(), any()
+        )).thenAnswer(invocation -> {
+            ConversationProgressListener progress = invocation.getArgument(5);
+            progress.onAnswerDelta("最终规范回答");
+            return buildAnswer("最终规范回答", false, null, List.of());
+        });
 
         SseEmitter emitter = streamAdapter.stream(
                 sessionId, buildMessageRequest("mysql 架构是什么"));
 
-        verify(answerGenerationService).generate(
-                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT), anyList(), anyList());
-        verify(answerGenerationService, never()).generateStream(
-                any(), any(), any(), anyList(), anyList(), any());
+        verify(answerGenerationService).generateStream(
+                eq("mysql 架构是什么"), eq("mysql 架构是什么"), eq(AnswerMode.STRICT),
+                anyList(), anyList(), any());
+        verify(answerGenerationService, never()).generate(
+                any(), any(), any(), anyList(), anyList());
 
         @SuppressWarnings("unchecked")
         Set<ResponseBodyEmitter.DataWithMediaType> earlyEvents =
@@ -435,10 +444,12 @@ class ConversationServiceImplTest {
                 .map(String.class::cast)
                 .collect(Collectors.joining());
         assertThat(sseFraming)
-                .contains("event:trace", "event:delta", "event:citations", "event:done");
+                .contains("event:trace", "event:delta", "event:answer_reset", "event:citations", "event:done");
         assertThat(sseFraming.indexOf("event:trace"))
                 .isLessThan(sseFraming.indexOf("event:delta"));
         assertThat(sseFraming.indexOf("event:delta"))
+                .isLessThan(sseFraming.indexOf("event:answer_reset"));
+        assertThat(sseFraming.indexOf("event:answer_reset"))
                 .isLessThan(sseFraming.indexOf("event:citations"));
         assertThat(sseFraming.indexOf("event:citations"))
                 .isLessThan(sseFraming.indexOf("event:done"));
@@ -465,6 +476,9 @@ class ConversationServiceImplTest {
         ConversationTurn storedTurn = repository.findRecentTurns(sessionId, 1).getFirst();
         assertThat(initialTrace.get("turnId")).isEqualTo(storedTurn.getTurnId());
         assertThat(answerDelta.get("text")).isEqualTo(storedTurn.getAnswer());
+        assertThat(answerDelta.get("answerId")).isEqualTo(storedTurn.getTurnId());
+        assertThat(answerDelta.get("revision")).isEqualTo(1L);
+        assertThat((Long) answerDelta.get("sequence")).isPositive();
         assertThat(done.get("sessionUpdatedAt")).isEqualTo(
                 repository.findSession(sessionId).orElseThrow().getUpdatedAt());
 

@@ -34,6 +34,14 @@ public final class AgentCitationRenderer {
             String answer,
             List<ConversationRetrievalCandidate> selectedEvidence
     ) {
+        return render(answer, selectedEvidence, null);
+    }
+
+    static AgentCitationRenderResult render(
+            String answer,
+            List<ConversationRetrievalCandidate> selectedEvidence,
+            Map<String, AgentCitationReference> fixedReferences
+    ) {
         String source = answer == null ? "" : answer.trim();
         List<ConversationRetrievalCandidate> evidence = selectedEvidence == null
                 ? List.of() : selectedEvidence;
@@ -44,7 +52,9 @@ public final class AgentCitationRenderer {
             }
         }
         if (evidenceBySegment.isEmpty()) return new AgentCitationRenderResult(source, Map.of());
-        Map<String, AgentCitationReference> references = AgentCitationIndexPlan.build(source, evidence);
+        Map<String, AgentCitationReference> references = fixedReferences == null
+                ? AgentCitationIndexPlan.build(source, evidence)
+                : fixedReferences;
 
         Matcher matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(source);
         StringBuilder rendered = new StringBuilder();

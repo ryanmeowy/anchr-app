@@ -1,7 +1,10 @@
 package com.anchr.core.conversation.application.agent;
 
-import com.anchr.core.conversation.domain.model.AgentTask;
+import com.anchr.core.conversation.application.AnswerEvent;
+import com.anchr.core.conversation.application.AnswerEventBroker;
+import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.interfaces.rest.dto.AgentTaskDTO;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -9,135 +12,172 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** Publishes background-task progress and canonical terminal answers to connected Ask clients. */
+/** Converts the shared local AnswerEvent channel into the existing Agent Task SSE protocol. */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class AgentTaskStreamService {
-
     private static final long STREAM_TIMEOUT_MILLIS = 11 * 60_000L;
     private static final String STREAM_PADDING = " ".repeat(2_048);
 
-    private final Map<String, CopyOnWriteArrayList<SseEmitter>> subscribers = new ConcurrentHashMap<>();
-    private final Map<String, String> latestAnswers = new ConcurrentHashMap<>();
+    private final AnswerEventBroker eventBroker;
+    private final ConversationTurnCodec turnCodec;
 
     public SseEmitter subscribe(AgentTaskDTO snapshot) {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
         String taskId = snapshot.getTaskId();
-        CopyOnWriteArrayList<SseEmitter> taskSubscribers = subscribers.computeIfAbsent(
-                taskId, ignored -> new CopyOnWriteArrayList<>());
-        taskSubscribers.add(emitter);
-        Runnable remove = () -> remove(taskId, emitter);
-        emitter.onCompletion(remove);
-        emitter.onTimeout(remove);
-        emitter.onError(ignored -> remove.run());
+        TaskProjection projection = new TaskProjection(snapshot);
+        AtomicBoolean closed = new AtomicBoolean(false);
+        AtomicReference<AnswerEventBroker.Subscription> subscriptionRef = new AtomicReference<>();
+        Runnable close = () -> {
+            if (!closed.compareAndSet(false, true)) return;
+            AnswerEventBroker.Subscription subscription = subscriptionRef.get();
+            if (subscription != null) subscription.close();
+        };
+        emitter.onCompletion(close);
+        emitter.onTimeout(close);
+        emitter.onError(ignored -> close.run());
         try {
             send(emitter, "task", snapshot);
-            String latestAnswer = latestAnswers.get(taskId);
-            if (latestAnswer != null && !latestAnswer.equals(snapshot.getAnswer())) {
-                send(emitter, "answer_reset", Map.of("text", latestAnswer));
-            }
             if (terminal(snapshot.getStatus())) {
-                send(emitter, "done", Map.of("taskId", taskId));
+                sendTerminalSnapshot(emitter, snapshot);
                 emitter.complete();
+                return emitter;
             }
-        } catch (IOException e) {
-            remove.run();
-            emitter.completeWithError(e);
+            AnswerEventBroker.Subscription subscription = eventBroker.subscribe(taskId, event -> {
+                if (closed.get()) return;
+                try {
+                    handle(emitter, projection, event);
+                    if (terminal(event.type())) {
+                        emitter.complete();
+                        close.run();
+                    }
+                } catch (IOException | IllegalStateException exception) {
+                    close.run();
+                }
+            });
+            subscriptionRef.set(subscription);
+            if (closed.get()) subscription.close();
+        } catch (IOException exception) {
+            close.run();
+            emitter.completeWithError(exception);
         }
         return emitter;
     }
 
-    public void publishTask(AgentTask task) {
-        if (task == null || !StringUtils.hasText(task.getTaskId())) return;
-        publish(task.getTaskId(), "task", taskEvent(task));
+    private void handle(SseEmitter emitter, TaskProjection projection, AnswerEvent event) throws IOException {
+        if (!projection.accepts(event)) return;
+        switch (event.type()) {
+            case STARTED -> send(emitter, "answer_reset", answerPayload(event, ""));
+            case PROGRESS -> send(emitter, "task", projection.progress(event));
+            case DELTA -> send(emitter, "delta", answerPayload(event, event.text()));
+            case SNAPSHOT -> send(emitter, "answer_reset", answerPayload(event, event.text()));
+            case CITATIONS -> send(emitter, "citations", citationsPayload(event));
+            case COMPLETED, FAILED, CANCELLED -> send(emitter, "done", identityPayload(event));
+        }
     }
 
-    static Map<String, Object> taskEvent(AgentTask task) {
-        Map<String, Object> event = new LinkedHashMap<>();
-        event.put("taskId", task.getTaskId());
-        event.put("type", task.getTaskType());
-        event.put("status", task.getStatus());
-        event.put("progress", task.getProgress());
-        event.put("currentStage", task.getCurrentStage());
-        if (StringUtils.hasText(task.getErrorCode())) event.put("errorCode", task.getErrorCode());
-        if (StringUtils.hasText(task.getErrorMessage())) event.put("errorMessage", task.getErrorMessage());
-        return event;
-    }
-
-    public void publishDelta(String taskId, String delta) {
-        if (!StringUtils.hasText(taskId) || !StringUtils.hasText(delta)) return;
-        latestAnswers.compute(taskId, (ignored, current) -> (current == null ? "" : current) + delta);
-        publish(taskId, "delta", Map.of("text", delta));
-    }
-
-    public void publishReset(String taskId, String answer) {
-        if (!StringUtils.hasText(taskId)) return;
-        String value = answer == null ? "" : answer;
-        latestAnswers.put(taskId, value);
-        publish(taskId, "answer_reset", Map.of("text", value));
-    }
-
-    public void complete(AgentTask task) {
-        if (task == null || !StringUtils.hasText(task.getTaskId())) return;
-        publishTask(task);
+    private void sendTerminalSnapshot(SseEmitter emitter, AgentTaskDTO task) throws IOException {
         if (StringUtils.hasText(task.getAnswer())) {
-            publishReset(task.getTaskId(), task.getAnswer());
+            Map<String, Object> answer = terminalIdentity(task);
+            answer.put("sequence", 1L);
+            answer.put("text", task.getAnswer());
+            send(emitter, "answer_reset", answer);
         }
-        complete(task.getTaskId());
+        Map<String, Object> citations = terminalIdentity(task);
+        citations.put("citations", task.getCitations() == null ? List.of() : task.getCitations());
+        send(emitter, "citations", citations);
+        send(emitter, "done", terminalIdentity(task));
     }
 
-    public void complete(AgentTaskDTO task) {
-        if (task == null || !StringUtils.hasText(task.getTaskId())) return;
-        publish(task.getTaskId(), "task", task);
-        complete(task.getTaskId());
+    private Map<String, Object> answerPayload(AnswerEvent event, String text) {
+        Map<String, Object> payload = identityPayload(event);
+        payload.put("sequence", event.sequence());
+        payload.put("text", text == null ? "" : text);
+        return payload;
     }
 
-    private void complete(String taskId) {
-        publish(taskId, "done", Map.of("taskId", taskId));
-        CopyOnWriteArrayList<SseEmitter> emitters = subscribers.remove(taskId);
-        if (emitters != null) {
-            emitters.forEach(emitter -> {
-                try {
-                    emitter.complete();
-                } catch (Exception ignored) {
-                    // Completion is best effort after the terminal event.
-                }
-            });
-        }
-        latestAnswers.remove(taskId);
+    private Map<String, Object> citationsPayload(AnswerEvent event) {
+        Map<String, Object> payload = identityPayload(event);
+        payload.put("citations", turnCodec.toCitationDTOs(event.citations()));
+        return payload;
     }
 
-    private void publish(String taskId, String event, Object data) {
-        CopyOnWriteArrayList<SseEmitter> emitters = subscribers.get(taskId);
-        if (emitters == null || emitters.isEmpty()) return;
-        for (SseEmitter emitter : emitters) {
-            try {
-                send(emitter, event, data);
-            } catch (IOException | IllegalStateException e) {
-                remove(taskId, emitter);
-                log.debug("Agent task SSE subscriber disconnected, taskId={}", taskId);
-            }
-        }
+    private Map<String, Object> identityPayload(AnswerEvent event) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (StringUtils.hasText(event.identity().taskId())) payload.put("taskId", event.identity().taskId());
+        if (StringUtils.hasText(event.identity().answerId())) payload.put("answerId", event.identity().answerId());
+        payload.put("revision", event.identity().revision());
+        return payload;
+    }
+
+    private Map<String, Object> terminalIdentity(AgentTaskDTO task) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("taskId", task.getTaskId());
+        if (StringUtils.hasText(task.getTurnId())) payload.put("answerId", task.getTurnId());
+        payload.put("revision", Math.max(1, task.getRevision()));
+        return payload;
     }
 
     private void send(SseEmitter emitter, String event, Object data) throws IOException {
-        SseEmitter.SseEventBuilder builder = SseEmitter.event().name(event);
-        if ("task".equals(event)) builder.comment(STREAM_PADDING);
-        emitter.send(builder.data(data));
-    }
-
-    private void remove(String taskId, SseEmitter emitter) {
-        CopyOnWriteArrayList<SseEmitter> emitters = subscribers.get(taskId);
-        if (emitters == null) return;
-        emitters.remove(emitter);
-        if (emitters.isEmpty()) subscribers.remove(taskId, emitters);
+        emitter.send(SseEmitter.event().comment(STREAM_PADDING).name(event).data(data));
     }
 
     private boolean terminal(String status) {
         return "SUCCEEDED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status);
+    }
+
+    private boolean terminal(AnswerEvent.Type type) {
+        return type == AnswerEvent.Type.COMPLETED
+                || type == AnswerEvent.Type.FAILED
+                || type == AnswerEvent.Type.CANCELLED;
+    }
+
+    private static final class TaskProjection {
+        private final Map<String, Object> values = new LinkedHashMap<>();
+        private long revision;
+
+        private TaskProjection(AgentTaskDTO task) {
+            values.put("taskId", task.getTaskId());
+            values.put("sessionId", task.getSessionId());
+            values.put("turnId", task.getTurnId());
+            values.put("runId", task.getRunId());
+            values.put("type", task.getType());
+            values.put("status", task.getStatus());
+            values.put("progress", task.getProgress());
+            values.put("stage", task.getCurrentStage());
+            values.put("errorCode", task.getErrorCode());
+            values.put("errorMessage", task.getErrorMessage());
+            revision = Math.max(1, task.getRevision());
+            values.put("revision", revision);
+        }
+
+        synchronized boolean accepts(AnswerEvent event) {
+            return event.identity().revision() >= revision;
+        }
+
+        synchronized Map<String, Object> progress(AnswerEvent event) {
+            revision = event.identity().revision();
+            values.put("sessionId", event.identity().sessionId());
+            values.put("turnId", event.identity().answerId());
+            values.put("runId", event.identity().runId());
+            values.put("revision", revision);
+            values.put("progress", event.progress());
+            values.put("stage", event.stage());
+            values.put("currentStage", event.stage());
+            values.put("status", switch (event.stage() == null ? "" : event.stage()) {
+                case "RETRY_WAIT" -> "PENDING";
+                case "COMPLETED" -> "SUCCEEDED";
+                case "FAILED" -> "FAILED";
+                case "CANCELLED" -> "CANCELLED";
+                default -> "RUNNING";
+            });
+            return new LinkedHashMap<>(values);
+        }
     }
 }

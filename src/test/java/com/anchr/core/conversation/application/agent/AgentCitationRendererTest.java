@@ -4,6 +4,7 @@ import com.anchr.core.conversation.application.model.ConversationRetrievalCandid
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,6 +30,26 @@ class AgentCitationRendererTest {
                 evidence("seg-1", "asset-a")));
 
         assertThat(rendered.answer()).isEqualTo("A [1-1]，B [2-1]，A2 [1-2]。");
+    }
+
+    @Test
+    void shouldRebuildContinuousIndexesAfterFinalAnswerDropsDraftEvidence() {
+        List<ConversationRetrievalCandidate> evidence = List.of(
+                evidence("seg-1", "asset-a"),
+                evidence("seg-2", "asset-a"),
+                evidence("seg-3", "asset-a"));
+        Map<String, AgentCitationReference> draftReferences = AgentCitationIndexPlan.build(
+                "A {{segment:seg-1}}，B {{segment:seg-2}}，C {{segment:seg-3}}。",
+                evidence);
+
+        assertThat(draftReferences.get("seg-3").label()).isEqualTo("1-3");
+
+        AgentCitationRenderResult rendered = AgentCitationRenderer.render(
+                "A {{segment:seg-1}}，C {{segment:seg-3}}。",
+                List.of(evidence.get(0), evidence.get(2)));
+
+        assertThat(rendered.answer()).isEqualTo("A [1-1]，C [1-2]。");
+        assertThat(rendered.references().get("seg-3").label()).isEqualTo("1-2");
     }
 
     @Test

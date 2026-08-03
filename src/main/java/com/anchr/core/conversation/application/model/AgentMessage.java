@@ -1,32 +1,34 @@
 package com.anchr.core.conversation.application.model;
 
+import java.util.List;
+
 public record AgentMessage(String role,
                            String content,
                            String toolCallId,
                            String toolName,
-                           java.util.List<AgentToolCall> toolCalls) {
+                           List<AgentToolCall> toolCalls) {
 
     public AgentMessage {
-        toolCalls = toolCalls == null ? java.util.List.of() : java.util.List.copyOf(toolCalls);
+        toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
     }
 
     public static AgentMessage system(String content) {
-        return new AgentMessage("system", content, null, null, java.util.List.of());
+        return new AgentMessage("system", content, null, null, List.of());
     }
 
     public static AgentMessage user(String content) {
-        return new AgentMessage("user", content, null, null, java.util.List.of());
+        return new AgentMessage("user", content, null, null, List.of());
     }
 
     public static AgentMessage assistant(String content) {
-        return new AgentMessage("assistant", content, null, null, java.util.List.of());
+        return new AgentMessage("assistant", content, null, null, List.of());
     }
 
-    public static AgentMessage assistantToolCalls(String content, java.util.List<AgentToolCall> toolCalls) {
+    public static AgentMessage assistantToolCalls(String content, List<AgentToolCall> toolCalls) {
         return new AgentMessage("assistant", content, null, null, toolCalls);
     }
 
     public static AgentMessage tool(String callId, String name, String content) {
-        return new AgentMessage("tool", content, callId, name, java.util.List.of());
+        return new AgentMessage("tool", content, callId, name, List.of());
     }
 }
