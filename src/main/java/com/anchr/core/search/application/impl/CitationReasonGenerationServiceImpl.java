@@ -21,6 +21,8 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.anchr.core.common.constant.CitationConstant.REASON_MAX_LENGTH;
+
 /**
  * Batch LLM generation for final citation explanations. Model failure never changes citations.
  */
@@ -30,8 +32,6 @@ import java.util.regex.Pattern;
 public class CitationReasonGenerationServiceImpl implements RetrievalCitationReasonApi {
 
     private static final Pattern JSON_BLOCK_PATTERN = Pattern.compile("```json\\s*(\\{[\\s\\S]*?})\\s*```");
-    private static final int MAX_REASON_LENGTH = 100;
-
     private final SearchGenerationPort generationPort;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
@@ -127,7 +127,8 @@ public class CitationReasonGenerationServiceImpl implements RetrievalCitationRea
             return null;
         }
         String trimmed = reason.trim();
-        return trimmed.length() <= MAX_REASON_LENGTH ? trimmed : trimmed.substring(0, MAX_REASON_LENGTH);
+        return trimmed.length() <= REASON_MAX_LENGTH
+                ? trimmed : trimmed.substring(0, REASON_MAX_LENGTH);
     }
 
     private List<CitationChunk> eligibleChunks(RetrievalCitationReasonRequest request) {
@@ -152,7 +153,8 @@ public class CitationReasonGenerationServiceImpl implements RetrievalCitationRea
                 .flatMap(group -> group.chunks() == null ? java.util.stream.Stream.empty() : group.chunks().stream())
                 .filter(java.util.Objects::nonNull)
                 .filter(chunk -> StringUtils.hasText(chunk.segmentId()) && StringUtils.hasText(chunk.matchSummary()))
-                .forEach(chunk -> reasons.putIfAbsent(chunk.segmentId(), chunk.matchSummary().trim()));
+                .forEach(chunk -> reasons.putIfAbsent(
+                        chunk.segmentId(), sanitizeReason(chunk.matchSummary())));
         return reasons;
     }
 }

@@ -19,16 +19,19 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.READ_DOCUMENT_DEFAULT_PAGE_SIZE;
+import static com.anchr.core.conversation.application.constant.AgentConstant.READ_DOCUMENT_MAX_CONTENT_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.READ_DOCUMENT_MAX_PAGE_SIZE;
+import static com.anchr.core.conversation.application.constant.AgentConstant.READ_DOCUMENT_MIN_PAGE_SIZE;
+
 @Component
 @RequiredArgsConstructor
 public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
-    private static final int MAX_CONTENT_CHARS = 20_000;
-    private static final int MIN_PAGE_SIZE = 10;
     public record Input(
             @JsonPropertyDescription("优先填写 find_documents 返回的 documents[].assetId；也允许当前授权范围内唯一匹配的完整文件名或标题。不得填写 segmentId。")
             @NotBlank String assetId,
             String cursor,
-            @Min(1) @Max(20) Integer limit) {}
+            @Min(1) @Max(READ_DOCUMENT_MAX_PAGE_SIZE) Integer limit) {}
 
     private final AgentScopeGuard scopeGuard;
     private final ConversationRetrievalAcl conversationRetrievalAcl;
@@ -45,7 +48,9 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
     public AgentToolResult execute(Input input, AgentExecutionContext context) {
         var asset = scopeGuard.requireAsset(input.assetId(), context);
         Cursor cursor = decode(input.cursor());
-        int limit = input.limit() == null ? 20 : Math.max(MIN_PAGE_SIZE, input.limit());
+        int limit = input.limit() == null
+                ? READ_DOCUMENT_DEFAULT_PAGE_SIZE
+                : Math.max(READ_DOCUMENT_MIN_PAGE_SIZE, input.limit());
         List<ConversationRetrievalCandidate> candidates = conversationRetrievalAcl.readDocument(
                 asset, cursor.chunkOrder(), cursor.segmentId(), limit + 1);
         boolean hasMore = candidates.size() > limit;
@@ -55,7 +60,7 @@ public class ReadDocumentTool implements AgentTool<ReadDocumentTool.Input> {
         java.util.ArrayList<ConversationRetrievalCandidate> bounded = new java.util.ArrayList<>();
         for (ConversationRetrievalCandidate candidate : page) {
             String text = candidate.getContent() == null ? "" : candidate.getContent();
-            if (!bounded.isEmpty() && chars + text.length() > MAX_CONTENT_CHARS) break;
+            if (!bounded.isEmpty() && chars + text.length() > READ_DOCUMENT_MAX_CONTENT_CHARS) break;
             chars += text.length();
             bounded.add(candidate);
         }

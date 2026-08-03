@@ -7,20 +7,21 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CITATION_MARKERS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CITATION_MARKERS_PER_PARAGRAPH;
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_UNIQUE_CITATIONS;
+
 @Component
 final class AgentCitationPolicy {
-    static final int MAX_UNIQUE_CITATIONS = 10;
-    static final int MAX_MARKERS = 12;
-    static final int MAX_MARKERS_PER_PARAGRAPH = 3;
     private static final Pattern PARAGRAPH_BOUNDARY = Pattern.compile(
             "(?:\\R\\s*){2,}|(?m)(?=^\\s*(?:[-*+]\\s+|\\d+[.)]\\s+))");
 
     boolean withinLimits(String answer) {
         if (!StringUtils.hasText(answer)) return false;
         if (AgentCitationRenderer.extractSegmentIds(answer).size() > MAX_UNIQUE_CITATIONS) return false;
-        if (markerCount(answer) > MAX_MARKERS) return false;
+        if (markerCount(answer) > MAX_CITATION_MARKERS) return false;
         for (String paragraph : PARAGRAPH_BOUNDARY.split(answer)) {
-            if (markerCount(paragraph) > MAX_MARKERS_PER_PARAGRAPH) return false;
+            if (markerCount(paragraph) > MAX_CITATION_MARKERS_PER_PARAGRAPH) return false;
         }
         return true;
     }
@@ -42,8 +43,8 @@ final class AgentCitationPolicy {
             boolean withinUniqueLimit = knownId || selectedIds.size() < MAX_UNIQUE_CITATIONS;
             boolean keep = StringUtils.hasText(segmentId)
                     && withinUniqueLimit
-                    && totalMarkers < MAX_MARKERS
-                    && paragraphMarkers < MAX_MARKERS_PER_PARAGRAPH;
+                    && totalMarkers < MAX_CITATION_MARKERS
+                    && paragraphMarkers < MAX_CITATION_MARKERS_PER_PARAGRAPH;
             matcher.appendReplacement(compacted,
                     keep ? java.util.regex.Matcher.quoteReplacement(matcher.group()) : "");
             if (keep) {

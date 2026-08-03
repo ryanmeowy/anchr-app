@@ -19,11 +19,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static com.anchr.core.conversation.application.constant.ConversationConstant.CHAT_MAX_TOKENS;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.CHAT_TEMPERATURE;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.DEFAULT_TIMEOUT;
 
 @Slf4j
 @Service
@@ -74,7 +77,8 @@ public class ChatResponseServiceImpl implements ChatResponseService {
         try {
             List<ConversationModelMessage> messages =
                     buildMessages(sessionId, query, effectiveContextTurnLimit);
-            GenerationOptions options = new GenerationOptions(0.4D, 500, Duration.ofSeconds(30));
+            GenerationOptions options = new GenerationOptions(
+                    CHAT_TEMPERATURE, CHAT_MAX_TOKENS, DEFAULT_TIMEOUT);
             String answer = progress.supportsAnswerStreaming()
                     ? generationPort.generateStream(messages, options, delta -> {
                         if (delta == null || delta.isEmpty()) return;

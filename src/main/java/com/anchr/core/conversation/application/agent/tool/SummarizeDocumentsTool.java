@@ -16,14 +16,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_INSTRUCTION_MAX_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_LANGUAGE_MAX_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.SUMMARY_MAX_DOCUMENTS;
+
 @Component
 @RequiredArgsConstructor
 public class SummarizeDocumentsTool implements AgentTool<SummarizeDocumentsTool.Input> {
     public record Input(
                         @JsonPropertyDescription("优先填写 find_documents 返回的 documents[].assetId；也允许当前授权范围内唯一匹配的完整文件名或标题。不得填写 segmentId。")
-                        @NotEmpty @Size(max = 3) List<@NotBlank String> assetIds,
-                        @NotBlank @Size(max = 2_000) String instruction,
-                        @Size(max = 32) String language) {}
+                        @NotEmpty @Size(max = SUMMARY_MAX_DOCUMENTS) List<@NotBlank String> assetIds,
+                        @NotBlank @Size(max = SUMMARY_INSTRUCTION_MAX_CHARS) String instruction,
+                        @Size(max = SUMMARY_LANGUAGE_MAX_CHARS) String language) {}
 
     private final AgentScopeGuard scopeGuard;
     private final ObjectMapper objectMapper;

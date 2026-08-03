@@ -8,7 +8,7 @@ import lombok.Getter;
 @Getter
 public enum ApiError {
     INVALID_REQUEST(400, "Invalid request parameters."),
-    UPLOAD_TOO_LARGE(400, "The uploaded file is too large, please upload a file within 10MB."),
+    UPLOAD_TOO_LARGE(400, "The uploaded file exceeds the allowed size."),
     UNAUTHORIZED(401, "Unauthorized access"),
     FORBIDDEN(403, "Forbidden"),
     NOT_FOUND(404, "Resource not found."),

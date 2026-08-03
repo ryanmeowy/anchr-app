@@ -30,7 +30,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.time.Duration;
+
+import static com.anchr.core.conversation.application.constant.ConversationConstant.DEFAULT_TIMEOUT;
 
 /**
  * Default grounded answer generation service.
@@ -105,7 +106,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
 
             String prompt = buildPrompt(userQuery, rewrittenQuery, groundingSegments, resolvedMode, policy);
             StreamingJsonAnswerDecoder decoder = new StreamingJsonAnswerDecoder(progress);
-            GenerationOptions options = new GenerationOptions(null, null, Duration.ofSeconds(30));
+            GenerationOptions options = new GenerationOptions(null, null, DEFAULT_TIMEOUT);
             String rawText = progress.supportsAnswerStreaming()
                     ? generationPort.generateStream(
                             List.of(new ConversationModelMessage("user", prompt)),

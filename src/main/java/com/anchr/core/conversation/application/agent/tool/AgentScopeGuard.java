@@ -13,10 +13,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.DOCUMENT_NAME_LOOKUP_LIMIT;
+
 @Component
 @RequiredArgsConstructor
 public class AgentScopeGuard {
-    private static final int NAME_LOOKUP_LIMIT = 50;
     private final ConversationKnowledgeAcl conversationKnowledgeAcl;
 
     /**
@@ -59,7 +60,7 @@ public class AgentScopeGuard {
             String reference, List<String> kbIds) {
         Map<String, ConversationDocumentReference> matches = new LinkedHashMap<>();
         for (ConversationDocumentReference asset : conversationKnowledgeAcl
-                .searchActiveDocuments(kbIds, reference, NAME_LOOKUP_LIMIT)) {
+                .searchActiveDocuments(kbIds, reference, DOCUMENT_NAME_LOOKUP_LIMIT)) {
             if (matchesName(asset, reference)) {
                 matches.putIfAbsent(asset.id(), asset);
             }

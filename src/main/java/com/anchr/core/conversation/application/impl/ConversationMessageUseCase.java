@@ -40,13 +40,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
+import static com.anchr.core.conversation.application.constant.ConversationConstant.SINGLE_USER_ID;
+
 @Component
 @RequiredArgsConstructor
 public class ConversationMessageUseCase {
 
     private static final int AUTO_TITLE_MAX_LENGTH = 128;
-    private static final String SINGLE_USER_ID = "single_user";
-
     private final ConversationRepository conversationRepository;
     private final ConversationMessageOrchestrator conversationMessageOrchestrator;
     private final ConversationTurnCodec turnCodec;

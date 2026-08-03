@@ -21,10 +21,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.FIND_DOCUMENTS_DEFAULT_LIMIT;
+import static com.anchr.core.conversation.application.constant.AgentConstant.FIND_DOCUMENTS_MAX_LIMIT;
+import static com.anchr.core.conversation.application.constant.AgentConstant.FIND_DOCUMENTS_QUERY_MAX_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.FIND_DOCUMENTS_SNIPPET_MAX_CHARS;
+
 @Component
 @RequiredArgsConstructor
 public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
-    public record Input(@NotBlank @Size(max = 500) String query, @Min(1) @Max(10) Integer limit) {}
+    public record Input(
+            @NotBlank @Size(max = FIND_DOCUMENTS_QUERY_MAX_CHARS) String query,
+            @Min(1) @Max(FIND_DOCUMENTS_MAX_LIMIT) Integer limit) {}
 
     private final ConversationKnowledgeAcl conversationKnowledgeAcl;
     private final ConversationRetrievalOrchestrator retrievalOrchestrator;
@@ -38,7 +45,7 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
 
     @Override
     public AgentToolResult execute(Input input, AgentExecutionContext context) {
-        int limit = input.limit() == null ? 5 : input.limit();
+        int limit = input.limit() == null ? FIND_DOCUMENTS_DEFAULT_LIMIT : input.limit();
         LinkedHashMap<String, DocumentMatch> matches = new LinkedHashMap<>();
         for (ConversationDocumentReference asset : conversationKnowledgeAcl
                 .searchActiveDocuments(context.kbIds(), input.query().trim(), limit)) {
@@ -46,7 +53,8 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
                 matches.putIfAbsent(asset.id(), new DocumentMatch(asset));
             }
         }
-        var retrieved = retrievalOrchestrator.retrieve(input.query().trim(), 10, context.kbIds(),
+        var retrieved = retrievalOrchestrator.retrieve(
+                input.query().trim(), FIND_DOCUMENTS_MAX_LIMIT, context.kbIds(),
                 List.of("MIXED"), context.assetIds());
         List<ConversationRetrievalCandidate> evidence = new ArrayList<>();
         for (ConversationRetrievalCandidate candidate : retrieved.getTopCandidates()) {
@@ -91,7 +99,8 @@ public class FindDocumentsTool implements AgentTool<FindDocumentsTool.Input> {
             if (segmentId.isEmpty()) segmentId = value.getSegmentId() == null ? "" : value.getSegmentId();
             if (snippet.isEmpty()) {
                 String text = StringUtils.hasText(value.getSnippet()) ? value.getSnippet() : value.getContent();
-                snippet = text == null ? "" : text.substring(0, Math.min(500, text.length()));
+                snippet = text == null ? "" : text.substring(
+                        0, Math.min(FIND_DOCUMENTS_SNIPPET_MAX_CHARS, text.length()));
             }
         }
         private Map<String, Object> view() {

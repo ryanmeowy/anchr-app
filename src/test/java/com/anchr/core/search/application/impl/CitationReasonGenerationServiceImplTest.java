@@ -53,6 +53,20 @@ class CitationReasonGenerationServiceImplTest {
     }
 
     @Test
+    void generate_shouldLimitModelReasonToFiftyCharacters() {
+        SearchGenerationPort generationPort = mock(SearchGenerationPort.class);
+        String longReason = "理由".repeat(30);
+        when(generationPort.generateText(org.mockito.ArgumentMatchers.anyString())).thenReturn(
+                "{\"items\":[{\"segmentId\":\"seg-1\",\"reason\":\""
+                        + longReason + "\"}]}"
+        );
+
+        String reason = service(generationPort).generate(request()).get("seg-1");
+
+        assertThat(reason).hasSize(50).isEqualTo(longReason.substring(0, 50));
+    }
+
+    @Test
     void generate_shouldSkipModelWhenNoChunkHasOriginalContent() {
         SearchGenerationPort generationPort = mock(SearchGenerationPort.class);
         RetrievalCitationReasonRequest request = new RetrievalCitationReasonRequest(
@@ -62,6 +76,22 @@ class CitationReasonGenerationServiceImplTest {
         )))));
 
         assertThat(service(generationPort).generate(request)).containsEntry("seg-1", "语义匹配");
+        verifyNoInteractions(generationPort);
+    }
+
+    @Test
+    void generate_shouldAlsoLimitFallbackReasonToFiftyCharacters() {
+        SearchGenerationPort generationPort = mock(SearchGenerationPort.class);
+        String longReason = "回退".repeat(30);
+        RetrievalCitationReasonRequest request = new RetrievalCitationReasonRequest(
+                "问题", null, "回答[1]", List.of(new RetrievalCitationReasonRequest.CitationGroup(
+                1, "asset-1", List.of(new RetrievalCitationReasonRequest.CitationChunk(
+                "seg-1", null, 0.2D, List.of("VECTOR"), longReason
+        )))));
+
+        assertThat(service(generationPort).generate(request).get("seg-1"))
+                .hasSize(50)
+                .isEqualTo(longReason.substring(0, 50));
         verifyNoInteractions(generationPort);
     }
 

@@ -2,6 +2,7 @@ package com.anchr.core.conversation.interfaces.rest;
 
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.util.RuntimeConfigUnit;
+import com.anchr.core.conversation.application.constant.AgentConstant;
 import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.common.model.Result;
@@ -33,6 +34,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import static com.anchr.core.conversation.application.constant.ConversationConstant.MAX_SESSION_LIST_LIMIT;
+
 /**
  * Conversation APIs.
  */
@@ -54,10 +57,7 @@ public class ConversationController {
                         RuntimeConfigType.AGENT,
                         AgentRuntimeConfigKey.ENABLED,
                         true),
-                runtimeConfigUnit.getInt(
-                        RuntimeConfigType.AGENT,
-                        AgentRuntimeConfigKey.SUMMARY_MAX_DOCUMENTS,
-                        3)));
+                AgentConstant.SUMMARY_MAX_DOCUMENTS));
     }
 
     @PostMapping
@@ -69,7 +69,7 @@ public class ConversationController {
     @GetMapping
     @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
     public Result<ConversationSessionListDTO> listSessions(
-            @RequestParam(required = false) @Min(1) @Max(50) Integer limit,
+            @RequestParam(required = false) @Min(1) @Max(MAX_SESSION_LIST_LIMIT) Integer limit,
             @RequestParam(required = false) String cursor) {
         return Result.success(conversationService.listSessions(limit, cursor));
     }

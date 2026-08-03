@@ -34,15 +34,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.UUID;
 
+import static com.anchr.core.conversation.application.constant.AnswerStreamConstant.CONVERSATION_TIMEOUT_MILLIS;
+import static com.anchr.core.conversation.application.constant.AnswerStreamConstant.PADDING;
+
 /**
  * Spring MVC transport adapter for the synchronous Conversation message use case.
  */
 @Slf4j
 @Component
 public class ConversationMessageStreamAdapter {
-
-    static final long STREAM_TIMEOUT_MILLIS = 120_000L;
-    static final String TRACE_PADDING = " ".repeat(2_048);
 
     private final ConversationMessageUseCase messageUseCase;
     private final Executor streamExecutor;
@@ -68,7 +68,7 @@ public class ConversationMessageStreamAdapter {
             String sessionId,
             ConversationMessageRequestDTO request
     ) {
-        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        SseEmitter emitter = new SseEmitter(CONVERSATION_TIMEOUT_MILLIS);
         AtomicBoolean clientDisconnected = new AtomicBoolean(false);
         AtomicReference<String> activeRunId = new AtomicReference<>();
         String channelId = UUID.randomUUID().toString();
@@ -353,7 +353,7 @@ public class ConversationMessageStreamAdapter {
         try {
             emitter.send(SseEmitter.event()
                     .name("trace")
-                    .comment(TRACE_PADDING)
+                    .comment(PADDING)
                     .data(data));
         } catch (IOException exception) {
             throw new SseClientDisconnectedException(exception);

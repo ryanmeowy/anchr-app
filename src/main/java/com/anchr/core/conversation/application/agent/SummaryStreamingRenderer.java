@@ -10,13 +10,14 @@ import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.anchr.core.conversation.application.constant.AnswerStreamConstant.TAIL_GUARD_CHARS;
+
 /**
  * Converts opaque summary citation tokens into visible labels while retaining a tail that may
  * still contain a partial token or a whole-answer Markdown fence. Raw segment ids never leave this
  * component. The completed internal answer is returned separately for canonical validation.
  */
 final class SummaryStreamingRenderer {
-    private static final int TAIL_GUARD_CHARS = 96;
     private static final Pattern TOKEN = Pattern.compile("\\{\\{cite:(\\d+)}}", Pattern.CASE_INSENSITIVE);
     private static final Pattern WHOLE_MARKDOWN_FENCE = Pattern.compile(
             "(?is)^```[ \\t]*(?:markdown|md)?[ \\t]*\\R(.*?)\\R```[ \\t]*$");

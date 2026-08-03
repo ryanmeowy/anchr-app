@@ -215,7 +215,7 @@ class DoclingClientTest {
                 "v1:" + "a".repeat(64),
                 "https://anchr.oss-cn-shanghai.aliyuncs.com/file.pdf",
                 "file.pdf",
-                ParseRequest.Options.chunkModel(),
+                ParseRequest.Options.chunkModel(false, 200, 1_200),
                 null);
     }
 

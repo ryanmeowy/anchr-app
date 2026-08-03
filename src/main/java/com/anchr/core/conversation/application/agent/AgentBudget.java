@@ -2,6 +2,8 @@ package com.anchr.core.conversation.application.agent;
 
 import java.time.Duration;
 
+import static com.anchr.core.conversation.application.constant.ConversationConstant.DEFAULT_TIMEOUT;
+
 public record AgentBudget(int maxSteps, int maxToolCalls, long deadlineEpochMs) {
 
     public boolean exhausted(int steps, int toolCalls) {
@@ -13,7 +15,7 @@ public record AgentBudget(int maxSteps, int maxToolCalls, long deadlineEpochMs) 
     }
 
     public Duration boundedTimeout(Duration configured) {
-        long configuredMs = configured == null ? 30_000L : configured.toMillis();
+        long configuredMs = configured == null ? DEFAULT_TIMEOUT.toMillis() : configured.toMillis();
         return Duration.ofMillis(Math.max(1L, Math.min(configuredMs, remainingMillis())));
     }
 }

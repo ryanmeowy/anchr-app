@@ -94,6 +94,7 @@ final class IngestionTaskCreateUseCase {
             }
         }
 
+        validateUploadLimits(normalized);
         knowledgeBaseService.get(normalizedKbId);
         try {
             IngestionTask created = transactionRunner.write(() -> createNewTask(
@@ -353,6 +354,29 @@ final class IngestionTaskCreateUseCase {
                 sourceType,
                 dedupeStrategy,
                 List.copyOf(items));
+    }
+
+    private void validateUploadLimits(NormalizedCreateRequest request) {
+        for (IngestionCreateItemCommand item : request.items()) {
+            if (ingestionCapabilityService.isSupportedFileType(item.fileType())) {
+                validateFileSize(item.fileName(), item.fileType(), item.sizeBytes());
+            }
+        }
+    }
+
+    private void validateFileSize(String fileName, String fileType, Long sizeBytes) {
+        if (sizeBytes == null) {
+            return;
+        }
+        if (sizeBytes < 0) {
+            throw new BusinessException(ApiError.INVALID_REQUEST,
+                    "sizeBytes must be greater than or equal to 0.");
+        }
+        long maxSizeBytes = ingestionCapabilityService.maxFileSizeBytesFor(fileType);
+        if (sizeBytes > maxSizeBytes) {
+            throw new BusinessException(ApiError.UPLOAD_TOO_LARGE,
+                    fileName + " exceeds the allowed size for " + fileType + ".");
+        }
     }
 
     private IngestionTaskCreateResult replayOrReject(IngestionTask existing,

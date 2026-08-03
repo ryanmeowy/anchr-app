@@ -21,7 +21,10 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.time.Duration;
+
+import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_MAX_TOKENS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_TEMPERATURE;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.DEFAULT_TIMEOUT;
 
 @Slf4j
 @Component
@@ -105,10 +108,10 @@ final class AgentFinalPresentation {
                     List.of(
                             new ConversationModelMessage("system", FINAL_PRESENTATION_PROMPT),
                             new ConversationModelMessage("user", user.toString())),
-                    new GenerationOptions(0D, 1_500,
+                    new GenerationOptions(FINALIZER_TEMPERATURE, FINALIZER_MAX_TOKENS,
                             state.getBudget().boundedTimeout(
                                     state.getRuntimeConfig() == null
-                                            ? Duration.ofSeconds(30)
+                                            ? DEFAULT_TIMEOUT
                                             : state.getRuntimeConfig().modelTimeout())),
                     delta -> {
                         if (delta == null || delta.isEmpty()) return;

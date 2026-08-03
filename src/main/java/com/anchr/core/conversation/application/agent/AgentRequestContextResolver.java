@@ -11,6 +11,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CONTEXT_ASSETS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CONTEXT_KNOWLEDGE_BASES;
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_CONTEXT_NAME_LENGTH;
+
 /**
  * Resolves client-provided IDs back to active server-side resources before
  * exposing their metadata to the Agent model.
@@ -18,10 +22,6 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 public class AgentRequestContextResolver {
-    private static final int MAX_CONTEXT_KNOWLEDGE_BASES = 50;
-    private static final int MAX_CONTEXT_ASSETS = 20;
-    private static final int MAX_NAME_LENGTH = 300;
-
     private final ConversationKnowledgeAcl conversationKnowledgeAcl;
 
     public AgentRequestContext resolve(AgentRunRequest request) {
@@ -89,7 +89,7 @@ public class AgentRequestContextResolver {
         if (!StringUtils.hasText(value)) return "";
         String normalized = value.trim()
                 .replaceAll("[\\p{Cntrl}&&[^\\r\\n\\t]]", "");
-        return normalized.length() <= MAX_NAME_LENGTH
-                ? normalized : normalized.substring(0, MAX_NAME_LENGTH);
+        return normalized.length() <= MAX_CONTEXT_NAME_LENGTH
+                ? normalized : normalized.substring(0, MAX_CONTEXT_NAME_LENGTH);
     }
 }

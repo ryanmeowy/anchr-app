@@ -57,6 +57,20 @@ class ConversationCitationReasonEnricherTest {
     }
 
     @Test
+    void shouldLimitEveryAppliedReasonToFiftyCharacters() {
+        String longReason = "引用".repeat(30);
+        ConversationCitation generated = citation("seg-1", "fallback");
+        ConversationCitation fallback = citation("seg-2", longReason);
+        when(retrievalAcl.generateCitationReasons(any()))
+                .thenReturn(Map.of("seg-1", longReason));
+
+        enricher.enrich("问题", null, "回答 [1-1] [1-2]", List.of(generated, fallback));
+
+        assertThat(generated.getWhy().getReason()).hasSize(50);
+        assertThat(fallback.getWhy().getReason()).hasSize(50);
+    }
+
+    @Test
     void shouldSkipProviderWhenThereAreNoFinalCitations() {
         enricher.enrich("问题", null, "无引用回答", List.of());
 

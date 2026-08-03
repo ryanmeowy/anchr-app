@@ -15,6 +15,7 @@ public class IngestionCapabilityDTO {
 
     List<SupportedFormatDTO> supportedFormats;
     long maxFileSizeBytes;
+    long maxImageFileSizeBytes;
     int maxFilesPerBatch;
     List<String> dedupeStrategies;
     String defaultDedupeStrategy;
@@ -24,6 +25,7 @@ public class IngestionCapabilityDTO {
         return IngestionCapabilityDTO.builder()
                 .supportedFormats(capabilities.getSupportedFormats().stream().map(SupportedFormatDTO::from).toList())
                 .maxFileSizeBytes(capabilities.getMaxFileSizeBytes())
+                .maxImageFileSizeBytes(capabilities.getMaxImageFileSizeBytes())
                 .maxFilesPerBatch(capabilities.getMaxFilesPerBatch())
                 .dedupeStrategies(capabilities.getDedupeStrategies().stream().map(Enum::name).toList())
                 .defaultDedupeStrategy(capabilities.getDefaultDedupeStrategy().name())

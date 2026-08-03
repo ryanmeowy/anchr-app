@@ -13,6 +13,8 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 import java.util.Map;
 
+import static com.anchr.core.common.constant.CitationConstant.REASON_MAX_LENGTH;
+
 /** Adds presentation reasons after the final answer and citation set have been verified. */
 @Slf4j
 @Component
@@ -49,7 +51,9 @@ public class ConversationCitationReasonEnricher {
                 reason = citation.getWhy().getMatchSummary();
             }
             if (StringUtils.hasText(reason)) {
-                citation.getWhy().setReason(reason.trim());
+                String normalized = reason.trim();
+                citation.getWhy().setReason(normalized.length() <= REASON_MAX_LENGTH
+                        ? normalized : normalized.substring(0, REASON_MAX_LENGTH));
             }
         }
     }

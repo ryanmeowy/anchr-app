@@ -28,6 +28,9 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.anchr.core.conversation.application.constant.ConversationConstant.STRUCTURED_OUTPUT_MAX_TOKENS;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.STRUCTURED_OUTPUT_TEMPERATURE;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -79,7 +82,10 @@ public class ConversationIntentRouterImpl implements ConversationIntentRouter {
             }
             String raw = generationPort.generate(
                     buildMessages(sessionId, query, runtimeConfig.intentContextTurnLimit()),
-                    new GenerationOptions(0.0D, 300, runtimeConfig.intentTimeout())
+                    new GenerationOptions(
+                            STRUCTURED_OUTPUT_TEMPERATURE,
+                            STRUCTURED_OUTPUT_MAX_TOKENS,
+                            runtimeConfig.intentTimeout())
             );
             ConversationIntentResult parsed = parse(raw);
             return record(parsed);

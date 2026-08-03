@@ -45,7 +45,8 @@ public class KnowledgeBaseIngestionController {
     @RequireAuth(roles = {"ADMIN", "USER"})
     @UploadCleanupContract(safeBusinessErrors = {
             ApiError.INVALID_REQUEST,
-            ApiError.KNOWLEDGE_BASE_NOT_FOUND
+            ApiError.KNOWLEDGE_BASE_NOT_FOUND,
+            ApiError.UPLOAD_TOO_LARGE
     })
     @PostMapping("/ingestion-tasks")
     public ResponseEntity<Result<IngestionTaskDTO>> createTask(

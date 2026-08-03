@@ -17,19 +17,19 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static com.anchr.core.conversation.application.constant.AnswerStreamConstant.AGENT_TASK_TIMEOUT_MILLIS;
+import static com.anchr.core.conversation.application.constant.AnswerStreamConstant.PADDING;
+
 /** Converts the shared local AnswerEvent channel into the existing Agent Task SSE protocol. */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AgentTaskStreamService {
-    private static final long STREAM_TIMEOUT_MILLIS = 11 * 60_000L;
-    private static final String STREAM_PADDING = " ".repeat(2_048);
-
     private final AnswerEventBroker eventBroker;
     private final ConversationTurnCodec turnCodec;
 
     public SseEmitter subscribe(AgentTaskDTO snapshot) {
-        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        SseEmitter emitter = new SseEmitter(AGENT_TASK_TIMEOUT_MILLIS);
         String taskId = snapshot.getTaskId();
         TaskProjection projection = new TaskProjection(snapshot);
         AtomicBoolean closed = new AtomicBoolean(false);
@@ -125,7 +125,7 @@ public class AgentTaskStreamService {
     }
 
     private void send(SseEmitter emitter, String event, Object data) throws IOException {
-        emitter.send(SseEmitter.event().comment(STREAM_PADDING).name(event).data(data));
+        emitter.send(SseEmitter.event().comment(PADDING).name(event).data(data));
     }
 
     private boolean terminal(String status) {

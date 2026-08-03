@@ -19,26 +19,20 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
+import static com.anchr.core.conversation.application.constant.ConversationConstant.DEFAULT_SESSION_LIST_LIMIT;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.MAX_SESSION_CURSOR_UPDATED_AT;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.MAX_SESSION_LIST_CURSOR_LENGTH;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.MAX_SESSION_LIST_LIMIT;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.SESSION_LIST_CURSOR_VERSION;
+import static com.anchr.core.conversation.application.constant.ConversationConstant.SINGLE_USER_ID;
+
 @Component
 @RequiredArgsConstructor
 final class ConversationSessionUseCase {
-
-    private static final int DEFAULT_SESSION_LIST_LIMIT = 20;
-    private static final int MAX_SESSION_LIST_LIMIT = 50;
-    private static final int SESSION_LIST_CURSOR_VERSION = 1;
-    private static final int MAX_SESSION_LIST_CURSOR_LENGTH = 1_024;
-    private static final long MAX_SESSION_CURSOR_UPDATED_AT = LocalDateTime.of(
-                    9999, 12, 31, 23, 59, 59, 999_000_000)
-            .atZone(ZoneId.systemDefault())
-            .toInstant()
-            .toEpochMilli();
-    private static final String SINGLE_USER_ID = "single_user";
 
     private final ConversationRepository conversationRepository;
     private final ConversationKnowledgeAcl conversationKnowledgeAcl;

@@ -18,15 +18,20 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.anchr.core.conversation.application.constant.AgentConstant.FIELD_LIMIT;
+import static com.anchr.core.conversation.application.constant.AgentConstant.HISTORY_CHAR_LIMIT;
+import static com.anchr.core.conversation.application.constant.AgentConstant.HISTORY_LIMIT;
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_FINALIZER_EVIDENCE;
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_MODEL_TOOL_RESULT_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_READ_DOCUMENT_CALLS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.PLANNING_MAX_TOKENS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.PLANNING_COMPACT_FIELD_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.PLANNING_EVIDENCE_CONTENT_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.PLANNING_TEMPERATURE;
+
 @Slf4j
 @Service
 public class AgentWorkflowImpl implements AgentWorkflow {
-    private static final int HISTORY_LIMIT = 10;
-    private static final int FIELD_LIMIT = 1_200;
-    private static final int HISTORY_CHAR_LIMIT = 12_000;
-    private static final int MAX_FINALIZER_EVIDENCE = 12;
-    private static final int MAX_MODEL_TOOL_RESULT_CHARS = 14_000;
-    private static final int MAX_READ_DOCUMENT_CALLS = 2;
     private static final String SYSTEM_PROMPT = """
             你是 Anchr 的通用知识库 Agent。你可以自然聊天，也可以根据用户目标自主选择工具。
             工具选择原则：寻找相关文档用 find_documents；检索定义、原理、流程、规则、配置、事实和机制等定向证据用 search_knowledge；
@@ -170,7 +175,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 "decision", "ANALYZING"));
         AgentModelRequest modelRequest = new AgentModelRequest(
                 List.copyOf(state.getMessages()), toolsEnabled ? toolRegistry.definitions() : List.of(),
-                new AgentModelOptions(0.2, 1_500,
+                new AgentModelOptions(PLANNING_TEMPERATURE, PLANNING_MAX_TOKENS,
                         state.getBudget().boundedTimeout(state.getRuntimeConfig().modelTimeout()),
                         state.getRuntimeConfig().toolCallMode().name(),
                         state.getRuntimeConfig().nativeToolChoice().name(), toolsEnabled));
@@ -625,7 +630,9 @@ public class AgentWorkflowImpl implements AgentWorkflow {
             for (String field : List.of("assetId", "fileName", "rewrittenQuery", "nextCursor", "hasMore")) {
                 JsonNode value = root.get(field);
                 if (value != null && !value.isContainerNode()) {
-                    compact.put(field, value.isTextual() ? clip(value.asText(), 1_000) : value);
+                    compact.put(field, value.isTextual()
+                            ? clip(value.asText(), PLANNING_COMPACT_FIELD_CHARS)
+                            : value);
                 }
             }
             JsonNode documents = root.get("documents");
@@ -653,7 +660,7 @@ public class AgentWorkflowImpl implements AgentWorkflow {
                 "assetId", safe(candidate.getAssetId()),
                 "title", safe(candidate.getTitle()),
                 "pageNo", candidate.getPageNo() == null ? -1 : candidate.getPageNo(),
-                "content", clip(evidenceContent(candidate), 700));
+                "content", clip(evidenceContent(candidate), PLANNING_EVIDENCE_CONTENT_CHARS));
     }
 
     private String evidenceContent(ConversationRetrievalCandidate candidate) {
