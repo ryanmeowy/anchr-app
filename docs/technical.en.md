@@ -10,9 +10,9 @@
 [![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5.8-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.18.8-005571?style=flat-square&logo=elasticsearch&logoColor=white)](https://www.elastic.co/elasticsearch)
 [![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](./LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](../LICENSE)
 
-English · [简体中文](README-CN.md)
+[Product overview](../README.md) · [中文产品介绍](./product.zh-CN.md) · English technical guide · [中文技术文档](./technical.zh-CN.md)
 
 </div>
 
@@ -110,7 +110,7 @@ flowchart LR
 
 Cross-domain calls use small application APIs and caller-side anti-corruption layers. The write path intentionally avoids pretending that MySQL, Elasticsearch, and object storage form one distributed transaction: coordinators own state transitions, and an outbox retries delayed cleanup.
 
-For the full boundary decision, see [Domain boundaries and interactions](./docs/domain-boundaries-and-interactions.md).
+For the full boundary decision, see [Domain boundaries and interactions](./domain-boundaries-and-interactions.md).
 
 ## Quick start
 
@@ -260,7 +260,7 @@ Settings and stored as runtime KV records. A change applies to the next
 operation; an operation already in progress keeps the values it read when it
 started. If a KV override is absent, the caller uses its built-in default.
 
-[`application.yaml`](./src/main/resources/application.yaml) defines the
+[`application.yaml`](../src/main/resources/application.yaml) defines the
 database, Redis, security, and Docling startup settings. The Elasticsearch
 connection is loaded from `ES_USERNAME`, `ES_PASSWORD`, and `ES_HOST` by the
 application's Elasticsearch configuration. Model endpoints, API keys, model
@@ -296,13 +296,13 @@ XML reports are retained as a workflow artifact for seven days.
 
 ### Project structure
 
-See [`project_layout.text`](./project_layout.text) for the maintained repository and package map.
+See [`project_layout.text`](../project_layout.text) for the maintained repository and package map.
 
 ### Further reading
 
-- [Agent RAG workflow](./docs/agent-rag-workflow.md)
-- [Domain boundaries and interactions](./docs/domain-boundaries-and-interactions.md)
-- [Docker deployment](./docker/README.md)
+- [Agent RAG workflow](./agent-rag-workflow.md)
+- [Domain boundaries and interactions](./domain-boundaries-and-interactions.md)
+- [Docker deployment](../docker/README.md)
 
 ## Production notes
 
@@ -328,7 +328,7 @@ Please do not include access tokens, provider keys, storage credentials, private
 
 ## License
 
-Anchr App is released under the [MIT License](./LICENSE).
+Anchr App is released under the [MIT License](../LICENSE).
 
 ---
 

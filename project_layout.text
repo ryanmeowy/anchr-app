@@ -1,9 +1,15 @@
 anchr-app/
-├── README.md                              # 英文项目主页
-├── README.zh-CN.md                        # 简体中文说明
+├── README.md                              # 英文产品主页，顶部链接中文产品介绍
 ├── docs/
+│   ├── product.zh-CN.md                   # 中文产品介绍
+│   ├── technical.en.md                    # 英文技术文档
+│   ├── technical.zh-CN.md                 # 中文技术文档
 │   ├── agent-rag-workflow.md              # Agent RAG 运行、证据与恢复流程
-│   └── domain-boundaries-and-interactions.md # 领域边界、状态所有权与交互规则
+│   ├── domain-boundaries-and-interactions.md # 领域边界、状态所有权与交互规则
+│   └── images/                            # README 产品截图
+│       ├── overview.png
+│       ├── citation-preview.png
+│       └── agent-activity.png
 ├── docker/
 │   ├── README.md                          # Docker 部署与常用命令
 │   ├── app/
