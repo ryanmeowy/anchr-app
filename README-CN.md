@@ -12,7 +12,7 @@
 [![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](./LICENSE)
 
-[English](./README.md) · 简体中文
+[English](README-EN.md) · 简体中文
 
 </div>
 

@@ -1,341 +1,236 @@
 <div align="center">
 
-# Anchr App
+# Anchr
 
-### Anchor your knowledge. Trust every answer.
+### 锚定知识，信任每一个答案。
 
-**An evidence-first backend for document intelligence, hybrid retrieval, and agentic RAG.**
+**面向自有文档的证据优先知识工作台。**<br>
+从内容导入、混合检索到 Agent 深度阅读，让答案有来源、过程有边界、结论可核验。
 
-[![Java](https://img.shields.io/badge/Java-21-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://openjdk.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5.8-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.18.8-005571?style=flat-square&logo=elasticsearch&logoColor=white)](https://www.elastic.co/elasticsearch)
-[![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white)](https://www.mysql.com/)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-anchr.cloud-6d5dfc?style=flat-square)](https://anchr.cloud)
+[![Experience](https://img.shields.io/badge/Experience-Evidence--first-5b6ee1?style=flat-square)](#核心体验)
+[![Deployment](https://img.shields.io/badge/Deployment-Self--hosted-2f855a?style=flat-square)](README-CN.md)
 [![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](./LICENSE)
 
-English · [简体中文](./README.zh-CN.md)
+[在线体验](https://anchr.cloud) · [产品概览](README.md) · [技术文档](README-CN.md) · [English](README-EN.md) · [Web 工作台](https://github.com/ryanmeowy/anchr-web)
 
+</div>
+
+<div align="center">
+  <a href="./docs/images/overview.png">
+    <img src="./docs/images/overview.png" alt="Anchr 产品总览" width="920">
+  </a>
+  <br>
+  <sub>Anchr 产品总览 · 点击查看大图</sub>
 </div>
 
 ---
 
-## About Anchr
+<details open>
+<summary><b>📕 目录</b></summary>
 
-Anchr App is the backend of the Anchr knowledge system. It turns documents into searchable, citable evidence and exposes the workflows needed to manage knowledge bases, ingest files, retrieve relevant passages, stream grounded answers, and inspect how Agent runs were produced.
+- [Anchr 是什么](#anchr-是什么)
+- [快速开始](#快速开始)
+- [核心体验](#核心体验)
+- [主要能力](#主要能力)
+- [典型场景](#典型场景)
+- [适合谁](#适合谁)
+- [为什么选择 Anchr](#为什么选择-anchr)
+- [产品组成](#产品组成)
+- [当前阶段](#当前阶段)
+- [进一步了解](#进一步了解)
 
-The application is a Java 21 and Spring Boot modular monolith. MySQL owns business state, Elasticsearch stores versioned segment projections, Redis supports access tokens, ID allocation, query-rewrite caching, and recoverable Agent snapshots, while an authenticated [Anchr Docling](https://github.com/ryanmeowy/anchr-docling) sidecar handles document parsing.
+</details>
+
+## Anchr 是什么
+
+Anchr 是一套开源、可自主托管的文档知识工作台，面向需要使用自有资料进行搜索、问答、研究与知识复用的用户。
+
+它把原始文档转化为可搜索、可引用、可预览的知识证据。用户既可以直接检索内容，也可以围绕一个知识库、几份指定文档或一个具体问题展开对话；当任务需要多步查找、连续阅读或跨文档归纳时，还可以让 Agent 在明确范围内继续探索。
+
+Anchr 关注的不只是“生成一个答案”，而是让用户知道答案依据了什么、能否回到原文、复杂任务进行到了哪里。
 
 > [!IMPORTANT]
-> This repository contains the API service only. Use [Anchr Web](https://github.com/ryanmeowy/anchr-web) for the browser workspace. Document ingestion additionally requires Anchr Docling, object storage, and configured model providers.
+> 本仓库提供 Anchr 的 API 服务。完整产品体验需要配合 [Anchr Web](https://github.com/ryanmeowy/anchr-web)；文档处理需要 [Anchr Docling](https://github.com/ryanmeowy/anchr-docling) 以及已配置的存储和模型能力。
 
-> [!NOTE]
-> The project is under active development. Interfaces, migrations, and operational defaults may evolve before a stable release.
+## 快速开始
 
-## Features
+### 在线体验
 
-| Area | What it provides |
-| --- | --- |
-| **Knowledge content** | Knowledge-base and document lifecycle, health and statistics, object-storage references, deduplication, versioned asset generations, and reliable cleanup. |
-| **Document ingestion** | Asynchronous batch ingestion, idempotent client requests, parse/embed/index stage tracking, manual whole-document retry after failure, reparse/re-embed operations, and Docling integration. |
-| **Hybrid retrieval** | Full-text and vector recall, Chinese IK analysis, Reciprocal Rank Fusion, bounded reranking, metadata and modality filters, and generation-aware visibility. |
-| **Evidence-first answers** | Query rewriting, answer generation, source citations, result cards, follow-up questions, segment preview, and document-context restoration. |
-| **Agentic RAG** | Budgeted tool execution, knowledge search, document discovery and reading, asynchronous summaries, trace persistence, runtime recovery, cancellation, and traditional RAG fallback. |
-| **Streaming workflows** | Server-Sent Events for answers and long-running Agent tasks, with persisted terminal state for refresh-safe clients. |
-| **Runtime configuration** | Encrypted Generation, Embedding, multimodal Embedding, Rerank, and Aliyun OSS configuration with connection testing and controlled activation. |
-| **Access and operations** | Redis-backed `ADMIN`, `USER`, and `GUEST` tokens, index lifecycle controls, Actuator health/metrics, recent activity views, Flyway migrations, and transactional outbox processing. |
+访问 [anchr.cloud](https://anchr.cloud)，直接体验 Anchr 的浏览器工作台。
 
-## Design principles
+建议准备一组你熟悉、方便核验的文档，然后按以下路径体验：
 
-- **Evidence before eloquence** — knowledge answers are tied to registered segments and source previews.
-- **Explicit state ownership** — MySQL stores business truth; Elasticsearch remains a replaceable retrieval projection.
-- **Trackable document ingestion** — ingestion persists task status and stage progress; failed items can be manually retried as whole documents, but a process restart does not resume interrupted processing stages.
-- **Recoverable Agent work** — Agent tasks separately persist runtime state and support Lease-based recovery and cancellation.
-- **Safe index evolution** — asset generations and physical index versions are handled separately, with alias-based activation.
-- **Provider independence** — narrow ports isolate OpenAI-compatible model endpoints, Docling, and object storage from domain workflows.
-- **Bounded complexity** — domain boundaries live inside one deployable modular monolith instead of premature microservices.
+1. 创建知识库并导入文档；
+2. 等待文档进入可用状态，通过搜索确认关键内容能够被找到；
+3. 在 Ask 中限定知识范围并提出问题；
+4. 查看答案引用、结果卡片与原文预览；
+5. 再尝试一个需要跨文档查找、阅读或归纳的问题。
 
-## Tech stack
+使用熟悉的材料，可以直接判断三件事：**是否找对内容、是否引用相关证据、是否能顺畅回到原文。**
 
-| Layer | Technology |
-| --- | --- |
-| Runtime | Java 21 · Spring Boot 3.5 |
-| API | Spring MVC · Jakarta Validation · REST · SSE |
-| Persistence | MySQL 8.4 · MyBatis · Flyway |
-| Retrieval | Elasticsearch 8.18 · BM25/IK · HNSW dense vectors · RRF · Rerank |
-| Runtime state | Redis 7.4 |
-| AI integration | Spring AI · OpenAI-compatible Generation, Embedding, multimodal Embedding, and Rerank endpoints |
-| Documents and storage | Anchr Docling · Aliyun OSS · STS |
-| Testing | JUnit 5 · Mockito · Spring Test · Testcontainers |
+### 自主托管
 
-## Architecture
+如需在自己的环境中运行完整产品：
+
+1. 按[中文技术文档](README-CN.md)启动 Anchr App，并准备 Anchr Web 与 Anchr Docling；
+2. 在设置中完成存储、生成、向量化和排序能力配置；
+3. 启动 Web 工作台，按上面的在线体验路径验证完整知识闭环。
+
+## 核心体验
 
 ```mermaid
 flowchart LR
-    C["Clients<br/>Anchr Web · REST consumers"] -->|REST / SSE| API["Spring MVC API"]
-
-    subgraph APP["Anchr App · modular monolith"]
-        AUTH["Auth & Technical Kernel"]
-        KC["Knowledge Content<br/>KB · Asset · Ingestion"]
-        RET["Retrieval<br/>Segments · Search · Preview"]
-        ASK["Ask<br/>Conversation · Agent"]
-        ACT["Activity<br/>Recent views"]
-        CAP["Capability & Providers<br/>Models · Storage"]
-    end
-
-    API --> AUTH
-    API --> KC
-    API --> RET
-    API --> ASK
-    API --> ACT
-    API --> CAP
-
-    KC <-->|"generation write / cleanup"| RET
-    ASK -->|"scope and documents"| KC
-    ASK -->|"evidence queries"| RET
-    KC -.->|"best effort"| ACT
-    RET -.->|"best effort"| ACT
-    ASK -.->|"best effort"| ACT
-
-    KC --> MYSQL[("MySQL")]
-    ASK --> MYSQL
-    ACT --> MYSQL
-    CAP --> MYSQL
-    AUTH --> REDIS[("Redis")]
-    ASK --> REDIS
-    RET --> ES[("Elasticsearch")]
-
-    CAP --> MODELS["OpenAI-compatible<br/>model providers"]
-    KC --> DOCLING["Anchr Docling"]
-    KC --> OSS["Aliyun OSS"]
+    A["导入文档"] --> B["建立可用知识"]
+    B --> C["搜索或提问"]
+    C --> D["获得带引用答案"]
+    D --> E["回到原文核验"]
+    E --> F["继续会话与探索"]
 ```
 
-Cross-domain calls use small application APIs and caller-side anti-corruption layers. The write path intentionally avoids pretending that MySQL, Elasticsearch, and object storage form one distributed transaction: coordinators own state transitions, and an outbox retries delayed cleanup.
+### 📚 把文档变成可持续使用的知识
 
-For the full boundary decision, see [Domain boundaries and interactions](./docs/domain-boundaries-and-interactions.md).
+按主题或业务范围组织知识库，批量导入文档，并查看处理进度、可用状态与失败信息。内容发生变化时，可以重新处理，而不是把知识库当成一次性数据集。
 
-## Quick start
+### 🔎 搜索不止于关键词
 
-### Prerequisites
+结合文本与语义相关性查找内容，并把搜索范围收敛到指定知识库或文档。用户可以浏览结果，也可以基于相关证据继续提问。
 
-- [JDK 21](https://openjdk.org/)
-- [Apache Maven](https://maven.apache.org/) `3.6.3+`
-- [Docker Engine](https://docs.docker.com/engine/install/) with Docker Compose
-- An Elasticsearch IK plugin archive compatible with Elasticsearch `8.18.8`
-- For the complete workflow:
-  - a running [Anchr Docling](https://github.com/ryanmeowy/anchr-docling) service;
-  - an Aliyun OSS bucket and credentials;
-  - OpenAI-compatible Generation, Embedding or multimodal Embedding, and Rerank endpoints.
+### 🌱 回答有据可查
 
-### 1. Clone the repository
+知识型回答携带来源引用和结果卡片。用户可以进入相关文档片段及上下文预览，确认回答使用了哪些材料，而不是只接受一段无法核实的结论。
 
-```bash
-git clone https://github.com/ryanmeowy/anchr-app.git anchr-app
-cd anchr-app
-```
+<div align="center">
+  <a href="./docs/images/citation-preview.png">
+    <img src="./docs/images/citation-preview.png" alt="Anchr 引用与原文核验" width="780">
+  </a>
+  <br>
+  <sub>引用与原文核验 · 点击查看大图</sub>
+</div>
 
-### 2. Add the Elasticsearch IK plugin
+### 🧭 Agent 面向真实文档工作
 
-Download the release archive compatible with Elasticsearch `8.18.8` from [analysis-ik releases](https://github.com/infinilabs/analysis-ik/releases), then place it beside the infrastructure Dockerfile:
+面对需要多步探索的问题，Agent 可以在授权范围内查找文档、搜索知识、连续阅读并发起文档总结。任务设有执行边界，并提供活动状态、恢复与取消能力。
 
-```text
-docker/infra/elasticsearch-analysis-ik-8.18.8.zip
-```
+<div align="center">
+  <a href="./docs/images/agent-activity.png">
+    <img src="./docs/images/agent-activity.png" alt="Anchr Agent 文档任务" width="780">
+  </a>
+  <br>
+  <sub>Agent 文档任务 · 点击查看大图</sub>
+</div>
 
-The archive is intentionally excluded from Git. The infrastructure image cannot be built until the file is present.
+### 🕘 让知识探索可以继续
 
-### 3. Start infrastructure
+会话、历史回答、最近问题、搜索、引用和文档活动可以被重新访问。用户能够从上一次发现继续，而不必反复重建上下文。
 
-```bash
-cp docker/infra/.env.example docker/infra/.env
-# Replace every change-me value.
-docker compose --env-file docker/infra/.env \
-  -f docker/infra/compose.yml up -d --build
-```
+## 主要能力
 
-Elasticsearch, Redis, and MySQL are published on loopback-only ports. Infrastructure initialization uses `ES_PASSWORD`, `REDIS_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_ROOT_PASSWORD`.
-
-### 4. Configure Anchr App
-
-```bash
-cp docker/app/.env.example docker/app/.env
-```
-
-Match its datastore credentials to the infrastructure environment, then configure Docling and replace all application secrets. Generate the encryption material with:
-
-```bash
-openssl rand -base64 32
-openssl rand -base64 16
-```
-
-Use the first value as `APP_ENCRYPT_KEY` and the second as `APP_ENCRYPT_IV`. The Docling token must match `ANCHR_DOCLING_API_TOKEN` in the sidecar.
-
-The template is organized into these groups:
-
-| Group | Variables | Purpose |
-| --- | --- | --- |
-| Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Tokens, distributed ID segments, rewrite cache, and Agent snapshots. |
-| Elasticsearch | `ES_USERNAME`, `ES_PASSWORD`, `ES_HOST` | Segment indexes, aliases, lexical recall, and vector recall. |
-| MySQL | `MYSQL_URL`, `MYSQL_USER`, `MYSQL_PASSWORD` | Application state. |
-| Security | `APP_ADMIN_SECRET`, `APP_ENCRYPT_KEY`, `APP_ENCRYPT_IV` | Token administration and encryption of provider credentials. |
-| Docling | `APP_DOCLING_BASE_URL`, `APP_DOCLING_API_TOKEN` | Authenticated asynchronous parsing. |
-| Server | `SERVER_HOST`, `SERVER_PORT`, `PROFILES_ACTIVE` | HTTP bind address, port, and active Spring profile. |
-
-> [!WARNING]
-> Do not commit either Docker `.env` file. Keep the encryption key and IV stable for existing encrypted configuration records, and use a secret manager in production.
-
-### 5. Start Anchr App
-
-Build and start the API container:
-
-```bash
-docker compose --env-file docker/app/.env \
-  -f docker/app/compose.yml up -d --build
-```
-
-Anchr Docling remains a separate service. With the example port, the API is available at [http://127.0.0.1:8081](http://127.0.0.1:8081).
-
-For local JVM development instead, copy the application environment to the repository root, change the datastore hosts from Docker service names to `127.0.0.1`, export it, and run Maven:
-
-```bash
-cp docker/app/.env.example .env
-# Set REDIS_HOST and ES_HOST for host access, and change the host in MYSQL_URL.
-set -a
-source .env
-set +a
-mvn spring-boot:run
-```
-
-Flyway applies the database schema on startup.
-
-Check the application:
-
-```bash
-curl http://127.0.0.1:8081/actuator/health
-```
-
-### 6. Create an access token
-
-Issue a one-hour administrator token using the configured admin secret:
-
-```bash
-curl --get http://127.0.0.1:8081/api/v1/auth/refresh-token \
-  --header "X-Admin-Secret: ${APP_ADMIN_SECRET}" \
-  --data-urlencode "role=ADMIN"
-```
-
-Send the returned token as `X-Access-Token` on protected requests. Supported roles are `ADMIN`, `USER`, and `GUEST`; write and administration endpoints require the roles declared by each controller.
-
-### 7. Finish runtime setup
-
-Use the **Settings** workspace in Anchr Web, or the `/api/v1/settings` endpoints, to:
-
-1. configure and test Aliyun OSS;
-2. configure Generation and Rerank providers;
-3. configure either a text Embedding or multimodal Embedding provider;
-4. activate the selected providers and wait for the Segment index to become ready.
-
-Configure Anchr Web to use `http://127.0.0.1:8081` for this API.
-
-## API surface
-
-All business responses use a common result envelope. Protected endpoints expect `X-Access-Token`.
-
-| Prefix | Responsibility |
+| 能力 | 用户可以做什么 |
 | --- | --- |
-| `/api/v1/auth` | Token validation and administration; upload STS credentials. |
-| `/api/v1/settings` | Model capability and object-storage configuration. |
-| `/api/v1/kbs` | Knowledge bases, documents, health, previews, and statistics. |
-| `/api/v1/kbs/{kbId}/ingestion-tasks` | Ingestion creation, progress, and failed-item retry. |
-| `/api/v1/kbs/{kbId}/documents/{assetId}` | Document reparse and re-embed operations. |
-| `/api/v1/search` | Filtered hybrid retrieval with optional generated answers. |
-| `/api/v1/conversations` | Sessions, history, synchronous answers, and SSE answers. |
-| `/api/v1/agent/runs` · `/api/v1/agent/tasks` | Agent traces, snapshots, recovery, task streaming, and cancellation. |
-| `/api/v1/activity` | Recent questions, citations, searches, and documents. |
-| `/api/v1/index` · `/api/v1/preview` | Segment index lifecycle and source-context preview. |
-| `/actuator` · `/api/v1/health` | Runtime and Elasticsearch health. |
+| **知识库与文档** | 创建知识空间、批量导入资料、查看健康度和处理状态、处理失败任务与内容更新。 |
+| **混合检索** | 通过文字和语义相关性查找内容，按知识库、文档与内容类型收窄范围。 |
+| **可信问答** | 基于检索证据生成回答，获得来源引用、结果卡片和后续问题建议。 |
+| **原文核验** | 从搜索结果或回答引用进入文档片段及相邻上下文，恢复证据所在位置。 |
+| **Agentic RAG** | 让 Agent 搜索、定位、阅读和总结文档，并查看运行活动与最终状态。 |
+| **连续工作流** | 保存会话与回答，重新访问最近问题、搜索、引用和导入文档。 |
+| **自主配置** | 在自己的环境中运行，并选择适合自身需求的生成、向量化、排序与存储服务。 |
+| **服务集成** | 通过 API 把文档检索、可信问答和任务能力接入已有产品或内部工具。 |
 
-## Configuration
+## 典型场景
 
-Search, Conversation, Agent, Ingestion, and Outbox tuning is managed from
-Settings and stored as runtime KV records. A change applies to the next
-operation; an operation already in progress keeps the values it read when it
-started. If a KV override is absent, the caller uses its built-in default.
+### 📑 制度与流程查询
 
-[`application.yaml`](./src/main/resources/application.yaml) defines the
-database, Redis, security, and Docling startup settings. The Elasticsearch
-connection is loaded from `ES_USERNAME`, `ES_PASSWORD`, and `ES_HOST` by the
-application's Elasticsearch configuration. Model endpoints, API keys, model
-names, dimensions, and storage credentials are runtime records managed through
-Settings.
+从内部规范中找到适用条款，生成带引用的说明，并回到原文确认条件与上下文。
 
-## Development
+### 🧪 研究资料梳理
 
-### Common commands
+围绕一个主题跨多份材料查找线索、比较观点、归纳信息，同时保留关键结论的来源。
 
-| Command | Description |
+### 🗂️ 项目知识回顾
+
+从方案、会议材料和交付文档中定位历史决策、约束与背景，减少依赖个人记忆。
+
+### 💬 产品与支持知识库
+
+快速查找功能说明、操作步骤和已知处理方式，为重复出现的问题提供可复核的回答。
+
+### 📖 长文档理解
+
+针对指定文档提问，连续阅读相关部分，或发起独立的文档总结任务。
+
+### 🔌 知识能力集成
+
+为已有门户、工作台或内部工具补充文档检索、证据问答与 Agent 文档任务。
+
+## 适合谁
+
+- **知识工作者与研究人员**：需要从大量资料中快速找到信息，并为结论保留出处；
+- **产品、运营与支持人员**：需要持续使用制度、手册、方案和产品文档；
+- **管理内部知识的团队**：重视知识更新状态、回答可信度和原文复核路径；
+- **希望自主托管的团队**：希望掌握自己的文档、模型配置与存储选择；
+- **知识应用开发者**：希望在现有界面或业务流程中接入完整的文档智能能力。
+
+> [!NOTE]
+> 如果需求只是无来源约束的开放式聊天，Anchr 并不是为此设计。它更适合答案需要受到文档范围约束、并且需要被复核的场景。
+
+## 为什么选择 Anchr
+
+### 证据闭环，而不是答案终点
+
+回答、引用、结果卡片与原文预览连接在一起，“得到答案”之后仍然可以继续核验。
+
+### 搜索、问答与阅读是一条路径
+
+用户无需在独立工具之间反复切换，可以从内容发现自然进入理解、追问和原文阅读。
+
+### 知识范围是产品交互的一部分
+
+问题可以限定在选定知识库或文档中，复杂任务也只能在授权范围内探索。
+
+### 长任务有边界、有状态
+
+Agent 和文档任务不是不可见的后台黑盒。用户可以了解活动状态，并在需要时恢复或取消。
+
+### 文档变化属于主流程
+
+导入进度、失败处理、重新解析与知识更新都是产品能力，而不是部署完成后的人工补丁。
+
+### 保留部署与供应商选择权
+
+Anchr 可以运行在自己的环境中，并配置适合自身需求的模型与存储服务。
+
+## 产品组成
+
+| 组件 | 产品职责 |
 | --- | --- |
-| `mvn spring-boot:run` | Start the API in development mode. |
-| `mvn test` | Run unit, contract, and integration tests; Docker-backed tests require a working Docker daemon. |
-| `mvn -DskipTests package` | Build the executable Spring Boot JAR. |
-| `java -jar target/anchr-app-0.0.1-SNAPSHOT.jar` | Run the packaged application after exporting its environment. |
-| `docker compose --env-file docker/infra/.env -f docker/infra/compose.yml logs -f elasticsearch` | Follow Elasticsearch startup and plugin logs. |
+| [**Anchr Web**](https://github.com/ryanmeowy/anchr-web) | 面向用户的浏览器工作台，承载知识库、搜索、Ask、预览、活动和设置体验。 |
+| **Anchr App** | 本仓库；提供知识管理、检索、问答、Agent、活动与配置等产品工作流。 |
+| [**Anchr Docling**](https://github.com/ryanmeowy/anchr-docling) | 将原始文档解析为后续检索与阅读可以使用的内容。 |
 
-### Continuous integration
+## 当前阶段
 
-Pull Requests run the `App CI / Verify` check on JDK 21. It uses the same
-commands as local verification:
+Anchr 仍在积极开发中，产品界面、接口与默认行为可能继续演进。当前重点是建立可靠的文档知识闭环：
 
-```bash
-mvn -B -ntp -DskipTests compile
-mvn -B -ntp test
-```
+- 让内容可以被持续导入和更新；
+- 让搜索与提问受到明确知识范围约束；
+- 让答案可以通过引用与原文预览被核验；
+- 让复杂文档任务具备清晰的执行边界和状态。
 
-The check publishes a Surefire summary with tests, failures, errors, and
-skipped counts. Docker-backed Testcontainers suites run when Docker is
-available; their executed or skipped status is reported separately. Surefire
-XML reports are retained as a workflow artifact for seven days.
+在线演示可通过 [anchr.cloud](https://anchr.cloud) 访问。自主托管前请先阅读技术文档中的依赖条件与运行说明。
 
-### Project structure
+## 进一步了解
 
-See [`project_layout.text`](./project_layout.text) for the maintained repository and package map.
-
-### Further reading
-
-- [Agent RAG workflow](./docs/agent-rag-workflow.md)
-- [Domain boundaries and interactions](./docs/domain-boundaries-and-interactions.md)
-- [Docker deployment](./docker/README.md)
-
-## Production notes
-
-- Terminate TLS at a trusted reverse proxy and disable response buffering for SSE routes.
-- Keep MySQL, Elasticsearch, Redis, Docling, provider APIs, and object storage on private network paths.
-- Store admin, encryption, Docling, model, and storage secrets outside source control.
-- Persist and back up MySQL and object storage; manage Elasticsearch indexes as rebuildable projections.
-- Monitor `/actuator/health`, `/actuator/metrics`, ingestion failures, Agent task leases, outbox retries, and index alias state.
-- After an application restart, review interrupted ingestion items: they are marked failed and require a manual whole-document retry. Agent recovery and cancellation are separate Lease-based capabilities.
-- Validate migrations and index rebuilds against production-like data before deployment.
-
-## Contributing
-
-Bug reports, ideas, and focused Pull Requests are welcome.
-
-1. Open an issue describing the behavior or proposal.
-2. Create a focused branch from the intended base branch.
-3. Preserve domain ownership and existing REST/SSE contracts unless the change explicitly revises them.
-4. Add tests for behavior, failure paths, and persistence/query changes.
-5. Run the relevant focused tests and the CI commands above, then report any Docker/Testcontainers skips separately.
-
-Please do not include access tokens, provider keys, storage credentials, private documents, or production traces in public issues.
-
-## License
-
-Anchr App is released under the [MIT License](./LICENSE).
+- [中文技术文档](README-CN.md)：安装、配置、接口、开发和生产注意事项；
+- [English README](README-EN.md)：英文技术说明；
+- [Agent RAG 当前实现](./docs/agent-rag-workflow.md)：Agent、证据、降级与恢复行为；
+- [领域边界与交互](./docs/domain-boundaries-and-interactions.md)：系统职责与状态边界；
+- [Docker 部署](./docker/README.md)：容器化运行说明。
 
 ---
 
 <div align="center">
 
-Built with care for answers you can trace.
-
-Copyright © 2026
+**让每一个知识答案，都有可以回到原文的锚点。**
 
 </div>
