@@ -33,7 +33,7 @@
 | 207G | 建立最小 CI 和合并门禁 | P1 | 本仓 CI 完成，门禁待配置 | 跨仓工作流未纳入本次执行 |
 | 207H | 准确描述 Ingestion 的恢复能力 | P2 | 完成 | 否 |
 | 207I | 收敛 Agent 状态、依赖和可读性 | P2 | 完成 | 已按 207I1 → 207I4 分阶段实施和验证 |
-| 207J | 审查数据库关系与缺失 FK 的清理风险 | P1/P2 | 审查完成，待决策 | 是否调整 Schema 或采用显式清理需单独确认 |
+| 207J | 审查数据库关系与缺失 FK 的清理风险 | P1/P2 | 207J-1 源码完成，MySQL 验证待执行 | 保持无 FK；207J-2 暂不处理 |
 
 推荐执行顺序：
 
@@ -559,8 +559,17 @@ PLANNING
 ### 验证状态
 
 - 目标集成测试：`AgentTraceMigrationTest` 共 3 个测试，因本机无 Docker/Testcontainers 环境全部 skipped；未伪装为真实 MySQL 通过。
-- 本次为只读审查，没有修改 Java、SQL、测试或历史数据。
-- 207J 后续若进入实施，必须先决定：显式删除 Step、为 `agent_step.run_id` 增加 `ON DELETE CASCADE`，或采用其他受控清理策略；不能只添加无级联 FK，否则现有 `delete agent_run` 会改为失败。
+- 审查阶段没有修改 Java、SQL、测试或历史数据。
+- 207J-1 已决定保持项目无 FK 设计，采用应用层显式清理；207J-2 的历史软删除 Turn 引用暂不处理。
+
+### 2026-08-04 207J-1 实施记录
+
+- `AgentConversationCleanupService.deleteRecords` 先查询 Session 下的全部 Run ID，再按顺序删除 Agent Task、对应 Agent Step 和 Agent Run；没有增加 FK、定时任务或新的事务注解。
+- `AgentTraceRepository`/`AgentTraceMapper` 新增按 Session 查询 Run ID、按 Run ID 批量删除 Step 的最小能力；空 Run ID 集合由 Repository 直接忽略，不生成空 `IN` SQL。
+- 事务继续由公开入口 `ConversationServiceImpl.deleteSession` 的 `@Transactional(rollbackFor = Exception.class)` 统一提供，清理任一步失败都会回滚本次 Session 删除。
+- 原 `AgentTraceMigrationTest.deletingRun_shouldCascadeOnlyItsSteps` 与项目无 FK 设计冲突，已改为验证数据库不会自动级联；显式清理顺序由 `AgentConversationCleanupServiceTest` 覆盖。
+- `AgentTraceMapperXmlTest`、`AgentConversationCleanupServiceTest` 和 `ConversationServiceImplTest` 通过；`mvn -DskipTests compile` 通过；完整 `mvn test` 共 610 个测试，0 failure、0 error、18 skipped。
+- `AgentTraceMigrationTest` 因本机无 Docker/Testcontainers 环境跳过 3 个 MySQL 用例，真实 MySQL 下的 Mapper 批量删除仍待执行验证。
 
 ---
 

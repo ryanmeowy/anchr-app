@@ -14,5 +14,7 @@ public interface AgentTraceMapper {
     List<AgentRunRecord> findRecoverableRuns(@Param("userId") String userId,
                                              @Param("limit") int limit);
     List<AgentStepRecord> findSteps(@Param("runId") String runId);
+    List<String> findRunIdsBySessionId(@Param("sessionId") String sessionId);
+    int deleteStepsByRunIds(@Param("runIds") List<String> runIds);
     int deleteRunsBySessionId(@Param("sessionId") String sessionId);
 }

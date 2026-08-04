@@ -74,7 +74,7 @@ class AgentTraceMigrationTest {
     }
 
     @Test
-    void deletingRun_shouldCascadeOnlyItsSteps() throws Exception {
+    void deletingRun_shouldNotRelyOnDatabaseCascade() throws Exception {
         try (Connection connection = DriverManager.getConnection(
                 MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())) {
             connection.createStatement().executeUpdate("""
@@ -93,8 +93,10 @@ class AgentTraceMigrationTest {
             try (ResultSet result = connection.createStatement().executeQuery(
                     "select count(*) from agent_step where run_id='run-cascade'")) {
                 assertThat(result.next()).isTrue();
-                assertThat(result.getInt(1)).isZero();
+                assertThat(result.getInt(1)).isEqualTo(1);
             }
+            connection.createStatement().executeUpdate(
+                    "delete from agent_step where run_id='run-cascade'");
         }
     }
 

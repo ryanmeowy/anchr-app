@@ -52,7 +52,22 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
     }
 
     @Override
-    public void deleteBySessionId(String sessionId) {
+    public List<String> findRunIdsBySessionId(String sessionId) {
+        return StringUtils.hasText(sessionId) ? mapper.findRunIdsBySessionId(sessionId) : List.of();
+    }
+
+    @Override
+    public void deleteStepsByRunIds(List<String> runIds) {
+        if (runIds == null || runIds.isEmpty()) return;
+        List<String> normalized = runIds.stream()
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        if (!normalized.isEmpty()) mapper.deleteStepsByRunIds(normalized);
+    }
+
+    @Override
+    public void deleteRunsBySessionId(String sessionId) {
         if (StringUtils.hasText(sessionId)) mapper.deleteRunsBySessionId(sessionId);
     }
 

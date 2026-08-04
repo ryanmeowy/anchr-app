@@ -42,14 +42,18 @@ class AgentConversationCleanupServiceTest {
     }
 
     @Test
-    void deleteRecords_shouldDeleteTasksBeforeRuns() {
+    void deleteRecords_shouldFindRunsThenDeleteTasksStepsAndRuns() {
+        when(traceRepository.findRunIdsBySessionId("session-1"))
+                .thenReturn(List.of("run-1", "run-2"));
         AgentConversationCleanupService service = service();
 
         service.deleteRecords("session-1");
 
         InOrder order = inOrder(taskRepository, traceRepository);
+        order.verify(traceRepository).findRunIdsBySessionId("session-1");
         order.verify(taskRepository).deleteBySessionId("session-1");
-        order.verify(traceRepository).deleteBySessionId("session-1");
+        order.verify(traceRepository).deleteStepsByRunIds(List.of("run-1", "run-2"));
+        order.verify(traceRepository).deleteRunsBySessionId("session-1");
     }
 
     private AgentConversationCleanupService service() {

@@ -12,5 +12,7 @@ public interface AgentTraceRepository {
     Optional<AgentRun> findRun(String runId);
     List<AgentRun> findRecoverableRuns(String userId, int limit);
     List<AgentStep> findSteps(String runId);
-    void deleteBySessionId(String sessionId);
+    List<String> findRunIdsBySessionId(String sessionId);
+    void deleteStepsByRunIds(List<String> runIds);
+    void deleteRunsBySessionId(String sessionId);
 }

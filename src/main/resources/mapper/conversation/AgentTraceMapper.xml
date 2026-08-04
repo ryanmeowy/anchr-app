@@ -100,6 +100,18 @@
         select * from agent_step where run_id = #{runId} order by step_order asc
     </select>
 
+    <select id="findRunIdsBySessionId" resultType="java.lang.String">
+        select run_id from agent_run where session_id = #{sessionId} order by run_id asc
+    </select>
+
+    <delete id="deleteStepsByRunIds">
+        delete from agent_step
+        where run_id in
+        <foreach collection="runIds" item="runId" open="(" separator="," close=")">
+            #{runId}
+        </foreach>
+    </delete>
+
     <delete id="deleteRunsBySessionId">
         delete from agent_run where session_id = #{sessionId}
     </delete>

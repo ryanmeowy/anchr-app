@@ -35,7 +35,9 @@ public class AgentConversationCleanupService {
 
     public void deleteRecords(String sessionId) {
         if (!StringUtils.hasText(sessionId)) return;
+        var runIds = traceRepository.findRunIdsBySessionId(sessionId);
         taskRepository.deleteBySessionId(sessionId);
-        traceRepository.deleteBySessionId(sessionId);
+        traceRepository.deleteStepsByRunIds(runIds);
+        traceRepository.deleteRunsBySessionId(sessionId);
     }
 }
