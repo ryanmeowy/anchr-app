@@ -10,7 +10,7 @@ From ingestion and hybrid search to Agent-assisted deep reading, Anchr keeps ans
 [![Deployment](https://img.shields.io/badge/Deployment-Self--hosted-2f855a?style=flat-square)](./docs/technical.en.md)
 [![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](./LICENSE)
 
-[中文产品介绍](./docs/product.zh-CN.md) · Product overview · [中文技术文档](./technical.zh-CN.md) · [English technical guide](./technical.en.md)
+[中文产品介绍](./docs/product.zh-CN.md) · Product overview · [中文技术文档](./docs/technical.zh-CN.md) · [English technical guide](./docs/technical.en.md)
 
 
 </div>
