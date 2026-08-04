@@ -73,7 +73,7 @@ Anchr 关注的不只是“生成一个答案”，而是让用户知道答案�
 
 如需在自己的环境中运行完整产品：
 
-1. 按[中文技术文档](README-CN.md)启动 Anchr App，并准备 Anchr Web 与 Anchr Docling；
+1. 按[技术文档](README-CN.md)启动 Anchr App，并准备 Anchr Web 与 Anchr Docling；
 2. 在设置中完成存储、生成、向量化和排序能力配置；
 3. 启动 Web 工作台，按上面的在线体验路径验证完整知识闭环。
 
@@ -222,7 +222,7 @@ Anchr 仍在积极开发中，产品界面、接口与默认行为可能继续�
 ## 进一步了解
 
 - [中文技术文档](README-CN.md)：安装、配置、接口、开发和生产注意事项；
-- [English README](README-EN.md)：英文技术说明；
+- [English README](README-EN.md)：English technical instructions；
 - [Agent RAG 当前实现](./docs/agent-rag-workflow.md)：Agent、证据、降级与恢复行为；
 - [领域边界与交互](./docs/domain-boundaries-and-interactions.md)：系统职责与状态边界；
 - [Docker 部署](./docker/README.md)：容器化运行说明。
