@@ -37,6 +37,7 @@ From ingestion and hybrid search to Agent-assisted deep reading, Anchr keeps ans
 - [How a trusted answer is formed](#how-a-trusted-answer-is-formed)
 - [Use cases](#use-cases)
 - [Who it is for](#who-it-is-for)
+- [Deployment and tenancy model](#deployment-and-tenancy-model)
 - [What makes Anchr different](#what-makes-anchr-different)
 - [How to evaluate Anchr](#how-to-evaluate-anchr)
 - [Product components](#product-components)
@@ -93,6 +94,8 @@ To run the complete product in your own environment:
 1. Follow the [English technical guide](./docs/technical.en.md) to start Anchr App and prepare Anchr Web and Anchr Docling.
 2. Configure storage, generation, embedding, and reranking capabilities.
 3. Start the Web workspace and follow the same evaluation path described above.
+
+The current release uses a **single-instance, single-tenant** deployment model: one Anchr App deployment serves one organization or team and runs one App process or container replica. Deploy a separate environment for every organization that requires isolation. See [Deployment and tenancy model](#deployment-and-tenancy-model) and the [technical guide](./docs/technical.en.md#single-instance-single-tenant-constraints).
 
 ## Product journey
 
@@ -214,6 +217,17 @@ Add document search, evidence-grounded Q&A, and Agent document work to an existi
 
 > [!NOTE]
 > Anchr is not primarily designed for open-ended chat without source constraints. It is most useful when an answer should stay within a document scope and remain open to verification.
+
+## Deployment and tenancy model
+
+Anchr currently follows a **single-instance, single-tenant** design:
+
+- One deployment belongs to one logical tenant: an organization or team that shares knowledge, configuration, and operations.
+- One deployment runs one Anchr App process or container replica. Multiple people may use it, but horizontal replicas behind a load balancer are not supported.
+- Knowledge bases organize content and narrow retrieval; they are not tenant security boundaries. `ADMIN`, `USER`, and `GUEST` are roles inside the same tenant, not tenant identities.
+- Model, embedding, reranking, object-storage, and runtime settings apply to the whole deployment.
+
+“Single tenant” does not mean “single user.” It means the current product does not isolate multiple organizations inside one deployment. Multi-tenant SaaS, tenant-specific administration and quotas, and horizontal App scaling are outside the current product boundary. Use separate deployments, data stores, storage namespaces, and secrets for mutually isolated tenants.
 
 ## What makes Anchr different
 

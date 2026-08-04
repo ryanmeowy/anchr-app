@@ -8,6 +8,13 @@ Docker assets are split by deployment responsibility:
 The two stacks use separate environment files so they do not need to share every
 secret.
 
+> [!IMPORTANT]
+> The supported topology is single-instance and single-tenant. Run exactly one
+> Anchr App container for one organization or team. For isolated tenants, deploy
+> separate App environments with separate databases, Elasticsearch/Redis logical
+> resources, object-storage namespaces, and secrets. Do not scale the `backend`
+> service to multiple replicas or overlap old and new replicas during upgrades.
+
 ## 1. Prepare Elasticsearch
 
 Download the `analysis-ik` archive compatible with Elasticsearch `8.18.8` and

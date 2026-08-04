@@ -4,6 +4,9 @@
 
 内容以源码和数据库迁移为准，随实现同步更新。
 
+> [!IMPORTANT]
+> 当前系统的受支持边界是**单实例、单租户**：一套部署只运行一个 Anchr App 进程并服务一个组织或团队。本文提到的 `user_id`、角色和知识范围都位于该租户内部，不构成跨租户隔离；局部使用 Lease、条件更新或查询恢复也不表示系统支持多 App 副本。完整约束见[中文技术文档](./technical.zh-CN.md#单实例单租户架构约束)。
+
 ## 1. 系统边界与术语
 
 Anchr App 后端是一个 Spring Boot 模块化单体。所有模块运行在同一进程中，但业务状态并不共享所有权：
@@ -352,7 +355,7 @@ Agent 模式复用相同的知识范围和检索边界：
 - Redis Runtime Snapshot 仅用于快速展示最新运行状态，读取或写入失败不改变 MySQL 中的权威状态。
 - SSE 是传输和订阅机制，不另建一套问答业务流程。
 - Conversation SSE、异步 Task SSE、轮询和 Snapshot 使用同一 `turnId` 回答身份；实时 delta 是 provisional，MySQL Turn 中的 canonical 终态是最终事实。
-- Conversation 与 Task 共用的 Answer Event Broker 只保证单 JVM 内实时分发；当前未使用 Redis Pub/Sub，多实例依赖 Task/Turn 查询恢复最终答案。
+- Conversation 与 Task 共用的 Answer Event Broker 只保证单 JVM 内实时分发；当前未使用 Redis Pub/Sub。Task/Turn 查询只能用于单实例中的断线与重启恢复，不能据此部署多个 App 副本。
 
 ### 6.4 Embedding 配置部署与索引切换
 

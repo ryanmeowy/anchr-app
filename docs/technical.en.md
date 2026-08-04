@@ -43,6 +43,7 @@ The application is a Java 21 and Spring Boot modular monolith. MySQL owns busine
 
 ## Design principles
 
+- **Single instance and tenant** — one deployment runs one Anchr App process for one logical tenant; separate deployments, rather than application-level data partitioning, provide tenant isolation.
 - **Evidence before eloquence** — knowledge answers are tied to registered segments and source previews.
 - **Explicit state ownership** — MySQL stores business truth; Elasticsearch remains a replaceable retrieval projection.
 - **Trackable document ingestion** — ingestion persists task status and stage progress; failed items can be manually retried as whole documents, but a process restart does not resume interrupted processing stages.
@@ -50,6 +51,47 @@ The application is a Java 21 and Spring Boot modular monolith. MySQL owns busine
 - **Safe index evolution** — asset generations and physical index versions are handled separately, with alias-based activation.
 - **Provider independence** — narrow ports isolate OpenAI-compatible model endpoints, Docling, and object storage from domain workflows.
 - **Bounded complexity** — domain boundaries live inside one deployable modular monolith instead of premature microservices.
+
+## Single-instance, single-tenant constraints
+
+### Supported boundary
+
+The supported deployment unit is one environment, one Anchr App instance, and one logical tenant:
+
+- **Single instance** means that only one Anchr App JVM or container replica runs in an environment at a time. MySQL, Elasticsearch, Redis, Docling, object storage, and model providers remain external dependencies and are not limited to one process by this definition.
+- **Single tenant** means that one deployment contains the data and configuration of one organization or team. The deployment boundary is the tenant boundary; requests do not carry a `tenantId` that can switch tenant context.
+- A tenant may issue multiple access tokens with `ADMIN`, `USER`, and `GUEST` roles. These roles authorize APIs inside one tenant; they do not provide tenant isolation.
+- Knowledge bases and conversation knowledge scopes organize and constrain content, but they are not security boundaries between organizations.
+
+### Data and configuration ownership
+
+| Resource | Current ownership and constraint |
+| --- | --- |
+| MySQL | Business tables have no `tenant_id` partition; knowledge bases, assets, ingestion, conversations, Agent state, activity, and configuration belong to the deployment. |
+| Elasticsearch | Segments use deployment-wide fixed read/write aliases and index lifecycle state, without tenant routing. |
+| Redis | Tokens, ID segments, caches, and Agent snapshots use a deployment-level namespace and are not a cross-tenant isolation layer. |
+| Object storage | One storage configuration is active at runtime; its bucket or prefix should be dedicated to the deployment. |
+| Model and runtime configuration | Generation, Embedding, Rerank, and Search/Agent/Ingestion settings apply globally, with no tenant-specific overrides. |
+
+Backups, restores, migrations, cleanup, and capacity planning therefore operate on the whole deployment. Do not treat `user_id`, roles, knowledge-base IDs, object prefixes, or client-supplied filters as tenant isolation controls.
+
+### Why one App instance is required
+
+The current implementation contains process-local coordination state:
+
+- The ingestion worker runs as a single-instance worker. A restart marks interrupted items as failed for manual whole-document retry.
+- Segment index write barriers, lifecycle state, and pending index rebuild decisions are process-local, so multiple replicas cannot provide the required mutual exclusion and consistent state.
+- The answer event broker delivers real-time events only inside one JVM and has no cross-instance event bus such as Redis Pub/Sub.
+
+Some Agent work uses leases and can recover from MySQL or Redis, but this does not make the application as a whole multi-instance safe. Do not run multiple App replicas behind a load balancer or let old and new replicas serve traffic concurrently during a rolling deployment.
+
+### Isolating multiple tenants
+
+Deploy a separate environment for every isolated tenant, including a separate Anchr App/Web entry point, MySQL database, Elasticsearch logical resources that cannot collide on fixed aliases, Redis logical resources and key namespace, object-storage bucket or prefix, application/admin secrets, and provider credentials.
+
+Model providers and Docling may be shared if their own authentication, capacity, data-handling, and audit boundaries are sufficient. Anchr itself does not provide a cross-tenant control plane, tenant routing, quotas, billing, or tenant-specific secret management.
+
+Supporting multi-tenant or horizontally scaled deployments in the future requires end-to-end `tenant_id` authorization, tenant-aware indexes/caches/object keys, distributed locking and event delivery, persistent index lifecycle state, migrations, and isolation tests. Until those capabilities exist, single-instance single-tenancy is an architecture constraint, not just a recommended topology.
 
 ## Tech stack
 
@@ -320,6 +362,8 @@ See [`project_layout.text`](../project_layout.text) for the maintained repositor
 
 ## Production notes
 
+- Run exactly one Anchr App replica per environment. Stop the old instance before starting the new one; do not use a rolling strategy that lets both serve application traffic concurrently.
+- Serve one tenant per deployment. Isolate organizations with separate deployments, data resources, storage namespaces, and secrets rather than knowledge bases, roles, or request filters.
 - Terminate TLS at a trusted reverse proxy and disable response buffering for SSE routes.
 - Keep MySQL, Elasticsearch, Redis, Docling, provider APIs, and object storage on private network paths.
 - Store admin, encryption, Docling, model, and storage secrets outside source control.
