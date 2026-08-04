@@ -68,42 +68,42 @@ The application is a Java 21 and Spring Boot modular monolith. MySQL owns busine
 
 ```mermaid
 flowchart TB
-    CLIENT["Anchr Web · REST consumers"] -->|"REST / SSE"| API
+    CLIENT["Anchr Web · API clients"] -->|"REST / SSE"| API
 
     subgraph APP["Anchr App · modular monolith"]
         direction TB
 
-        subgraph ACCESS["Access layer"]
+        subgraph ACCESS["Interface & access"]
             direction LR
             API["Spring MVC API"]
-            AUTH["Auth & Technical Kernel<br/>Tokens · Roles · shared utilities"]
+            AUTH["Auth & Technical Kernel<br/>Authentication & Authorization · Technical foundation"]
         end
 
-        subgraph CORE["Core domains"]
+        subgraph CORE["Business domains"]
             direction LR
             ASK["Ask<br/>Conversations · Answers · Agent"]
-            KC["Knowledge Content<br/>KBs · Assets · Ingestion"]
-            RET["Retrieval<br/>Segments · Search · Preview"]
-            ACT["Activity<br/>Recent views"]
+            KC["Knowledge Content<br/>Knowledge bases · Assets · Ingestion"]
+            RET["Retrieval<br/>Indexing · Search · Preview"]
+            ACT["Activity<br/>Activity records & queries"]
         end
 
-        CAP["Capability & Providers<br/>Runtime config · Models · Storage"]
+        CAP["Capability & Providers<br/>Runtime configuration & provider adapters"]
     end
 
     API --> AUTH
     API --> ASK & KC & RET & ACT & CAP
 
-    ASK -->|"scope & documents"| KC
-    ASK -->|"retrieval & evidence"| RET
-    KC <-->|"generation write / cleanup"| RET
+    ASK -->|"knowledge scope / documents"| KC
+    ASK -->|"retrieval / evidence"| RET
+    KC <-->|"index write / cleanup"| RET
     ASK -.-> ACT
     KC -.-> ACT
     RET -.-> ACT
 
-    subgraph STATE["State & retrieval projections"]
+    subgraph STATE["Data & projections"]
         direction LR
-        MYSQL[("MySQL<br/>business truth")]
-        ES[("Elasticsearch<br/>retrieval projections")]
+        MYSQL[("MySQL<br/>business state")]
+        ES[("Elasticsearch<br/>retrieval index")]
         REDIS[("Redis<br/>auth · cache · snapshots")]
     end
 
@@ -111,18 +111,18 @@ flowchart TB
     RET --> ES
     AUTH & ASK --> REDIS
 
-    subgraph EXTERNAL["External capabilities"]
+    subgraph EXTERNAL["External services"]
         direction LR
-        MODELS["OpenAI-compatible models"]
-        DOCLING["Anchr Docling"]
-        OSS["Aliyun OSS"]
+        MODELS["Model services<br/>OpenAI-compatible"]
+        DOCLING["Document parsing<br/>Anchr Docling"]
+        OSS["Object storage<br/>Aliyun OSS"]
     end
 
     CAP --> MODELS
     KC --> DOCLING & OSS
 ```
 
-Solid arrows represent business calls or state access and point toward the dependency. Dashed arrows into Activity represent best-effort event recording. Cross-domain calls use small application APIs and caller-side anti-corruption layers. The write path intentionally avoids pretending that MySQL, Elasticsearch, and object storage form one distributed transaction: coordinators own state transitions, and an outbox retries delayed cleanup.
+Solid arrows denote synchronous dependencies; dashed arrows denote activity recording that does not affect the main flow. Cross-domain calls use application APIs and caller-owned ACLs; state transitions and the outbox preserve cross-store consistency.
 
 For the full boundary decision, see [Domain boundaries and interactions](./domain-boundaries-and-interactions.md).
 
