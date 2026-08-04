@@ -6,6 +6,7 @@ import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
 import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
+import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
 import com.anchr.core.conversation.application.agent.AgentRunFinalizer;
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
 import com.anchr.core.conversation.application.assembler.ConversationRetrievalTraceBuilder;
@@ -57,6 +58,7 @@ public class ConversationMessageUseCase {
     private final AgentTaskRepository agentTaskRepository;
     private final TransactionTemplate transactionTemplate;
     private final AgentRunFinalizer agentRunFinalizer;
+    private final AgentConversationCleanupService agentConversationCleanupService;
     private final AgentTaskProcessor agentTaskProcessor;
     private final ConversationAgentTaskDtoAssembler agentTaskAssembler;
     private final ConversationCitationReasonEnricher citationReasonEnricher;
@@ -138,6 +140,8 @@ public class ConversationMessageUseCase {
         }
 
         agentRunFinalizer.markTurnSaved(executionResult.agentRunId());
+        agentConversationCleanupService.deleteOlderTerminalSteps(
+                session.getSessionId(), turn.getTurnId());
         recordQuestionActivity(session, request, turn, executionResult);
         meterRegistry.counter("conversation.turn.count").increment();
         ConversationSession persistedSession = loadSessionOrThrow(session.getSessionId());

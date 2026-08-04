@@ -10,7 +10,7 @@ import org.springframework.util.StringUtils;
 import java.util.Set;
 
 /**
- * Stops in-flight Agent work and removes Agent-owned records for a deleted conversation.
+ * Stops in-flight Agent work and removes obsolete Agent-owned records.
  */
 @Service
 @RequiredArgsConstructor
@@ -35,7 +35,15 @@ public class AgentConversationCleanupService {
 
     public void deleteRecords(String sessionId) {
         if (!StringUtils.hasText(sessionId)) return;
+        var runIds = traceRepository.findRunIdsBySessionId(sessionId);
         taskRepository.deleteBySessionId(sessionId);
-        traceRepository.deleteBySessionId(sessionId);
+        traceRepository.deleteStepsByRunIds(runIds);
+        traceRepository.deleteRunsBySessionId(sessionId);
+    }
+
+    public void deleteOlderTerminalSteps(String sessionId, String currentTurnId) {
+        if (!StringUtils.hasText(sessionId) || !StringUtils.hasText(currentTurnId)) return;
+        var runIds = traceRepository.findOlderTerminalRunIds(sessionId, currentTurnId);
+        traceRepository.deleteStepsByRunIds(runIds);
     }
 }

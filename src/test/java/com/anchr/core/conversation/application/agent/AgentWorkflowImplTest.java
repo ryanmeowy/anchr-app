@@ -395,9 +395,13 @@ class AgentWorkflowImplTest {
     @Test
     void consecutiveRawModelText_shouldReturnSafeProtocolFallback() {
         AtomicInteger calls = new AtomicInteger();
-        AgentModelPort model = request -> new AgentModelResponse(
-                "未按协议提交的回答 " + calls.incrementAndGet(), List.of(),
-                AgentTokenUsage.EMPTY, "model", "stop", "req");
+        List<String> toolCallModes = new CopyOnWriteArrayList<>();
+        AgentModelPort model = request -> {
+            toolCallModes.add(request.options().toolCallMode());
+            return new AgentModelResponse(
+                    "未按协议提交的回答 " + calls.incrementAndGet(), List.of(),
+                    AgentTokenUsage.EMPTY, "model", "stop", "req");
+        };
         ConversationRepository conversations = mock(ConversationRepository.class);
         when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
         AgentWorkflowImpl workflow = workflow(model, List.of(new DeliverOnlyTool()), conversations);
@@ -409,6 +413,7 @@ class AgentWorkflowImplTest {
         assertThat(result.fallbackReason()).isEqualTo("agent_protocol_error:MISSING_ACTION");
         assertThat(result.executionMode()).isEqualTo(ConversationExecutionMode.AGENT);
         assertThat(result.answer()).contains("未能按要求完成工具调用");
+        assertThat(toolCallModes).containsExactly("AUTO", "JSON");
     }
 
     @Test

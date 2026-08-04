@@ -33,6 +33,7 @@
 | 207G | 建立最小 CI 和合并门禁 | P1 | 本仓 CI 完成，门禁待配置 | 跨仓工作流未纳入本次执行 |
 | 207H | 准确描述 Ingestion 的恢复能力 | P2 | 完成 | 否 |
 | 207I | 收敛 Agent 状态、依赖和可读性 | P2 | 完成 | 已按 207I1 → 207I4 分阶段实施和验证 |
+| 207J | 审查数据库关系与缺失 FK 的清理风险 | P1/P2 | 207J-1 源码完成，MySQL 验证待执行 | 保持无 FK；207J-2 暂不处理 |
 
 推荐执行顺序：
 
@@ -508,6 +509,69 @@ PLANNING
 - 207I4：新增注入的 `AgentAnswerVerifier`，集中校验 answerType、当前 Run Evidence 所有权、Marker 绑定、空白/伪造 ID、模型自写可见引用、Citation 映射和稳定编号；同步 Agent 与异步总结共用 `AgentCitationPolicy` 的 10 个唯一引用、12 个 Marker、每段 3 个 Marker 限制。同步超限仍只触发现有一次回答修复，Evidence finalizer 仍最多尝试两次，异步总结仍执行确定性压缩。
 - 未修改 REST/SSE、数据库、ES、Tool 名称与参数、Prompt、预算、模型调用顺序、fallback、Lease/claim 或前端；保留工作区中既有的 `qodana.yml` 删除，未自动 commit。
 - Temurin JDK 21 `mvn -DskipTests compile` 通过；完整 `mvn test`：654 tests、0 failures、0 errors、33 skipped。Testcontainers 检测到本机无可用 Docker（缺少 `/var/run/docker.sock`），相关集成用例跳过；`git diff --check` 通过。
+
+---
+
+## ANCHR-207J：数据库关系与缺失 FK 清理风险审查
+
+### 审查范围
+
+只读检查当前 Flyway V1–V8 表结构、所有 MyBatis 删除/软删除语句、相关 Repository/Application 清理入口，以及已有 MySQL 集成测试。未修改业务代码、数据库 Schema 或历史数据。
+
+### 已确认问题
+
+#### 207J-1：`agent_step` 删除 Run 后残留孤儿记录（P1）
+
+- `agent_step.run_id` 只有 `NOT NULL` 和 `(run_id, step_order)` 唯一键，没有 FK 或 `ON DELETE CASCADE`：
+  `src/main/resources/db/migration/V7__create_agent_tables.sql:21-38`。
+- `ConversationSessionUseCase.delete` 的链路是：取消运行 → 软删除 Session/Turn → 物理删除 `agent_task` → 物理删除 `agent_run` → 删除 Activity：
+  `src/main/java/com/anchr/core/conversation/application/impl/ConversationSessionUseCase.java:86-92`。
+- `AgentTraceMapper.deleteRunsBySessionId` 只执行 `delete from agent_run where session_id = ?`，没有显式删除 `agent_step`：
+  `src/main/resources/mapper/conversation/AgentTraceMapper.xml:103-105`。
+- 现有 `AgentTraceMigrationTest.deletingRun_shouldCascadeOnlyItsSteps` 明确要求删除 Run 后对应 Step 数为 0，但当前 Schema 没有实现该级联：
+  `src/test/java/com/anchr/core/conversation/infrastructure/persistence/AgentTraceMigrationTest.java:76-97`。
+- `AgentTraceRecorder.recordStep` 直接写 Step，且捕获异常后只记录 WARN；删除与晚到 Step 写入并发时，无 FK 会允许已不存在 Run 的 Step 继续落库：
+  `src/main/java/com/anchr/core/conversation/application/agent/AgentTraceRecorder.java:39-60`。
+
+影响：删除接口本身不会因为 FK 缺失而报错，但 `agent_step` 会持续累积不可通过 Run Activity 访问的孤儿数据；直接删除 Run 的场景也同样存在该问题。
+
+#### 207J-2：软删除 Turn 保留已物理删除的 Agent 引用（P2，当前不影响活跃读取）
+
+- `conversation_turn` 保存 `agent_run_id` 和 `agent_task_id`，但没有 FK：
+  `src/main/resources/db/migration/V6__create_conversation_tables.sql:18-49`。
+- 删除 Session 时 Turn 只设置 `deleted_at`，而 Agent Run/Task 随后物理删除：
+  `src/main/java/com/anchr/core/conversation/infrastructure/persistence/ConversationRepositoryImpl.java:102-108`；
+  `src/main/java/com/anchr/core/conversation/application/agent/AgentConversationCleanupService.java:36-40`。
+
+结果是历史软删除 Turn 中可能保留无法解析的 Run/Task ID。当前活跃历史查询均过滤 `deleted_at is null`，未发现用户可见错误；这是生命周期语义下的悬挂引用，需要在决定硬删除/审计保留策略时单独处理。
+
+### 已检查但未确认存在当前业务故障的关系
+
+| 关系 | 当前观察 | 结论 |
+|---|---|---|
+| `asset.kb_id → knowledge_base.id` | KB 接口执行归档，不物理删除 KB；资产创建前校验有效 KB | 暂无由缺 FK 触发的当前删除故障 |
+| `ingestion_task.kb_id → knowledge_base.id` | 任务创建前校验 KB；当前没有物理删除 ingestion_task 的生产路径 | 仅有外部手工删父表时的潜在孤儿风险 |
+| `ingestion_task_item.task_id → ingestion_task.id` | Item 查询普遍 `inner join ingestion_task`；任务和 Item 在同一保存流程写入 | 暂无已确认的正常业务孤儿路径 |
+| `ingestion_task_item.asset_id/duplicate_asset_id → asset.id` | Asset 是软删除；失败重试和处理阶段会重新校验 Asset 是否有效 | 历史引用保留属于当前任务审计语义 |
+| `agent_run.session_id/turn_id`、`agent_task.run_id/turn_id/session_id` | Agent Run 可能在 Turn 最终保存前先创建；会话删除时由显式清理 | 不能直接加普通 FK，否则可能阻断现有生命周期 |
+| `activity_event.resource_id`、`outbox_event.aggregate_id` | 多态资源/聚合引用 | 不属于可直接建 FK 的关系 |
+
+### 验证状态
+
+- 目标集成测试：`AgentTraceMigrationTest` 共 3 个测试，因本机无 Docker/Testcontainers 环境全部 skipped；未伪装为真实 MySQL 通过。
+- 审查阶段没有修改 Java、SQL、测试或历史数据。
+- 207J-1 已决定保持项目无 FK 设计，采用应用层显式清理；207J-2 的历史软删除 Turn 引用暂不处理。
+
+### 2026-08-04 207J-1 实施记录
+
+- `AgentConversationCleanupService.deleteRecords` 先查询 Session 下的全部 Run ID，再按顺序删除 Agent Task、对应 Agent Step 和 Agent Run；没有增加 FK、定时任务或新的事务注解。
+- 新 Turn 成功落库并完成当前 Run 状态收口后，`ConversationMessageUseCase` 调用 `AgentConversationCleanupService.deleteOlderTerminalSteps`；它只删除该 Session 下、按 `created_at + turn_id` 排在当前 Turn 之前且 Run 已处于 `COMPLETED/CANCELLED/FAILED/DEGRADED/FALLBACK` 的 Step，保留 Run 和 Task。
+- 历史 Step 查询复用会话历史的 Turn 排序规则，并以当前 Turn 为上界；并发请求下不会删除排序晚于当前 Turn 的 Step，当前 Turn 为传统模式且没有 Agent Run 时也能清理此前终态 Run 的 Step。
+- `AgentTraceRepository`/`AgentTraceMapper` 新增按 Session 查询 Run ID、按 Run ID 批量删除 Step 的最小能力；空 Run ID 集合由 Repository 直接忽略，不生成空 `IN` SQL。
+- 事务继续由公开入口 `ConversationServiceImpl.deleteSession` 的 `@Transactional(rollbackFor = Exception.class)` 统一提供，清理任一步失败都会回滚本次 Session 删除。
+- 原 `AgentTraceMigrationTest.deletingRun_shouldCascadeOnlyItsSteps` 与项目无 FK 设计冲突，已改为验证数据库不会自动级联；显式清理顺序由 `AgentConversationCleanupServiceTest` 覆盖。
+- `AgentTraceMapperXmlTest`、`AgentConversationCleanupServiceTest` 和 `ConversationServiceImplTest` 通过；`mvn -DskipTests compile` 通过；完整 `mvn test` 共 611 个测试，0 failure、0 error、18 skipped。
+- `AgentTraceMigrationTest` 因本机无 Docker/Testcontainers 环境跳过 3 个 MySQL 用例，真实 MySQL 下的 Mapper 批量删除仍待执行验证。
 
 ---
 
