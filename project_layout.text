@@ -1,71 +1,61 @@
 anchr-app/
-├── README.md                              # 英文产品主页，顶部链接中文产品介绍
+├── README.md
 ├── docs/
-│   ├── product.zh-CN.md                   # 中文产品介绍
-│   ├── technical.en.md                    # 英文技术文档
-│   ├── technical.zh-CN.md                 # 中文技术文档
-│   ├── agent-rag-workflow.md              # Agent RAG 运行、证据与恢复流程
-│   ├── domain-boundaries-and-interactions.md # 领域边界、状态所有权与交互规则
-│   └── images/                            # README 产品截图
-│       ├── overview.png
-│       ├── citation-preview.png
-│       └── agent-activity.png
 ├── docker/
-│   ├── README.md                          # Docker 部署与常用命令
-│   ├── app/
-│   │   ├── .env.example                  # API 容器环境变量模板
-│   │   ├── compose.yml                   # API 构建与运行
-│   │   ├── Dockerfile                    # Java 21 非 root 运行镜像
-│   │   └── settings.xml                  # Maven 公共镜像配置
-│   └── infra/
-│       ├── .env.example                  # 基础设施初始化变量模板
-│       ├── compose.yml                   # Elasticsearch、Redis、MySQL
-│       └── Dockerfile                    # 带 IK 插件的 Elasticsearch 镜像
+│   ├── README.md
+│   ├── app/                                                    # App 服务容器
+│   │   ├── .env.example
+│   │   ├── compose.yml
+│   │   ├── Dockerfile
+│   │   └── settings.xml
+│   └── infra/                                                  # 基础设施：Elasticsearch、Redis、MySQL
+│       ├── .env.example
+│       ├── compose.yml
+│       └── Dockerfile
 ├── src/
 │   ├── main/
 │   │   ├── java/com/anchr/core/
-│   │   │   ├── activity/                  # Activity/Recent 支撑域与读模型
+│   │   │   ├── activity/                                       # Activity：最近活动读模型
 │   │   │   │   ├── application/(acl,api,impl)
 │   │   │   │   ├── domain/(model,repository)
 │   │   │   │   ├── infrastructure/persistence
 │   │   │   │   └── interfaces/rest/(assembler,dto)
-│   │   │   ├── auth/                      # Token 校验、管理与上传 STS 接口
+│   │   │   ├── auth/                                           # Auth：Token 认证与上传 STS
 │   │   │   │   ├── application/(acl,model)
 │   │   │   │   └── interfaces/rest(/dto)
-│   │   │   ├── common/                    # 稳定技术内核，不承载跨域业务模型
+│   │   │   ├── common/                                         # Technical Kernel：通用技术设施，不持有业务状态
 │   │   │   │   ├── application/context
-│   │   │   │   ├── config                 # ES、Redis、线程池与 Web 装配
+│   │   │   │   ├── config
 │   │   │   │   ├── constant
-│   │   │   │   ├── exception              # 统一错误与 HTTP 响应
-│   │   │   │   ├── infrastructure         # 鉴权拦截器与健康检查
-│   │   │   │   ├── model                  # 通用结果与稳定值对象
-│   │   │   │   └── util                   # 加密、ID 与向量工具
-│   │   │   ├── conversation/              # Ask：会话、回答与 Agent
+│   │   │   │   ├── exception
+│   │   │   │   ├── infrastructure
+│   │   │   │   ├── model
+│   │   │   │   └── util
+│   │   │   ├── conversation/                                   # Ask：会话、回答与 Agent
 │   │   │   │   ├── application/
-│   │   │   │   │   ├── acl                # Ask -> Knowledge/Retrieval/Activity
-│   │   │   │   │   ├── agent(/tool)       # Agent 状态机、预算与工具
+│   │   │   │   │   ├── acl                                     # Ask -> Knowledge/Retrieval/Activity
+│   │   │   │   │   ├── agent(/tool)                            # Agent 状态机、预算与工具
 │   │   │   │   │   ├── assembler
 │   │   │   │   │   ├── impl
 │   │   │   │   │   └── model
 │   │   │   │   ├── config
 │   │   │   │   ├── domain/(model,port,repository)
 │   │   │   │   ├── infrastructure/persistence
-│   │   │   │   └── interfaces/rest(/dto)  # REST、SSE、Run/Task 恢复
-│   │   │   ├── ingestion/                 # Knowledge Content 的入库处理部分
+│   │   │   │   └── interfaces/rest(/dto)
+│   │   │   ├── ingestion/                                      # Knowledge Content：摄取流水线
 │   │   │   │   ├── application/(acl,impl,model)
 │   │   │   │   ├── domain/(model,port,repository)
 │   │   │   │   ├── infrastructure/(parser,persistence)
 │   │   │   │   └── interfaces/rest(/dto)
-│   │   │   ├── integration/               # 外部 Provider 的配置驱动适配器
-│   │   │   │   ├── ai/(adapter,client)    # Generation/Embedding/Rerank/Docling
-│   │   │   │   ├── multimodal/example     # 多模态请求示例
-│   │   │   │   └── storage                # 阿里云 OSS 与 STS 实现
-│   │   │   ├── kb/                        # Knowledge Content 的目录与资产部分
+│   │   │   ├── integration/                                    # Integration：外部供应商适配器
+│   │   │   │   ├── ai/(adapter,client)
+│   │   │   │   └── storage
+│   │   │   ├── kb/                                             # Knowledge Content：知识库与资产
 │   │   │   │   ├── application/(acl,api,impl,support)
 │   │   │   │   ├── domain/(model,port,repository)
 │   │   │   │   ├── infrastructure/persistence
 │   │   │   │   └── interfaces/rest(/dto)
-│   │   │   ├── search/                    # Retrieval：索引、检索与 Preview
+│   │   │   ├── search/                                         # Retrieval：索引投影与检索
 │   │   │   │   ├── application/(acl,api,impl,model,support)
 │   │   │   │   ├── config
 │   │   │   │   ├── domain/(model,port,repository)
@@ -74,19 +64,19 @@ anchr-app/
 │   │   │   │   │   ├── document
 │   │   │   │   │   └── repository
 │   │   │   │   └── interfaces/rest/(assembler,dto)
-│   │   │   └── settings/                  # Capability 与 Storage 运行时配置
+│   │   │   └── settings/                                       # Capability：AI 与存储配置
 │   │   │       ├── application/(acl,api,impl,model,support)
 │   │   │       ├── domain/(model,repository)
 │   │   │       ├── infrastructure/persistence
 │   │   │       └── interfaces/rest(/dto)
 │   │   └── resources/
-│   │       ├── application.yaml            # Spring 与 app.* 默认配置
-│   │       ├── db/migration/               # Flyway
-│   │       ├── mapper/                     # MyBatis XML Mapper
-│   │       ├── es-kb-segment-mapping.json  # 动态向量维度的 Segment Mapping
-│   │       └── es-settings.json            # IK Analyzer 与索引设置
-│   └── test/java/com/anchr/core/           # 单元、契约与 Testcontainers 测试
-├── .dockerignore                           # Docker 构建上下文排除规则
-├── .gitignore                              # 本地密钥、构建产物与 IDE 文件
-├── pom.xml                                 # Maven 构建与依赖版本
-└── LICENSE                                 # MIT License
+│   │       ├── application.yaml
+│   │       ├── db/migration/                                   # Flyway
+│   │       ├── mapper/
+│   │       ├── es-kb-segment-mapping.json                      # Index Mapping
+│   │       └── es-settings.json                                # Index Setting
+│   └── test/java/com/anchr/core/
+├── .dockerignore
+├── .gitignore
+├── pom.xml
+└── LICENSE

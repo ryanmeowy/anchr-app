@@ -68,42 +68,42 @@ Anchr App 是 Anchr 知识系统的后端。它把文档转化为可检索、可
 
 ```mermaid
 flowchart TB
-    CLIENT["Anchr Web · REST 调用方"] -->|"REST / SSE"| API
+    CLIENT["Anchr Web · API 客户端"] -->|"REST / SSE"| API
 
     subgraph APP["Anchr App · 模块化单体"]
         direction TB
 
-        subgraph ACCESS["访问层"]
+        subgraph ACCESS["接口与访问"]
             direction LR
             API["Spring MVC API"]
-            AUTH["认证与技术内核<br/>Token · Role · 通用能力"]
+            AUTH["Auth & Technical Kernel<br/>认证与授权 · 技术基础"]
         end
 
-        subgraph CORE["核心领域"]
+        subgraph CORE["业务域"]
             direction LR
-            ASK["Ask<br/>会话 · 回答 · Agent"]
-            KC["Knowledge Content<br/>知识库 · 文档 · 入库"]
-            RET["Retrieval<br/>Segment · 检索 · 预览"]
-            ACT["Activity<br/>Recent 视图"]
+            ASK["Ask<br/>会话 · 问答 · Agent"]
+            KC["Knowledge Content<br/>知识库 · Asset · 摄取"]
+            RET["Retrieval<br/>索引 · 检索 · 预览"]
+            ACT["Activity<br/>活动记录与查询"]
         end
 
-        CAP["Capability & Providers<br/>运行配置 · 模型 · 存储"]
+        CAP["Capability & Providers<br/>运行配置与供应商适配"]
     end
 
     API --> AUTH
     API --> ASK & KC & RET & ACT & CAP
 
-    ASK -->|"范围与文档"| KC
-    ASK -->|"检索与证据"| RET
-    KC <-->|"generation 写入 / 清理"| RET
+    ASK -->|"知识范围 / 文档"| KC
+    ASK -->|"检索 / 证据"| RET
+    KC <-->|"索引写入 / 清理"| RET
     ASK -.-> ACT
     KC -.-> ACT
     RET -.-> ACT
 
-    subgraph STATE["状态与检索投影"]
+    subgraph STATE["数据与投影"]
         direction LR
-        MYSQL[("MySQL<br/>业务事实")]
-        ES[("Elasticsearch<br/>检索投影")]
+        MYSQL[("MySQL<br/>业务状态")]
+        ES[("Elasticsearch<br/>检索索引")]
         REDIS[("Redis<br/>认证 · 缓存 · 快照")]
     end
 
@@ -111,18 +111,18 @@ flowchart TB
     RET --> ES
     AUTH & ASK --> REDIS
 
-    subgraph EXTERNAL["外部能力"]
+    subgraph EXTERNAL["外部服务"]
         direction LR
-        MODELS["OpenAI 兼容模型"]
-        DOCLING["Anchr Docling"]
-        OSS["阿里云 OSS"]
+        MODELS["模型服务<br/>OpenAI 兼容"]
+        DOCLING["文档解析<br/>Anchr Docling"]
+        OSS["对象存储<br/>阿里云 OSS"]
     end
 
     CAP --> MODELS
     KC --> DOCLING & OSS
 ```
 
-图中实线表示业务调用或状态访问，指向被依赖的一方；指向 Activity 的虚线表示 best-effort 活动记录。跨领域调用通过小型 Application API 和调用方 ACL 完成。写入链路不会把 MySQL、Elasticsearch 和对象存储伪装成一个分布式事务：Process Coordinator 负责状态迁移，Outbox 负责重试延迟清理。
+实线表示同步依赖，虚线表示不影响主流程的活动记录。跨域调用通过 Application API 与调用方 ACL；跨存储一致性由状态迁移和 Outbox 保障。
 
 完整边界决策见[领域边界与交互](./domain-boundaries-and-interactions.md)。
 
