@@ -10,9 +10,9 @@
 [![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5.8-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.18.8-005571?style=flat-square&logo=elasticsearch&logoColor=white)](https://www.elastic.co/elasticsearch)
 [![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](./LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](../LICENSE)
 
-[English](README-EN.md) · 简体中文
+[Product homepage](../README.md) · [中文产品介绍](./product.zh-CN.md) · [English technical guide](./technical.en.md) · 中文技术文档
 
 </div>
 
@@ -110,7 +110,7 @@ flowchart LR
 
 跨领域调用通过小型 Application API 和调用方 ACL 完成。写入链路不会把 MySQL、Elasticsearch 和对象存储伪装成一个分布式事务：Process Coordinator 负责状态迁移，Outbox 负责重试延迟清理。
 
-完整边界决策见[领域边界与交互](./docs/domain-boundaries-and-interactions.md)。
+完整边界决策见[领域边界与交互](./domain-boundaries-and-interactions.md)。
 
 ## 快速开始
 
@@ -260,7 +260,7 @@ Search、Conversation、Agent、Ingestion 和 Outbox 的调优参数通过 Setti
 操作继续使用启动时读取的值。某个 KV 没有覆盖值时，由调用方使用代码内置
 的默认值。
 
-[`application.yaml`](./src/main/resources/application.yaml) 配置数据库、
+[`application.yaml`](../src/main/resources/application.yaml) 配置数据库、
 Redis、安全密钥和 Docling 等启动配置。Elasticsearch 连接由应用的
 Elasticsearch 配置直接读取 `ES_USERNAME`、`ES_PASSWORD` 和 `ES_HOST`。
 模型地址、API Key、模型名、向量维度和存储凭据由 Settings 运行时管理。
@@ -292,13 +292,13 @@ Surefire XML 报告会作为 workflow artifact 保留七天。
 
 ### 项目结构
 
-持续维护的仓库与 Package 地图见 [`project_layout.text`](./project_layout.text)。
+持续维护的仓库与 Package 地图见 [`project_layout.text`](../project_layout.text)。
 
 ### 延伸阅读
 
-- [Agent RAG 完整工作流](./docs/agent-rag-workflow.md)
-- [领域边界与交互](./docs/domain-boundaries-and-interactions.md)
-- [Docker 部署](./docker/README.md)
+- [Agent RAG 完整工作流](./agent-rag-workflow.md)
+- [领域边界与交互](./domain-boundaries-and-interactions.md)
+- [Docker 部署](../docker/README.md)
 
 ## 生产部署提示
 
@@ -324,7 +324,7 @@ Surefire XML 报告会作为 workflow artifact 保留七天。
 
 ## 开源许可
 
-Anchr App 基于 [MIT License](./LICENSE) 开源。
+Anchr App 基于 [MIT License](../LICENSE) 开源。
 
 ---
 
