@@ -496,7 +496,7 @@ SSE 断开或 120 秒传输超时时：
 - Snapshot 使用单调递增 `version`，客户端可以用 `afterVersion` 避免重复获取旧快照。
 - 默认 TTL 为 35 分钟；实际 TTL 取配置值与“任务总时限 × 最大尝试次数 + 5 分钟”中的较大值。
 - 可恢复列表最多返回 20 条，优先活动状态 `RUNNING/WAITING_TASK/AWAITING_TURN`，并包含最近 10 分钟启动的终态 Run。
-- Conversation 与 Task 共用的 Answer Event Broker 只覆盖单 JVM。多实例部署中，连接实例与任务执行实例不同时不保证实时 delta；客户端必须以 Task/Turn 轮询和 Runtime Snapshot 恢复最终状态。
+- Conversation 与 Task 共用的 Answer Event Broker 只覆盖单 JVM。当前系统只支持单 App 实例；Task/Turn 轮询和 Runtime Snapshot 用于客户端断线或进程重启后的恢复，不是多实例部署的一致性方案。
 
 ## 13. 失败与降级
 
@@ -588,7 +588,7 @@ Trace 只保存响应形态和摘要，不保存完整模型回答或思维链�
 3. 文档工具必须通过服务端范围校验，不能相信模型提供的 ID。
 4. KNOWLEDGE 只能引用当前 Run 的 Evidence Registry。
 5. 后端删除伪造的数字引用，只渲染合法 Segment Marker。
-6. 异步任务使用 Lease、Owner 和条件更新防止多实例重复写入。
+6. 异步任务使用 Lease、Owner 和条件更新防止重复认领与重复写入；这是任务并发保护，不代表整个应用支持多实例部署。
 7. 保存 Turn 前锁定未删除会话，避免会话删除与回答落库竞态。
 8. 删除会话时取消活动 Run/Task，并删除相关 Trace 与 Task 记录。
 9. Redis 快照不参与权限或业务终态判断，MySQL 仍是权威来源。
