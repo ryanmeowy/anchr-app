@@ -2,8 +2,6 @@
 
 # Anchr App
 
-### 锚定知识，信任每一个答案。
-
 **面向文档智能、混合检索与 Agentic RAG 的证据优先后端。**
 
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://openjdk.org/)

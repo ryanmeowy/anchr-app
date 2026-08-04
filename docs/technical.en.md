@@ -2,8 +2,6 @@
 
 # Anchr App
 
-### Anchor your knowledge. Trust every answer.
-
 **An evidence-first backend for document intelligence, hybrid retrieval, and agentic RAG.**
 
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://openjdk.org/)
