@@ -1,10 +1,10 @@
-# Anchr Agent RAG 当前实现说明
+# Agent RAG 实现说明
 
-> 本文描述当前 `anchr-app` 后端已经实现的行为，不是设计提案或任务卡。
->
-## 1. 先看结论
+本文记录 `anchr-app` 当前的 Agent RAG 执行路径、状态、限制和失败语义。内容以源码、运行配置和数据库迁移为准，不包含规划中的能力。
 
-一次消息请求只有两条主路径：
+## 1. 执行路径
+
+消息请求在 Agent 和传统流程中择一执行：
 
 ```mermaid
 flowchart LR
@@ -16,30 +16,32 @@ flowchart LR
     E --> F["同步 JSON 或 SSE 响应"]
 ```
 
-- Agent 路径由模型选择工具，但后端控制权限、预算、证据、引用和终态。
-- 传统路径先识别 `CHAT`、`OTHER` 或 `KB_QUERY`，只有 `KB_QUERY` 进入固定 RAG Pipeline。
-- Agent 得到知识证据后，只能引用当前 Run 内注册过的 Segment。
-- 新旧索引 generation 可以同时存在于 Elasticsearch；查询只放行资产当前激活的 generation。
-- 消息 SSE 断开不会取消后端执行。后端继续完成工作流和 Turn 落库，客户端可通过恢复接口取得状态与最终消息。
-- 大文档总结是异步任务，不占用同步 Agent Run 长时间读取全文。
+关键约束：
 
-## 2. 请求入口与职责
+- 模型决定工具调用；权限、预算、证据、引用和终态由后端校验。
+- 传统流程先路由 `CHAT`、`OTHER` 和 `KB_QUERY`，仅 `KB_QUERY` 执行 RAG。
+- Agent 只能引用当前 Run 注册的 Segment。
+- Elasticsearch 可同时保留多个 generation，查询只接受资产的 active generation。
+- SSE 断开不取消执行；Turn 仍会落库，客户端通过 Run、Task 或消息接口恢复状态。
+- 文档总结使用异步 Task，不在同步 Run 中读取全文。
+
+## 2. API 与请求范围
 
 ### 2.1 API
 
-| 场景 | API | 当前行为 |
+| 场景 | API | 行为 |
 | --- | --- | --- |
 | 同步问答 | `POST /api/v1/conversations/{sessionId}/messages` | 执行完成并保存 Turn 后返回 JSON |
 | 消息 SSE | `POST /api/v1/conversations/{sessionId}/messages/stream` | 实时发送过程事件和安全的模型答案增量，终态使用完整答案校准 |
 | 查询 Run | `GET /api/v1/agent/runs/{runId}/activity` | 返回持久化的 Run、Step、工具、Token 和耗时 |
-| 查询可恢复 Run | `GET /api/v1/agent/runs/recoverable?limit=10` | 返回最多 20 个活动 Run，以及最近 10 分钟内启动的 Run |
+| 查询可恢复 Run | `GET /api/v1/agent/runs/recoverable?limit=10` | 返回不超过 `limit` 条记录；默认 10 条、最大 20 条，优先活动 Run，并包含最近 10 分钟内启动的 Run |
 | 查询运行快照 | `GET /api/v1/agent/runs/{runId}/runtime-snapshot?afterVersion=0` | 仅在快照版本较新时返回 Redis 中的最新运行态 |
 | 取消 Run | `POST /api/v1/agent/runs/{runId}/cancel` | 请求取消仍处于 `RUNNING` 的同步 Agent Run |
 | 查询异步任务 | `GET /api/v1/agent/tasks/{taskId}` | 返回任务状态、进度、答案和引用 |
 | 订阅异步任务 | `GET /api/v1/agent/tasks/{taskId}/stream` | SSE 发送任务进度及终态答案 |
 | 取消异步任务 | `POST /api/v1/agent/tasks/{taskId}/cancel` | 取消 `PENDING/RUNNING` 任务并更新 Turn 与 Run |
 
-消息请求的主要字段：
+消息字段：
 
 | 字段 | 作用 |
 | --- | --- |
@@ -51,16 +53,16 @@ flowchart LR
 | `preferredModalities` | `TEXT`、`IMAGE` 或 `MIXED` |
 | `agentEnabled` | 客户端是否请求使用 Agent |
 
-### 2.2 代码职责
+### 2.2 组件职责
 
 - `ConversationServiceImpl` 是稳定的应用服务门面。
 - `ConversationMessageUseCase` 负责加载会话、归一化请求范围、生成 `turnId/runId`、调用编排器、在事务中保存 Turn/Task、提交后触发异步任务，以及在 Turn 保存后 Finalize Run。
 - `ConversationMessageOrchestrator` 只负责选择 Agent 路径或传统路径。
 - `ConversationMessageStreamAdapter` 把同一个消息用例适配为 SSE，不负责业务编排。
 
-### 2.3 范围归一化
+### 2.3 范围处理
 
-当前消息流程按以下规则处理范围：
+处理顺序：
 
 1. 加载未软删除的会话；不存在则返回 `CONVERSATION_SESSION_NOT_FOUND`。
 2. 请求没有 `kbIds` 且会话已有 `kbScope` 时，继承会话范围。
@@ -69,13 +71,13 @@ flowchart LR
 5. `preferredModalities` 为空时默认 `MIXED`。
 6. `assetIdList` 是本次消息的显式文档范围，并原样记录到 Turn；Agent 还会在服务端把这些 ID 解析为当前有效、可访问的资产。
 
-#### Session Asset Scope 的当前实现缺口
+#### 已知缺口：Session Asset Scope
 
-数据库、领域对象、创建会话 DTO 和响应 DTO 都已经有 `asset_scope/assetIdList` 字段，但当前业务流程尚未完整接通：
+数据库、领域对象和会话 DTO 已包含 `asset_scope/assetIdList`，但业务流程尚未接通：
 
 - `ConversationSessionUseCase.create` 只保存 `kbScope`，没有把创建请求的 `assetIdList` 写入会话。
 - `ConversationMessageUseCase.applyConversationScope` 只继承会话 `kbScope`，不会继承会话 `assetScope`。
-- 因此，当前真正生效的是每次消息请求携带的 `assetIdList`，不能把会话级 Asset Scope 当成已实现能力。
+- 当前生效范围以消息请求的 `assetIdList` 为准；会话级 Asset Scope 尚不可用。
 
 ## 3. Agent 与传统路径
 
@@ -86,7 +88,7 @@ request.agentEnabled == true
 运行配置 AGENT.enabled == true
 ```
 
-`AgentWorkflow` 是编排器的必需依赖，不存在“Bean 不可用时静默改走传统路径”的分支。
+`AgentWorkflow` 是编排器的必需依赖。Bean 缺失属于装配错误，不会在运行时静默切换到传统流程。
 
 非 Agent 路径先执行 Intent Router：
 
@@ -94,14 +96,14 @@ request.agentEnabled == true
 - `OTHER`：返回能力范围澄清。
 - `KB_QUERY`：进入传统 RAG Pipeline。
 
-Agent 路径不会先执行 Intent Router。只有 Agent 抛出未预期异常，且运行配置
-`AGENT.fallbackToTraditional=true` 时，才重新路由并执行传统路径；该次执行模式记为 `AGENT_FALLBACK`。
+Agent 路径不执行 Intent Router。Agent 出现未预期异常且
+`AGENT.fallbackToTraditional=true` 时，编排器重新路由并执行传统流程，执行模式记为 `AGENT_FALLBACK`。
 
-## 4. Agent Run 初始化与预算
+## 4. Run 上下文与预算
 
-### 4.1 Run State
+### 4.1 Run state
 
-每个 Run 创建独立 `AgentRunState`，保存：
+`AgentRunState` 按 Run 隔离，包含：
 
 - `runId`、`turnId`、`sessionId`、`userId` 和本次 KB/Asset 范围。
 - 模型消息列表。
@@ -113,9 +115,9 @@ Agent 路径不会先执行 Intent Router。只有 Agent 抛出未预期异常�
 
 `AgentRequestContextResolver` 会再次从服务端读取有效资源信息，并把上下文锁定为不可扩大的范围；上下文最多展示 50 个 KB 元数据和 20 个 Asset 元数据。
 
-### 4.2 历史消息
+### 4.2 模型上下文
 
-模型上下文由以下内容组成：
+模型上下文包含：
 
 1. 系统提示和回答模式约束。
 2. 最近最多 10 个 Turn。
@@ -133,14 +135,14 @@ Agent 路径不会先执行 Intent Router。只有 Agent 抛出未预期异常�
 | Run 总时限 | 90 秒 |
 | 单次模型时限 | 30 秒，并受 Run 剩余时间约束 |
 
-预算耗尽时：
+预算耗尽后的处理：
 
 - 已有证据且至少还剩 500ms：进入 Evidence Finalizer。
 - 没有证据或已无时间：返回本地澄清，`AnswerStatus=NO_EVIDENCE`，Run 最终为 `DEGRADED`，原因为 `agent_budget_exhausted`。
 
-## 5. 模型动作协议
+## 5. 模型协议
 
-### 5.1 调用模式
+### 5.1 工具调用模式
 
 | 模式 | 行为 |
 | --- | --- |
@@ -165,25 +167,25 @@ JSON 模式只接受以下两种结构：
 {"action":"final","answerType":"CHAT|CLARIFICATION|KNOWLEDGE|NO_EVIDENCE","answer":"最终回答","citedSegmentIds":[]}
 ```
 
-系统提示要求所有正常回答都通过 `deliver_answer` 结束；严格 JSON `final` 是不支持原生工具调用时的等价协议。
+正常回答通过 `deliver_answer` 结束；严格 JSON `final` 用于不支持原生工具调用的模型。
 
 ### 5.2 协议错误
 
-```mermaid
-flowchart LR
-    A["没有合法动作"] --> B{"连续第几次?"}
-    B -- "第一次" --> C["注入修复提示并重试"]
-    B -- "第二次且已有证据" --> D["Evidence Finalizer"]
-    B -- "第二次且无证据" --> E["本地安全回答"]
-```
+普通 Markdown 或自然语言不属于合法动作。处理规则：
 
-- 普通 Markdown 或自然语言即使内容正确，也不算合法动作。
-- 合法 Tool Call 会清零连续协议错误。
-- 第二次错误且无法用证据收尾时，返回 `AnswerStatus=MODEL_FALLBACK`；Turn 保存后 Run 为 `DEGRADED`，原因以 `agent_protocol_error:` 开头。
+| 连续错误 | Run 内证据 | 处理 |
+| --- | --- | --- |
+| 第一次 | 任意 | 注入修复提示并重试 |
+| 第二次 | 有 | 进入 Evidence Finalizer |
+| 第二次 | 无 | 返回本地安全回答 |
+
+合法 Tool Call 会清零连续协议错误。第二次错误且无法用证据收尾时，返回
+`AnswerStatus=MODEL_FALLBACK`；Turn 保存后 Run 为 `DEGRADED`，原因以
+`agent_protocol_error:` 开头。
 
 ## 6. Agent 工具
 
-| 工具 | 适用场景 | 关键输入 | 当前行为 | 注册证据 |
+| 工具 | 用途 | 关键输入 | 行为 | 注册证据 |
 | --- | --- | --- | --- | --- |
 | `find_documents` | 不确定目标文档 | `query`、`limit<=10` | 返回文档、真实 `assetId` 和匹配片段 | 是 |
 | `search_knowledge` | 查询事实、规则、流程或相关内容 | `query`、可选 `assetIds`、`limit<=10`、模态 | Query Rewrite 后检索 | 是 |
@@ -211,7 +213,7 @@ flowchart LR
 4. 未找到返回 `DOCUMENT_NOT_FOUND`。
 5. 本次请求有 `assetIdList` 时，越界访问返回 `PERMISSION_DENIED`。
 
-模型应复用 `find_documents.documents[].assetId`，不能把 `matchedSegmentId` 当成 `assetId`。
+`find_documents.documents[].assetId` 是后续文档工具的输入；`matchedSegmentId` 不是 `assetId`。
 
 Tool Call 去重规则：
 
@@ -219,7 +221,7 @@ Tool Call 去重规则：
 - 无 ID 时使用 `toolName + arguments`。
 - 重复调用返回 `DUPLICATE_TOOL_CALL`，不再次执行。
 
-### 6.2 `read_document` 的额外边界
+### 6.2 `read_document` 限制
 
 - 默认和最大页大小均为 20；过小值会提升到 10。
 - 单次返回正文总量最多约 20000 字符。
@@ -255,7 +257,7 @@ flowchart LR
 
 ### 7.2 三路召回、generation gate 与 Rerank
 
-`RetrievalQueryServiceImpl` 的实际顺序是：
+`RetrievalQueryServiceImpl` 的执行顺序：
 
 1. 通过 `SearchKnowledgeAcl` 解析当前可见 KB，并应用 KB/Asset/类型过滤。
 2. 为查询生成一次 Embedding。
@@ -278,11 +280,11 @@ Rerank 默认值：
 - 标准化检索分数权重 `0.6`，Rerank 分数权重 `0.4`。
 - Rerank 异常或空结果时保留 RRF 顺序。
 
-generation gate 的含义是：新 generation 激活前，查询仍读取旧 generation；激活后，即使 Elasticsearch 里暂时同时存在新旧 Segment，也只有新 generation 能通过查询过滤。
+新 generation 激活前，查询读取旧 generation。激活后，即使 Elasticsearch 暂时保留新旧 Segment，也只有新 generation 能通过过滤。
 
-## 8. Evidence Finalizer
+## 8. 证据收尾
 
-Evidence Finalizer 不是“关闭工具后再让 Agent 自由回答一次”，而是一条独立、受限的证据生成路径。
+Evidence Finalizer 使用当前 Run 已注册的证据生成受限答案，不再开放工具调用。
 
 触发条件：
 
@@ -298,13 +300,13 @@ Evidence Finalizer 不是“关闭工具后再让 Agent 自由回答一次”，
 4. 在剩余时间允许时最多尝试 2 次，每次仍受 Agent 单次模型时限约束。
 5. 成功后继续走与 `deliver_answer` 相同的引用校验。
 
-无法调用 Finalizer 或两次均失败时：
+Finalizer 不可用或两次调用均失败时：
 
 - 返回 `AnswerStatus=MODEL_FALLBACK`。
 - 原因分别为 `agent_evidence_finalization_unavailable` 或 `agent_evidence_finalization_failed`。
 - Turn 保存后 Run 终态为 `DEGRADED`。
 
-## 9. 最终答案与引用
+## 9. 回答与引用
 
 ### 9.1 Answer Type
 
@@ -315,11 +317,11 @@ Evidence Finalizer 不是“关闭工具后再让 Agent 自由回答一次”，
 | `KNOWLEDGE` | 必须有当前 Run 证据、合法引用 ID 和正文 Marker |
 | `NO_EVIDENCE` | 禁止引用；后端按回答模式替换为统一的安全无证据文案 |
 
-模型声明 `NO_EVIDENCE` 是正常业务结果：`AnswerStatus=NO_EVIDENCE`，Run 在 Turn 保存后为 `COMPLETED`，不是 Agent 故障。
+`NO_EVIDENCE` 属于业务结果：`AnswerStatus=NO_EVIDENCE`，Turn 保存后 Run 为 `COMPLETED`。
 
 ### 9.2 Evidence Registry 与 KNOWLEDGE 校验
 
-当前 Run 的证据按以下结构注册：
+Run 内证据按以下结构注册：
 
 ```text
 segmentId -> ConversationRetrievalCandidate
@@ -327,18 +329,7 @@ segmentId -> ConversationRetrievalCandidate
 
 只有本轮 `find_documents`、`search_knowledge`、`read_document` 返回并注册的 Segment 才能引用。历史回答引用、模型编造的 ID 和其他 Run 的证据都无效。
 
-KNOWLEDGE 的校验顺序：
-
-```mermaid
-flowchart LR
-    A["最终回答"] --> B{"当前 Run 有证据?"}
-    B -- "否" --> X["要求修复"]
-    B -- "是" --> C{"引用 ID 都属于本轮?"}
-    C -- "否" --> X
-    C -- "是" --> D{"正文有合法 Marker?"}
-    D -- "否" --> X
-    D -- "是" --> E["渲染引用并完成"]
-```
+KNOWLEDGE 依次校验当前 Run 是否有证据、引用 ID 是否属于本轮、正文是否包含合法 Marker。任一条件不满足都进入答案修复。
 
 内部 Marker：
 
@@ -346,7 +337,7 @@ flowchart LR
 结论内容 {{segment:真实SegmentID}}
 ```
 
-后端会：
+渲染步骤：
 
 1. 删除模型自行写入的 `[数字]` 引用。
 2. 只识别当前 Evidence Registry 中的 Marker。
@@ -354,22 +345,31 @@ flowchart LR
 4. 渲染成 `[1-1]`、`[1-2]`、`[2-1]`。
 5. 生成包含 `kbId`、`assetId`、`segmentId`、页码、锚点和命中原因的 Citation。
 
-最终答案第一次校验失败时，错误会返回模型修复；再次失败则返回安全的 `NO_EVIDENCE`。这个分支的 Run 在 Turn 保存后为 `COMPLETED`，因为后端已经生成了合法终态答案。
+首次校验失败时，错误返回模型修复；再次失败则返回安全的 `NO_EVIDENCE`。后端已生成合法终态答案，因此 Turn 保存后 Run 为 `COMPLETED`。
 
 ## 10. 异步文档总结
 
 `summarize_documents` 返回 `AgentDeferredTask`。同步请求先保存 PROCESSING 占位 Turn 和 PENDING Task，事务提交后再触发后台处理。
 
-```mermaid
-flowchart LR
-    A["校验 1–3 份文档"] --> B["保存占位 Turn 和 PENDING Task"]
-    B --> C["Claim Lease"]
-    C --> D["READING"]
-    D --> E["MAP_SUMMARY"]
-    E --> F["REDUCE_SUMMARY"]
-    F --> G["FINALIZING"]
-    G --> H["更新 Task、Turn 和 Run"]
+Task status 与处理阶段是两组独立状态。
+
+Task status：
+
+```text
+PENDING -> RUNNING -> SUCCEEDED | FAILED | CANCELLED
+              |
+              +-> PENDING（等待重试）
 ```
+
+`currentStage`：
+
+```text
+QUEUED -> READING -> MAP_SUMMARY -> REDUCE_SUMMARY -> FINALIZING -> COMPLETED
+任一执行阶段 -> RETRY_WAIT -> READING（重新执行）
+任一活动阶段 -> FAILED | CANCELLED
+```
+
+发生可重试失败时，Task status 回到 `PENDING`，`currentStage` 设为 `RETRY_WAIT`；重新 Claim 后，Task status 再次变为 `RUNNING`。成功完成时，Task status 为 `SUCCEEDED`，`currentStage` 为 `COMPLETED`。
 
 ### 10.1 默认限制
 
@@ -385,7 +385,7 @@ flowchart LR
 | 最大重试 | 2 |
 | 轮询间隔 | 5 秒 |
 
-### 10.2 实际处理
+### 10.2 处理阶段
 
 1. `READING`：按文档原始 Segment 顺序读取全文。
 2. `MAP_SUMMARY`：按约 12000 字符分批生成局部总结，并保留 Marker。
@@ -405,7 +405,7 @@ flowchart LR
 
 Final 模型使用不含 Segment ID 的临时引用 token；增量渲染器缓存不完整 token 和 Markdown fence，转换为可见引用后才发送。完整答案通过引用范围和密度校验、事务保存 Task 与 Turn 后，再按 `answer_reset → citations → done` 完成。
 
-## 11. 持久化与 Run 状态
+## 11. 持久化与状态
 
 ### 11.1 数据表
 
@@ -417,7 +417,7 @@ Final 模型使用不含 Segment ID 的临时引用 token；增量渲染器缓�
 | `agent_step` | 模型决策、工具结果和异步任务阶段 |
 | `agent_task` | 异步总结任务、Lease、进度、重试、答案和错误 |
 
-### 11.2 两阶段完成
+### 11.2 Run 终态
 
 同步 Agent 先生成结果，再保存 Turn：
 
@@ -455,7 +455,7 @@ FALLBACK
 
 API 展示时，`DEGRADED` 映射为 `AGENT_DEGRADED`，`FALLBACK` 映射为 `AGENT_FALLBACK`。
 
-## 12. SSE、断线与恢复
+## 12. SSE 与恢复
 
 ### 12.1 消息 SSE
 
@@ -487,9 +487,9 @@ SSE 断开或 120 秒传输超时时：
 3. 因连接已断开，不再向该 Emitter 发送答案。
 4. 不会因为 SSE 断线自动写入取消标记，也不会把 Run 改成 `CANCELLED`。
 
-真正的取消来自显式 Run/Task 取消接口，或删除会话时的清理逻辑。
+取消只由 Run/Task 取消接口或会话删除清理触发。
 
-### 12.3 恢复数据的权威性
+### 12.3 状态来源
 
 - MySQL 中的 Conversation、Agent Run、Agent Step 和 Agent Task 是权威数据。
 - Redis Runtime Snapshot 是 best-effort 缓存；读写失败不得影响主工作流。
@@ -498,7 +498,7 @@ SSE 断开或 120 秒传输超时时：
 - 可恢复列表最多返回 20 条，优先活动状态 `RUNNING/WAITING_TASK/AWAITING_TURN`，并包含最近 10 分钟启动的终态 Run。
 - Conversation 与 Task 共用的 Answer Event Broker 只覆盖单 JVM。多实例部署中，连接实例与任务执行实例不同时不保证实时 delta；客户端必须以 Task/Turn 轮询和 Runtime Snapshot 恢复最终状态。
 
-## 13. 降级与错误矩阵
+## 13. 失败与降级
 
 | 场景 | 局部处理 | 最终结果 |
 | --- | --- | --- |
@@ -520,7 +520,7 @@ SSE 断开或 120 秒传输超时时：
 | 异步总结临时失败 | 延迟重试 | 重试耗尽后 `FAILED` |
 | 异步总结永久错误 | 不重试 | Task/Run `FAILED`，Turn 更新为 `MODEL_FALLBACK` |
 
-## 14. 传统 RAG Pipeline
+## 14. 传统 RAG
 
 Agent 关闭或 Agent 异常降级时，`KB_QUERY` 执行：
 
@@ -546,12 +546,11 @@ Query Rewrite
 传统答案模型必须输出 `ANSWERED|NO_EVIDENCE` 严格 JSON，并使用 `[1]` 引用输入证据。后端校验引用范围、规范化文档索引，并只保留答案真正使用的 Segment。
 
 运行配置 `CONVERSATION.legacyEvidenceFallbackEnabled` 默认是 `false`。
-因此模型失败或格式不合法时，当前默认行为是返回 `GENERATION_FAILED`
-文案；只有显式打开该配置，才使用证据拼接旧式保守答案。
+模型失败或格式不合法时，默认返回 `GENERATION_FAILED`；启用该配置后才使用证据拼接旧式保守答案。
 
-## 15. 可观测性与安全边界
+## 15. 可观测性与安全
 
-### 15.1 Trace 与 Metrics
+### 15.1 Trace 与指标
 
 模型步骤记录模型、`finishReason`、消息数、工具计划、Token 和耗时。工具步骤记录工具名、Call ID、状态、错误码、证据数、文档数、Segment 数和分页状态。
 
@@ -603,7 +602,7 @@ Settings 中的 `AGENT` 运行配置。Conversation 的传统证据降级使用
 
 异步任务 Lease 固定为 2 分钟，Claim 轮询间隔固定为 5 秒，不接受外部配置。
 
-## 17. 代码导航
+## 17. 代码索引
 
 | 组件 | 文件 |
 | --- | --- |
