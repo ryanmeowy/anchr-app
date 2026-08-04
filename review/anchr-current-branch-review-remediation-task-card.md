@@ -565,10 +565,12 @@ PLANNING
 ### 2026-08-04 207J-1 实施记录
 
 - `AgentConversationCleanupService.deleteRecords` 先查询 Session 下的全部 Run ID，再按顺序删除 Agent Task、对应 Agent Step 和 Agent Run；没有增加 FK、定时任务或新的事务注解。
+- 新 Turn 成功落库并完成当前 Run 状态收口后，`ConversationMessageUseCase` 调用 `AgentConversationCleanupService.deleteOlderTerminalSteps`；它只删除该 Session 下、按 `created_at + turn_id` 排在当前 Turn 之前且 Run 已处于 `COMPLETED/CANCELLED/FAILED/DEGRADED/FALLBACK` 的 Step，保留 Run 和 Task。
+- 历史 Step 查询复用会话历史的 Turn 排序规则，并以当前 Turn 为上界；并发请求下不会删除排序晚于当前 Turn 的 Step，当前 Turn 为传统模式且没有 Agent Run 时也能清理此前终态 Run 的 Step。
 - `AgentTraceRepository`/`AgentTraceMapper` 新增按 Session 查询 Run ID、按 Run ID 批量删除 Step 的最小能力；空 Run ID 集合由 Repository 直接忽略，不生成空 `IN` SQL。
 - 事务继续由公开入口 `ConversationServiceImpl.deleteSession` 的 `@Transactional(rollbackFor = Exception.class)` 统一提供，清理任一步失败都会回滚本次 Session 删除。
 - 原 `AgentTraceMigrationTest.deletingRun_shouldCascadeOnlyItsSteps` 与项目无 FK 设计冲突，已改为验证数据库不会自动级联；显式清理顺序由 `AgentConversationCleanupServiceTest` 覆盖。
-- `AgentTraceMapperXmlTest`、`AgentConversationCleanupServiceTest` 和 `ConversationServiceImplTest` 通过；`mvn -DskipTests compile` 通过；完整 `mvn test` 共 610 个测试，0 failure、0 error、18 skipped。
+- `AgentTraceMapperXmlTest`、`AgentConversationCleanupServiceTest` 和 `ConversationServiceImplTest` 通过；`mvn -DskipTests compile` 通过；完整 `mvn test` 共 611 个测试，0 failure、0 error、18 skipped。
 - `AgentTraceMigrationTest` 因本机无 Docker/Testcontainers 环境跳过 3 个 MySQL 用例，真实 MySQL 下的 Mapper 批量删除仍待执行验证。
 
 ---

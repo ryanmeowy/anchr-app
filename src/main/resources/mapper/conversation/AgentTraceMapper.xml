@@ -100,6 +100,28 @@
         select * from agent_step where run_id = #{runId} order by step_order asc
     </select>
 
+    <select id="findOlderTerminalRunIds" resultType="java.lang.String">
+        select r.run_id
+        from agent_run r
+        join conversation_turn previous_turn
+          on previous_turn.session_id = r.session_id
+         and previous_turn.turn_id = r.turn_id
+        join conversation_turn current_turn
+          on current_turn.session_id = r.session_id
+         and current_turn.turn_id = #{currentTurnId}
+         and current_turn.deleted_at is null
+        where r.session_id = #{sessionId}
+          and r.status in ('COMPLETED', 'CANCELLED', 'FAILED', 'DEGRADED', 'FALLBACK')
+          and (
+            previous_turn.created_at &lt; current_turn.created_at
+            or (
+              previous_turn.created_at = current_turn.created_at
+              and previous_turn.turn_id &lt; current_turn.turn_id
+            )
+          )
+        order by previous_turn.created_at asc, previous_turn.turn_id asc, r.run_id asc
+    </select>
+
     <select id="findRunIdsBySessionId" resultType="java.lang.String">
         select run_id from agent_run where session_id = #{sessionId} order by run_id asc
     </select>

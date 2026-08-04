@@ -20,6 +20,10 @@ class AgentTraceMapperXmlTest {
     void cleanupStatementsShouldFindRunsAndDeleteStepsByRunIds() throws Exception {
         Configuration configuration = loadConfiguration();
 
+        String findOlderTerminalRunsSql = sql(
+                configuration,
+                "findOlderTerminalRunIds",
+                Map.of("sessionId", "session-1", "currentTurnId", "turn-current"));
         String findRunsSql = sql(
                 configuration,
                 "findRunIdsBySessionId",
@@ -29,6 +33,16 @@ class AgentTraceMapperXmlTest {
                 "deleteStepsByRunIds",
                 Map.of("runIds", List.of("run-1", "run-2")));
 
+        assertThat(findOlderTerminalRunsSql)
+                .contains("from agent_run r join conversation_turn previous_turn")
+                .contains("join conversation_turn current_turn")
+                .contains("current_turn.turn_id = ?")
+                .contains("current_turn.deleted_at is null")
+                .contains("r.session_id = ?")
+                .contains("r.status in ('COMPLETED', 'CANCELLED', 'FAILED', 'DEGRADED', 'FALLBACK')")
+                .contains("previous_turn.created_at < current_turn.created_at")
+                .contains("previous_turn.created_at = current_turn.created_at")
+                .contains("previous_turn.turn_id < current_turn.turn_id");
         assertThat(findRunsSql)
                 .isEqualTo("select run_id from agent_run where session_id = ? order by run_id asc");
         assertThat(deleteStepsSql)

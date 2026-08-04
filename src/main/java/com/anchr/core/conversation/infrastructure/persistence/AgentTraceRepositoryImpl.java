@@ -52,6 +52,13 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
     }
 
     @Override
+    public List<String> findOlderTerminalRunIds(String sessionId, String currentTurnId) {
+        return StringUtils.hasText(sessionId) && StringUtils.hasText(currentTurnId)
+                ? mapper.findOlderTerminalRunIds(sessionId, currentTurnId)
+                : List.of();
+    }
+
+    @Override
     public List<String> findRunIdsBySessionId(String sessionId) {
         return StringUtils.hasText(sessionId) ? mapper.findRunIdsBySessionId(sessionId) : List.of();
     }

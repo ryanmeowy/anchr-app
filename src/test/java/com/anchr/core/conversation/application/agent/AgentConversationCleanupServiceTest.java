@@ -56,6 +56,21 @@ class AgentConversationCleanupServiceTest {
         order.verify(traceRepository).deleteRunsBySessionId("session-1");
     }
 
+    @Test
+    void deleteOlderTerminalSteps_shouldFindOlderTerminalRunsThenDeleteOnlySteps() {
+        when(traceRepository.findOlderTerminalRunIds("session-1", "turn-current"))
+                .thenReturn(List.of("run-1", "run-2"));
+        AgentConversationCleanupService service = service();
+
+        service.deleteOlderTerminalSteps("session-1", "turn-current");
+
+        InOrder order = inOrder(traceRepository);
+        order.verify(traceRepository).findOlderTerminalRunIds("session-1", "turn-current");
+        order.verify(traceRepository).deleteStepsByRunIds(List.of("run-1", "run-2"));
+        verify(taskRepository, never()).deleteBySessionId("session-1");
+        verify(traceRepository, never()).deleteRunsBySessionId("session-1");
+    }
+
     private AgentConversationCleanupService service() {
         return new AgentConversationCleanupService(
                 taskRepository, traceRepository, taskProcessor, runCancellationRegistry);

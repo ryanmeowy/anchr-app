@@ -182,6 +182,7 @@ class ConversationServiceImplTest {
                 agentTaskRepository,
                 transactionTemplate,
                 agentRunFinalizer,
+                agentConversationCleanupService,
                 agentTaskProcessor,
                 taskAssembler,
                 citationReasonEnricher);
@@ -225,6 +226,8 @@ class ConversationServiceImplTest {
         assertThat(response.getResultCards()).isEmpty();
         verify(queryRewriteService, never()).rewrite(any(), any());
         verify(activityEventService, never()).recordQuestionAsked(any(), any(), any(), any());
+        verify(agentConversationCleanupService).deleteOlderTerminalSteps(
+                session.getSessionId(), response.getTurnId());
 
         ConversationTurnDTO stored = service.listMessages(session.getSessionId(), 20, null).getTurns().getFirst();
         assertThat(stored.getIntent().getType()).isEqualTo("CHAT");
@@ -1147,6 +1150,7 @@ class ConversationServiceImplTest {
                         agentTaskRepository,
                         transactionTemplate,
                         agentRunFinalizer,
+                        agentConversationCleanupService,
                         agentTaskProcessor,
                         taskAssembler,
                         new ConversationCitationReasonEnricher(
