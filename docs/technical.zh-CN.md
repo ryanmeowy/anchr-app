@@ -67,46 +67,62 @@ Anchr App 是 Anchr 知识系统的后端。它把文档转化为可检索、可
 ## 系统架构
 
 ```mermaid
-flowchart LR
-    C["客户端<br/>Anchr Web · REST 调用方"] -->|"REST / SSE"| API["Spring MVC API"]
+flowchart TB
+    CLIENT["Anchr Web · REST 调用方"] -->|"REST / SSE"| API
 
     subgraph APP["Anchr App · 模块化单体"]
-        AUTH["认证与技术内核"]
-        KC["Knowledge Content<br/>知识库 · 文档 · 入库"]
-        RET["Retrieval<br/>Segment · 检索 · 预览"]
-        ASK["Ask<br/>会话 · Agent"]
-        ACT["Activity<br/>Recent 视图"]
-        CAP["Capability & Providers<br/>模型 · 存储"]
+        direction TB
+
+        subgraph ACCESS["访问层"]
+            direction LR
+            API["Spring MVC API"]
+            AUTH["认证与技术内核<br/>Token · Role · 通用能力"]
+        end
+
+        subgraph CORE["核心领域"]
+            direction LR
+            ASK["Ask<br/>会话 · 回答 · Agent"]
+            KC["Knowledge Content<br/>知识库 · 文档 · 入库"]
+            RET["Retrieval<br/>Segment · 检索 · 预览"]
+            ACT["Activity<br/>Recent 视图"]
+        end
+
+        CAP["Capability & Providers<br/>运行配置 · 模型 · 存储"]
     end
 
     API --> AUTH
-    API --> KC
-    API --> RET
-    API --> ASK
-    API --> ACT
-    API --> CAP
+    API --> ASK & KC & RET & ACT & CAP
 
+    ASK -->|"范围与文档"| KC
+    ASK -->|"检索与证据"| RET
     KC <-->|"generation 写入 / 清理"| RET
-    ASK -->|"范围与文档查询"| KC
-    ASK -->|"证据检索"| RET
-    KC -.->|"best effort"| ACT
-    RET -.->|"best effort"| ACT
-    ASK -.->|"best effort"| ACT
+    ASK -.-> ACT
+    KC -.-> ACT
+    RET -.-> ACT
 
-    KC --> MYSQL[("MySQL")]
-    ASK --> MYSQL
-    ACT --> MYSQL
-    CAP --> MYSQL
-    AUTH --> REDIS[("Redis")]
-    ASK --> REDIS
-    RET --> ES[("Elasticsearch")]
+    subgraph STATE["状态与检索投影"]
+        direction LR
+        MYSQL[("MySQL<br/>业务事实")]
+        ES[("Elasticsearch<br/>检索投影")]
+        REDIS[("Redis<br/>认证 · 缓存 · 快照")]
+    end
 
-    CAP --> MODELS["OpenAI 兼容<br/>模型服务"]
-    KC --> DOCLING["Anchr Docling"]
-    KC --> OSS["阿里云 OSS"]
+    ASK & KC & ACT & CAP --> MYSQL
+    RET --> ES
+    AUTH & ASK --> REDIS
+
+    subgraph EXTERNAL["外部能力"]
+        direction LR
+        MODELS["OpenAI 兼容模型"]
+        DOCLING["Anchr Docling"]
+        OSS["阿里云 OSS"]
+    end
+
+    CAP --> MODELS
+    KC --> DOCLING & OSS
 ```
 
-跨领域调用通过小型 Application API 和调用方 ACL 完成。写入链路不会把 MySQL、Elasticsearch 和对象存储伪装成一个分布式事务：Process Coordinator 负责状态迁移，Outbox 负责重试延迟清理。
+图中实线表示业务调用或状态访问，指向被依赖的一方；指向 Activity 的虚线表示 best-effort 活动记录。跨领域调用通过小型 Application API 和调用方 ACL 完成。写入链路不会把 MySQL、Elasticsearch 和对象存储伪装成一个分布式事务：Process Coordinator 负责状态迁移，Outbox 负责重试延迟清理。
 
 完整边界决策见[领域边界与交互](./domain-boundaries-and-interactions.md)。
 
