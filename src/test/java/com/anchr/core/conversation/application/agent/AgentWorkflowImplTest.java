@@ -772,6 +772,43 @@ class AgentWorkflowImplTest {
     }
 
     @Test
+    void buildMessages_shouldKeepNewestHistoryWithinCharacterBudgetAndSendItChronologically() {
+        ConversationTurn oldest = historyTurn("history-1");
+        ConversationTurn second = historyTurn("history-2");
+        ConversationTurn third = historyTurn("history-3");
+        ConversationTurn fourth = historyTurn("history-4");
+        ConversationTurn fifth = historyTurn("history-5");
+        ConversationTurn newest = historyTurn("history-6");
+
+        AgentModelPort model = request -> {
+            List<String> historicalUsers = request.messages().stream()
+                    .filter(message -> "user".equals(message.role()))
+                    .map(AgentMessage::content)
+                    .filter(content -> content.startsWith("history-"))
+                    .map(content -> content.substring(0, content.indexOf(':')))
+                    .toList();
+            List<String> historicalAssistants = request.messages().stream()
+                    .filter(message -> "assistant".equals(message.role()))
+                    .map(AgentMessage::content)
+                    .map(content -> content.substring(0, content.indexOf(':')))
+                    .toList();
+            assertThat(historicalUsers).containsExactly(
+                    "history-2", "history-3", "history-4", "history-5", "history-6");
+            assertThat(historicalAssistants).containsExactly(
+                    "history-2", "history-3", "history-4", "history-5", "history-6");
+            return new AgentModelResponse(null, List.of(new AgentToolCall("call-1", "deliver_answer",
+                    "{\"answerType\":\"CHAT\",\"answer\":\"完成\",\"citedSegmentIds\":[]}")),
+                    AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1");
+        };
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(
+                List.of(newest, fifth, fourth, third, second, oldest));
+        AgentWorkflowImpl workflow = workflow(model, List.of(new DeliverOnlyTool()), conversations);
+
+        assertThat(workflow.execute(run("继续"), ConversationProgressListener.NOOP).answer()).isEqualTo("完成");
+    }
+
+    @Test
     void cancelRun_shouldInterruptModelAndReturnCancelledResult() throws Exception {
         CountDownLatch modelStarted = new CountDownLatch(1);
         AgentModelPort model = request -> {
@@ -862,6 +899,13 @@ class AgentWorkflowImplTest {
         request.setAnswerMode(answerMode.name());
         request.setKbIds(List.of("kb-1")); request.setAssetIdList(List.of());
         return new AgentRunRequest("run-1", "turn-1", "session", "single_user", request);
+    }
+
+    private ConversationTurn historyTurn(String label) {
+        ConversationTurn turn = new ConversationTurn();
+        turn.setQuery(label + ":" + "u".repeat(1_200));
+        turn.setAnswer(label + ":" + "a".repeat(1_200));
+        return turn;
     }
 
     record SearchInput(@NotBlank String query) {}
