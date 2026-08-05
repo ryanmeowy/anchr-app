@@ -25,6 +25,14 @@ public class IngestionRetrievalAcl {
             IngestionTaskItem item,
             Asset asset,
             List<IngestionIndexSegment> segments) {
+        return replaceGeneration(item, asset, segments, null);
+    }
+
+    public RetrievalGenerationWriteReceipt replaceGeneration(
+            IngestionTaskItem item,
+            Asset asset,
+            List<IngestionIndexSegment> segments,
+            String embeddingProfileFingerprint) {
         long generation = requireGeneration(item);
         validateSegments(item, asset, generation, segments);
         List<RetrievalGenerationIndexRequest.SegmentValue> values = segments.stream()
@@ -32,7 +40,11 @@ public class IngestionRetrievalAcl {
                 .toList();
         return retrievalGenerationIndexApi.replaceGeneration(
                 new RetrievalGenerationIndexRequest(
-                        item.getKbId(), asset.getId(), generation, values));
+                        item.getKbId(),
+                        asset.getId(),
+                        generation,
+                        embeddingProfileFingerprint,
+                        values));
     }
 
     private long requireGeneration(IngestionTaskItem item) {

@@ -11,4 +11,32 @@ public interface IngestionEmbeddingPort {
 
     boolean isMulti();
 
+    default EmbeddingSession openSession() {
+        IngestionEmbeddingPort owner = this;
+        return new EmbeddingSession() {
+            @Override
+            public List<Float> embed(String source, String sourceType) {
+                return owner.embed(source, sourceType);
+            }
+
+            @Override
+            public boolean isMulti() {
+                return owner.isMulti();
+            }
+
+            @Override
+            public String profileFingerprint() {
+                return "legacy-profile";
+            }
+        };
+    }
+
+    interface EmbeddingSession {
+        List<Float> embed(String source, String sourceType);
+
+        boolean isMulti();
+
+        String profileFingerprint();
+    }
+
 }

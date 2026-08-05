@@ -9,7 +9,9 @@
 /ui_streamlit/myenv
 #/docs/*.md
 /docs/*.sh
-/scripts
+/scripts/*
+!/scripts/MigrateCredentialsToGcm.java
+!/scripts/migrate-credentials-to-gcm.sh
 /*.iml
 /docker/**/.env
 /docker/infra/elasticsearch-analysis-ik-*.zip

@@ -1,12 +1,14 @@
 package com.anchr.core.search.infrastructure.persistence.es;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.ErrorCause;
 import co.elastic.clients.elasticsearch._types.Refresh;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Objects;
 
 import static com.anchr.core.common.constant.SegmentIndexConstant.WRITE_ALIAS;
 
@@ -31,11 +34,11 @@ public class SearchSegmentBulkWriter {
     private final ElasticsearchClient esClient;
     private final SegmentIndexManager segmentIndexManager;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
+    private final SegmentRebuildMutationTracker rebuildMutationTracker;
 
     public WriteResult write(List<Segment> segments) {
-        String indexName = WRITE_ALIAS;
         if (segments == null || segments.isEmpty()) {
-            return new WriteResult(0, indexName, null);
+            return new WriteResult(0, WRITE_ALIAS, null);
         }
         validateSegments(segments);
         return indexWriteBarrier.withWritePermit(() -> doWrite(segments));
@@ -88,12 +91,18 @@ public class SearchSegmentBulkWriter {
             if (response.errors() || !failures.isEmpty()) {
                 String reason = failures.stream()
                         .map(BulkResponseItem::error)
-                        .map(error -> error.reason())
+                        .filter(Objects::nonNull)
+                        .map(ErrorCause::reason)
                         .filter(StringUtils::hasText)
                         .findFirst()
                         .orElse("kb_segment bulk save failed");
                 throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE, reason);
             }
+            segments.stream()
+                    .map(Segment::getAssetId)
+                    .filter(StringUtils::hasText)
+                    .distinct()
+                    .forEach(rebuildMutationTracker::markDirty);
             return new WriteResult(
                     segments.size(), indexName, status.getActualProfileFingerprint());
         } catch (BusinessException e) {

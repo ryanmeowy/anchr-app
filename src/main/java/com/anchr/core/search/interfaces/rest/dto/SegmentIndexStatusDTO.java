@@ -44,6 +44,7 @@ public class SegmentIndexStatusDTO {
     public static class RebuildProgress {
         private long migrated;   // 已迁移文档数
         private long total;      // 旧索引文档总数
-        private String phase;    // PREPARING | MIGRATING | SWITCHING_ALIAS | COMPLETED | FAILED
+        private String phase;    // PREPARING | BACKFILLING | CATCHING_UP | VALIDATING | SWITCHING_ALIAS | COMPLETED | FAILED
+        private long dirtyAssets;
     }
 }

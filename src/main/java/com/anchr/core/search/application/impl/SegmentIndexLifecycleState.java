@@ -78,7 +78,8 @@ record SegmentIndexLifecycleState(
                 newIndexExists,
                 newReadIndex,
                 newReadable,
-                status == SegmentIndexStatus.READY && newWritable,
+                (status == SegmentIndexStatus.READY
+                        || status == SegmentIndexStatus.REBUILDING) && newWritable,
                 newActualDim,
                 newActualModel,
                 newActualProfileFingerprint);
@@ -88,7 +89,7 @@ record SegmentIndexLifecycleState(
         return new SegmentIndexLifecycleState(
                 SegmentIndexStatus.REBUILDING, null, pendingRebuild,
                 new SegmentIndexRebuildProgress(0, 0, "PREPARING"),
-                indexExists, readIndex, readable, false,
+                indexExists, readIndex, readable, writable,
                 actualDim, actualModel, actualProfileFingerprint);
     }
 
@@ -129,8 +130,17 @@ record SegmentIndexPendingRebuild(
 ) {
 }
 
-record SegmentIndexRebuildProgress(long migrated, long total, String phase) {
+record SegmentIndexRebuildProgress(
+        long migrated,
+        long total,
+        String phase,
+        long dirtyAssets
+) {
+    SegmentIndexRebuildProgress(long migrated, long total, String phase) {
+        this(migrated, total, phase, 0L);
+    }
+
     SegmentIndexRebuildProgress withPhase(String newPhase) {
-        return new SegmentIndexRebuildProgress(migrated, total, newPhase);
+        return new SegmentIndexRebuildProgress(migrated, total, newPhase, dirtyAssets);
     }
 }

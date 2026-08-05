@@ -5,6 +5,7 @@ import com.anchr.core.conversation.application.model.ConversationRuntimeSettings
 import com.anchr.core.ingestion.application.model.IngestionRuntimeSettings;
 import com.anchr.core.kb.application.model.OutboxRuntimeSettings;
 import com.anchr.core.search.application.model.SearchRuntimeSettings;
+import com.anchr.core.search.application.model.SearchRebuildRuntimeSettings;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ class RuntimeConfigDefaultsContractTest {
     void callerDefaultsShouldMatchTheManagementPageDefaults() {
         var unit = RuntimeConfigTestUnits.defaults();
         SearchRuntimeSettings search = SearchRuntimeSettings.load(unit);
+        SearchRebuildRuntimeSettings rebuild = SearchRebuildRuntimeSettings.load(unit);
         ConversationRuntimeSettings conversation =
                 ConversationRuntimeSettings.load(unit);
         AgentRuntimeSettings agent = AgentRuntimeSettings.load(unit);
@@ -43,6 +45,13 @@ class RuntimeConfigDefaultsContractTest {
                 Map.entry("windowMax", Integer.toString(search.windowMax())),
                 Map.entry("fusionAlpha", Double.toString(search.fusionAlpha())),
                 Map.entry("fusionBeta", Double.toString(search.fusionBeta()))));
+        assertThat(serializedDefaults(RuntimeConfigType.REBUILD)).isEqualTo(Map.ofEntries(
+                Map.entry("rebuildSourceBatchSize", Integer.toString(rebuild.sourceBatchSize())),
+                Map.entry("rebuildEmbeddingBatchSize", Integer.toString(rebuild.embeddingBatchSize())),
+                Map.entry("rebuildEmbeddingConcurrency", Integer.toString(rebuild.embeddingConcurrency())),
+                Map.entry("rebuildEmbeddingRateLimitMaxAttempts", Integer.toString(rebuild.rateLimitMaxAttempts())),
+                Map.entry("rebuildEmbeddingRateLimitBackoffMs", Long.toString(rebuild.rateLimitBackoffMs())),
+                Map.entry("rebuildDirtyAssetLimit", Integer.toString(rebuild.dirtyAssetLimit()))));
         assertThat(serializedDefaults(RuntimeConfigType.CONVERSATION))
                 .containsExactlyInAnyOrderEntriesOf(
                 Map.of(
@@ -138,6 +147,21 @@ class RuntimeConfigDefaultsContractTest {
                         "maxAttempts", Integer.toString(outbox.maxAttempts()),
                         "retentionDays", Long.toString(outbox.retentionDays()),
                         "cleanupBatchSize", Integer.toString(outbox.cleanupBatchSize())));
+    }
+
+    @Test
+    void rebuildSettingsShouldReadFromTheRebuildPartition() {
+        SearchRebuildRuntimeSettings rebuild = SearchRebuildRuntimeSettings.load(
+                RuntimeConfigTestUnits.values(Map.of(
+                        "REBUILD.rebuildSourceBatchSize", "111",
+                        "REBUILD.rebuildEmbeddingBatchSize", "7",
+                        "REBUILD.rebuildEmbeddingConcurrency", "3",
+                        "REBUILD.rebuildEmbeddingRateLimitMaxAttempts", "4",
+                        "REBUILD.rebuildEmbeddingRateLimitBackoffMs", "6000",
+                        "REBUILD.rebuildDirtyAssetLimit", "999")));
+
+        assertThat(rebuild).isEqualTo(
+                new SearchRebuildRuntimeSettings(111, 7, 3, 4, 6000L, 999));
     }
 
     private Map<String, String> serializedDefaults(RuntimeConfigType type) {

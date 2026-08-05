@@ -548,18 +548,23 @@ public class AgentWorkflowImpl implements AgentWorkflow {
         List<AgentMessage> messages = new ArrayList<>();
         messages.add(AgentMessage.system(SYSTEM_PROMPT + System.lineSeparator()
                 + answerModeInstruction(request)));
-        List<ConversationTurn> recent = new ArrayList<>(conversationRepository.findRecentTurns(request.sessionId(), HISTORY_LIMIT));
-        Collections.reverse(recent);
+        List<ConversationTurn> recent = conversationRepository.findRecentTurns(
+                request.sessionId(), HISTORY_LIMIT);
+        List<List<AgentMessage>> selectedTurns = new ArrayList<>();
         int used = 0;
         for (ConversationTurn turn : recent) {
             String user = clip(turn.getQuery(), FIELD_LIMIT);
             String assistant = clip(stripHistoricalCitationLabels(turn), FIELD_LIMIT);
             int size = user.length() + assistant.length();
             if (used + size > HISTORY_CHAR_LIMIT) break;
-            if (StringUtils.hasText(user)) messages.add(AgentMessage.user(user));
-            if (StringUtils.hasText(assistant)) messages.add(AgentMessage.assistant(assistant));
+            List<AgentMessage> turnMessages = new ArrayList<>(2);
+            if (StringUtils.hasText(user)) turnMessages.add(AgentMessage.user(user));
+            if (StringUtils.hasText(assistant)) turnMessages.add(AgentMessage.assistant(assistant));
+            selectedTurns.add(turnMessages);
             used += size;
         }
+        Collections.reverse(selectedTurns);
+        selectedTurns.forEach(messages::addAll);
         messages.add(AgentMessage.user(renderRequestContext(requestContext)));
         messages.add(AgentMessage.user(clip(request.request().getQuery().trim(), FIELD_LIMIT)));
         return messages;

@@ -6,6 +6,7 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.model.IngestionIndexSegment;
 import com.anchr.core.ingestion.domain.model.Chunk;
 import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort;
+import com.anchr.core.ingestion.domain.port.IngestionEmbeddingPort.EmbeddingSession;
 import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.integration.ai.client.AiClient;
 import com.anchr.core.kb.domain.model.Asset;
@@ -38,15 +39,22 @@ final class IngestionEmbeddingStage {
         this.idGen = idGen;
     }
 
-    List<IngestionIndexSegment> prepare(Asset asset,
-                                        IngestionParseStage.ParsedChunks parsed,
-                                        Settings settings) {
-        Profile profile = Profile.fromMulti(embeddingPort.isMulti());
+    PreparedSegments prepare(Asset asset,
+                             IngestionParseStage.ParsedChunks parsed,
+                             Settings settings) {
+        EmbeddingSession session = embeddingPort.openSession();
+        if (session == null) {
+            session = legacySession();
+        }
+        Profile profile = Profile.fromMulti(session.isMulti());
         List<IngestionIndexSegment> segments = buildSegments(
                 asset, parsed.chunks(), parsed.targetGeneration(), profile);
         String imageInput = EmbeddingProjectionPolicy.requiresImageVisual(
                 profile, asset.getFileType()) ? resolveImageEmbeddingUrl(asset) : null;
-        return applyEmbeddings(asset, segments, profile, imageInput, settings);
+        return new PreparedSegments(
+                applyEmbeddings(
+                        asset, segments, profile, imageInput, settings, session),
+                session.profileFingerprint());
     }
 
     private List<IngestionIndexSegment> buildSegments(Asset asset,
@@ -84,7 +92,8 @@ final class IngestionEmbeddingStage {
             List<IngestionIndexSegment> segments,
             Profile profile,
             String imageInput,
-            Settings settings) {
+            Settings settings,
+            EmbeddingSession session) {
         List<IngestionIndexSegment> embedded = new ArrayList<>(segments.size());
         for (IngestionIndexSegment segment : segments) {
             SegmentType segmentType = SegmentType.valueOf(segment.segmentType());
@@ -103,7 +112,7 @@ final class IngestionEmbeddingStage {
             }
             EmbeddingProjection selected = projection.get();
             List<Float> embedding = embed(
-                    selected.source(), selected.inputType().requestValue(), settings);
+                    selected.source(), selected.inputType().requestValue(), settings, session);
             if (embedding == null || embedding.isEmpty()) {
                 throw new BusinessException(ApiError.EMBEDDING_RESULT_EMPTY);
             }
@@ -112,12 +121,17 @@ final class IngestionEmbeddingStage {
         return embedded;
     }
 
-    private List<Float> embed(String input, String inputType, Settings settings) {
+    private List<Float> embed(
+            String input,
+            String inputType,
+            Settings settings,
+            EmbeddingSession session
+    ) {
         int attempts = Math.max(1, settings.rateLimitMaxAttempts());
         for (int attempt = 1; attempt <= attempts; attempt++) {
             reserveEmbeddingCallSlot(settings.minIntervalMs());
             try {
-                return embeddingPort.embed(input, inputType);
+                return session.embed(input, inputType);
             } catch (BusinessException exception) {
                 throw exception;
             } catch (RuntimeException exception) {
@@ -194,8 +208,33 @@ final class IngestionEmbeddingStage {
         return "IMAGE".equalsIgnoreCase(asset.getFileType());
     }
 
+    private EmbeddingSession legacySession() {
+        return new EmbeddingSession() {
+            @Override
+            public List<Float> embed(String source, String sourceType) {
+                return embeddingPort.embed(source, sourceType);
+            }
+
+            @Override
+            public boolean isMulti() {
+                return embeddingPort.isMulti();
+            }
+
+            @Override
+            public String profileFingerprint() {
+                return "legacy-profile";
+            }
+        };
+    }
+
     record Settings(long minIntervalMs,
                     int rateLimitMaxAttempts,
                     long rateLimitBackoffMs) {
+    }
+
+    record PreparedSegments(
+            List<IngestionIndexSegment> segments,
+            String embeddingProfileFingerprint
+    ) {
     }
 }

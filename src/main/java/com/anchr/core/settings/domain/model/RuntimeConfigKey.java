@@ -5,6 +5,7 @@ import java.util.List;
 
 public sealed interface RuntimeConfigKey permits
         SearchRuntimeConfigKey,
+        RebuildRuntimeConfigKey,
         ConversationRuntimeConfigKey,
         AgentRuntimeConfigKey,
         IngestionRuntimeConfigKey,
@@ -37,6 +38,7 @@ public sealed interface RuntimeConfigKey permits
     static List<RuntimeConfigKey> keys(RuntimeConfigType type) {
         RuntimeConfigKey[] keys = switch (type) {
             case SEARCH -> SearchRuntimeConfigKey.values();
+            case REBUILD -> RebuildRuntimeConfigKey.values();
             case CONVERSATION -> ConversationRuntimeConfigKey.values();
             case AGENT -> AgentRuntimeConfigKey.values();
             case INGESTION -> IngestionRuntimeConfigKey.values();

@@ -3,6 +3,7 @@ package com.anchr.core.search.application.impl;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import com.anchr.core.common.util.IdGen;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.application.acl.RetrievalCapabilityAcl;
 import com.anchr.core.search.domain.port.EmbeddingProfileProvider;
 import com.anchr.core.search.domain.port.SearchEmbeddingPort;
@@ -57,10 +58,11 @@ final class SegmentIndexManagerTestFactory {
                 embeddingPort,
                 indexInitExecutor,
                 indexWriteBarrier,
+                new SegmentRebuildMutationTracker(),
                 aliasManager,
                 new SegmentIndexTopologyInspector(esClient, aliasManager),
                 new SegmentPhysicalIndexFactory(esClient),
-                new SegmentIndexMigrationRunner(esClient, storagePort, idGen),
+                new SegmentIndexMigrationRunner(esClient, storagePort, idGen, null),
                 new SegmentIndexStatusAssembler(),
                 retrievalCapabilityAcl);
     }

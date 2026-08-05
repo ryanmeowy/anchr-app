@@ -31,7 +31,6 @@ app:
   security:
     admin-secret: ${APP_ADMIN_SECRET}
     encrypt-key: ${APP_ENCRYPT_KEY}
-    encrypt-iv: ${APP_ENCRYPT_IV}
   docling:
     base-url: ${APP_DOCLING_BASE_URL}
     api-token: ${APP_DOCLING_API_TOKEN}

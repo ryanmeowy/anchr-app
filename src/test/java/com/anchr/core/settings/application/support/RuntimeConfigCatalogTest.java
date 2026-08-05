@@ -4,6 +4,7 @@ import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.OutboxRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RebuildRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigEntry;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
@@ -26,6 +27,9 @@ class RuntimeConfigCatalogTest {
         assertThat(catalog.defaults(RuntimeConfigType.SEARCH))
                 .containsEntry(SearchRuntimeConfigKey.RANK_CONSTANT, "60")
                 .containsEntry(SearchRuntimeConfigKey.FUSION_ALPHA, "0.6");
+        assertThat(catalog.defaults(RuntimeConfigType.REBUILD))
+                .containsEntry(RebuildRuntimeConfigKey.SOURCE_BATCH_SIZE, "200")
+                .containsEntry(RebuildRuntimeConfigKey.EMBEDDING_CONCURRENCY, "2");
         assertThat(catalog.defaults(RuntimeConfigType.CONVERSATION))
                 .containsEntry(ConversationRuntimeConfigKey.INTENT_ROUTING_ENABLED, "false")
                 .containsEntry(ConversationRuntimeConfigKey.INTENT_TIMEOUT_SECONDS, "5");
@@ -58,11 +62,39 @@ class RuntimeConfigCatalogTest {
     }
 
     @Test
+    void shouldBoundRebuildEmbeddingBatchSizeAndConcurrency() {
+        assertThat(catalog.normalize(
+                RuntimeConfigType.REBUILD,
+                RebuildRuntimeConfigKey.EMBEDDING_BATCH_SIZE,
+                "2048"))
+                .isEqualTo("2048");
+        assertThat(catalog.normalize(
+                RuntimeConfigType.REBUILD,
+                RebuildRuntimeConfigKey.EMBEDDING_CONCURRENCY,
+                "16"))
+                .isEqualTo("16");
+
+        assertThatThrownBy(() -> catalog.normalize(
+                RuntimeConfigType.REBUILD,
+                RebuildRuntimeConfigKey.EMBEDDING_BATCH_SIZE,
+                "2049"))
+                .hasMessageContaining("between 1 and 2048");
+        assertThatThrownBy(() -> catalog.normalize(
+                RuntimeConfigType.REBUILD,
+                RebuildRuntimeConfigKey.EMBEDDING_CONCURRENCY,
+                "17"))
+                .hasMessageContaining("between 1 and 16");
+    }
+
+    @Test
     void shouldKeepTheKeyAssociatedWithItsTypeAtTheStringBoundary() {
         assertThat(RuntimeConfigKey.parse(RuntimeConfigType.SEARCH, "textTopK"))
                 .isSameAs(SearchRuntimeConfigKey.TEXT_TOP_K);
         assertThat(SearchRuntimeConfigKey.TEXT_TOP_K.type())
                 .isEqualTo(RuntimeConfigType.SEARCH);
+        assertThat(RuntimeConfigKey.parse(
+                RuntimeConfigType.REBUILD, "rebuildEmbeddingBatchSize"))
+                .isSameAs(RebuildRuntimeConfigKey.EMBEDDING_BATCH_SIZE);
         assertThatThrownBy(() -> RuntimeConfigKey.parse(
                 RuntimeConfigType.AGENT, "textTopK"))
                 .isInstanceOf(IllegalArgumentException.class)

@@ -225,7 +225,7 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
 
             IngestionParseStage.ParsedChunks parsedChunks =
                     parseStage.mapChunks(item, asset, parsedJob.result());
-            List<IngestionIndexSegment> segments = embeddingStage.prepare(
+            IngestionEmbeddingStage.PreparedSegments prepared = embeddingStage.prepare(
                     asset,
                     parsedChunks,
                     new IngestionEmbeddingStage.Settings(
@@ -243,7 +243,12 @@ public class IngestionTaskProcessorImpl implements IngestionTaskProcessor {
                     .progress(Math.max(item.getProgress(), 75))
                     .build();
 
-            var writeReceipt = ingestionRetrievalAcl.replaceGeneration(item, asset, segments);
+            List<IngestionIndexSegment> segments = prepared.segments();
+            var writeReceipt = ingestionRetrievalAcl.replaceGeneration(
+                    item,
+                    asset,
+                    segments,
+                    prepared.embeddingProfileFingerprint());
             if (!ingestionIndexFinalizer.activateGeneration(
                     item,
                     asset,

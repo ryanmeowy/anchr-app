@@ -2,6 +2,7 @@ package com.anchr.core.search.application.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import com.anchr.core.search.application.SegmentIndexManager;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.application.acl.RetrievalCapabilityAcl;
 import com.anchr.core.search.application.api.RetrievalEmbeddingDeploymentApi;
@@ -26,6 +27,8 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -49,6 +52,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
     @Qualifier("indexInitExecutor")
     private final Executor indexInitExecutor;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
+    private final SegmentRebuildMutationTracker rebuildMutationTracker;
     private final SegmentIndexAliasManager aliasManager;
     private final SegmentIndexTopologyInspector topologyInspector;
     private final SegmentPhysicalIndexFactory physicalIndexFactory;
@@ -66,6 +70,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
 
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
+        reconcileInterruptedRebuild();
         SegmentIndexStatusDTO s = status();
         if (!s.isIndexExists()) {
             embeddingProfileProvider.getActiveEmbeddingProfile().ifPresentOrElse(
@@ -82,6 +87,36 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
             markReadyFromStatus(s);
             log.info("Boot: index exists via alias [{}], actualDim={}, expectedDim={}",
                     READ_ALIAS, s.getActualDim(), s.getExpectedDim());
+        }
+    }
+
+    private void reconcileInterruptedRebuild() {
+        AliasTopology topology = aliasManager.inspect();
+        Set<String> protectedIndices = new HashSet<>();
+        if (StringUtils.hasText(topology.readIndex())) {
+            protectedIndices.add(topology.readIndex());
+        }
+        if (StringUtils.hasText(topology.writeIndex())) {
+            protectedIndices.add(topology.writeIndex());
+        }
+        physicalIndexFactory.cleanupAbandonedRebuildTargets(protectedIndices);
+        if (!topology.valid()) {
+            return;
+        }
+        EmbeddingProfile interrupted = topologyInspector.interruptedCutoverProfile(
+                topology.physicalIndex());
+        if (interrupted == null) {
+            return;
+        }
+        try {
+            retrievalCapabilityAcl.activateServingProfile(interrupted);
+            physicalIndexFactory.markActiveBestEffort(
+                    topology.physicalIndex(), interrupted, null, null);
+            log.info("Recovered interrupted rebuild cutover on [{}]",
+                    topology.physicalIndex());
+        } catch (Exception error) {
+            log.error("Failed to recover interrupted rebuild cutover on [{}]",
+                    topology.physicalIndex(), error);
         }
     }
 
@@ -293,22 +328,19 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
     private void executeRebuild(RebuildClaim claim) {
         indexOpLock.lock();
         try {
-            indexWriteBarrier.withExclusiveRebuildPermit(() -> executeRebuildExclusively(claim));
+            executeRebuildOnline(claim);
         } finally {
             indexOpLock.unlock();
         }
     }
 
-    private void executeRebuildExclusively(RebuildClaim claim) {
+    private void executeRebuildOnline(RebuildClaim claim) {
         try {
             EmbeddingSession embeddingSession = embeddingPort.openSession(claim.targetProfile());
-            doRebuild(claim.targetProfile(), embeddingSession);
-            stateRef.updateAndGet(current ->
-                    isActiveRebuild(current, claim)
-                            ? current.rebuildSucceeded(claim.targetProfile())
-                            : current);
+            doRebuild(claim, embeddingSession);
             log.info("Rebuild completed, taskId={}, status=READY", claim.taskId());
         } catch (Exception e) {
+            stopMutationCapture(claim.taskId());
             AliasTopology topology = aliasManager.inspect();
             stateRef.updateAndGet(current ->
                     isActiveRebuild(current, claim)
@@ -339,60 +371,205 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
     private record RebuildClaim(String taskId, EmbeddingProfile targetProfile) {
     }
 
-    private void doRebuild(EmbeddingProfile targetProfile, EmbeddingSession embeddingSession)
+    private void doRebuild(RebuildClaim claim, EmbeddingSession embeddingSession)
             throws Exception {
-        // 1. 严格校验 read/write alias 均唯一且指向同一物理索引
+        EmbeddingProfile targetProfile = claim.targetProfile();
         AliasTopology aliasTopology = aliasManager.requireValid();
         String oldPhysicalIndex = aliasTopology.physicalIndex();
-
-        // 2. 让屏障前已完成的写入对 count/scroll 可见，再统计源文档
-        esClient.indices().refresh(r -> r.index(oldPhysicalIndex));
-        long totalDocs = esClient.count(c -> c.index(oldPhysicalIndex)).count();
-        log.info("Rebuild: old index [{}] has {} documents to migrate", oldPhysicalIndex, totalDocs);
-
-        // 3. 建新版本索引
         String newPhysicalIndex = physicalIndexFactory.newPhysicalIndexName();
         log.info("Rebuild: creating new index [{}] with dim={}",
                 newPhysicalIndex, targetProfile.dimension());
-        physicalIndexFactory.create(newPhysicalIndex, targetProfile);
-
-        // 4. 存量数据迁移
+        physicalIndexFactory.createRebuildTarget(
+                newPhysicalIndex,
+                targetProfile,
+                claim.taskId(),
+                oldPhysicalIndex);
         try {
-            SegmentIndexMigrationRunner.MigrationResult migration =
-                    migrationRunner.migrate(
+            long totalDocs = startMutationCapture(
+                    claim.taskId(), oldPhysicalIndex,
+                    migrationRunner.settings().dirtyAssetLimit());
+            log.info("Rebuild: old index [{}] has {} documents to migrate",
+                    oldPhysicalIndex, totalDocs);
+
+            migrationRunner.migrate(
                     oldPhysicalIndex,
                     newPhysicalIndex,
                     totalDocs,
                     targetProfile,
                     embeddingSession,
                     this::updateRebuildProgress);
-
-            // 5. alias 原子切换到新索引
-            log.info("Rebuild: switching alias from [{}] to [{}]",
-                    oldPhysicalIndex, newPhysicalIndex);
-            switchAliasesAndActivate(oldPhysicalIndex, newPhysicalIndex, targetProfile);
-
-            stateRef.updateAndGet(current -> current.withRebuildProgress(
-                    new SegmentIndexRebuildProgress(
-                            migration.processedCount(), migration.sourceCount(), "COMPLETED")));
-
-            // Keep the old physical index as a rollback snapshot. Cleanup must be explicit.
+            catchUpAndSwitch(
+                    claim,
+                    oldPhysicalIndex,
+                    newPhysicalIndex,
+                    targetProfile,
+                    embeddingSession);
             log.info("Rebuild: old index [{}] retained for rollback; new index [{}] has {} documents",
-                    oldPhysicalIndex, newPhysicalIndex, migration.targetCount());
+                    oldPhysicalIndex,
+                    newPhysicalIndex,
+                    esClient.count(c -> c.index(newPhysicalIndex)).count());
         } catch (Exception e) {
             log.error("Rebuild: migration or alias switch failed for new index [{}]",
                     newPhysicalIndex, e);
+            stopMutationCapture(claim.taskId());
             cleanupFailedTargetIndex(newPhysicalIndex, READ_ALIAS, WRITE_ALIAS);
             throw e;
+        }
+    }
+
+    private long startMutationCapture(
+            String taskId,
+            String oldPhysicalIndex,
+            int dirtyAssetLimit
+    ) throws Exception {
+        AtomicLong total = new AtomicLong();
+        indexWriteBarrier.withExclusiveRebuildPermit(() -> {
+            try {
+                AliasTopology current = aliasManager.requireValid();
+                if (!oldPhysicalIndex.equals(current.physicalIndex())) {
+                    throw new IllegalStateException(
+                            "Alias changed before rebuild capture started");
+                }
+                esClient.indices().refresh(r -> r.index(oldPhysicalIndex));
+                total.set(esClient.count(c -> c.index(oldPhysicalIndex)).count());
+                rebuildMutationTracker.start(taskId, dirtyAssetLimit);
+            } catch (Exception error) {
+                throw new RebuildOperationException(error);
+            }
+        });
+        return total.get();
+    }
+
+    private void catchUpAndSwitch(
+            RebuildClaim claim,
+            String oldPhysicalIndex,
+            String newPhysicalIndex,
+            EmbeddingProfile targetProfile,
+            EmbeddingSession embeddingSession
+    ) throws Exception {
+        while (true) {
+            SegmentRebuildMutationTracker.Snapshot snapshot =
+                    rebuildMutationTracker.snapshot(claim.taskId());
+            if (snapshot.overflowed()) {
+                throw new IllegalStateException(
+                        "Rebuild dirty asset limit exceeded");
+            }
+            updateRebuildProgress(new SegmentIndexMigrationRunner.Progress(
+                    0L, snapshot.dirtyAssets().size(), "CATCHING_UP"));
+            for (var entry : snapshot.dirtyAssets().entrySet()) {
+                migrationRunner.resyncAsset(
+                        oldPhysicalIndex,
+                        newPhysicalIndex,
+                        entry.getKey(),
+                        targetProfile,
+                        embeddingSession);
+                rebuildMutationTracker.removeIfUnchanged(
+                        claim.taskId(), entry.getKey(), entry.getValue());
+            }
+
+            SegmentRebuildMutationTracker.Snapshot beforeValidation =
+                    rebuildMutationTracker.snapshot(claim.taskId());
+            if (!beforeValidation.dirtyAssets().isEmpty()) {
+                continue;
+            }
+            updateRebuildProgress(new SegmentIndexMigrationRunner.Progress(
+                    0L, 0L, "VALIDATING"));
+            SegmentIndexMigrationRunner.Validation validation =
+                    migrationRunner.validateCurrentTarget(
+                            oldPhysicalIndex, newPhysicalIndex, targetProfile);
+            SegmentRebuildMutationTracker.Snapshot afterValidation =
+                    rebuildMutationTracker.snapshot(claim.taskId());
+            if (!afterValidation.dirtyAssets().isEmpty()
+                    || afterValidation.sequence() != beforeValidation.sequence()) {
+                continue;
+            }
+            if (tryFinalSwitch(
+                    claim,
+                    oldPhysicalIndex,
+                    newPhysicalIndex,
+                    targetProfile,
+                    validation,
+                    afterValidation.sequence())) {
+                return;
+            }
+        }
+    }
+
+    private boolean tryFinalSwitch(
+            RebuildClaim claim,
+            String oldPhysicalIndex,
+            String newPhysicalIndex,
+            EmbeddingProfile targetProfile,
+            SegmentIndexMigrationRunner.Validation validation,
+            long validatedSequence
+    ) {
+        java.util.concurrent.atomic.AtomicBoolean switched =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        indexWriteBarrier.withExclusiveRebuildPermit(() -> {
+            SegmentRebuildMutationTracker.Snapshot finalSnapshot =
+                    rebuildMutationTracker.snapshot(claim.taskId());
+            if (!finalSnapshot.dirtyAssets().isEmpty()
+                    || finalSnapshot.sequence() != validatedSequence) {
+                return;
+            }
+            try {
+                updateRebuildProgress(new SegmentIndexMigrationRunner.Progress(
+                        validation.projectedCount(),
+                        validation.sourceCount(),
+                        "SWITCHING_ALIAS"));
+                physicalIndexFactory.markSwitching(
+                        newPhysicalIndex,
+                        targetProfile,
+                        claim.taskId(),
+                        oldPhysicalIndex);
+                switchAliasesAndActivate(
+                        oldPhysicalIndex, newPhysicalIndex, targetProfile);
+                physicalIndexFactory.markActiveBestEffort(
+                        newPhysicalIndex,
+                        targetProfile,
+                        claim.taskId(),
+                        oldPhysicalIndex);
+                rebuildMutationTracker.stop(claim.taskId());
+                stateRef.updateAndGet(current ->
+                        isActiveRebuild(current, claim)
+                                ? current.rebuildSucceeded(targetProfile)
+                                        .withRebuildProgress(
+                                                new SegmentIndexRebuildProgress(
+                                                        validation.projectedCount(),
+                                                        validation.sourceCount(),
+                                                        "COMPLETED"))
+                                : current);
+                switched.set(true);
+            } catch (Exception error) {
+                throw new RebuildOperationException(error);
+            }
+        });
+        return switched.get();
+    }
+
+    private void stopMutationCapture(String taskId) {
+        if (!rebuildMutationTracker.isActive(taskId)) {
+            return;
+        }
+        indexWriteBarrier.withExclusiveRebuildPermit(
+                () -> rebuildMutationTracker.stop(taskId));
+    }
+
+    private static final class RebuildOperationException extends RuntimeException {
+        private RebuildOperationException(Throwable cause) {
+            super(cause);
         }
     }
 
     private void updateRebuildProgress(
             SegmentIndexMigrationRunner.Progress progress
     ) {
+        long dirtyAssets = "CATCHING_UP".equals(progress.phase())
+                ? progress.total()
+                : 0L;
         stateRef.updateAndGet(current -> current.withRebuildProgress(
                 new SegmentIndexRebuildProgress(
-                        progress.migrated(), progress.total(), progress.phase())));
+                        progress.migrated(), progress.total(), progress.phase(), dirtyAssets)));
     }
 
     void switchAliasesAndActivate(

@@ -107,7 +107,7 @@ class IngestionTaskProcessorImplTest {
         when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("hello", "text")).thenReturn(List.of(0.1f));
-        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any(), any()))
                 .thenReturn(receipt());
         when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
                 .thenReturn(true);
@@ -133,7 +133,7 @@ class IngestionTaskProcessorImplTest {
         order.verify(embeddingPort).embed("hello", "text");
         order.verify(coordinator).advanceAndUpdateAssetStatus(
                 any(), eq(IngestionStage.INDEX), eq(75), eq(asset), any(), any());
-        order.verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
+        order.verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any(), any());
         order.verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
         order.verify(ingestionDoclingAcl).ackJob("job-1");
         order.verify(knowledgeBaseRepository)
@@ -166,7 +166,7 @@ class IngestionTaskProcessorImplTest {
                         .assetId("asset-1").segmentType(SegmentType.DOCUMENT_IMAGE)
                         .sourceRef("images/1.png").build()));
         when(embeddingPort.isMulti()).thenReturn(false);
-        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any(), any()))
                 .thenReturn(receipt());
         when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
                 .thenReturn(true);
@@ -176,7 +176,7 @@ class IngestionTaskProcessorImplTest {
         verify(ingestionDoclingAcl, Mockito.times(2))
                 .submitJob(any(), anyInt());
         verify(ingestionDoclingAcl).ackJob("failed");
-        verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any());
+        verify(ingestionRetrievalAcl).replaceGeneration(any(), eq(asset), any(), any());
         verify(finalizer).activateGeneration(any(), eq(asset), eq(1), eq(receipt()));
     }
 
@@ -212,7 +212,7 @@ class IngestionTaskProcessorImplTest {
         when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("hello", "text")).thenReturn(List.of(0.1f));
-        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any(), any()))
                 .thenReturn(receipt());
         when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
                 .thenReturn(true);
@@ -250,7 +250,7 @@ class IngestionTaskProcessorImplTest {
         when(chunkMapper.toDocumentImageChunks(asset, response, 1L)).thenReturn(List.of());
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("hello", "text")).thenReturn(List.of(0.1f));
-        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any(), any()))
                 .thenThrow(new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE));
 
         processor.processItem(item);
@@ -307,7 +307,7 @@ class IngestionTaskProcessorImplTest {
                 eq("provider unavailable"),
                 eq("FAILED"),
                 eq("FAILED"));
-        verify(ingestionRetrievalAcl, never()).replaceGeneration(any(), any(), any());
+        verify(ingestionRetrievalAcl, never()).replaceGeneration(any(), any(), any(), any());
         verify(finalizer, never()).activateGeneration(any(), any(), anyInt(), any());
         verify(ingestionDoclingAcl).ackJob("job-1");
     }
@@ -371,7 +371,7 @@ class IngestionTaskProcessorImplTest {
                 .thenReturn(List.of());
         when(embeddingPort.isMulti()).thenReturn(false);
         when(embeddingPort.embed("hello", "text")).thenReturn(List.of(0.1f));
-        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any()))
+        when(ingestionRetrievalAcl.replaceGeneration(any(), eq(asset), any(), any()))
                 .thenReturn(receipt());
         when(finalizer.activateGeneration(any(), eq(asset), eq(1), eq(receipt())))
                 .thenReturn(true);

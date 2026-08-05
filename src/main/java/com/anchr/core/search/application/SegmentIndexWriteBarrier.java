@@ -10,9 +10,9 @@ import java.util.function.Supplier;
  * Coordinates normal index writes with an in-process index rebuild.
  *
  * <p>Normal writes hold a shared permit from readiness validation through the
- * Elasticsearch request. A rebuild holds the exclusive permit until its final
- * state transition, so no accepted write can land in the old index after the
- * rebuild snapshot is taken.</p>
+ * Elasticsearch request. Online rebuilds take the exclusive permit only while
+ * enabling mutation capture and during the final alias/profile cutover. The
+ * backfill and catch-up work run without this barrier.</p>
  */
 @Component
 public class SegmentIndexWriteBarrier {

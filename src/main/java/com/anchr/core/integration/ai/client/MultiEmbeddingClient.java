@@ -21,17 +21,26 @@ public class MultiEmbeddingClient implements EmbeddingClient {
 
     @Override
     public EmbeddingResult embed(EmbedContext context) {
+        return embedMany(context).getFirst();
+    }
+
+    @Override
+    public List<EmbeddingResult> embedMany(EmbedContext context) {
         JsonNode root = client.multiEmbeddings(context.modelName(), context.contentMap(), context.extraConfig());
         JsonNode data = root.path("output").path("embeddings");
         if (!data.isArray() || data.isEmpty()) {
             throw new AiClient.OpenAiException(-1, "Empty embedding response.");
         }
-        JsonNode firstEmbedding = data.get(0).path("embedding");
-        List<Float> vector = new ArrayList<>();
-        for (JsonNode val : firstEmbedding) {
-            vector.add((float) val.asDouble());
+        List<EmbeddingResult> results = new ArrayList<>(data.size());
+        for (JsonNode item : data) {
+            JsonNode rawEmbedding = item.path("embedding");
+            List<Float> vector = new ArrayList<>();
+            for (JsonNode val : rawEmbedding) {
+                vector.add((float) val.asDouble());
+            }
+            results.add(new EmbeddingResult(vector, vector.size()));
         }
-        return new EmbeddingResult(vector, vector.size());
+        return results;
     }
 
     /**

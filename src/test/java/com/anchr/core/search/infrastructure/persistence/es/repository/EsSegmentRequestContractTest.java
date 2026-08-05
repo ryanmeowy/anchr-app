@@ -3,6 +3,7 @@ package com.anchr.core.search.infrastructure.persistence.es.repository;
 import co.elastic.clients.elasticsearch._types.SortOrder;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -94,6 +95,7 @@ class EsSegmentRequestContractTest {
     }
 
     private EsSegmentRepository repository() {
-        return new EsSegmentRepository(null, null, null);
+        return new EsSegmentRepository(
+                null, null, null, new SegmentRebuildMutationTracker());
     }
 }

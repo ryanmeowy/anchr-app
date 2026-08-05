@@ -17,6 +17,7 @@ import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.SearchFilter;
 import com.anchr.core.search.domain.model.Segment;
@@ -50,6 +51,7 @@ public class EsSegmentRepository implements SegmentRepository {
     private final ElasticsearchClient esClient;
     private final SegmentIndexManager segmentIndexManager;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
+    private final SegmentRebuildMutationTracker rebuildMutationTracker;
 
     private void assertIndexReadable() {
         SegmentIndexStatusDTO status = segmentIndexManager.status();
@@ -250,6 +252,7 @@ public class EsSegmentRepository implements SegmentRepository {
                 throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
                         "Search index delete did not complete successfully.");
             }
+            rebuildMutationTracker.markDirty(assetId);
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -268,6 +271,7 @@ public class EsSegmentRepository implements SegmentRepository {
                             .filter(f -> f.term(t -> t.field("assetId").value(assetId)))
                             .filter(indexGenerationFilter(indexGeneration)))));
             assertDeleteCompleted(esClient.deleteByQuery(request));
+            rebuildMutationTracker.markDirty(assetId);
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {

@@ -100,7 +100,7 @@ class SegmentIndexMigrationValidationTest {
             }
         };
         SegmentIndexMigrationRunner runner =
-                new SegmentIndexMigrationRunner(null, storage, null);
+                new SegmentIndexMigrationRunner(null, storage, null, null);
 
         assertEquals(
                 "signed://images/photo.png",
