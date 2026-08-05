@@ -227,10 +227,9 @@ cp docker/app/.env.example docker/app/.env
 
 ```bash
 openssl rand -base64 32
-openssl rand -base64 16
 ```
 
-第一个值填写到 `APP_ENCRYPT_KEY`，第二个值填写到 `APP_ENCRYPT_IV`。Docling Token 必须与 sidecar 中的 `ANCHR_DOCLING_API_TOKEN` 保持一致。
+将生成值填写到 `APP_ENCRYPT_KEY`。Docling Token 必须与 sidecar 中的 `ANCHR_DOCLING_API_TOKEN` 保持一致。
 
 模板按以下分组组织：
 
@@ -239,12 +238,12 @@ openssl rand -base64 16
 | Redis | `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` | Token、分布式 ID 分段、查询改写缓存和 Agent 快照。 |
 | Elasticsearch | `ES_USERNAME`、`ES_PASSWORD`、`ES_HOST` | Segment 索引、alias、全文召回和向量召回。 |
 | MySQL | `MYSQL_URL`、`MYSQL_USER`、`MYSQL_PASSWORD` | 应用状态。 |
-| 安全 | `APP_ADMIN_SECRET`、`APP_ENCRYPT_KEY`、`APP_ENCRYPT_IV` | Token 管理和模型/存储凭据加密。 |
+| 安全 | `APP_ADMIN_SECRET`、`APP_ENCRYPT_KEY` | Token 管理和模型/存储凭据加密。 |
 | Docling | `APP_DOCLING_BASE_URL`、`APP_DOCLING_API_TOKEN` | 带鉴权的异步文档解析。 |
 | Server | `SERVER_HOST`、`SERVER_PORT`、`PROFILES_ACTIVE` | HTTP 监听地址、端口和启用的 Spring Profile。 |
 
 > [!WARNING]
-> 不要提交任一 Docker `.env` 文件。已有加密配置存在时，应保持加密 Key 和 IV 稳定；生产环境请使用 Secret Manager。
+> 不要提交任一 Docker `.env` 文件。已有加密配置存在时，应保持加密 Key 稳定；生产环境请使用 Secret Manager。
 
 ### 5. 启动 Anchr App
 

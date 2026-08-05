@@ -55,11 +55,9 @@ Generate application encryption material with:
 
 ```bash
 openssl rand -base64 32
-openssl rand -base64 16
 ```
 
-Use the first value as `APP_ENCRYPT_KEY` and the second as `APP_ENCRYPT_IV`.
-Never commit either `.env` file.
+Use the value as `APP_ENCRYPT_KEY`. Never commit either `.env` file.
 
 ## Commands
 

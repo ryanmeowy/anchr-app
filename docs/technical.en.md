@@ -219,10 +219,9 @@ Match its datastore credentials to the infrastructure environment, then configur
 
 ```bash
 openssl rand -base64 32
-openssl rand -base64 16
 ```
 
-Use the first value as `APP_ENCRYPT_KEY` and the second as `APP_ENCRYPT_IV`. The Docling token must match `ANCHR_DOCLING_API_TOKEN` in the sidecar.
+Use the value as `APP_ENCRYPT_KEY`. The Docling token must match `ANCHR_DOCLING_API_TOKEN` in the sidecar.
 
 The template is organized into these groups:
 
@@ -231,12 +230,12 @@ The template is organized into these groups:
 | Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Tokens, distributed ID segments, rewrite cache, and Agent snapshots. |
 | Elasticsearch | `ES_USERNAME`, `ES_PASSWORD`, `ES_HOST` | Segment indexes, aliases, lexical recall, and vector recall. |
 | MySQL | `MYSQL_URL`, `MYSQL_USER`, `MYSQL_PASSWORD` | Application state. |
-| Security | `APP_ADMIN_SECRET`, `APP_ENCRYPT_KEY`, `APP_ENCRYPT_IV` | Token administration and encryption of provider credentials. |
+| Security | `APP_ADMIN_SECRET`, `APP_ENCRYPT_KEY` | Token administration and encryption of provider credentials. |
 | Docling | `APP_DOCLING_BASE_URL`, `APP_DOCLING_API_TOKEN` | Authenticated asynchronous parsing. |
 | Server | `SERVER_HOST`, `SERVER_PORT`, `PROFILES_ACTIVE` | HTTP bind address, port, and active Spring profile. |
 
 > [!WARNING]
-> Do not commit either Docker `.env` file. Keep the encryption key and IV stable for existing encrypted configuration records, and use a secret manager in production.
+> Do not commit either Docker `.env` file. Keep the encryption key stable for existing encrypted configuration records, and use a secret manager in production.
 
 ### 5. Start Anchr App
 

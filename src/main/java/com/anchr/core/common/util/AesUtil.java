@@ -7,7 +7,6 @@ import java.util.Arrays;
 import java.util.Base64;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -15,21 +14,21 @@ import org.springframework.stereotype.Component;
 /**
  * Utility class for AES encryption and decryption.
  * This class provides methods to encrypt and decrypt strings using AES algorithm.
- * The encryption key and initialization vector (IV) are injected from application properties.
+ * The encryption key is injected from application properties.
  *
  */
 @Component
 public class AesUtil {
 
-    private static final String ALGORITHM = "AES/CBC/PKCS5Padding";
-    private final String keyBase64;
-    private final String ivBase64;
+    private static final String GCM_ALGORITHM = "AES/GCM/NoPadding";
+    private static final int GCM_NONCE_BYTES = 12;
+    private static final int GCM_TAG_BYTES = 16;
+    private static final int GCM_TAG_BITS = GCM_TAG_BYTES * Byte.SIZE;
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private final String keyBase64;
 
-    public AesUtil(@Value("${app.security.encrypt-key}") String keyBase64,
-                   @Value("${app.security.encrypt-iv}") String ivBase64) {
+    public AesUtil(@Value("${app.security.encrypt-key}") String keyBase64) {
         this.keyBase64 = keyBase64;
-        this.ivBase64 = ivBase64;
     }
 
     private byte[] decodeKey() {
@@ -37,13 +36,6 @@ public class AesUtil {
             throw new EncryptionException("Encryption key is not configured");
         }
         return Base64.getDecoder().decode(keyBase64);
-    }
-
-    private byte[] decodeIv() {
-        if (ivBase64 == null || ivBase64.isBlank()) {
-            throw new EncryptionException("Encryption iv is not configured");
-        }
-        return Base64.getDecoder().decode(ivBase64);
     }
 
     private SecretKeySpec keySpec() {
@@ -54,23 +46,19 @@ public class AesUtil {
         return new SecretKeySpec(keyBytes, "AES");
     }
 
-    private IvParameterSpec ivSpec() {
-        byte[] ivBytes = decodeIv();
-        if (ivBytes.length != 16) {
-            throw new EncryptionException("IV must be 16 bytes");
-        }
-        return new IvParameterSpec(ivBytes);
-    }
-
     public String encrypt(String content) {
         if (content == null) {
             throw new EncryptionException("Content to encrypt must not be null");
         }
         try {
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec(), ivSpec());
-            byte[] encrypted = cipher.doFinal(content.getBytes(StandardCharsets.UTF_8));
-            return Base64.getEncoder().encodeToString(encrypted);
+            byte[] nonce = randomNonce();
+            Cipher cipher = Cipher.getInstance(GCM_ALGORITHM);
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec(), new GCMParameterSpec(GCM_TAG_BITS, nonce));
+            byte[] sealed = cipher.doFinal(content.getBytes(StandardCharsets.UTF_8));
+            byte[] envelope = new byte[nonce.length + sealed.length];
+            System.arraycopy(nonce, 0, envelope, 0, nonce.length);
+            System.arraycopy(sealed, 0, envelope, nonce.length, sealed.length);
+            return Base64.getEncoder().encodeToString(envelope);
         } catch (Exception e) {
             throw new EncryptionException("Encryption failed", e);
         }
@@ -81,14 +69,25 @@ public class AesUtil {
             throw new EncryptionException("Ciphertext must not be null");
         }
         try {
-            Cipher cipher = Cipher.getInstance(ALGORITHM);
-            cipher.init(Cipher.DECRYPT_MODE, keySpec(), ivSpec());
-            byte[] decoded = Base64.getDecoder().decode(base64Ciphertext);
-            byte[] decrypted = cipher.doFinal(decoded);
+            byte[] envelope = Base64.getDecoder().decode(base64Ciphertext);
+            if (envelope.length < GCM_NONCE_BYTES + GCM_TAG_BYTES) {
+                throw new EncryptionException("Ciphertext envelope is too short");
+            }
+            byte[] nonce = Arrays.copyOfRange(envelope, 0, GCM_NONCE_BYTES);
+            byte[] sealed = Arrays.copyOfRange(envelope, GCM_NONCE_BYTES, envelope.length);
+            Cipher cipher = Cipher.getInstance(GCM_ALGORITHM);
+            cipher.init(Cipher.DECRYPT_MODE, keySpec(), new GCMParameterSpec(GCM_TAG_BITS, nonce));
+            byte[] decrypted = cipher.doFinal(sealed);
             return new String(decrypted, StandardCharsets.UTF_8);
         } catch (Exception e) {
             throw new EncryptionException("Decryption failed", e);
         }
+    }
+
+    private byte[] randomNonce() {
+        byte[] nonce = new byte[GCM_NONCE_BYTES];
+        SECURE_RANDOM.nextBytes(nonce);
+        return nonce;
     }
 
     /** Encrypts a short-lived cross-service secret with authenticated context binding. */
@@ -97,13 +96,12 @@ public class AesUtil {
             throw new EncryptionException("AEAD content and AAD must not be null");
         }
         try {
-            byte[] nonce = new byte[12];
-            SECURE_RANDOM.nextBytes(nonce);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec(), new GCMParameterSpec(128, nonce));
+            byte[] nonce = randomNonce();
+            Cipher cipher = Cipher.getInstance(GCM_ALGORITHM);
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec(), new GCMParameterSpec(GCM_TAG_BITS, nonce));
             cipher.updateAAD(aad.getBytes(StandardCharsets.UTF_8));
             byte[] sealed = cipher.doFinal(content.getBytes(StandardCharsets.UTF_8));
-            int tagOffset = sealed.length - 16;
+            int tagOffset = sealed.length - GCM_TAG_BYTES;
             return new AeadEnvelope(
                     Base64.getEncoder().encodeToString(nonce),
                     Base64.getEncoder().encodeToString(
