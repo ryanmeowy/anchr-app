@@ -98,12 +98,16 @@ request.agentEnabled == true
 
 Agent 路径不执行 Intent Router。Agent 出现未预期异常且
 `AGENT.fallbackToTraditional=true` 时，编排器重新路由并执行传统流程，执行模式记为 `AGENT_FALLBACK`。
+`AgentWorkflowImpl` 会把初始化及运行期间未被状态机消费的异常统一封装为
+`AgentWorkflowException`，避免 Repository、配置加载或历史读取异常以裸异常形式逃逸。
+需要注意：初始化发生在 `RunStarted` 之前；若初始化失败，Agent Trace 尚未创建，
+因此只能由编排器执行传统流程降级，不能把一个不存在的 Agent Run 更新为 `FAILED`。
 
 ## 4. Run 上下文与预算
 
-### 4.1 Run state
+### 4.1 不可变 Run State
 
-`AgentRunState` 按 Run 隔离，包含：
+`AgentState` 是单次同步 Run 的不可变快照，包含：
 
 - `runId`、`turnId`、`sessionId`、`userId` 和本次 KB/Asset 范围。
 - 模型消息列表。
@@ -112,6 +116,13 @@ Agent 路径不执行 Intent Router。Agent 出现未预期异常且
 - 各工具执行次数。
 - 模型步骤数、工具调用数和 Prompt/Completion Token。
 - 连续协议错误数、最终答案校验错误数、Trace 顺序和当前步骤。
+- 待执行工具队列、Finalizer 尝试次数和 Finalizer 修复上下文。
+
+消息、证据、已执行工具键、工具次数和待执行工具队列在构造快照时复制并转为只读集合。Evidence 不只复制 Map：`ConversationRetrievalCandidate` 以及内部的 Anchor、Bbox、Explain 和命中来源列表都会做防御性复制；空白 `segmentId` 不进入 Registry。每次状态转换返回新快照，旧快照不会随之后的工具结果、Evidence 注册、外部 Candidate 变更或计数更新而变化。
+
+Phase 变更统一经过 `AgentWorkflowPhase.canTransitionTo` 运行时校验。非法迁移立即抛出异常，不能依赖 Runner 当前的事件顺序来隐式保证状态合法。
+
+`AgentBudget` 只根据调用方提供的 `now` 计算是否耗尽、剩余时间和单次调用上限。状态机不读取系统时间，因此同一个 `State + Event` 会得到相同 Transition。
 
 `AgentRequestContextResolver` 会再次从服务端读取有效资源信息，并把上下文锁定为不可扩大的范围；上下文最多展示 50 个 KB 元数据和 20 个 Asset 元数据。
 
@@ -139,6 +150,102 @@ Agent 路径不执行 Intent Router。Agent 出现未预期异常且
 
 - 已有证据且至少还剩 500ms：进入 Evidence Finalizer。
 - 没有证据或已无时间：返回本地澄清，`AnswerStatus=NO_EVIDENCE`，Run 最终为 `DEGRADED`，原因为 `agent_budget_exhausted`。
+
+### 4.4 同步 Agent 状态循环
+
+`AgentWorkflowImpl` 只运行固定事件循环，不再解析协议、执行工具、登记 Evidence、决定重试或构造业务终态：
+
+```mermaid
+flowchart LR
+    A["AgentState"] --> B["AgentTransitionEngine.transition"]
+    B --> C["AgentTransition"]
+    C --> D["先发布 Signals"]
+    D --> E{"Terminal?"}
+    E -- "是" --> F["返回结果或抛 AgentWorkflowException"]
+    E -- "否" --> G["执行一个 Command"]
+    G --> H["生成 AgentEvent"]
+    H --> B
+```
+
+Transition 每次最多产生一个外部 Command。模型一次返回多个 Tool Call 时，状态机把它们保存到 `pendingToolCalls`，只发出第一个 `CallTool`。Runner 在 Command 前后根据 `AgentRunCancellationRegistry` 检查业务取消；状态机调度每个待执行工具时先检查预算，再检查重复调用和 `read_document` 限制。预算已经耗尽时直接进入预算降级或 Finalizer，不再额外产生 duplicate/read-limit Signal、Trace 或原因字符串。
+
+非取消 Terminal 在应用 `nextState` 和发布 Terminal Signal 前，必须通过 Cancellation Registry 原子认领终态。若取消请求先被接受，Runner 丢弃尚未发布的 Completion/Failure Transition，并从原非终态 State 发送 `CancellationRequested`；若 Terminal 先认领成功，Registry 会移除运行句柄，稍后到达的取消返回未命中。这样关闭了“effect 后检查已通过、Terminal 提交前又收到取消”的窗口，Presentation fallback 也不能覆盖已经接受的取消。
+
+#### 阶段一：初始化与规划
+
+```mermaid
+flowchart LR
+    A["AgentRunInitializer"] --> B["初始 AgentState"]
+    B --> C["RunStarted"]
+    C --> D["PLANNING"]
+    D --> E["CallModel"]
+    E --> F["ModelCompleted 或 ModelFailed"]
+```
+
+Initializer 冻结运行配置和 deadline，按最近优先消耗历史字符预算，再恢复时间正序；同时清理旧引用编号、解析历史 Citation metadata，并构造服务端 Request Context。
+初始化位于 Workflow 的统一 `try/finally` 边界内。初始化失败会封装为
+`AgentWorkflowException`；只有成功注册取消句柄后，`finally` 才执行注销，避免失败路径遗留悬挂注册。
+
+#### 阶段二：工具执行与证据登记
+
+```mermaid
+flowchart LR
+    A["ModelCompleted: ToolCalls"] --> B["pendingToolCalls"]
+    B --> C{"预算耗尽?"}
+    C -- "是" --> D["预算降级或 Finalizer"]
+    C -- "否" --> E{"重复或 Read Limit?"}
+    E -- "是" --> F["追加 Guard Tool Message"]
+    E -- "否" --> G["CallTool"]
+    G --> H["ToolCompleted"]
+    H --> I["登记可引用 Evidence"]
+    I --> J{"还有 Pending Call?"}
+    J -- "是" --> C
+    J -- "否" --> K["重新 PLANNING"]
+    F --> J
+```
+
+duplicate 和 read-limit guard 不增加实际工具调用数。合法工具在发出 `CallTool` 前增加 `toolCallCount`；工具完成 Event 携带压缩后的模型消息、Evidence、Trace 摘要和耗时。
+
+#### 阶段三：验证、Finalizer 与 Presentation
+
+```mermaid
+flowchart LR
+    A["FinalAnswer"] --> B["VerifyAnswer"]
+    B --> C{"验证通过?"}
+    C -- "首次失败" --> D["追加修复消息并重新规划"]
+    C -- "再次失败" --> E["NO_EVIDENCE Terminal"]
+    C -- "通过" --> F["PresentAnswer"]
+    G["预算/协议/Read Limit 且有 Evidence"] --> H["CallEvidenceFinalizer"]
+    H --> I{"单次结果"}
+    I -- "失败且可重试" --> H
+    I -- "验证通过" --> F
+    I -- "超限" --> J["MODEL_FALLBACK Terminal"]
+    F --> K["COMPLETED Terminal"]
+```
+
+Finalizer 每个 Command 只调用模型一次；最多两次的规则由 Transition Engine 决定。Presentation 每个 Command 最多执行一次流式模型调用。流式失败或输出校验失败时使用已验证草稿完成，不把 Run 改为失败。
+答案校验器异常会先转换为 `AnswerVerificationFailed` Event，再由状态机生成
+`FAILED` Terminal；Workflow 最终抛出 `AgentWorkflowException`，由上层决定是否切换传统流程。
+Presentation 仅允许通过校验的候选触发 `answer_reset`。候选包含内部
+`{{segment:...}}`、原始 `segmentId` 或非法可见引用时，无论生成端口是否产生过 delta，
+都不会把该候选通过 SSE 发给客户端；有 provisional delta 时 reset 为已验证草稿，
+无 delta 时直接使用草稿完成。
+
+#### Signal 与副作用边界
+
+| 对象 | 职责 |
+| --- | --- |
+| `AgentEvent` | 携带外部调用结果、完成时间、Usage 和语义决策 |
+| `AgentCommand` | 描述一次 Model、Tool、Verify、Finalizer 或 Presentation 调用 |
+| `AgentSignal` | 固定 Progress、Trace、Metrics 和操作日志所需的顺序号、attempt、计数、details 和失败 cause |
+| `AgentRunObserver` | 持久化 Trace，发送 Progress，记录 Metrics；失败按 best-effort 处理 |
+| `AgentTerminal` | 保存回答状态、降级原因、Citation、Deferred Task、Run 状态和异常 cause |
+
+`AgentTransitionEngine` 没有 Spring 注解，也不依赖 Repository、Clock、Metrics 或 Listener。`AgentEffectRunner` 只把 Command 路由到 `AgentModelEffect`、`AgentToolEffect` 和 `AgentCompletionEffect`，所有结果先转成 Event。`AgentActionProtocol` 只做 native/JSON 输出到语义决策的解析，不再持有错误计数或 Metrics。
+
+`AgentSignal.Progress.details` 以及 Trace 的 input/output summary 使用保留 null 值能力的不可变快照，而不是 `Map.copyOf`。因此可观测字段出现 null 时不会在 Transition 内触发 NPE，Observer 也不能反向修改 State。答案校验拒绝使用 `AnswerValidationRejected` Signal；Finalizer 或 Presentation 的 effect 异常使用携带原始 cause 的 `EffectFailure` Signal，Observer 负责记录完整异常栈。
+
+同步状态机不接管 `AgentTaskProcessor`。`summarize_documents` 仍以 `DeferredTask/WAITING_TASK` 结束同步 Run，后续异步处理继续使用原有 Task 状态、Lease、Trace Order 和恢复协议。
 
 ## 5. 模型协议
 
@@ -294,11 +401,13 @@ Evidence Finalizer 使用当前 Run 已注册的证据生成受限答案，不�
 
 处理方式：
 
-1. 从当前 Run Evidence Registry 选择最多 12 条证据。
+1. 从当前 Run Evidence Registry 选择最多 12 条具有非空 `segmentId` 的证据；缺少可引用 ID 的候选不计入选择数量。
 2. 证据输入最多约 24000 字符。
 3. 通过 `ConversationGenerationPort` 生成严格的 `KNOWLEDGE|NO_EVIDENCE` JSON。
 4. 在剩余时间允许时最多尝试 2 次，每次仍受 Agent 单次模型时限约束。
 5. 成功后继续走与 `deliver_answer` 相同的引用校验。
+
+严格 JSON 是生成协议，不是旧输出的硬切断边界。为兼容已有模型行为，解析器在收到非 JSON 文本时仍保留正文；若正文含合法 `{{segment:...}}` Marker，则推断为 `KNOWLEDGE` 并继续走同一 Evidence 校验，不能因协议重构丢失已有引用语义。没有 Marker 且不能确定 Answer Type 的文本仍按无效 Finalizer 输出处理。
 
 Finalizer 不可用或两次调用均失败时：
 
@@ -487,7 +596,11 @@ SSE 断开或 120 秒传输超时时：
 3. 因连接已断开，不再向该 Emitter 发送答案。
 4. 不会因为 SSE 断线自动写入取消标记，也不会把 Run 改成 `CANCELLED`。
 
-取消只由 Run/Task 取消接口或会话删除清理触发。
+取消只由 Run/Task 取消接口或会话删除清理在 `AgentRunCancellationRegistry` 中登记后触发。取消登记会 interrupt 当前执行线程，以便模型、工具等阻塞调用尽快退出；但线程的 interrupt flag 本身不是业务取消依据。框架超时、外部 interrupt 或线程池残留中断若没有对应的 Registry 记录，必须按实际 effect 结果继续或失败，不能伪装成 `CANCELLED/查询已取消`。
+
+取消登记与非取消 Terminal 使用同一 Registry 临界区决定先后顺序：已经接受的取消优先于尚未提交的 `COMPLETED`、`DEGRADED` 或 `FAILED` Terminal；已经原子认领的 Terminal 则不再接受迟到的取消。
+
+同步 Workflow 在所有出口统一清除当前线程的 interrupt flag，包括正常完成、业务取消、`FAILED` Terminal、初始化异常和 Runner 兜底异常，避免线程池复用时把上一轮中断带入下一轮 Run。
 
 ### 12.3 状态来源
 
@@ -505,7 +618,8 @@ SSE 断开或 120 秒传输超时时：
 | Query Rewrite 失败 | 使用原始 Query | 继续检索 |
 | Embedding 为空 | 抛业务异常 | 进入上层异常路径 |
 | Rerank 失败或空结果 | 保留 RRF 顺序 | 继续回答 |
-| 工具参数或执行错误 | Tool Error 返回模型 | 模型可修复后重试 |
+| 工具参数或已规范化的执行错误 | `AgentToolResult.failure` 返回模型，并保留既有 FAILED Trace/Progress | 模型可修复后重试 |
+| Tool Effect 边界异常 | 转为 `ToolFailed` 并保留 cause；不新增 Step、Progress 或 step latency | `FAILED` Terminal，配置允许时走传统路径 |
 | 重复工具调用 | `DUPLICATE_TOOL_CALL` | 不重复执行 |
 | 第一次无合法 Agent 动作 | 注入协议修复消息 | 重试模型 |
 | 第二次无合法动作且已有证据 | Evidence Finalizer | 成功则正常完成，失败则 `MODEL_FALLBACK/DEGRADED` |
@@ -514,7 +628,12 @@ SSE 断开或 120 秒传输超时时：
 | 再次最终答案校验失败 | 本地安全无证据回答 | `NO_EVIDENCE/COMPLETED` |
 | 预算耗尽且已有证据 | Evidence Finalizer | 失败时 `MODEL_FALLBACK/DEGRADED` |
 | 预算耗尽且无证据 | 本地澄清 | `NO_EVIDENCE/DEGRADED` |
-| Agent 未预期异常 | 原 Agent Trace 先记 `FAILED` | 配置允许时走传统路径，最终 Run 为 `FALLBACK` |
+| Agent 初始化失败 | 封装为 `AgentWorkflowException`；此时尚无 Agent Trace | 配置允许时走传统路径，最终 Run 为 `FALLBACK` |
+| Answer Verifier 异常 | 转成 `AnswerVerificationFailed`，状态机生成 `FAILED` Terminal | Workflow 抛 `AgentWorkflowException`；配置允许时走传统路径 |
+| 已建模的 Model 或 Verify 异常 | Effect 转为失败 Event，状态机生成 `FAILED` Terminal 并保留 cause | Workflow 抛 `AgentWorkflowException`；配置允许时走传统路径 |
+| 状态循环本身的未预期异常 | Workflow 统一封装为 `AgentWorkflowException`，不让裸异常逃逸 | 配置允许时走传统路径，最终 Run 为 `FALLBACK` |
+| Finalizer 模型异常 | `FinalizerModelFailed` 携带 cause；预算和次数允许时重试 | 超限后 `MODEL_FALLBACK/DEGRADED` |
+| Presentation 异常或输出非法 | 记录失败 cause，丢弃非法候选并使用已验证草稿 | Run 仍为 `COMPLETED`，客户端与落库答案一致 |
 | 传统 RAG 无合格证据 | 固定无证据模板 | `NO_EVIDENCE` |
 | 传统答案格式错误或模型失败 | 默认返回生成失败文案 | `MODEL_FALLBACK`；只有打开 legacy 配置才拼接证据 |
 | 异步总结临时失败 | 延迟重试 | 重试耗尽后 `FAILED` |
@@ -553,6 +672,10 @@ Query Rewrite
 ### 15.1 Trace 与指标
 
 模型步骤记录模型、`finishReason`、消息数、工具计划、Token 和耗时。工具步骤记录工具名、Call ID、状态、错误码、证据数、文档数、Segment 数和分页状态。
+
+Observer 同时恢复运行期操作日志：Run 开始/结束、模型决策完成、工具开始/完成/失败、duplicate 拒绝、`read_document` 限制、协议错误和答案校验拒绝都会留下带 `runId`、step/attempt 及必要摘要的日志。Finalizer 和 Presentation 的异常通过 `EffectFailure` Signal 传递，日志记录 phase、异常消息和完整 cause；状态机本身不直接写日志。Observer、Trace、Metrics 或 Progress 发送失败仍按 best-effort 处理，不改变 State 或 Terminal。
+
+异常指标保持重构前语义：`agent.run.result` 只记录正常产生的业务终态，不为抛出 `AgentWorkflowException` 的 `FAILED` Terminal 增加 `status=FAILED` 序列；异常 Run 仍由 `agent.run.count{status=FAILED}` 统计。模型调用失败继续保留原有 `MODEL_DECISION` 失败 Trace 和 `decision_failed` Progress；`AgentToolResult.failure` 继续保留原有工具失败 Trace/Progress。只有 Tool Effect 边界自身抛出的异常直接结束 Run，不额外制造 FAILED Step，因此不会新增 `agent.step.latency{step=FAILED}` 或空 usage 的 `agent.model.tokens` 样本。
 
 异步任务阶段使用固定 Trace Order `101–106`：
 
@@ -615,15 +738,20 @@ Settings 中的 `AGENT` 运行配置。Conversation 的传统证据降级使用
 | Agent/传统路径编排 | `ConversationMessageOrchestrator.java` |
 | KB 可见范围 ACL | `ConversationKnowledgeAcl.java` |
 | Agent 请求上下文解析 | `AgentRequestContextResolver.java` |
-| Agent 状态机 | `AgentWorkflowImpl.java` |
-| Agent Run 状态 | `AgentRunState.java` |
+| Agent 同步运行器 | `AgentWorkflowImpl.java` |
+| 纯状态转换 | `AgentTransitionEngine.java`、`AgentTransition.java` |
+| 不可变 Run 状态 | `AgentState.java`、`AgentBudget.java` |
+| Event、Command、Signal 与 Terminal | `AgentEvent.java`、`AgentCommand.java`、`AgentSignal.java`、`AgentTerminal.java` |
+| Run 初始化 | `AgentRunInitializer.java` |
+| Effect 路由与纵向边界 | `AgentEffectRunner.java`、`AgentModelEffect.java`、`AgentToolEffect.java`、`AgentCompletionEffect.java` |
+| Progress、Trace 与 Metrics Observer | `AgentRunObserver.java` |
 | 模型适配与 Tool Choice | `SpringAiAgentModelAdapter.java` |
 | 工具注册与执行 | `AgentToolRegistry.java`、`AgentToolExecutor.java` |
 | 五个 Agent 工具 | `application/agent/tool/` |
 | Conversation/Search 检索边界 | `ConversationRetrievalAcl.java` |
 | 三路检索、generation gate 与 Rerank | `RetrievalQueryServiceImpl.java` |
 | 对话 Query Rewrite | `QueryRewriteServiceImpl.java` |
-| Evidence Finalizer | `AgentEvidenceFinalizer.java` |
+| Evidence Finalizer 与流式 Presentation Effect | `AgentCompletionEffect.java` |
 | Agent 引用渲染 | `AgentCitationRenderer.java`、`AgentCitationIndexPlan.java` |
 | 异步总结处理 | `AgentTaskProcessor.java` |
 | 异步任务 SSE | `AgentTaskStreamService.java` |

@@ -35,20 +35,24 @@ class AgentWorkflowSpringWiringTest {
                     () -> mock(AgentRunCancellationRegistry.class));
             context.registerBean(ObjectMapper.class, () -> new ObjectMapper());
             context.registerBean(MeterRegistry.class, () -> new SimpleMeterRegistry());
-            context.register(AgentActionProtocol.class, AgentEvidenceFinalizer.class,
-                    AgentFinalPresentation.class, AgentCitationPolicy.class,
-                    AgentAnswerVerifier.class, AgentWorkflowImpl.class);
+            context.register(AgentActionProtocol.class, AgentCitationPolicy.class,
+                    AgentAnswerVerifier.class, AgentRunInitializer.class,
+                    AgentModelEffect.class, AgentToolEffect.class, AgentCompletionEffect.class,
+                    AgentEffectRunner.class, AgentRunObserver.class,
+                    AgentWorkflowConfiguration.class, AgentWorkflowImpl.class);
             context.refresh();
 
             AgentWorkflowImpl workflow = context.getBean(AgentWorkflowImpl.class);
-            assertThat(ReflectionTestUtils.getField(workflow, "actionProtocol"))
-                    .isSameAs(context.getBean(AgentActionProtocol.class));
-            assertThat(ReflectionTestUtils.getField(workflow, "evidenceFinalizer"))
-                    .isSameAs(context.getBean(AgentEvidenceFinalizer.class));
-            assertThat(ReflectionTestUtils.getField(workflow, "finalPresentation"))
-                    .isSameAs(context.getBean(AgentFinalPresentation.class));
-            assertThat(ReflectionTestUtils.getField(workflow, "answerVerifier"))
-                    .isSameAs(context.getBean(AgentAnswerVerifier.class));
+            assertThat(ReflectionTestUtils.getField(workflow, "initializer"))
+                    .isSameAs(context.getBean(AgentRunInitializer.class));
+            assertThat(ReflectionTestUtils.getField(workflow, "transitionEngine"))
+                    .isSameAs(context.getBean(AgentTransitionEngine.class));
+            assertThat(ReflectionTestUtils.getField(workflow, "effectRunner"))
+                    .isSameAs(context.getBean(AgentEffectRunner.class));
+            assertThat(ReflectionTestUtils.getField(workflow, "observer"))
+                    .isSameAs(context.getBean(AgentRunObserver.class));
+            assertThat(ReflectionTestUtils.getField(workflow, "cancellationRegistry"))
+                    .isSameAs(context.getBean(AgentRunCancellationRegistry.class));
         }
     }
 }

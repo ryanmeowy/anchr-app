@@ -16,8 +16,7 @@ class AgentAnswerVerifierTest {
 
     @Test
     void verifiesCurrentRunOwnershipMarkerBindingAndStableCitationIndexes() {
-        AgentRunState state = state("STRICT");
-        state.registerEvidence(List.of(
+        AgentState state = state("STRICT").registerEvidence(List.of(
                 evidence("seg-1", "asset-1"),
                 evidence("seg-2", "asset-1"),
                 evidence("seg-3", "asset-2")));
@@ -39,8 +38,7 @@ class AgentAnswerVerifierTest {
 
     @Test
     void rejectsForgedBlankAndMarkerMismatchedSegmentIds() {
-        AgentRunState state = state("STRICT");
-        state.registerEvidence(List.of(
+        AgentState state = state("STRICT").registerEvidence(List.of(
                 evidence("seg-1", "asset-1"),
                 evidence("seg-2", "asset-1")));
 
@@ -61,7 +59,7 @@ class AgentAnswerVerifierTest {
 
     @Test
     void verifiesNoEvidenceWithoutAllowingCitations() {
-        AgentRunState state = state("SUMMARY");
+        AgentState state = state("SUMMARY");
 
         AgentAnswerValidationOutcome accepted = verifier.verify(state, new AgentFinalAnswer(
                 AgentAnswerType.NO_EVIDENCE, "模型原始说明", List.of()));
@@ -77,11 +75,11 @@ class AgentAnswerVerifierTest {
 
     @Test
     void enforcesTenUniqueTwelveTotalAndThreePerParagraphLimits() {
-        AgentRunState state = state("STRICT");
+        AgentState state = state("STRICT");
         List<ConversationRetrievalCandidate> evidence = IntStream.rangeClosed(1, 11)
                 .mapToObj(index -> evidence("seg-" + index, "asset-" + index))
                 .toList();
-        state.registerEvidence(evidence);
+        state = state.registerEvidence(evidence);
 
         String tenUnique = IntStream.rangeClosed(1, 10)
                 .mapToObj(index -> "段落 " + index + " {{segment:seg-" + index + "}}")
@@ -123,15 +121,15 @@ class AgentAnswerVerifierTest {
         assertThat(((AgentAnswerValidationOutcome.Rejected) outcome).code()).isEqualTo(code);
     }
 
-    private AgentRunState state(String answerMode) {
+    private AgentState state(String answerMode) {
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("问题");
         request.setAnswerMode(answerMode);
         AgentRunRequest run = new AgentRunRequest(
                 "run-1", "turn-1", "session-1", "user-1", request);
-        return new AgentRunState(run,
-                new AgentBudget(20, 20, System.currentTimeMillis() + 60_000L),
-                System.currentTimeMillis());
+        long now = System.currentTimeMillis();
+        return AgentState.initial(run, new AgentBudget(20, 20, now + 60_000L), now,
+                null, false, List.of());
     }
 
     private ConversationRetrievalCandidate evidence(String segmentId, String assetId) {

@@ -22,6 +22,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -33,6 +34,30 @@ import static org.mockito.Mockito.*;
 
 class AgentWorkflowImplTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void initializerFailure_shouldBeWrappedForTraditionalFallback() {
+        IllegalStateException failure = new IllegalStateException("database unavailable");
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenThrow(failure);
+        AgentRunCancellationRegistry cancellation = new AgentRunCancellationRegistry();
+        AgentModelPort model = mock(AgentModelPort.class);
+        AgentWorkflowImpl workflow = workflow(model, List.of(new DeliverOnlyTool()),
+                conversations, cancellation);
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> workflow.execute(run("你好"), ConversationProgressListener.NOOP))
+                    .isInstanceOf(AgentWorkflowException.class)
+                    .hasMessage("agent_workflow_failed")
+                    .hasCause(failure);
+            assertThat(Thread.currentThread().isInterrupted()).isFalse();
+            assertThat(cancellation.cancel("run-1")).isFalse();
+            verifyNoInteractions(model);
+        } finally {
+            Thread.interrupted();
+        }
+    }
 
     @Test
     void directChat_shouldFinishWithoutKnowledgeToolOrIntent() {
@@ -121,6 +146,32 @@ class AgentWorkflowImplTest {
                 .containsEntry("decision", "MODEL_ERROR")
                 .containsEntry("errorCode", "MODEL_DECISION_FAILED")
                 .containsEntry("stepOrder", started.details().get("stepOrder"));
+    }
+
+    @Test
+    void bareThreadInterrupt_shouldFailInsteadOfBecomingBusinessCancellationAndClearFlag() {
+        IllegalStateException failure = new IllegalStateException("framework interrupted request");
+        AgentModelPort model = request -> {
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            throw failure;
+        };
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentRunCancellationRegistry cancellation = new AgentRunCancellationRegistry();
+        AgentWorkflowImpl workflow = workflow(model, List.of(new DeliverOnlyTool()),
+                conversations, cancellation);
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> workflow.execute(run("分析文档"), ConversationProgressListener.NOOP))
+                    .isInstanceOf(AgentWorkflowException.class)
+                    .hasMessage("agent_workflow_failed")
+                    .hasCause(failure);
+            assertThat(Thread.currentThread().isInterrupted()).isFalse();
+            assertThat(cancellation.isCancellationRequested("run-1")).isFalse();
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test
@@ -238,6 +289,46 @@ class AgentWorkflowImplTest {
         assertThat(streamed.toString()).isEqualTo("流式回答");
         assertThat(result.answer()).isEqualTo("流式回答");
         verify(generation).generateStream(any(), any(), any());
+    }
+
+    @Test
+    void cancellationAcceptedAfterPresentationEffect_shouldOverrideFallbackCompletion() {
+        AgentModelPort model = request -> new AgentModelResponse(null,
+                List.of(new AgentToolCall("call-1", "deliver_answer",
+                        "{\"answerType\":\"CHAT\",\"answer\":\"已验证草稿\",\"citedSegmentIds\":[]}")),
+                AgentTokenUsage.EMPTY, "model", "tool_calls", "req");
+        AtomicBoolean armCancellation = new AtomicBoolean();
+        AgentRunCancellationRegistry cancellation = new AgentRunCancellationRegistry() {
+            @Override
+            public boolean isCancellationRequested(String runId) {
+                if (armCancellation.compareAndSet(true, false)) {
+                    assertThat(cancel(runId)).isTrue();
+                    return false;
+                }
+                return super.isCancellationRequested(runId);
+            }
+        };
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        when(generation.generateStream(any(), any(), any())).thenAnswer(invocation -> {
+            armCancellation.set(true);
+            throw new IllegalStateException("presentation interrupted");
+        });
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentRequestContextResolver contextResolver = mock(AgentRequestContextResolver.class);
+        when(contextResolver.resolve(any())).thenReturn(AgentRequestContext.empty());
+        ConversationProgressListener progress = new ConversationProgressListener() {
+            @Override public boolean supportsAnswerStreaming() { return true; }
+        };
+        AgentWorkflowImpl workflow = workflow(model, generation,
+                List.of(new DeliverOnlyTool()), conversations, cancellation, contextResolver);
+
+        ConversationExecutionResult result = workflow.execute(run("你好"), progress);
+
+        assertThat(result.answerStatus()).isEqualTo(AnswerStatus.CANCELLED);
+        assertThat(result.answer()).isEqualTo("查询已取消。");
+        assertThat(result.fallbackReason()).isEqualTo("agent_run_cancelled");
+        assertThat(Thread.currentThread().isInterrupted()).isFalse();
     }
 
     @Test
@@ -716,7 +807,7 @@ class AgentWorkflowImplTest {
         agentCitation.setAssetCitationIndex(1);
         agentCitation.setSegmentCitationIndex(1);
 
-        assertThat(AgentWorkflowImpl.stripHistoricalCitationLabels(
+        assertThat(AgentRunInitializer.stripHistoricalCitationLabels(
                 "结论 [1-1]，普通 [1]，数组 arr[1-1]，区间 [2024-2025]，链接 [1-1](https://example.com)。",
                 List.of(agentCitation)))
                 .isEqualTo("结论，普通 [1]，数组 arr[1-1]，区间 [2024-2025]，链接 [1-1](https://example.com)。");
@@ -728,10 +819,10 @@ class AgentWorkflowImplTest {
         legacyCitation.setAssetId("asset-1");
         legacyCitation.setSegmentId("seg-1");
 
-        assertThat(AgentWorkflowImpl.stripHistoricalCitationLabels(
+        assertThat(AgentRunInitializer.stripHistoricalCitationLabels(
                 "旧回答 [1]，普通 [2]。", List.of(legacyCitation)))
                 .isEqualTo("旧回答，普通 [2]。");
-        assertThat(AgentWorkflowImpl.stripHistoricalCitationLabels(
+        assertThat(AgentRunInitializer.stripHistoricalCitationLabels(
                 "没有元数据时保留 [1]。", List.of()))
                 .isEqualTo("没有元数据时保留 [1]。");
     }
@@ -866,28 +957,22 @@ class AgentWorkflowImplTest {
         AgentToolExecutor executor = new AgentToolExecutor(registry, objectMapper,
                 Validation.buildDefaultValidatorFactory().getValidator());
         AgentTraceRecorder traceRecorder = mock(AgentTraceRecorder.class);
-        when(traceRecorder.recordStep(any(AgentRunState.class), any(AgentStepType.class), anyInt(),
-                nullable(String.class), anyMap(), anyMap(), any(AgentTokenUsage.class), anyLong(),
-                nullable(String.class))).thenAnswer(invocation ->
-                ((AgentRunState) invocation.getArgument(0)).nextTraceOrder());
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
         AgentCitationPolicy citationPolicy = new AgentCitationPolicy();
         AgentAnswerVerifier answerVerifier = new AgentAnswerVerifier(
                 new ConversationCitationMapper(), citationPolicy);
-        return new AgentWorkflowImpl(
-                RuntimeConfigTestUnits.values(Map.of(
+        var runtimeConfig = RuntimeConfigTestUnits.values(Map.of(
                         "AGENT.maxSteps", "6",
-                        "AGENT.maxToolCalls", "4")),
-                model,
-                registry, executor, conversations, contextResolver,
-                traceRecorder,
-                cancellationRegistry, objectMapper,
-                meterRegistry,
-                new AgentActionProtocol(objectMapper, meterRegistry),
-                new AgentEvidenceFinalizer(
-                        generationPort, traceRecorder, objectMapper, answerVerifier),
-                new AgentFinalPresentation(generationPort, traceRecorder),
-                answerVerifier);
+                        "AGENT.maxToolCalls", "4"));
+        AgentRunInitializer initializer = new AgentRunInitializer(
+                runtimeConfig, conversations, contextResolver, objectMapper);
+        AgentEffectRunner effects = new AgentEffectRunner(
+                new AgentModelEffect(model, registry, new AgentActionProtocol(objectMapper)),
+                new AgentToolEffect(executor, objectMapper),
+                new AgentCompletionEffect(generationPort, answerVerifier, objectMapper));
+        AgentRunObserver observer = new AgentRunObserver(traceRecorder, meterRegistry);
+        return new AgentWorkflowImpl(initializer, new AgentTransitionEngine(), effects,
+                observer, cancellationRegistry);
     }
 
     private AgentRunRequest run(String query) {
