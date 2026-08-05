@@ -129,13 +129,20 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
                     activeGenerationCandidateCount,
                     recalledCandidateCount - activeGenerationCandidateCount);
         }
-        candidates = rrfFusionPolicy.diversify(candidates);
+        // A pre-rerank per-asset cap would discard recoverable chunks in a single-document search.
+        boolean deferDiversificationUntilAfterRerank = hasSingleAssetScope(filter);
+        if (!deferDiversificationUntilAfterRerank) {
+            candidates = rrfFusionPolicy.diversify(candidates);
+        }
         int fusedCount = candidates.size();
 
         RetrievalRerankPolicy.Outcome rerankOutcome =
                 rerankPolicy.rerank(rawQuery, candidates, limit, runtimeConfig);
         List<SegmentRerankCandidate> rankedCandidates = rerankOutcome.candidates();
         int rerankCount = rankedCandidates.size();
+        if (deferDiversificationUntilAfterRerank) {
+            rankedCandidates = rrfFusionPolicy.diversify(rankedCandidates);
+        }
         List<RetrievalHit> segmentResults = rankedCandidates.stream()
                 .map(candidate -> resultAssembler.toResult(candidate, rawQuery))
                 .filter(Objects::nonNull)
@@ -231,6 +238,18 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
         int maxCandidates = Math.max(1, runtimeConfig.maxCandidates());
         int recallSize = Math.max(1, limit) * multiplier;
         return Math.min(recallSize, maxCandidates);
+    }
+
+    private boolean hasSingleAssetScope(SearchFilter filter) {
+        if (filter == null || filter.getAssetIds() == null) {
+            return false;
+        }
+        return filter.getAssetIds().stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .limit(2)
+                .count() == 1;
     }
 
     private int resolveLimit(Integer limit) {
