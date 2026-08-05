@@ -147,7 +147,7 @@ class SegmentIndexManagerImplConcurrencyTest {
         SegmentIndexStatusDTO rebuildingStatus = manager.status();
         assertEquals(SegmentIndexStatus.REBUILDING, rebuildingStatus.getStatus());
         assertTrue(rebuildingStatus.isReadable());
-        assertFalse(rebuildingStatus.isWritable());
+        assertTrue(rebuildingStatus.isWritable());
         assertEquals(0, rebuildingStatus.getRebuildProgress().getMigrated());
         assertEquals(0, rebuildingStatus.getRebuildProgress().getTotal());
         assertEquals("PREPARING", rebuildingStatus.getRebuildProgress().getPhase());

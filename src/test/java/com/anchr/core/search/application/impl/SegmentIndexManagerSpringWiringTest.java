@@ -2,7 +2,9 @@ package com.anchr.core.search.application.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import com.anchr.core.common.util.IdGen;
+import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.application.acl.RetrievalCapabilityAcl;
 import com.anchr.core.search.application.api.RetrievalEmbeddingDeploymentApi;
 import com.anchr.core.search.domain.port.EmbeddingProfileProvider;
@@ -28,6 +30,7 @@ class SegmentIndexManagerSpringWiringTest {
             registerMock(context, SearchEmbeddingPort.class);
             registerMock(context, SearchObjectStoragePort.class);
             registerMock(context, IdGen.class);
+            registerMock(context, RuntimeConfigUnit.class);
             context.registerBean(
                     "indexInitExecutor",
                     Executor.class,
@@ -35,6 +38,9 @@ class SegmentIndexManagerSpringWiringTest {
             context.registerBean(
                     SegmentIndexWriteBarrier.class,
                     SegmentIndexWriteBarrier::new);
+            context.registerBean(
+                    SegmentRebuildMutationTracker.class,
+                    SegmentRebuildMutationTracker::new);
             registerMock(context, SegmentIndexAliasManager.class);
             registerMock(context, RetrievalCapabilityAcl.class);
             context.register(

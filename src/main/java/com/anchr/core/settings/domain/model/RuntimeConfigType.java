@@ -4,6 +4,7 @@ import java.util.Locale;
 
 public enum RuntimeConfigType {
     SEARCH,
+    REBUILD,
     CONVERSATION,
     AGENT,
     INGESTION,

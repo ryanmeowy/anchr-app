@@ -7,6 +7,7 @@ import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
@@ -96,7 +97,8 @@ class EsSegmentGenerationTest {
         return new EsSegmentRepository(
                 client,
                 indexManager,
-                new SegmentIndexWriteBarrier());
+                new SegmentIndexWriteBarrier(),
+                new SegmentRebuildMutationTracker());
     }
 
     private SegmentIndexStatusDTO writable() {

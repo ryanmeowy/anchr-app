@@ -9,6 +9,8 @@ public interface EmbeddingClient {
 
     EmbeddingResult embed(EmbedContext context);
 
+    List<EmbeddingResult> embedMany(EmbedContext context);
+
     ConnectionTestResult testConnection(String modelName);
 
     record EmbeddingResult(List<Float> vector, int dimension) {}

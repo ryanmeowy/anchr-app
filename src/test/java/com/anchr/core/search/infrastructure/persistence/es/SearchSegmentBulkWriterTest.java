@@ -10,6 +10,7 @@ import co.elastic.clients.elasticsearch.core.bulk.OperationType;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentType;
 import com.anchr.core.search.infrastructure.persistence.es.document.SegmentDocument;
@@ -46,7 +47,8 @@ class SearchSegmentBulkWriterTest {
         writer = new SearchSegmentBulkWriter(
                 esClient,
                 segmentIndexManager,
-                new SegmentIndexWriteBarrier());
+                new SegmentIndexWriteBarrier(),
+                new SegmentRebuildMutationTracker());
     }
 
     @Test

@@ -47,13 +47,24 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
     }
 
     @Override
-    public EmbeddingSession openSession(EmbeddingProfile profile) {
+    public SearchEmbeddingPort.EmbeddingSession openSession(EmbeddingProfile profile) {
         if (profile == null) {
             throw new IllegalArgumentException("Embedding profile is required");
         }
         ClientCacheManager.ResolvedClient resolved = profileClients.computeIfAbsent(
                 profile.fingerprint(), ignored -> resolveProfileClient(profile));
-        return (source, sourceType) -> embed(resolved, source, sourceType);
+        return new SearchEmbeddingPort.EmbeddingSession() {
+            @Override
+            public List<Float> embed(String source, String sourceType) {
+                return ConfigDrivenEmbeddingAdapter.this.embed(
+                        resolved, source, sourceType);
+            }
+
+            @Override
+            public List<List<Float>> embedBatch(List<EmbeddingInput> inputs) {
+                return ConfigDrivenEmbeddingAdapter.this.embedBatch(resolved, inputs);
+            }
+        };
     }
 
     private ClientCacheManager.ResolvedClient resolveProfileClient(EmbeddingProfile profile) {
@@ -143,11 +154,100 @@ public class ConfigDrivenEmbeddingAdapter implements SearchEmbeddingPort, Ingest
         return client.embed(context).vector();
     }
 
+    private List<List<Float>> embedBatch(
+            ClientCacheManager.ResolvedClient resolved,
+            List<EmbeddingInput> inputs
+    ) {
+        if (inputs == null || inputs.isEmpty()) {
+            return List.of();
+        }
+        CapabilityConfig config = resolved.config();
+        EmbeddingClient client = (EmbeddingClient) resolved.client();
+        boolean isMulti = "MULTI_EMBEDDING".equals(config.getCapability());
+        Map<String, Object> extraMap = extraConfig(config);
+        EmbeddingClient.EmbedContext context;
+        if (isMulti) {
+            List<Map<String, Object>> contents = new java.util.ArrayList<>(inputs.size());
+            for (EmbeddingInput input : inputs) {
+                Map<String, Object> content = new HashMap<>();
+                content.put(input.sourceType(), input.source());
+                contents.add(content);
+            }
+            Map<String, Object> contentMap = new HashMap<>();
+            contentMap.put("contents", contents);
+            context = EmbeddingClient.EmbedContext.builder()
+                    .modelName(config.getModelName())
+                    .extraConfig(extraMap)
+                    .contentMap(contentMap)
+                    .build();
+        } else {
+            boolean unsupported = inputs.stream()
+                    .anyMatch(input -> !"text".equals(input.sourceType()));
+            if (unsupported) {
+                return inputs.stream()
+                        .map(input -> embed(
+                                resolved, input.source(), input.sourceType()))
+                        .toList();
+            }
+            context = EmbeddingClient.EmbedContext.builder()
+                    .modelName(config.getModelName())
+                    .extraConfig(extraMap)
+                    .texts(inputs.stream().map(EmbeddingInput::source).toList())
+                    .build();
+        }
+        List<List<Float>> vectors = client.embedMany(context).stream()
+                .map(EmbeddingClient.EmbeddingResult::vector)
+                .toList();
+        if (vectors.size() != inputs.size()) {
+            throw new IllegalStateException(
+                    "Embedding batch response size mismatch: expected "
+                            + inputs.size() + ", actual " + vectors.size());
+        }
+        return vectors;
+    }
+
+    private Map<String, Object> extraConfig(CapabilityConfig config) {
+        if (!StringUtils.hasText(config.getExtraConfig())) {
+            return new HashMap<>();
+        }
+        try {
+            return objectMapper.readValue(config.getExtraConfig(), new TypeReference<>() {});
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Override
     public boolean isMulti() {
         CapabilityConfig config = configResolver.activeForSlot(CapabilityResolver.SLOT_EMBEDDING)
                 .orElseThrow(() -> new IllegalStateException("Embedding is not configured"));
         return "MULTI_EMBEDDING".equals(config.getCapability());
+    }
+
+    @Override
+    public IngestionEmbeddingPort.EmbeddingSession openSession() {
+        ClientCacheManager.ResolvedClient resolved = resolveActiveClient();
+        EmbeddingProfile profile = CapabilityEmbeddingProfileProvider
+                .createProfile(resolved.config())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Embedding configuration has no valid profile"));
+        return new IngestionEmbeddingPort.EmbeddingSession() {
+            @Override
+            public List<Float> embed(String source, String sourceType) {
+                return ConfigDrivenEmbeddingAdapter.this.embed(
+                        resolved, source, sourceType);
+            }
+
+            @Override
+            public boolean isMulti() {
+                return "MULTI_EMBEDDING".equals(resolved.config().getCapability());
+            }
+
+            @Override
+            public String profileFingerprint() {
+                return profile.fingerprint();
+            }
+        };
     }
 
     private ClientCacheManager.ResolvedClient resolve() {

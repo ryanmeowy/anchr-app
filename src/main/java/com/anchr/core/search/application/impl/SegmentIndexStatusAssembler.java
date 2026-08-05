@@ -83,6 +83,7 @@ final class SegmentIndexStatusAssembler {
                 .migrated(progress.migrated())
                 .total(progress.total())
                 .phase(progress.phase())
+                .dirtyAssets(progress.dirtyAssets())
                 .build();
     }
 }

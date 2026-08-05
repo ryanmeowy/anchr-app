@@ -8,10 +8,20 @@ public record RetrievalGenerationIndexRequest(
         String kbId,
         String assetId,
         long generation,
+        String embeddingProfileFingerprint,
         List<SegmentValue> segments
 ) {
     public RetrievalGenerationIndexRequest {
         segments = segments == null ? List.of() : List.copyOf(segments);
+    }
+
+    public RetrievalGenerationIndexRequest(
+            String kbId,
+            String assetId,
+            long generation,
+            List<SegmentValue> segments
+    ) {
+        this(kbId, assetId, generation, null, segments);
     }
 
     public record SegmentValue(

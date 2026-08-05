@@ -20,7 +20,7 @@ class SegmentIndexStatusAssemblerTest {
                 "last error",
                 new SegmentIndexPendingRebuild(
                         "task-1", target, "model changed", "2026-07-30T10:00:00"),
-                new SegmentIndexRebuildProgress(40, 100, "MIGRATING"),
+                new SegmentIndexRebuildProgress(40, 100, "BACKFILLING"),
                 true,
                 "kb_segment_old",
                 true,
@@ -50,7 +50,7 @@ class SegmentIndexStatusAssemblerTest {
                 .isEqualTo("2026-07-30T10:00:00");
         assertThat(status.getRebuildProgress().getMigrated()).isEqualTo(40);
         assertThat(status.getRebuildProgress().getTotal()).isEqualTo(100);
-        assertThat(status.getRebuildProgress().getPhase()).isEqualTo("MIGRATING");
+        assertThat(status.getRebuildProgress().getPhase()).isEqualTo("BACKFILLING");
         assertThat(status.getLastError()).isEqualTo("last error");
     }
 

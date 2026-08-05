@@ -152,8 +152,20 @@ class ConfigDrivenEmbeddingAdapterTest {
 
         @Override
         public EmbeddingResult embed(EmbedContext context) {
+            return embedMany(context).getFirst();
+        }
+
+        @Override
+        public List<EmbeddingResult> embedMany(EmbedContext context) {
             contexts.add(context);
-            return new EmbeddingResult(List.of(1F), 1024);
+            int count = context.texts() == null
+                    ? ((List<?>) context.contentMap().get("contents")).size()
+                    : context.texts().size();
+            List<EmbeddingResult> results = new ArrayList<>(count);
+            for (int index = 0; index < count; index++) {
+                results.add(new EmbeddingResult(List.of(1F), 1024));
+            }
+            return results;
         }
 
         @Override

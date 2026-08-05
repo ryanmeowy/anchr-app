@@ -5,6 +5,7 @@ import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.IngestionRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.OutboxRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RebuildRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.SearchRuntimeConfigKey;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import org.springframework.stereotype.Component;
@@ -22,6 +23,7 @@ public class RuntimeConfigCatalog {
     public Map<RuntimeConfigKey, String> defaults(RuntimeConfigType type) {
         return switch (type) {
             case SEARCH -> searchDefaults();
+            case REBUILD -> rebuildDefaults();
             case CONVERSATION -> conversationDefaults();
             case AGENT -> agentDefaults();
             case INGESTION -> ingestionDefaults();
@@ -43,6 +45,7 @@ public class RuntimeConfigCatalog {
         String value = rawValue == null ? "" : rawValue.trim();
         String normalized = switch (type) {
             case SEARCH -> normalizeSearch(key, value);
+            case REBUILD -> normalizeRebuild(key, value);
             case CONVERSATION -> normalizeConversation(key, value);
             case AGENT -> normalizeAgent(key, value);
             case INGESTION -> normalizeIngestion(key, value);
@@ -104,6 +107,17 @@ public class RuntimeConfigCatalog {
         values.put(SearchRuntimeConfigKey.WINDOW_MAX, "80");
         values.put(SearchRuntimeConfigKey.FUSION_ALPHA, "0.6");
         values.put(SearchRuntimeConfigKey.FUSION_BETA, "0.4");
+        return values;
+    }
+
+    private Map<RuntimeConfigKey, String> rebuildDefaults() {
+        LinkedHashMap<RuntimeConfigKey, String> values = new LinkedHashMap<>();
+        values.put(RebuildRuntimeConfigKey.SOURCE_BATCH_SIZE, "200");
+        values.put(RebuildRuntimeConfigKey.EMBEDDING_BATCH_SIZE, "32");
+        values.put(RebuildRuntimeConfigKey.EMBEDDING_CONCURRENCY, "2");
+        values.put(RebuildRuntimeConfigKey.EMBEDDING_RATE_LIMIT_MAX_ATTEMPTS, "5");
+        values.put(RebuildRuntimeConfigKey.EMBEDDING_RATE_LIMIT_BACKOFF_MS, "5000");
+        values.put(RebuildRuntimeConfigKey.DIRTY_ASSET_LIMIT, "100000");
         return values;
     }
 
@@ -169,6 +183,15 @@ public class RuntimeConfigCatalog {
             case WINDOW_ENABLED -> booleanText(value, key);
             case TEXT_SIMILARITY, DOCUMENT_IMAGE_SIMILARITY,
                     FUSION_ALPHA, FUSION_BETA -> boundedDecimal(value, key);
+            default -> positiveInteger(value, key);
+        };
+    }
+
+    private String normalizeRebuild(RuntimeConfigKey key, String value) {
+        RebuildRuntimeConfigKey rebuildKey = (RebuildRuntimeConfigKey) key;
+        return switch (rebuildKey) {
+            case EMBEDDING_BATCH_SIZE -> boundedInteger(value, key, 1, 2048);
+            case EMBEDDING_CONCURRENCY -> boundedInteger(value, key, 1, 16);
             default -> positiveInteger(value, key);
         };
     }

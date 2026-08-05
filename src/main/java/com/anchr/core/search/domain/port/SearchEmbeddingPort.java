@@ -12,11 +12,19 @@ public interface SearchEmbeddingPort {
     List<Float> embed(String source, String sourceType);
 
     default EmbeddingSession openSession(EmbeddingProfile profile) {
-        return this::embed;
+        return SearchEmbeddingPort.this::embed;
     }
 
-    @FunctionalInterface
     interface EmbeddingSession {
         List<Float> embed(String source, String sourceType);
+
+        default List<List<Float>> embedBatch(List<EmbeddingInput> inputs) {
+            return inputs.stream()
+                    .map(input -> embed(input.source(), input.sourceType()))
+                    .toList();
+        }
+    }
+
+    record EmbeddingInput(String source, String sourceType) {
     }
 }

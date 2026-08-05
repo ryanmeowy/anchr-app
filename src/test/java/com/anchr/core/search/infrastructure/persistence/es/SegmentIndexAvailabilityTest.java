@@ -3,6 +3,7 @@ package com.anchr.core.search.infrastructure.persistence.es;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
+import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentIndexStatus;
@@ -18,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class SegmentIndexAvailabilityTest {
 
     @Test
-    void readsShouldRemainAvailableWhileRebuildBlocksWrites() {
+    void readsShouldRemainAvailableWhenIndexReportsNonWritable() {
         SegmentIndexStatusDTO rebuilding = SegmentIndexStatusDTO.builder()
                 .status(SegmentIndexStatus.REBUILDING)
                 .indexExists(true)
@@ -28,9 +29,11 @@ class SegmentIndexAvailabilityTest {
         SegmentIndexManager manager = new StubSegmentIndexManager(rebuilding);
         SegmentIndexWriteBarrier barrier = new SegmentIndexWriteBarrier();
         EsSegmentRepository repository =
-                new EsSegmentRepository(null, manager, barrier);
+                new EsSegmentRepository(
+                        null, manager, barrier, new SegmentRebuildMutationTracker());
         SearchSegmentBulkWriter bulkWriter =
-                new SearchSegmentBulkWriter(null, manager, barrier);
+                new SearchSegmentBulkWriter(
+                        null, manager, barrier, new SegmentRebuildMutationTracker());
 
         assertDoesNotThrow(() -> repository.textSearch("", 0));
         assertThrows(BusinessException.class, () ->

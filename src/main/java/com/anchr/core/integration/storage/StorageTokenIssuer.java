@@ -9,7 +9,7 @@ import com.anchr.core.settings.domain.model.StorageConfig;
 import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Service;
 
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -36,8 +36,8 @@ public class StorageTokenIssuer {
         }
     }
 
-    private static @NonNull Map<String, Object> getObjectMap(StorageConfig config, AssumeRoleResponse response) {
-        Map<String, Object> result = new LinkedHashMap<>();
+    private @NonNull Map<String, Object> getObjectMap(StorageConfig config, AssumeRoleResponse response) {
+        Map<String, Object> result = new HashMap<>();
         result.put("endpoint", config.getEndpoint());
         result.put("bucket", config.getBucket());
         result.put("region", config.getRegion());
