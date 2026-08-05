@@ -1,7 +1,6 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -10,8 +9,7 @@ class AgentActionProtocolTest {
 
     @Test
     void fencedFinalAction_shouldPreserveAnswerTypeAnswerAndCitations() {
-        AgentActionProtocol protocol = new AgentActionProtocol(
-                new ObjectMapper(), new SimpleMeterRegistry());
+        AgentActionProtocol protocol = new AgentActionProtocol(new ObjectMapper());
 
         AgentActionProtocol.ParseOutcome parsed = protocol.parse("""
                 ```json
@@ -28,8 +26,7 @@ class AgentActionProtocolTest {
 
     @Test
     void toolActions_shouldPreserveOrderAndArgumentEncoding() {
-        AgentActionProtocol protocol = new AgentActionProtocol(
-                new ObjectMapper(), new SimpleMeterRegistry());
+        AgentActionProtocol protocol = new AgentActionProtocol(new ObjectMapper());
 
         AgentActionProtocol.ParseOutcome parsed = protocol.parse("""
                 {"action":"call_tools","toolCalls":[
@@ -48,34 +45,10 @@ class AgentActionProtocolTest {
 
     @Test
     void invalidProtocolOutput_shouldReturnExplicitOutcome() {
-        AgentActionProtocol protocol = new AgentActionProtocol(
-                new ObjectMapper(), new SimpleMeterRegistry());
+        AgentActionProtocol protocol = new AgentActionProtocol(new ObjectMapper());
 
         assertThat(protocol.parse("not-json"))
                 .isInstanceOf(AgentActionProtocol.ParseOutcome.Invalid.class);
     }
 
-    @Test
-    void protocolErrors_shouldKeepRetryFallbackThresholdAndResetBehavior() {
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        AgentActionProtocol protocol = new AgentActionProtocol(new ObjectMapper(), registry);
-        AgentRunState state = new AgentRunState(
-                null, new AgentBudget(6, 4, System.currentTimeMillis() + 10_000L),
-                System.currentTimeMillis());
-
-        int first = protocol.recordError(state, "MISSING_ACTION");
-        int second = protocol.recordError(state, "MISSING_ACTION");
-        protocol.resetErrors(state);
-        int afterReset = protocol.recordError(state, "MISSING_ACTION");
-
-        assertThat(protocol.shouldFallback(first)).isFalse();
-        assertThat(protocol.shouldFallback(second)).isTrue();
-        assertThat(protocol.shouldFallback(afterReset)).isFalse();
-        assertThat(registry.get("agent.protocol.error")
-                .tags("code", "MISSING_ACTION", "outcome", "retry")
-                .counter().count()).isEqualTo(2D);
-        assertThat(registry.get("agent.protocol.error")
-                .tags("code", "MISSING_ACTION", "outcome", "fallback")
-                .counter().count()).isEqualTo(1D);
-    }
 }

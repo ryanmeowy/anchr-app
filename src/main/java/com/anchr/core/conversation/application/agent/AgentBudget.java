@@ -6,16 +6,16 @@ import static com.anchr.core.conversation.application.constant.ConversationConst
 
 public record AgentBudget(int maxSteps, int maxToolCalls, long deadlineEpochMs) {
 
-    public boolean exhausted(int steps, int toolCalls) {
-        return steps >= maxSteps || toolCalls >= maxToolCalls || remainingMillis() <= 0;
+    public boolean exhausted(int steps, int toolCalls, long now) {
+        return steps >= maxSteps || toolCalls >= maxToolCalls || remainingMillis(now) <= 0;
     }
 
-    public long remainingMillis() {
-        return Math.max(0L, deadlineEpochMs - System.currentTimeMillis());
+    public long remainingMillis(long now) {
+        return Math.max(0L, deadlineEpochMs - now);
     }
 
-    public Duration boundedTimeout(Duration configured) {
+    public Duration boundedTimeout(Duration configured, long now) {
         long configuredMs = configured == null ? DEFAULT_TIMEOUT.toMillis() : configured.toMillis();
-        return Duration.ofMillis(Math.max(1L, Math.min(configuredMs, remainingMillis())));
+        return Duration.ofMillis(Math.max(1L, Math.min(configuredMs, remainingMillis(now))));
     }
 }

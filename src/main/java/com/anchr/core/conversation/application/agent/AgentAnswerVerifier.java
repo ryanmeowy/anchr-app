@@ -29,13 +29,13 @@ final class AgentAnswerVerifier {
         this.citationPolicy = citationPolicy;
     }
 
-    AgentAnswerValidationOutcome verify(AgentRunState state,
+    AgentAnswerValidationOutcome verify(AgentState state,
                                         AgentFinalAnswer answer) {
-        return verify(state, answer, state.getEvidence().values(), false);
+        return verify(state, answer, state.evidence().values(), false);
     }
 
     AgentAnswerValidationOutcome verifyEvidenceFinalizer(
-            AgentRunState state,
+            AgentState state,
             AgentFinalAnswer answer,
             Collection<ConversationRetrievalCandidate> allowedEvidence
     ) {
@@ -43,7 +43,7 @@ final class AgentAnswerVerifier {
     }
 
     private AgentAnswerValidationOutcome verify(
-            AgentRunState state,
+            AgentState state,
             AgentFinalAnswer answer,
             Collection<ConversationRetrievalCandidate> allowedEvidence,
             boolean evidenceOnly
@@ -143,8 +143,8 @@ final class AgentAnswerVerifier {
         return new AgentAnswerValidationOutcome.Rejected(code, message, fallbackReason);
     }
 
-    private String noEvidenceAnswer(AgentRunState state) {
-        AnswerMode mode = AnswerMode.from(state.getRunRequest().request().getAnswerMode());
+    private String noEvidenceAnswer(AgentState state) {
+        AnswerMode mode = AnswerMode.from(state.runRequest().request().getAnswerMode());
         return switch (mode) {
             case STRICT -> "当前证据不足以回答该问题。请补充相关资料、缩小问题范围或指定文档后重试。";
             case SUMMARY -> "当前证据不足以形成可靠摘要。请补充相关资料或明确需要总结的文档范围。";

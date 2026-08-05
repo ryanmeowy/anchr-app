@@ -3,7 +3,6 @@ package com.anchr.core.conversation.application.agent;
 import com.anchr.core.conversation.application.model.AgentToolCall;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -12,16 +11,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
-import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_PROTOCOL_ERRORS;
-
 @Component
 final class AgentActionProtocol {
     private final ObjectMapper objectMapper;
-    private final MeterRegistry meterRegistry;
 
-    AgentActionProtocol(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+    AgentActionProtocol(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
-        this.meterRegistry = meterRegistry;
     }
 
     ParseOutcome parse(String raw) {
@@ -57,21 +52,6 @@ final class AgentActionProtocol {
             return new ParseOutcome.Invalid();
         }
         return new ParseOutcome.Invalid();
-    }
-
-    void resetErrors(AgentRunState state) {
-        state.resetProtocolErrors();
-    }
-
-    int recordError(AgentRunState state, String code) {
-        int errors = state.nextProtocolError();
-        meterRegistry.counter("agent.protocol.error", "code", code,
-                "outcome", errors >= MAX_PROTOCOL_ERRORS ? "fallback" : "retry").increment();
-        return errors;
-    }
-
-    boolean shouldFallback(int errors) {
-        return errors >= MAX_PROTOCOL_ERRORS;
     }
 
     private AgentAnswerType parseAnswerType(String value) {

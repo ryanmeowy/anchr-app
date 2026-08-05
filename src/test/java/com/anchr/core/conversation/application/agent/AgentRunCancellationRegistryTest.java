@@ -54,6 +54,31 @@ class AgentRunCancellationRegistryTest {
         other.join(1_000);
     }
 
+    @Test
+    void terminalClaim_shouldLoseWhenCancellationWasAlreadyAccepted() {
+        AgentRunCancellationRegistry registry = new AgentRunCancellationRegistry();
+        registry.register("run-1", "session-1");
+
+        try {
+            assertThat(registry.cancel("run-1")).isTrue();
+            assertThat(registry.tryClaimTerminal("run-1")).isFalse();
+        } finally {
+            registry.unregister("run-1");
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void terminalClaim_shouldMakeLaterCancellationLose() {
+        AgentRunCancellationRegistry registry = new AgentRunCancellationRegistry();
+        registry.register("run-1", "session-1");
+
+        assertThat(registry.tryClaimTerminal("run-1")).isTrue();
+        assertThat(registry.cancel("run-1")).isFalse();
+        assertThat(Thread.currentThread().isInterrupted()).isFalse();
+        registry.unregister("run-1");
+    }
+
     private Thread worker(AgentRunCancellationRegistry registry,
                           String runId,
                           String sessionId,
