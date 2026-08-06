@@ -2,306 +2,299 @@
 
 # Anchr
 
-**An evidence-first workspace for knowledge grounded in your own documents.**<br>
-From ingestion and hybrid search to Agent-assisted deep reading, Anchr keeps answers sourced, work bounded, and conclusions inspectable.
+**面向自有文档的证据优先知识工作台。**<br>
+从内容导入、混合检索到 Agent 深度阅读，让答案有来源、过程有边界、结论可核验。
 
 [![Live Demo](https://img.shields.io/badge/Live_Demo-anchr.cloud-6d5dfc?style=flat-square)](https://anchr.cloud)
-[![Experience](https://img.shields.io/badge/Experience-Evidence--first-5b6ee1?style=flat-square)](#core-experience)
-[![Deployment](https://img.shields.io/badge/Deployment-Self--hosted-2f855a?style=flat-square)](./docs/technical.en.md)
+[![Experience](https://img.shields.io/badge/Experience-Evidence--first-5b6ee1?style=flat-square)](#核心体验)
+[![Deployment](https://img.shields.io/badge/Deployment-Self--hosted-2f855a?style=flat-square)](./docs/technical.zh-CN.md)
 [![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](./LICENSE)
 
-[中文产品介绍](./docs/product.zh-CN.md) · Product overview · [中文技术文档](./docs/technical.zh-CN.md) · [English technical guide](./docs/technical.en.md)
-
+[English product overview](./docs/product.en.md) · 中文产品介绍 · [中文技术文档](./docs/technical.zh-CN.md) · [English technical guide](./docs/technical.en.md)
 
 </div>
 
 <div align="center">
   <a href="./docs/images/overview.png">
-    <img src="./docs/images/overview.png" alt="Anchr product overview" width="920">
+    <img src="./docs/images/overview.png" alt="Anchr 产品总览" width="920">
   </a>
   <br>
-  <sub>Anchr workspace · Click to view the full-size image</sub>
+  <sub>Anchr 产品总览 · 点击查看大图</sub>
 </div>
 
 ---
 
 <details open>
-<summary><b>Contents</b></summary>
+<summary><b>📕 目录</b></summary>
 
-- [What is Anchr?](#what-is-anchr)
-- [Why Anchr exists](#why-anchr-exists)
-- [Quick start](#quick-start)
-- [Product journey](#product-journey)
-- [Core experience](#core-experience)
-- [What Anchr offers](#what-anchr-offers)
-- [How a trusted answer is formed](#how-a-trusted-answer-is-formed)
-- [Use cases](#use-cases)
-- [Who it is for](#who-it-is-for)
-- [Deployment and tenancy model](#deployment-and-tenancy-model)
-- [What makes Anchr different](#what-makes-anchr-different)
-- [How to evaluate Anchr](#how-to-evaluate-anchr)
-- [Product components](#product-components)
-- [Current stage](#current-stage)
-- [Documentation](#documentation)
+- [Anchr 是什么](#anchr-是什么)
+- [为什么需要 Anchr](#为什么需要-anchr)
+- [快速开始](#快速开始)
+- [核心体验](#核心体验)
+- [主要能力](#主要能力)
+- [可信答案如何形成](#可信答案如何形成)
+- [典型场景](#典型场景)
+- [适合谁](#适合谁)
+- [部署与租户模型](#部署与租户模型)
+- [为什么选择 Anchr](#为什么选择-anchr)
+- [如何评估 Anchr](#如何评估-anchr)
+- [产品组成](#产品组成)
+- [当前阶段](#当前阶段)
+- [进一步了解](#进一步了解)
 
 </details>
 
-## What is Anchr?
+## Anchr 是什么
 
-Anchr is an open-source, self-hostable document knowledge workspace for people who need to search, question, study, and reuse information from their own materials.
+Anchr 是一套开源、可自主托管的文档知识工作台，面向需要使用自有资料进行搜索、问答、研究与知识复用的用户。
 
-It turns source documents into searchable, citable, and previewable evidence. You can search directly, ask within a knowledge base or a selected set of documents, and continue into multi-step exploration when a question requires discovery, sequential reading, or synthesis across sources.
+它把原始文档转化为可搜索、可引用、可预览的知识证据。用户既可以直接检索内容，也可以围绕一个知识库、几份指定文档或一个具体问题展开对话；当任务需要多步查找、连续阅读或跨文档归纳时，还可以让 Agent 在明确范围内继续探索。
 
-Anchr is designed around a practical standard for knowledge work: a useful answer should reveal what supports it, let the reader return to the source, and make longer-running work understandable.
+Anchr 关注的不只是“生成一个答案”，而是让用户知道答案依据了什么、能否回到原文、复杂任务进行到了哪里。
 
 > [!IMPORTANT]
-> This repository contains the Anchr API service. The complete product experience uses [Anchr Web](https://github.com/ryanmeowy/anchr-web); document processing also requires [Anchr Docling](https://github.com/ryanmeowy/anchr-docling), configured storage, and model providers.
+> 本仓库提供 Anchr 的 API 服务。完整产品体验需要配合 [Anchr Web](https://github.com/ryanmeowy/anchr-web)；文档处理需要 [Anchr Docling](https://github.com/ryanmeowy/anchr-docling) 以及已配置的存储和模型能力。
 
-## Why Anchr exists
+## 为什么需要 Anchr
 
-Many knowledge systems successfully store files but still leave the difficult part—using those files—up to the user.
+很多知识系统完成了“保存文档”，却没有真正解决“使用知识”。问题通常出现在从资料到结论的最后一公里：
 
-| Common friction | Anchr's product response |
+| 常见困境 | Anchr 的产品回应 |
 | --- | --- |
-| Documents are available, but the right information remains hard to find | Organize content into bounded knowledge bases and discover it through both lexical and semantic relevance. |
-| Search returns a list, while reading and synthesis remain manual | Continue from search results into evidence-grounded answers and multi-step document exploration. |
-| AI answers sound confident, but their basis is unclear | Keep citations, document-level result cards, and source-context entry points with knowledge answers. |
-| Cross-document questions require repeated searching and comparison | Let an Agent discover, search, read in sequence, and start document summaries within an authorized scope. |
-| Ingestion, updates, and long tasks disappear into the background | Expose processing progress, failure state, and Agent activity, with recovery or cancellation where supported. |
+| 文件很多，但信息仍然难找 | 把文档组织成有边界的知识库，通过文本与语义相关性共同发现内容。 |
+| 搜索给出一串结果，归纳仍靠人工 | 搜索结果可以继续进入基于证据的问答与多步文档探索。 |
+| AI 回答很流畅，却不知道依据什么 | 知识型回答保留引用、结果卡片和原文上下文入口。 |
+| 多文档问题需要反复查找和对照 | Agent 可以在授权范围内发现、搜索、连续阅读并发起总结。 |
+| 导入、更新和长任务在后台静默运行 | 处理进度、失败状态和 Agent 活动可以被查看，任务也支持恢复或取消。 |
 
-The goal is not merely to shave seconds from a search. It is to shorten the full path from “the information is probably in these files” to “I can state and verify a conclusion.”
+Anchr 希望缩短的不是一次搜索所花的几秒，而是从“我知道资料大概在哪里”到“我能给出并验证一个结论”的完整路径。
 
-## Quick start
+## 快速开始
 
-### Try the live workspace
+### 在线体验
 
-Visit [anchr.cloud](https://anchr.cloud) to experience the browser workspace.
+访问 [anchr.cloud](https://anchr.cloud)，直接体验 Anchr 的浏览器工作台。
 
-For a meaningful first evaluation, prepare a small set of documents you already know well:
+建议准备一组你熟悉、方便核验的文档，然后按以下路径体验：
 
-1. Create a knowledge base and import the documents.
-2. Wait until the content becomes available, then search for a fact you know is present.
-3. Ask a question within a clearly selected knowledge scope.
-4. Inspect the citations, result cards, and source preview.
-5. Try a second question that requires searching, reading, or synthesizing across documents.
+1. 创建知识库并导入文档；
+2. 等待文档进入可用状态，通过搜索确认关键内容能够被找到；
+3. 在 Ask 中限定知识范围并提出问题；
+4. 查看答案引用、结果卡片与原文预览；
+5. 再尝试一个需要跨文档查找、阅读或归纳的问题。
 
-Familiar material makes three qualities immediately visible: **whether Anchr found the right content, whether the citations support the answer, and whether verification is easy.**
+使用熟悉的材料，可以直接判断三件事：**是否找对内容、是否引用相关证据、是否能顺畅回到原文。**
 
-### Self-host Anchr
+### 自主托管
 
-To run the complete product in your own environment:
+如需在自己的环境中运行完整产品：
 
-1. Follow the [English technical guide](./docs/technical.en.md) to start Anchr App and prepare Anchr Web and Anchr Docling.
-2. Configure storage, generation, embedding, and reranking capabilities.
-3. Start the Web workspace and follow the same evaluation path described above.
+1. 按[中文技术文档](./docs/technical.zh-CN.md)启动 Anchr App，并准备 Anchr Web 与 Anchr Docling；
+2. 在设置中完成存储、生成、向量化和排序能力配置；
+3. 启动 Web 工作台，按上面的在线体验路径验证完整知识闭环。
 
-The current release uses a **single-instance, single-tenant** deployment model: one Anchr App deployment serves one organization or team and runs one App process or container replica. Deploy a separate environment for every organization that requires isolation. See [Deployment and tenancy model](#deployment-and-tenancy-model) and the [technical guide](./docs/technical.en.md#single-instance-single-tenant-constraints).
+当前版本采用**单实例、单租户**部署模型：一套 Anchr App 部署只服务一个组织或团队，并且只运行一个 App 进程（或容器副本）。如果需要服务多个彼此隔离的组织，应为每个组织分别部署完整环境。详见[部署与租户模型](#部署与租户模型)和[中文技术文档](./docs/technical.zh-CN.md#单实例单租户架构约束)。
 
-## Product journey
+## 核心体验
 
 ```mermaid
 flowchart LR
-    A["Import documents"] --> B["Build usable knowledge"]
-    B --> C["Search or ask"]
-    C --> D["Receive a cited answer"]
-    D --> E["Verify against the source"]
-    E --> F["Continue the conversation"]
+    A["导入文档"] --> B["建立可用知识"]
+    B --> C["搜索或提问"]
+    C --> D["获得带引用答案"]
+    D --> E["回到原文核验"]
+    E --> F["继续会话与探索"]
 ```
 
-Anchr treats this as one continuous experience. Ingestion quality affects retrieval; retrieval shapes the answer; citations and previews determine whether the answer can be trusted; history and recent activity make the work reusable.
+### 📚 把文档变成可持续使用的知识
 
-## Core experience
+按主题或业务范围组织知识库，批量导入文档，并查看处理进度、可用状态与失败信息。内容发生变化时，可以重新处理，而不是把知识库当成一次性数据集。
 
-### 📚 Build knowledge that stays usable
+### 🔎 搜索不止于关键词
 
-Organize documents by topic or business scope, import them in batches, and see processing progress, availability, and failure information. When content changes, reprocess it instead of treating the knowledge base as a one-time dataset.
+结合文本与语义相关性查找内容，并把搜索范围收敛到指定知识库或文档。用户可以浏览结果，也可以基于相关证据继续提问。
 
-### 🔎 Search beyond keywords
+### 🌱 回答有据可查
 
-Find content through lexical and semantic relevance, then narrow the search to selected knowledge bases, documents, or content types. Browse the results directly or continue into an answer grounded in the retrieved evidence.
-
-### 🎯 Ask within an explicit scope
-
-Choose where an answer is allowed to come from. A question can use a broader knowledge base or focus on specific documents, making the boundary visible instead of leaving it as a hidden retrieval decision.
-
-### 🌱 Inspect the evidence behind an answer
-
-Knowledge answers include citations and document-level result cards. Open a cited segment with its surrounding context to see what the model used and decide whether the conclusion holds.
+知识型回答携带来源引用和结果卡片。用户可以进入相关文档片段及上下文预览，确认回答使用了哪些材料，而不是只接受一段无法核实的结论。
 
 <div align="center">
   <a href="./docs/images/citation-preview.png">
-    <img src="./docs/images/citation-preview.png" alt="Anchr citation and source verification" width="780">
+    <img src="./docs/images/citation-preview.png" alt="Anchr 引用与原文核验" width="780">
   </a>
   <br>
-  <sub>Citations and source verification · Click to view the full-size image</sub>
+  <sub>引用与原文核验 · 点击查看大图</sub>
 </div>
 
-### 🧭 Let the Agent work through real documents
+### 🧭 Agent 面向真实文档工作
 
-For questions that require several steps, the Agent can discover documents, search knowledge, read in sequence, and initiate document summaries within the authorized scope. Runs have explicit limits and expose activity, recovery, and cancellation behavior.
+面对需要多步探索的问题，Agent 可以在授权范围内查找文档、搜索知识、连续阅读并发起文档总结。任务设有执行边界，并提供活动状态、恢复与取消能力。
 
 <div align="center">
   <a href="./docs/images/agent-activity.png">
-    <img src="./docs/images/agent-activity.png" alt="Anchr Agent document activity" width="780">
+    <img src="./docs/images/agent-activity.png" alt="Anchr Agent 文档任务" width="780">
   </a>
   <br>
-  <sub>Agent document activity · Click to view the full-size image</sub>
+  <sub>Agent 文档任务 · 点击查看大图</sub>
 </div>
 
-### 🕘 Continue instead of starting over
+### 🕘 让知识探索可以继续
 
-Conversations, previous answers, recent questions, searches, citations, and document activity can be revisited. Knowledge exploration becomes a continuing workflow rather than a disposable prompt.
+会话、历史回答、最近问题、搜索、引用和文档活动可以被重新访问。用户能够从上一次发现继续，而不必反复重建上下文。
 
-## What Anchr offers
+## 主要能力
 
-| Capability | What it enables |
+| 能力 | 用户可以做什么 |
 | --- | --- |
-| **Knowledge bases and documents** | Create bounded knowledge spaces, import documents in batches, inspect health and processing state, retry failures, and update content. |
-| **Hybrid retrieval** | Find content through lexical and semantic relevance, with knowledge-base, document, metadata, and modality constraints. |
-| **Grounded answers** | Generate answers from retrieved evidence with citations, result cards, and suggested follow-up questions. |
-| **Source verification** | Open cited segments with neighboring context and restore the evidence behind a conclusion. |
-| **Agentic RAG** | Discover, search, read, and summarize documents while exposing Run activity and terminal state. |
-| **Continuous workflow** | Preserve conversations and revisit recent questions, searches, citations, and imported documents. |
-| **Runtime choice** | Run in your own environment and select generation, embedding, reranking, and storage providers. |
-| **API integration** | Add document retrieval, grounded answers, and long-running knowledge tasks to an existing product or internal tool. |
+| **知识库与文档** | 创建知识空间、批量导入资料、查看健康度和处理状态、处理失败任务与内容更新。 |
+| **混合检索** | 通过文字和语义相关性查找内容，按知识库、文档与内容类型收窄范围。 |
+| **可信问答** | 基于检索证据生成回答，获得来源引用、结果卡片和后续问题建议。 |
+| **原文核验** | 从搜索结果或回答引用进入文档片段及相邻上下文，恢复证据所在位置。 |
+| **Agentic RAG** | 让 Agent 搜索、定位、阅读和总结文档，并查看运行活动与最终状态。 |
+| **连续工作流** | 保存会话与回答，重新访问最近问题、搜索、引用和导入文档。 |
+| **自主配置** | 在自己的环境中运行，并选择适合自身需求的生成、向量化、排序与存储服务。 |
+| **服务集成** | 通过 API 把文档检索、可信问答和任务能力接入已有产品或内部工具。 |
 
-## How a trusted answer is formed
+## 可信答案如何形成
 
-Anchr treats trust as a chain the user can inspect, not as an abstract model score.
+Anchr 把可信度设计成一条可以被用户检查的链路，而不是一个抽象的模型评分：
 
-| Stage | User control or feedback |
+| 环节 | 用户获得的控制或反馈 |
 | --- | --- |
-| **Scope** | Select which knowledge bases or documents are allowed to support the question. |
-| **Discovery** | Retrieve relevant passages and filter them against currently valid document content. |
-| **Use** | Register the material that actually participates in the answer as evidence for this turn. |
-| **Presentation** | Show citations and document-level result cards with a knowledge answer. |
-| **Verification** | Open the cited segment and neighboring context to judge whether the answer is supported. |
-| **Process** | Retain activity and terminal state for complex Agent work so the path to the result can be understood. |
+| **范围** | 明确选择本次问题使用哪些知识库或文档，避免搜索范围悄然扩大。 |
+| **发现** | 通过混合检索找到相关片段，并结合当前有效的文档内容过滤结果。 |
+| **使用** | 只有实际参与回答的内容才进入本次答案的证据集合。 |
+| **呈现** | 知识型回答展示来源引用和按文档组织的结果卡片。 |
+| **核验** | 用户可以打开引用片段及相邻上下文，回到原文判断答案是否成立。 |
+| **过程** | 复杂 Agent 任务保留活动、状态和终态，便于理解它做了什么。 |
 
 > [!NOTE]
-> A citation does not make an answer automatically correct. Its value is that an otherwise opaque generation becomes something a person can question, compare, and correct. Important conclusions should still be confirmed against the source and the real decision context.
+> 引用不等于答案天然正确。它的价值是把不可检查的生成结果变成可以追问、对照和纠正的判断材料；最终结论仍应结合原文和使用场景确认。
 
-## Use cases
+## 典型场景
 
-### 📑 Policy and procedure lookup
+### 📑 制度与流程查询
 
-Find the applicable clause in internal guidance, generate a cited explanation, and return to the source to verify conditions and surrounding context.
+从内部规范中找到适用条款，生成带引用的说明，并回到原文确认条件与上下文。
 
-### 🧪 Research synthesis
+### 🧪 研究资料梳理
 
-Trace a topic across several reports, compare perspectives, synthesize findings, and preserve the source behind each important conclusion.
+围绕一个主题跨多份材料查找线索、比较观点、归纳信息，同时保留关键结论的来源。
 
-### 🗂️ Project knowledge review
+### 🗂️ 项目知识回顾
 
-Recover decisions, constraints, and background from proposals, meeting material, and delivery documents without relying solely on institutional memory.
+从方案、会议材料和交付文档中定位历史决策、约束与背景，减少依赖个人记忆。
 
-### 💬 Product and support knowledge
+### 💬 产品与支持知识库
 
-Find feature explanations, operational steps, and known handling guidance, then provide repeatable answers that remain open to review.
+快速查找功能说明、操作步骤和已知处理方式，为重复出现的问题提供可复核的回答。
 
-### 📖 Long-document understanding
+### 📖 长文档理解
 
-Ask within a selected document, read relevant sections in sequence, or initiate a separate document-summary task.
+针对指定文档提问，连续阅读相关部分，或发起独立的文档总结任务。
 
-### 🔌 Knowledge capability integration
+### 🔌 知识能力集成
 
-Add document search, evidence-grounded Q&A, and Agent document work to an existing portal, workspace, or internal application.
+为已有门户、工作台或内部工具补充文档检索、证据问答与 Agent 文档任务。
 
-## Who it is for
+## 适合谁
 
-- **Knowledge workers and researchers** who need to find information across substantial document collections and preserve sources for their conclusions.
-- **Product, operations, and support teams** that repeatedly work from policies, manuals, proposals, and product documentation.
-- **Teams managing internal knowledge** that care about content readiness, answer traceability, and efficient source verification.
-- **Teams that prefer self-hosting** and want control over their documents, provider configuration, and storage choices.
-- **Developers building knowledge products** who need a complete backend workflow behind their own interface or business process.
+- **知识工作者与研究人员**：需要从大量资料中快速找到信息，并为结论保留出处；
+- **产品、运营与支持人员**：需要持续使用制度、手册、方案和产品文档；
+- **管理内部知识的团队**：重视知识更新状态、回答可信度和原文复核路径；
+- **希望自主托管的团队**：希望掌握自己的文档、模型配置与存储选择；
+- **知识应用开发者**：希望在现有界面或业务流程中接入完整的文档智能能力。
 
 > [!NOTE]
-> Anchr is not primarily designed for open-ended chat without source constraints. It is most useful when an answer should stay within a document scope and remain open to verification.
+> 如果需求只是无来源约束的开放式聊天，Anchr 并不是为此设计。它更适合答案需要受到文档范围约束、并且需要被复核的场景。
 
-## Deployment and tenancy model
+## 部署与租户模型
 
-Anchr currently follows a **single-instance, single-tenant** design:
+当前 Anchr 按**单实例、单租户**设计：
 
-- One deployment belongs to one logical tenant: an organization or team that shares knowledge, configuration, and operations.
-- One deployment runs one Anchr App process or container replica. Multiple people may use it, but horizontal replicas behind a load balancer are not supported.
-- Knowledge bases organize content and narrow retrieval; they are not tenant security boundaries. `ADMIN`, `USER`, and `GUEST` are roles inside the same tenant, not tenant identities.
-- Model, embedding, reranking, object-storage, and runtime settings apply to the whole deployment.
+- **一个部署对应一个租户**：这里的租户是一个使用同一套知识、配置和运维边界的组织或团队。一套部署中的知识库、文档、会话、活动、模型配置和对象存储配置都属于该租户。
+- **一个部署只运行一个 App 实例**：当前不支持把多个 Anchr App 副本放在负载均衡器后进行水平扩展或高可用切换。产品可以供同一租户内的多个用户使用，但后端仍是单个运行实例。
+- **知识库不是租户边界**：知识库用于组织资料和限定搜索、问答范围，不承担不同客户之间的安全隔离。`ADMIN`、`USER`、`GUEST` 是同一租户内的访问角色，也不是租户身份。
+- **设置由租户共享**：模型、Embedding、Rerank、对象存储和运行参数按整套部署生效，不提供逐租户配置、配额、计费或管理员体系。
 
-“Single tenant” does not mean “single user.” It means the current product does not isolate multiple organizations inside one deployment. Multi-tenant SaaS, tenant-specific administration and quotas, and horizontal App scaling are outside the current product boundary. Use separate deployments, data stores, storage namespaces, and secrets for mutually isolated tenants.
+因此，当前版本适合个人、单一团队或单一组织自主托管。若需要承载多个互不信任的客户或组织，应为每个租户使用独立的 Anchr App、数据存储、对象存储命名空间和密钥；不应在同一部署中仅靠知识库、角色或调用参数实现租户隔离。
 
-## What makes Anchr different
+> [!IMPORTANT]
+> “单租户”不等于“单用户”。同一租户内可以有多个使用者和不同访问角色，但系统不会隔离这些使用者所属的不同组织。多租户 SaaS、跨租户管理与单实例水平扩展不属于当前产品能力。
 
-### Evidence is a product path, not a footnote
+## 为什么选择 Anchr
 
-Answers, citations, result cards, and source previews are connected. Verification remains available after the answer appears.
+### 证据闭环，而不是答案终点
 
-### Search, Q&A, and reading belong together
+回答、引用、结果卡片与原文预览连接在一起，“得到答案”之后仍然可以继续核验。
 
-Users can move from discovery into understanding, follow-up questions, and source reading without rebuilding the task in separate tools.
+### 搜索、问答与阅读是一条路径
 
-### Knowledge scope is first-class
+用户无需在独立工具之间反复切换，可以从内容发现自然进入理解、追问和原文阅读。
 
-The selected knowledge base or document set is part of the interaction. Complex work cannot silently expand beyond the authorized scope.
+### 知识范围是产品交互的一部分
 
-### Long-running work has boundaries and state
+问题可以限定在选定知识库或文档中，复杂任务也只能在授权范围内探索。
 
-Agent and document tasks are not invisible background jobs. Their activity can be inspected, and supported work can be recovered or cancelled.
+### 长任务有边界、有状态
 
-### Document change is part of the main workflow
+Agent 和文档任务不是不可见的后台黑盒。用户可以了解活动状态，并在需要时恢复或取消。
 
-Ingestion progress, failure handling, reparsing, and knowledge updates are product capabilities rather than operational afterthoughts.
+### 文档变化属于主流程
 
-### Deployment and provider choice remain yours
+导入进度、失败处理、重新解析与知识更新都是产品能力，而不是部署完成后的人工补丁。
 
-Anchr can run in your environment and use model and storage services that fit your requirements.
+### 保留部署与供应商选择权
 
-## How to evaluate Anchr
+Anchr 可以运行在自己的环境中，并配置适合自身需求的模型与存储服务。
 
-Do not judge a document knowledge product only by how natural its answers sound. Use familiar, realistic material and inspect the full workflow.
+## 如何评估 Anchr
 
-| Dimension | Questions to ask |
+评估一个文档知识产品，不应只看回答是否自然。建议使用熟悉的真实资料，围绕以下维度进行验证：
+
+| 维度 | 可以提出的问题 |
 | --- | --- |
-| **Knowledge readiness** | When does a document become usable? Are failures understandable? Can updated content be processed again? |
-| **Retrieval quality** | Can Anchr find information you know exists? Do the scope and returned results match your expectation? |
-| **Answer grounding** | Is the answer actually supported by the material? Do citations correspond to the key claims? |
-| **Verification cost** | Can you reach the correct source passage quickly and see enough surrounding context? |
-| **Complex-task behavior** | Does a cross-document question lead to orderly search and reading? Are activity, failure, and completion visible? |
-| **Continuity** | Do conversation history and recent activity help you continue earlier work? |
+| **知识可用性** | 文档何时进入可用状态？失败原因是否清楚？更新后能否重新处理？ |
+| **检索质量** | 明确存在的内容能否被找到？搜索范围和结果是否符合预期？ |
+| **回答可信度** | 回答是否真正由材料支持？引用是否对应关键结论？ |
+| **核验效率** | 能否从答案快速进入正确片段，并看到足够的上下文？ |
+| **复杂任务表现** | 跨文档问题是否会有序查找与阅读？过程、失败和终态是否可见？ |
+| **持续使用体验** | 会话、最近活动和历史结果能否帮助用户继续此前的工作？ |
 
-A useful first test set contains three types of questions: one answered directly by a single document, one requiring synthesis across documents, and one for which the documents contain no answer. Together, they reveal much more than a polished happy-path response.
+一个好的首次测试集应同时包含：答案直接存在于单份文档的问题、需要跨文档归纳的问题，以及材料中没有答案的问题。三类问题共同决定系统是否真正可信。
 
-## Product components
+## 产品组成
 
-| Component | Product responsibility |
+| 组件 | 产品职责 |
 | --- | --- |
-| [**Anchr Web**](https://github.com/ryanmeowy/anchr-web) | The browser workspace for knowledge bases, search, Ask, preview, activity, and settings. |
-| **Anchr App** | This repository; the product workflows for knowledge management, retrieval, answers, Agent work, activity, and configuration. |
-| [**Anchr Docling**](https://github.com/ryanmeowy/anchr-docling) | Converts source documents into content that can be retrieved and read by the rest of the product. |
+| [**Anchr Web**](https://github.com/ryanmeowy/anchr-web) | 面向用户的浏览器工作台，承载知识库、搜索、Ask、预览、活动和设置体验。 |
+| **Anchr App** | 本仓库；提供知识管理、检索、问答、Agent、活动与配置等产品工作流。 |
+| [**Anchr Docling**](https://github.com/ryanmeowy/anchr-docling) | 将原始文档解析为后续检索与阅读可以使用的内容。 |
 
-## Current stage
+## 当前阶段
 
-Anchr is under active development. Product surfaces, interfaces, and defaults may continue to evolve. The current focus is a dependable document-knowledge loop:
+Anchr 仍在积极开发中，产品界面、接口与默认行为可能继续演进。当前重点是建立可靠的文档知识闭环：
 
-- continuously ingest and update content;
-- keep search and questions inside an explicit knowledge scope;
-- make answers inspectable through citations and source previews;
-- give complex document work clear execution boundaries and visible state.
+- 让内容可以被持续导入和更新；
+- 让搜索与提问受到明确知识范围约束；
+- 让答案可以通过引用与原文预览被核验；
+- 让复杂文档任务具备清晰的执行边界和状态。
 
-The live workspace is available at [anchr.cloud](https://anchr.cloud). Review the technical prerequisites before self-hosting.
+在线演示可通过 [anchr.cloud](https://anchr.cloud) 访问。自主托管前请先阅读技术文档中的依赖条件与运行说明。
 
-## Documentation
+## 进一步了解
 
-- [中文产品介绍](./docs/product.zh-CN.md)
-- [English technical guide](./docs/technical.en.md)
-- [中文技术文档](./docs/technical.zh-CN.md)
-- [Agent RAG implementation](./docs/agent-rag-workflow.md)
-- [Domain boundaries and interactions](./docs/domain-boundaries-and-interactions.md)
-- [Docker deployment](./docker/README.md)
+- [中文技术文档](./docs/technical.zh-CN.md)：安装、配置、接口、开发和生产注意事项；
+- [English technical guide](./docs/technical.en.md)：英文技术说明；
+- [Agent RAG 当前实现](./docs/agent-rag-workflow.md)：Agent、证据、降级与恢复行为；
+- [领域边界与交互](./docs/domain-boundaries-and-interactions.md)：系统职责与状态边界；
+- [索引重建实现说明](./docs/segment-index-online-rebuild.md)：索引回填/双写/切读全流程；
+- [Docker 部署](./docker/README.md)：容器化运行说明。
 
 ---
 
 <div align="center">
 
-**Give every knowledge answer an anchor back to its source.**
+**让每一个知识答案，都有可以回到原文的锚点。**
 
 </div>
