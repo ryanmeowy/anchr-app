@@ -74,8 +74,10 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     @Override
-    public List<IngestionTaskItem> listFailedItems(String kbId, String taskId) {
-        return mapper.listFailedItems(kbId, taskId).stream().map(this::toDomain).toList();
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<IngestionTaskItem> listRetryItemsForUpdate(String kbId, String taskId) {
+        return mapper.listRetryItemsForUpdate(kbId, taskId).stream()
+                .map(this::toDomain).toList();
     }
 
     @Override

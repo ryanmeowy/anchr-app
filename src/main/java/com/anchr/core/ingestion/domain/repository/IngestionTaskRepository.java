@@ -22,7 +22,7 @@ public interface IngestionTaskRepository {
 
     List<IngestionTask> listRecent(int limit);
 
-    List<IngestionTaskItem> listFailedItems(String kbId, String taskId);
+    List<IngestionTaskItem> listRetryItemsForUpdate(String kbId, String taskId);
 
     List<IngestionTaskItem> listRunningItems();
 

@@ -70,6 +70,19 @@ class IngestionTaskMapperXmlTest {
     }
 
     @Test
+    void retryItemListShouldLockTheCurrentKbScopedFailedSetInStableOrder() throws Exception {
+        String sql = sql(loadConfiguration(), "listRetryItemsForUpdate", Map.of(
+                "kbId", "kb-1", "taskId", "task-1"));
+
+        assertThat(sql)
+                .contains("inner join ingestion_task it on it.id = iti.task_id")
+                .contains("where it.kb_id = ? and iti.task_id = ?")
+                .contains("iti.status = 'FAILED' and iti.asset_id is not null")
+                .contains("order by iti.created_at asc, iti.id asc for update")
+                .endsWith("for update");
+    }
+
+    @Test
     void itemListShouldUseOneSingleTableBatchQueryWithStableOrdering() throws Exception {
         String sql = sql(loadConfiguration(), "listItemsByTaskIds", Map.of(
                 "taskIds", List.of("task-1", "task-2")));

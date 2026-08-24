@@ -31,8 +31,9 @@ public interface IngestionTaskMapper {
     List<IngestionTaskItemRecord> listItemsByTaskIds(
             @Param("taskIds") List<String> taskIds);
 
-    List<IngestionTaskItemRecord> listFailedItems(@Param("kbId") String kbId,
-                                                  @Param("taskId") String taskId);
+    List<IngestionTaskItemRecord> listRetryItemsForUpdate(
+            @Param("kbId") String kbId,
+            @Param("taskId") String taskId);
 
     List<IngestionTaskItemRecord> listRunningItems();
 

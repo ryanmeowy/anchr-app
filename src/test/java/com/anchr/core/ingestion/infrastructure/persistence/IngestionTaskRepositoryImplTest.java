@@ -12,8 +12,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 
@@ -70,6 +73,17 @@ class IngestionTaskRepositoryImplTest {
                 ArgumentCaptor.forClass(IngestionTaskRecord.class);
         verify(mapper).insertTask(captor.capture());
         assertThat(captor.getValue().getDedupeStrategy()).isEqualTo("SKIP");
+    }
+
+    @Test
+    void retryItemListShouldRequireAnExistingTransaction() throws Exception {
+        Method method = IngestionTaskRepositoryImpl.class.getMethod(
+                "listRetryItemsForUpdate", String.class, String.class);
+
+        Transactional transactional = method.getAnnotation(Transactional.class);
+
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.propagation()).isEqualTo(Propagation.MANDATORY);
     }
 
     @Test

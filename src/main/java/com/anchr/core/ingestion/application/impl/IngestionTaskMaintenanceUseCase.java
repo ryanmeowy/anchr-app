@@ -85,7 +85,7 @@ class IngestionTaskMaintenanceUseCase {
         IngestionTask task = taskQuery.get(kbId, taskId);
         RequestUserContext context = UserContextHolder.get();
         List<IngestionTaskItem> failedItems =
-                ingestionTaskRepository.listFailedItems(kbId, task.getId());
+                ingestionTaskRepository.listRetryItemsForUpdate(kbId, task.getId());
         if (failedItems.isEmpty()) {
             throw new BusinessException(ApiError.INGEST_NO_FAILED_ITEMS);
         }

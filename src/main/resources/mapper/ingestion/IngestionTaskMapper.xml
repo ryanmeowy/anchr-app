@@ -130,13 +130,14 @@
         order by iti.task_id asc, iti.created_at asc, iti.id asc
     </select>
 
-    <select id="listFailedItems" resultMap="IngestionTaskItemRecordMap">
+    <select id="listRetryItemsForUpdate" resultMap="IngestionTaskItemRecordMap">
         select <include refid="JoinedItemColumns"/>
         from ingestion_task_item iti
         inner join ingestion_task it on it.id = iti.task_id
         where it.kb_id = #{kbId} and iti.task_id = #{taskId}
           and iti.status = 'FAILED' and iti.asset_id is not null
         order by iti.created_at asc, iti.id asc
+        for update
     </select>
 
     <select id="listRunningItems" resultMap="IngestionTaskItemRecordMap">
