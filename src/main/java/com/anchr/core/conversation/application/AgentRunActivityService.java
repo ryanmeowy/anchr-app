@@ -100,7 +100,9 @@ public class AgentRunActivityService {
         target.setType(stepType(source.getStepType()));
         target.setToolName(text(output.get("tool"), text(input.get("tool"), null)));
         target.setCallId(text(output.get("callId"), text(input.get("callId"), null)));
-        target.setTaskStage(text(output.get("taskStage"), text(input.get("taskStage"), null)));
+        String legacyTaskStage = text(output.get("taskStage"), text(input.get("taskStage"), null));
+        target.setTaskStage("TASK_STAGE".equals(source.getStepType())
+                ? text(source.getDecisionCode(), legacyTaskStage) : legacyTaskStage);
         target.setTaskType(text(output.get("taskType"), null));
         target.setAnswerType(text(output.get("answerType"), null));
         target.setModel(text(output.get("model"), null));

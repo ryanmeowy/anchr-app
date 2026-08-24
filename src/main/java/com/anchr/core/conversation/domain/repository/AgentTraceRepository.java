@@ -9,6 +9,7 @@ import java.util.Optional;
 public interface AgentTraceRepository {
     void saveRun(AgentRun run);
     void saveStep(AgentStep step);
+    boolean lockRun(String runId);
     Optional<AgentRun> findRun(String runId);
     List<AgentRun> findRecoverableRuns(String userId, int limit);
     List<AgentStep> findSteps(String runId);

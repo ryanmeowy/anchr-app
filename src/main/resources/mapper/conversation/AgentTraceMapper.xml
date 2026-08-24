@@ -79,6 +79,13 @@
         select * from agent_run where run_id = #{runId}
     </select>
 
+    <select id="lockRun" resultType="java.lang.String">
+        select run_id
+        from agent_run
+        where run_id = #{runId}
+        for update
+    </select>
+
     <select id="findRecoverableRuns" resultMap="RunMap">
         select r.*
         from agent_run r

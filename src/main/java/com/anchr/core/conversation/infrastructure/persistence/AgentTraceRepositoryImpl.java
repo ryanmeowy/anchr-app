@@ -35,6 +35,11 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
     }
 
     @Override
+    public boolean lockRun(String runId) {
+        return StringUtils.hasText(runId) && mapper.lockRun(runId) != null;
+    }
+
+    @Override
     public Optional<AgentRun> findRun(String runId) {
         return StringUtils.hasText(runId) ? mapper.findRun(runId).map(this::toDomain) : Optional.empty();
     }

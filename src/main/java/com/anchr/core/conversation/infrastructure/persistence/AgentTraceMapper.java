@@ -10,6 +10,7 @@ import java.util.Optional;
 public interface AgentTraceMapper {
     int upsertRun(AgentRunRecord record);
     int insertStep(AgentStepRecord record);
+    String lockRun(@Param("runId") String runId);
     Optional<AgentRunRecord> findRun(@Param("runId") String runId);
     List<AgentRunRecord> findRecoverableRuns(@Param("userId") String userId,
                                              @Param("limit") int limit);

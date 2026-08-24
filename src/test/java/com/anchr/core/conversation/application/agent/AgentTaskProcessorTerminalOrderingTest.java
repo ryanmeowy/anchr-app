@@ -50,6 +50,7 @@ class AgentTaskProcessorTerminalOrderingTest {
             TransactionCallback<?> callback = invocation.getArgument(0);
             return callback.doInTransaction(null);
         });
+        when(traceRepository.lockRun("run-1")).thenReturn(true);
         when(traceRepository.findSteps("run-1")).thenReturn(List.of());
         when(traceRepository.findRun("run-1")).thenReturn(Optional.of(run()));
         when(conversationRepository.findTurn("session-1", "turn-1"))
