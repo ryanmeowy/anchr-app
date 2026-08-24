@@ -8,8 +8,17 @@ import java.util.Optional;
 
 @Mapper
 public interface AgentTraceMapper {
-    int upsertRun(AgentRunRecord record);
+    int insertRun(AgentRunRecord record);
+    int finishWorkflowRun(AgentRunRecord record);
+    int transitionRun(@Param("record") AgentRunRecord record,
+                      @Param("expectedStatus") String expectedStatus);
+    int markTraditionalFallback(@Param("runId") String runId,
+                                @Param("fallbackReason") String fallbackReason);
+    int addRunTokenUsage(@Param("runId") String runId,
+                         @Param("promptTokens") int promptTokens,
+                         @Param("completionTokens") int completionTokens);
     int insertStep(AgentStepRecord record);
+    String lockRun(@Param("runId") String runId);
     Optional<AgentRunRecord> findRun(@Param("runId") String runId);
     List<AgentRunRecord> findRecoverableRuns(@Param("userId") String userId,
                                              @Param("limit") int limit);

@@ -16,7 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /** MyBatis implementation backed only by ingestion_task and ingestion_task_item. */
 @Repository
@@ -38,20 +40,29 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     @Override
     public Optional<IngestionTask> findById(String kbId, String taskId) {
         return mapper.findTask(kbId, taskId)
-                .map(record -> toDomain(record, mapper.listItems(taskId)));
+                .map(record -> toDomain(record, loadItems(record)));
     }
 
     @Override
     public Optional<IngestionTask> findByClientRequestId(String createdBy, String clientRequestId) {
         return mapper.findTaskByClientRequestId(createdBy, clientRequestId)
-                .map(record -> toDomain(record, mapper.listItems(record.getId())));
+                .map(record -> toDomain(record, loadItems(record)));
     }
 
     @Override
     public List<IngestionTask> list(String kbId, IngestionTaskStatus status, int limit) {
-        return mapper.listTasks(kbId, status == null ? null : status.name(), positiveLimit(limit))
-                .stream()
-                .map(record -> toDomain(record, mapper.listItems(record.getId())))
+        List<IngestionTaskRecord> tasks = mapper.listTasks(
+                kbId, status == null ? null : status.name(), positiveLimit(limit));
+        if (tasks.isEmpty()) {
+            return List.of();
+        }
+        List<String> taskIds = tasks.stream().map(IngestionTaskRecord::getId).toList();
+        Map<String, List<IngestionTaskItemRecord>> itemsByTaskId =
+                mapper.listItemsByTaskIds(taskIds).stream()
+                        .collect(Collectors.groupingBy(IngestionTaskItemRecord::getTaskId));
+        return tasks.stream()
+                .map(record -> toDomain(
+                        record, itemsByTaskId.getOrDefault(record.getId(), List.of())))
                 .toList();
     }
 
@@ -63,13 +74,10 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
     }
 
     @Override
-    public List<IngestionTaskItem> listItems(String taskId) {
-        return mapper.listItems(taskId).stream().map(this::toDomain).toList();
-    }
-
-    @Override
-    public List<IngestionTaskItem> listFailedItems(String kbId, String taskId) {
-        return mapper.listFailedItems(kbId, taskId).stream().map(this::toDomain).toList();
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<IngestionTaskItem> listRetryItemsForUpdate(String kbId, String taskId) {
+        return mapper.listRetryItemsForUpdate(kbId, taskId).stream()
+                .map(this::toDomain).toList();
     }
 
     @Override
@@ -256,16 +264,29 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .createdAt(record.getCreatedAt())
                 .updatedAt(record.getUpdatedAt())
                 .finishedAt(record.getFinishedAt())
-                .items(items == null ? List.of() : items.stream().map(this::toDomain).toList())
+                .items(items == null ? List.of() : items.stream()
+                        .map(item -> toDomain(item, record)).toList())
                 .build();
     }
 
     private IngestionTaskItem toDomain(IngestionTaskItemRecord record) {
+        return toDomain(record, record.getKbId(), record.getTaskCreatedBy(),
+                record.getDedupeStrategy());
+    }
+
+    private IngestionTaskItem toDomain(IngestionTaskItemRecord record,
+                                       IngestionTaskRecord task) {
+        return toDomain(record, task.getKbId(), task.getCreatedBy(), task.getDedupeStrategy());
+    }
+
+    private IngestionTaskItem toDomain(IngestionTaskItemRecord record,
+                                       String kbId, String taskCreatedBy,
+                                       String dedupeStrategy) {
         return IngestionTaskItem.builder()
                 .id(record.getId())
                 .taskId(record.getTaskId())
-                .kbId(record.getKbId())
-                .taskCreatedBy(record.getTaskCreatedBy())
+                .kbId(kbId)
+                .taskCreatedBy(taskCreatedBy)
                 .assetId(record.getAssetId())
                 .targetIndexGeneration(record.getTargetIndexGeneration())
                 .fileName(record.getFileName())
@@ -273,7 +294,7 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .stage(IngestionStage.valueOf(record.getStage()))
                 .status(IngestionTaskItemStatus.valueOf(record.getStatus()))
                 .progress(defaultInt(record.getProgress()))
-                .dedupeStrategy(parseDedupeStrategy(record.getDedupeStrategy()))
+                .dedupeStrategy(parseDedupeStrategy(dedupeStrategy))
                 .dedupeResult(parseDedupeResult(record.getDedupeResult()))
                 .duplicateAssetId(record.getDuplicateAssetId())
                 .errorCode(record.getErrorCode())
@@ -282,6 +303,10 @@ public class IngestionTaskRepositoryImpl implements IngestionTaskRepository {
                 .updatedAt(record.getUpdatedAt())
                 .finishedAt(record.getFinishedAt())
                 .build();
+    }
+
+    private List<IngestionTaskItemRecord> loadItems(IngestionTaskRecord task) {
+        return mapper.listItemsByTaskIds(List.of(task.getId()));
     }
 
     private DedupeStrategy resolveTaskDedupeStrategy(IngestionTask task) {

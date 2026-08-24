@@ -4,6 +4,7 @@ import com.anchr.core.conversation.application.model.AgentTokenUsage;
 import com.anchr.core.conversation.domain.model.AgentRun;
 import com.anchr.core.conversation.domain.model.AgentStep;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
+import com.anchr.core.conversation.domain.repository.ConversationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -12,6 +13,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 @Component
@@ -19,11 +21,23 @@ import org.springframework.util.StringUtils;
 @Slf4j
 public class AgentTraceRecorder {
     private final AgentTraceRepository repository;
+    private final ConversationRepository conversationRepository;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final TransactionTemplate transactionTemplate;
 
     public void start(AgentState state) {
-        try { saveRun(state, AgentRunStatus.RUNNING, null, null, null); }
+        try {
+            AgentRun run = runSnapshot(state, AgentRunStatus.RUNNING, null, null, null);
+            transactionTemplate.executeWithoutResult(ignored -> {
+                if (!conversationRepository.lockActiveSession(run.getSessionId())) {
+                    log.warn("Agent run trace start skipped because session is missing or deleted, runId={}, sessionId={}",
+                            run.getRunId(), run.getSessionId());
+                    return;
+                }
+                repository.insertRun(run);
+            });
+        }
         catch (Exception e) { log.warn("Agent run trace start failed, runId={}", state.runRequest().runId(), e); }
     }
 
@@ -67,13 +81,25 @@ public class AgentTraceRecorder {
                        AgentRunStatus status,
                        String fallbackReason,
                        String errorCode) {
-        AgentRunStatus persistedStatus = status == AgentRunStatus.FAILED
+        boolean traditionalFallbackPending = status == AgentRunStatus.FAILED
+                && state.runtimeConfig() != null
+                && state.runtimeConfig().fallbackToTraditional();
+        AgentRunStatus persistedStatus = traditionalFallbackPending
+                ? AgentRunStatus.AWAITING_TURN : status == AgentRunStatus.FAILED
                 ? AgentRunStatus.FAILED : status == AgentRunStatus.CANCELLED
                 ? AgentRunStatus.CANCELLED : status == AgentRunStatus.WAITING_TASK
                 ? AgentRunStatus.WAITING_TASK : AgentRunStatus.AWAITING_TURN;
-        try { saveRun(state, persistedStatus, state.currentStep().name(), fallbackReason, errorCode); }
+        boolean updated = false;
+        try {
+            AgentRun run = runSnapshot(state, persistedStatus, state.currentStep().name(), fallbackReason, errorCode);
+            updated = repository.finishWorkflowRun(run);
+            if (!updated) {
+                log.warn("Agent run trace finish ignored because run is no longer RUNNING, runId={}, status={}",
+                        state.runRequest().runId(), persistedStatus);
+            }
+        }
         catch (Exception e) { log.warn("Agent run trace finish failed, runId={}", state.runRequest().runId(), e); }
-        if (persistedStatus == AgentRunStatus.FAILED) {
+        if (updated && persistedStatus == AgentRunStatus.FAILED) {
             recordRunMetrics(state, AgentRunStatus.FAILED);
         }
     }
@@ -86,11 +112,11 @@ public class AgentTraceRecorder {
         meterRegistry.summary("agent.run.tokens", "type", "completion").record(state.completionTokens());
     }
 
-    private void saveRun(AgentState state,
-                         AgentRunStatus status,
-                         String currentStep,
-                         String fallbackReason,
-                         String errorCode) {
+    private AgentRun runSnapshot(AgentState state,
+                                 AgentRunStatus status,
+                                 String currentStep,
+                                 String fallbackReason,
+                                 String errorCode) {
         AgentRun run = new AgentRun();
         run.setRunId(state.runRequest().runId());
         run.setSessionId(state.runRequest().sessionId());
@@ -108,7 +134,7 @@ public class AgentTraceRecorder {
         run.setFinishedAt(status == AgentRunStatus.RUNNING || status == AgentRunStatus.AWAITING_TURN
                 || status == AgentRunStatus.WAITING_TASK
                 ? null : System.currentTimeMillis());
-        repository.saveRun(run);
+        return run;
     }
 
     private String toJson(Map<String, Object> value) {

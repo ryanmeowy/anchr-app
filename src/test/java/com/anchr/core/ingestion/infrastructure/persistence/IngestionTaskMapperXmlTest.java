@@ -7,6 +7,7 @@ import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -66,6 +67,31 @@ class IngestionTaskMapperXmlTest {
                 .contains("stage = 'UPLOAD'")
                 .doesNotContain("parse_attempt")
                 .doesNotContain("execution_epoch");
+    }
+
+    @Test
+    void retryItemListShouldLockTheCurrentKbScopedFailedSetInStableOrder() throws Exception {
+        String sql = sql(loadConfiguration(), "listRetryItemsForUpdate", Map.of(
+                "kbId", "kb-1", "taskId", "task-1"));
+
+        assertThat(sql)
+                .contains("inner join ingestion_task it on it.id = iti.task_id")
+                .contains("where it.kb_id = ? and iti.task_id = ?")
+                .contains("iti.status = 'FAILED' and iti.asset_id is not null")
+                .contains("order by iti.created_at asc, iti.id asc for update")
+                .endsWith("for update");
+    }
+
+    @Test
+    void itemListShouldUseOneSingleTableBatchQueryWithStableOrdering() throws Exception {
+        String sql = sql(loadConfiguration(), "listItemsByTaskIds", Map.of(
+                "taskIds", List.of("task-1", "task-2")));
+
+        assertThat(sql)
+                .contains("from ingestion_task_item iti")
+                .contains("where iti.task_id in ( ? , ? )")
+                .contains("order by iti.task_id asc, iti.created_at asc, iti.id asc")
+                .doesNotContain("join ingestion_task");
     }
 
     private String sql(Configuration configuration, String statement, Object parameter) {

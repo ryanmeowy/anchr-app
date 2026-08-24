@@ -70,9 +70,10 @@ class AgentRunActivityServiceTest {
         AgentRunActivityService service = new AgentRunActivityService(traces, conversations, new ObjectMapper());
         AgentRun run = run("WAITING_TASK");
         AgentStep stage = step(101, "TASK_STAGE", "{}",
-                "{\"taskStage\":\"MAP_SUMMARY\",\"progress\":70,"
+                "{\"progress\":70,"
                         + "\"modelCallCount\":3,\"modelLatencyMs\":61500,"
                         + "\"firstTokenMs\":2300,\"streaming\":true}");
+        stage.setDecisionCode("MAP_SUMMARY");
         when(traces.findRun("run-1")).thenReturn(Optional.of(run));
         when(conversations.findSession("session-1")).thenReturn(Optional.of(session("user-a")));
         when(traces.findSteps("run-1")).thenReturn(List.of(stage));
@@ -80,6 +81,7 @@ class AgentRunActivityServiceTest {
         var result = service.get("run-1");
 
         assertThat(result.getSteps()).hasSize(1);
+        assertThat(result.getSteps().getFirst().getTaskStage()).isEqualTo("MAP_SUMMARY");
         assertThat(result.getSteps().getFirst().getProgress()).isEqualTo(100);
         assertThat(result.getSteps().getFirst().getPromptTokens()).isEqualTo(1_010);
         assertThat(result.getSteps().getFirst().getCompletionTokens()).isEqualTo(505);
@@ -87,6 +89,24 @@ class AgentRunActivityServiceTest {
         assertThat(result.getSteps().getFirst().getModelLatencyMs()).isEqualTo(61_500L);
         assertThat(result.getSteps().getFirst().getFirstTokenMs()).isEqualTo(2_300L);
         assertThat(result.getSteps().getFirst().getStreaming()).isTrue();
+    }
+
+    @Test
+    void get_shouldReadLegacyTaskStageFromSummaryWhenDecisionCodeIsMissing() {
+        AgentTraceRepository traces = mock(AgentTraceRepository.class);
+        ConversationRepository conversations = mock(ConversationRepository.class);
+        AgentRunActivityService service = new AgentRunActivityService(traces, conversations, new ObjectMapper());
+        AgentRun run = run("WAITING_TASK");
+        AgentStep stage = step(101, "TASK_STAGE", "{}",
+                "{\"taskStage\":\"READING\",\"progress\":35}");
+        when(traces.findRun("run-1")).thenReturn(Optional.of(run));
+        when(conversations.findSession("session-1")).thenReturn(Optional.of(session("user-a")));
+        when(traces.findSteps("run-1")).thenReturn(List.of(stage));
+
+        var result = service.get("run-1");
+
+        assertThat(result.getSteps()).singleElement()
+                .extracting(step -> step.getTaskStage()).isEqualTo("READING");
     }
 
     @Test

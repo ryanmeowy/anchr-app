@@ -17,6 +17,40 @@ class AgentTraceMapperXmlTest {
     private static final String NAMESPACE = AgentTraceMapper.class.getName() + ".";
 
     @Test
+    void runWritesShouldUseSingleTableInsertConditionalTransitionsAndAtomicTokens() throws Exception {
+        Configuration configuration = loadConfiguration();
+        AgentRunRecord run = new AgentRunRecord();
+        run.setRunId("run-1");
+        run.setSessionId("session-1");
+        run.setStatus("COMPLETED");
+        Map<String, Object> transition = Map.of(
+                "record", run,
+                "expectedStatus", "WAITING_TASK");
+
+        String insertSql = sql(configuration, "insertRun", run);
+        String finishSql = sql(configuration, "finishWorkflowRun", run);
+        String transitionSql = sql(configuration, "transitionRun", transition);
+        String tokensSql = sql(configuration, "addRunTokenUsage", Map.of(
+                "runId", "run-1", "promptTokens", 12, "completionTokens", 4));
+
+        assertThat(insertSql)
+                .startsWith("insert into agent_run")
+                .contains("on duplicate key update run_id = ?")
+                .doesNotContain("conversation_session", "where exists", "values(status)");
+        assertThat(finishSql)
+                .contains("step_count = ?", "prompt_tokens = ?")
+                .endsWith("where run_id = ? and status = 'RUNNING'");
+        assertThat(transitionSql)
+                .contains("set status = ?", "current_step = ?", "finished_at = ?")
+                .doesNotContain("step_count", "tool_call_count", "prompt_tokens", "completion_tokens")
+                .endsWith("where run_id = ? and status = ?");
+        assertThat(tokensSql)
+                .contains("prompt_tokens = prompt_tokens + ?")
+                .contains("completion_tokens = completion_tokens + ?")
+                .endsWith("where run_id = ?");
+    }
+
+    @Test
     void cleanupStatementsShouldFindRunsAndDeleteStepsByRunIds() throws Exception {
         Configuration configuration = loadConfiguration();
 

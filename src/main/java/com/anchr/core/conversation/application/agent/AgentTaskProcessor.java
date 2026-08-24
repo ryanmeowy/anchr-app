@@ -661,7 +661,10 @@ public class AgentTaskProcessor {
             run.setErrorCode(error);
             run.setFinishedAt(System.currentTimeMillis());
             run.setLatencyMs(run.getFinishedAt() - run.getStartedAt());
-            traceRepository.saveRun(run);
+            if (!traceRepository.transitionRun(run, AgentRunStatus.WAITING_TASK.name())) {
+                log.warn("Agent task run transition ignored because status changed, taskId={}, runId={}, targetStatus={}",
+                        task.getTaskId(), task.getRunId(), status);
+            }
         });
     }
 
@@ -711,50 +714,58 @@ public class AgentTaskProcessor {
 
     private void recordTaskStage(AgentTask task, String stage, String status, int progress, String errorCode, Map<String, Object> extraDetails) {
         if (task == null || !StringUtils.hasText(task.getRunId()) || !StringUtils.hasText(stage)) return;
-        Integer order = taskStageOrder(stage);
-        if (order == null) return;
-        long now = System.currentTimeMillis();
-        AgentStep existing = null;
+        int attempt = Math.max(1, task.getAttemptCount());
         try {
-            existing = traceRepository.findSteps(task.getRunId()).stream()
-                    .filter(value -> value.getStepOrder() == order && value.getAttempt() == Math.max(1, task.getAttemptCount()))
-                    .findFirst().orElse(null);
-        } catch (Exception e) {
-            log.warn("Agent task stage lookup failed, taskId={}, stage={}", task.getTaskId(), stage, e);
-        }
-        AgentStep step = new AgentStep();
-        step.setStepId(UUID.nameUUIDFromBytes((task.getRunId() + ":" + stage).getBytes(StandardCharsets.UTF_8)).toString());
-        step.setRunId(task.getRunId());
-        step.setStepOrder(order);
-        step.setStepType(AgentStepType.TASK_STAGE.name());
-        step.setAttempt(Math.max(1, task.getAttemptCount()));
-        step.setStatus(status);
-        step.setDecisionCode(stage);
-        step.setInputSummaryJson("{}");
-        Map<String, Object> summary = safeStageDetails(existing);
-        summary.put("taskStage", stage);
-        summary.put("progress", "COMPLETED".equals(status) ? 100 : Math.max(0, Math.min(100, progress)));
-        int documentCount = taskDocumentCount(task);
-        if (documentCount > 0) summary.put("documentCount", documentCount);
-        if (extraDetails != null) extraDetails.forEach((key, value) -> {
-            if (List.of("segmentCount", "batchCount", "citationCount").contains(key) && value instanceof Number)
-                summary.put(key, value);
-        });
-        try {
-            step.setOutputSummaryJson(objectMapper.writeValueAsString(summary));
-        } catch (Exception ignored) {
-            step.setOutputSummaryJson("{}");
-        }
-        long createdAt = existing == null ? now : existing.getCreatedAt();
-        step.setPromptTokens(existing == null ? 0 : existing.getPromptTokens());
-        step.setCompletionTokens(existing == null ? 0 : existing.getCompletionTokens());
-        step.setLatencyMs("RUNNING".equals(status) ? 0 : Math.max(0, now - createdAt));
-        step.setErrorCode(errorCode);
-        step.setCreatedAt(createdAt);
-        try {
-            traceRepository.saveStep(step);
+            Boolean recorded = transactionTemplate.execute(ignored -> {
+                if (!traceRepository.lockRun(task.getRunId())) return false;
+                List<AgentStep> steps = traceRepository.findSteps(task.getRunId());
+                AgentStep existing = findTaskStageStep(steps, stage, attempt);
+                long now = System.currentTimeMillis();
+                int order = existing == null
+                        ? steps.stream().mapToInt(AgentStep::getStepOrder).max().orElse(0) + 1
+                        : existing.getStepOrder();
+                AgentStep step = new AgentStep();
+                step.setStepId(existing == null
+                        ? UUID.nameUUIDFromBytes((task.getRunId() + ":" + task.getTaskId() + ":"
+                        + attempt + ":" + stage).getBytes(StandardCharsets.UTF_8)).toString()
+                        : existing.getStepId());
+                step.setRunId(task.getRunId());
+                step.setStepOrder(order);
+                step.setStepType(AgentStepType.TASK_STAGE.name());
+                step.setAttempt(attempt);
+                step.setStatus(status);
+                step.setDecisionCode(stage);
+                step.setInputSummaryJson("{}");
+                Map<String, Object> summary = safeStageDetails(existing);
+                summary.put("progress", "COMPLETED".equals(status) ? 100 : Math.max(0, Math.min(100, progress)));
+                int documentCount = taskDocumentCount(task);
+                if (documentCount > 0) summary.put("documentCount", documentCount);
+                if (extraDetails != null) extraDetails.forEach((key, value) -> {
+                    if (List.of("segmentCount", "batchCount", "citationCount").contains(key) && value instanceof Number)
+                        summary.put(key, value);
+                });
+                try {
+                    step.setOutputSummaryJson(objectMapper.writeValueAsString(summary));
+                } catch (Exception ignoredJson) {
+                    step.setOutputSummaryJson("{}");
+                }
+                long createdAt = existing == null ? now : existing.getCreatedAt();
+                step.setPromptTokens(existing == null ? 0 : existing.getPromptTokens());
+                step.setCompletionTokens(existing == null ? 0 : existing.getCompletionTokens());
+                step.setLatencyMs("RUNNING".equals(status) ? 0 : Math.max(0, now - createdAt));
+                step.setErrorCode(errorCode);
+                step.setCreatedAt(createdAt);
+                traceRepository.saveStep(step);
+                return true;
+            });
+            if (!Boolean.TRUE.equals(recorded)) {
+                log.warn("Agent task stage trace skipped because run is missing, taskId={}, runId={}, stage={}",
+                        task.getTaskId(), task.getRunId(), stage);
+                return;
+            }
         } catch (Exception e) {
             log.warn("Agent task stage trace failed, taskId={}, stage={}", task.getTaskId(), stage, e);
+            return;
         }
         runtimeSnapshotService.publishActivity(task.getRunId());
     }
@@ -769,38 +780,45 @@ public class AgentTaskProcessor {
         int safeCompletion = Math.max(0, completionTokens);
         if (safePrompt > 0 || safeCompletion > 0) {
             try {
-                traceRepository.findRun(task.getRunId()).ifPresent(run -> {
-                    run.setPromptTokens(run.getPromptTokens() + safePrompt);
-                    run.setCompletionTokens(run.getCompletionTokens() + safeCompletion);
-                    traceRepository.saveRun(run);
-                });
+                if (!traceRepository.addRunTokenUsage(task.getRunId(), safePrompt, safeCompletion)) {
+                    log.warn("Agent task run token trace skipped because run is missing, taskId={}, runId={}",
+                            task.getTaskId(), task.getRunId());
+                }
             } catch (Exception e) {
                 log.warn("Agent task run token trace failed, taskId={}", task.getTaskId(), e);
             }
         }
-        Integer order = taskStageOrder(task.getCurrentStage());
-        if (order == null) return;
+        int attempt = Math.max(1, task.getAttemptCount());
         try {
-            traceRepository.findSteps(task.getRunId()).stream()
-                    .filter(value -> value.getStepOrder() == order && value.getAttempt() == Math.max(1, task.getAttemptCount()))
-                    .findFirst().ifPresent(step -> {
-                        step.setPromptTokens(step.getPromptTokens() + safePrompt);
-                        step.setCompletionTokens(step.getCompletionTokens() + safeCompletion);
-                        Map<String, Object> details = safeStageDetails(step);
-                        int calls = details.get("modelCallCount") instanceof Number n ? n.intValue() : 0;
-                        long latency = details.get("modelLatencyMs") instanceof Number n ? n.longValue() : 0L;
-                        details.put("modelCallCount", calls + 1);
-                        details.put("modelLatencyMs", latency + Math.max(0L, modelLatencyMs));
-                        details.put("streaming", Boolean.TRUE.equals(details.get("streaming")) || streaming);
-                        if (firstTokenMs != null) details.put("firstTokenMs", Math.max(0L, firstTokenMs));
-                        try {
-                            step.setOutputSummaryJson(objectMapper.writeValueAsString(details));
-                        } catch (Exception ignored) {/* token counters remain available */}
-                        traceRepository.saveStep(step);
-                    });
+            AgentStep stageStep = findTaskStageStep(
+                    traceRepository.findSteps(task.getRunId()), task.getCurrentStage(), attempt);
+            Optional.ofNullable(stageStep).ifPresent(step -> {
+                step.setPromptTokens(step.getPromptTokens() + safePrompt);
+                step.setCompletionTokens(step.getCompletionTokens() + safeCompletion);
+                Map<String, Object> details = safeStageDetails(step);
+                int calls = details.get("modelCallCount") instanceof Number n ? n.intValue() : 0;
+                long latency = details.get("modelLatencyMs") instanceof Number n ? n.longValue() : 0L;
+                details.put("modelCallCount", calls + 1);
+                details.put("modelLatencyMs", latency + Math.max(0L, modelLatencyMs));
+                details.put("streaming", Boolean.TRUE.equals(details.get("streaming")) || streaming);
+                if (firstTokenMs != null) details.put("firstTokenMs", Math.max(0L, firstTokenMs));
+                try {
+                    step.setOutputSummaryJson(objectMapper.writeValueAsString(details));
+                } catch (Exception ignored) {/* token counters remain available */}
+                traceRepository.saveStep(step);
+            });
         } catch (Exception e) {
             log.warn("Agent task stage token trace failed, taskId={}, stage={}", task.getTaskId(), task.getCurrentStage(), e);
         }
+    }
+
+    private AgentStep findTaskStageStep(List<AgentStep> steps, String stage, int attempt) {
+        if (steps == null || !StringUtils.hasText(stage)) return null;
+        return steps.stream()
+                .filter(value -> AgentStepType.TASK_STAGE.name().equals(value.getStepType()))
+                .filter(value -> Objects.equals(stage, value.getDecisionCode()))
+                .filter(value -> value.getAttempt() == attempt)
+                .findFirst().orElse(null);
     }
 
     private Map<String, Object> safeStageDetails(AgentStep existing) {
@@ -811,7 +829,6 @@ public class AgentTaskProcessor {
             for (String key : List.of("progress", "documentCount", "segmentCount", "batchCount", "citationCount", "modelCallCount", "modelLatencyMs", "firstTokenMs")) {
                 if (root.path(key).isNumber()) result.put(key, root.path(key).numberValue());
             }
-            if (root.path("taskStage").isTextual()) result.put("taskStage", root.path("taskStage").asText());
             if (root.path("streaming").isBoolean()) result.put("streaming", root.path("streaming").asBoolean());
         } catch (Exception ignored) {/* safe trace metadata is best effort */}
         return result;
@@ -823,18 +840,6 @@ public class AgentTaskProcessor {
         } catch (Exception ignored) {
             return 0;
         }
-    }
-
-    private Integer taskStageOrder(String stage) {
-        return switch (stage) {
-            case "READING" -> 101;
-            case "MAP_SUMMARY" -> 102;
-            case "REDUCE_SUMMARY" -> 103;
-            case "FINALIZING" -> 104;
-            case "RETRY_WAIT" -> 105;
-            case "COMPLETED", "FAILED", "CANCELLED" -> 106;
-            default -> null;
-        };
     }
 
     private SummaryRequest parseRequest(String json) throws Exception {

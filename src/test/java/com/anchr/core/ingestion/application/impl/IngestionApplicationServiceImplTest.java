@@ -621,6 +621,80 @@ class IngestionApplicationServiceImplTest {
     }
 
     @Test
+    void retryFailed_whenLockedSetIsEmpty_shouldRejectWithoutWritesOrScheduling() {
+        savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
+                .status(IngestionTaskStatus.FAILED)
+                .items(List.of(failedItem("item-1", 1)))
+                .build());
+        when(ingestionTaskRepository.listRetryItemsForUpdate("kb-1", "task-1"))
+                .thenReturn(List.of());
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.retryFailed("kb-1", "task-1"));
+
+        assertThat(error.getError()).isEqualTo(ApiError.INGEST_NO_FAILED_ITEMS);
+        verify(ingestionTaskRepository, never()).resetFailedItem(
+                any(), any(), any(), anyLong(), any());
+        verify(ingestionTaskRepository, never()).refreshSummary(any(), any(), any(), any());
+        verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
+    }
+
+    @Test
+    void retryFailed_whenAssetWasDeleted_shouldRejectWithoutWritesOrScheduling() {
+        IngestionTaskItem failedItem = failedItem("item-1", 1);
+        savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
+                .status(IngestionTaskStatus.FAILED)
+                .items(List.of(failedItem))
+                .build());
+        when(ingestionTaskRepository.listRetryItemsForUpdate("kb-1", "task-1"))
+                .thenReturn(List.of(failedItem));
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-item-1"))
+                .thenReturn(Optional.of(Asset.builder()
+                        .id("asset-item-1")
+                        .kbId("kb-1")
+                        .deletedAt(LocalDateTime.now())
+                        .build()));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.retryFailed("kb-1", "task-1"));
+
+        assertThat(error.getError()).isEqualTo(ApiError.DOCUMENT_NOT_FOUND);
+        verify(ingestionTaskRepository, never()).resetFailedItem(
+                any(), any(), any(), anyLong(), any());
+        verify(ingestionTaskRepository, never()).refreshSummary(any(), any(), any(), any());
+        verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
+    }
+
+    @Test
+    void retryFailed_whenLaterItemChanges_shouldNotRefreshOrSchedule() {
+        IngestionTaskItem first = failedItem("item-first", 1);
+        IngestionTaskItem changed = failedItem("item-changed", 2);
+        savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
+                .status(IngestionTaskStatus.FAILED)
+                .items(List.of(first, changed))
+                .build());
+        when(ingestionTaskRepository.listRetryItemsForUpdate("kb-1", "task-1"))
+                .thenReturn(List.of(first, changed));
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-item-first"))
+                .thenReturn(1L);
+        when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-item-changed"))
+                .thenReturn(2L);
+        when(ingestionTaskRepository.resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-first"), eq(2L), any()))
+                .thenReturn(true);
+        when(ingestionTaskRepository.resetFailedItem(
+                eq("kb-1"), eq("task-1"), eq("item-changed"), eq(3L), any()))
+                .thenReturn(false);
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.retryFailed("kb-1", "task-1"));
+
+        assertThat(error.getError()).isEqualTo(ApiError.INGEST_RETRY_ONLY_FAILED);
+        verify(ingestionTaskRepository, never()).refreshSummary(any(), any(), any(), any());
+        verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
+    }
+
+    @Test
     void retryItem_shouldSubmitOnlyOnceAfterCommitWhenSynchronizationIsActive() {
         IngestionTaskItem failedItem = failedItem("item-1", 3);
         savedTask.set(task("task-1", "kb-1", null, null).toBuilder()
@@ -686,7 +760,7 @@ class IngestionApplicationServiceImplTest {
                 .status(IngestionTaskStatus.FAILED)
                 .items(List.of(legacyItem, currentItem))
                 .build());
-        when(ingestionTaskRepository.listFailedItems("kb-1", "task-1"))
+        when(ingestionTaskRepository.listRetryItemsForUpdate("kb-1", "task-1"))
                 .thenReturn(List.of(legacyItem, currentItem));
         when(ingestionTaskRepository.findMaxTargetIndexGeneration("asset-item-legacy"))
                 .thenReturn(1L);

@@ -4,6 +4,7 @@ import com.anchr.core.conversation.domain.model.AgentRun;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -11,6 +12,7 @@ import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class AgentRunFinalizer {
     private static final String TRADITIONAL_FALLBACK_REASON = "traditional_rag_fallback";
     private static final Set<String> DEGRADED_REASONS = Set.of(
@@ -31,8 +33,11 @@ public class AgentRunFinalizer {
         run.setStatus(status.name());
         run.setFinishedAt(System.currentTimeMillis());
         run.setLatencyMs(run.getFinishedAt() - run.getStartedAt());
-        repository.saveRun(run);
-        recordMetrics(run, status);
+        if (repository.transitionRun(run, AgentRunStatus.AWAITING_TURN.name())) {
+            recordMetrics(run, status);
+        } else {
+            log.warn("Agent run turn completion ignored because status changed, runId={}", runId);
+        }
     }
 
     private boolean isDegradedReason(String reason) {
@@ -47,18 +52,18 @@ public class AgentRunFinalizer {
         run.setErrorCode("turn_persistence_failed");
         run.setFinishedAt(System.currentTimeMillis());
         run.setLatencyMs(run.getFinishedAt() - run.getStartedAt());
-        repository.saveRun(run);
-        recordMetrics(run, AgentRunStatus.FAILED);
+        if (repository.transitionRun(run, AgentRunStatus.AWAITING_TURN.name())) {
+            recordMetrics(run, AgentRunStatus.FAILED);
+        } else {
+            log.warn("Agent run turn failure ignored because status changed, runId={}", runId);
+        }
     }
 
     public void prepareTraditionalFallback(String runId) {
         if (!StringUtils.hasText(runId)) return;
-        repository.findRun(runId).ifPresent(run -> {
-            run.setStatus(AgentRunStatus.AWAITING_TURN.name());
-            run.setFallbackReason(TRADITIONAL_FALLBACK_REASON);
-            run.setFinishedAt(null);
-            repository.saveRun(run);
-        });
+        if (!repository.markTraditionalFallback(runId, TRADITIONAL_FALLBACK_REASON)) {
+            log.warn("Traditional fallback marker ignored because run is not awaiting turn, runId={}", runId);
+        }
     }
 
     private AgentRun awaitingRun(String runId) {
