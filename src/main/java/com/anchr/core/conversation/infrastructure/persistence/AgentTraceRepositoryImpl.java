@@ -19,11 +19,40 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
     private final AgentTraceMapper mapper;
 
     @Override
-    public void saveRun(AgentRun run) {
-        if (run == null || !StringUtils.hasText(run.getRunId())) {
+    public void insertRun(AgentRun run) {
+        validateRun(run);
+        mapper.insertRun(toRecord(run));
+    }
+
+    @Override
+    public boolean finishWorkflowRun(AgentRun run) {
+        validateRun(run);
+        return mapper.finishWorkflowRun(toRecord(run)) > 0;
+    }
+
+    @Override
+    public boolean transitionRun(AgentRun run, String expectedStatus) {
+        validateRun(run);
+        if (!StringUtils.hasText(expectedStatus)) {
+            throw new IllegalArgumentException("expectedStatus cannot be empty");
+        }
+        return mapper.transitionRun(toRecord(run), expectedStatus) > 0;
+    }
+
+    @Override
+    public boolean markTraditionalFallback(String runId, String fallbackReason) {
+        if (!StringUtils.hasText(runId)) {
             throw new IllegalArgumentException("runId cannot be empty");
         }
-        mapper.upsertRun(toRecord(run));
+        return mapper.markTraditionalFallback(runId, fallbackReason) > 0;
+    }
+
+    @Override
+    public boolean addRunTokenUsage(String runId, int promptTokens, int completionTokens) {
+        if (!StringUtils.hasText(runId)) {
+            throw new IllegalArgumentException("runId cannot be empty");
+        }
+        return mapper.addRunTokenUsage(runId, Math.max(0, promptTokens), Math.max(0, completionTokens)) > 0;
     }
 
     @Override
@@ -81,6 +110,12 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
     @Override
     public void deleteRunsBySessionId(String sessionId) {
         if (StringUtils.hasText(sessionId)) mapper.deleteRunsBySessionId(sessionId);
+    }
+
+    private void validateRun(AgentRun run) {
+        if (run == null || !StringUtils.hasText(run.getRunId())) {
+            throw new IllegalArgumentException("runId cannot be empty");
+        }
     }
 
     private AgentRunRecord toRecord(AgentRun source) {

@@ -150,6 +150,7 @@ class AgentTaskProcessorStepOrderTest {
         assertThat(stage.getOutputSummaryJson())
                 .contains("\"modelCallCount\":1", "\"modelLatencyMs\":900",
                         "\"firstTokenMs\":150", "\"streaming\":true");
+        verify(traceRepository).addRunTokenUsage("run-1", 120, 40);
     }
 
     @Test

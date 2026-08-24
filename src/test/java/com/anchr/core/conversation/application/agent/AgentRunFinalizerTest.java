@@ -14,6 +14,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 @ExtendWith(MockitoExtension.class)
 class AgentRunFinalizerTest {
@@ -24,12 +26,13 @@ class AgentRunFinalizerTest {
     void markTurnSaved_shouldCompleteAwaitingRunOnlyAfterTurnPersistence() {
         AgentRun run = awaitingRun(null);
         when(repository.findRun("run-1")).thenReturn(Optional.of(run));
+        when(repository.transitionRun(any(), eq(AgentRunStatus.AWAITING_TURN.name()))).thenReturn(true);
         AgentRunFinalizer finalizer = new AgentRunFinalizer(repository, new SimpleMeterRegistry());
 
         finalizer.markTurnSaved("run-1");
 
         ArgumentCaptor<AgentRun> captor = ArgumentCaptor.forClass(AgentRun.class);
-        verify(repository).saveRun(captor.capture());
+        verify(repository).transitionRun(captor.capture(), eq(AgentRunStatus.AWAITING_TURN.name()));
         assertThat(captor.getValue().getStatus()).isEqualTo(AgentRunStatus.COMPLETED.name());
         assertThat(captor.getValue().getFinishedAt()).isNotNull();
     }
@@ -71,8 +74,13 @@ class AgentRunFinalizerTest {
     @Test
     void prepareTraditionalFallback_shouldBecomeFallbackAfterTurnPersistence() {
         AgentRun run = awaitingRun(null);
-        run.setStatus(AgentRunStatus.FAILED.name());
+        when(repository.markTraditionalFallback("run-1", "traditional_rag_fallback"))
+                .thenAnswer(ignored -> {
+                    run.setFallbackReason("traditional_rag_fallback");
+                    return true;
+                });
         when(repository.findRun("run-1")).thenReturn(Optional.of(run));
+        when(repository.transitionRun(any(), eq(AgentRunStatus.AWAITING_TURN.name()))).thenReturn(true);
         AgentRunFinalizer finalizer = new AgentRunFinalizer(repository, new SimpleMeterRegistry());
 
         finalizer.prepareTraditionalFallback("run-1");

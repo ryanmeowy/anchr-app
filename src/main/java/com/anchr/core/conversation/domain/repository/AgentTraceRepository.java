@@ -7,7 +7,11 @@ import java.util.List;
 import java.util.Optional;
 
 public interface AgentTraceRepository {
-    void saveRun(AgentRun run);
+    void insertRun(AgentRun run);
+    boolean finishWorkflowRun(AgentRun run);
+    boolean transitionRun(AgentRun run, String expectedStatus);
+    boolean markTraditionalFallback(String runId, String fallbackReason);
+    boolean addRunTokenUsage(String runId, int promptTokens, int completionTokens);
     void saveStep(AgentStep step);
     boolean lockRun(String runId);
     Optional<AgentRun> findRun(String runId);

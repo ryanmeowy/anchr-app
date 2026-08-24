@@ -14,11 +14,13 @@ import com.anchr.core.conversation.interfaces.rest.dto.AgentTaskDTO;
 import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AgentTaskQueryService {
     private final AgentTaskRepository taskRepository;
     private final ConversationRepository conversationRepository;
@@ -52,7 +54,10 @@ public class AgentTaskQueryService {
                 run.setErrorCode("TASK_CANCELLED");
                 run.setFinishedAt(now);
                 run.setLatencyMs(Math.max(0L, now - run.getStartedAt()));
-                traceRepository.saveRun(run);
+                if (!traceRepository.transitionRun(run, AgentRunStatus.WAITING_TASK.name())) {
+                    log.warn("Agent task cancellation run transition ignored because status changed, taskId={}, runId={}",
+                            task.getTaskId(), task.getRunId());
+                }
             });
             return true;
         });

@@ -35,28 +35,62 @@
         <result property="createdAt" column="created_at"/>
     </resultMap>
 
-    <insert id="upsertRun">
+    <insert id="insertRun">
         insert into agent_run (
           run_id, session_id, turn_id, status, current_step,
           step_count, tool_call_count, prompt_tokens, completion_tokens,
           latency_ms, fallback_reason, error_code, started_at, finished_at
-        )
-        select
+        ) values (
           #{runId}, #{sessionId}, #{turnId}, #{status}, #{currentStep},
           #{stepCount}, #{toolCallCount}, #{promptTokens}, #{completionTokens},
           #{latencyMs}, #{fallbackReason}, #{errorCode}, #{startedAt}, #{finishedAt}
-        from dual
-        where exists (
-          select 1 from conversation_session
-          where session_id=#{sessionId} and deleted_at is null
         )
         on duplicate key update
-          turn_id = values(turn_id), status = values(status), current_step = values(current_step),
-          step_count = values(step_count), tool_call_count = values(tool_call_count),
-          prompt_tokens = values(prompt_tokens), completion_tokens = values(completion_tokens),
-          latency_ms = values(latency_ms), fallback_reason = values(fallback_reason),
-          error_code = values(error_code), finished_at = values(finished_at)
+          run_id = #{runId}
     </insert>
+
+    <update id="finishWorkflowRun">
+        update agent_run
+        set turn_id = #{turnId},
+            status = #{status},
+            current_step = #{currentStep},
+            step_count = #{stepCount},
+            tool_call_count = #{toolCallCount},
+            prompt_tokens = #{promptTokens},
+            completion_tokens = #{completionTokens},
+            latency_ms = #{latencyMs},
+            fallback_reason = #{fallbackReason},
+            error_code = #{errorCode},
+            finished_at = #{finishedAt}
+        where run_id = #{runId}
+          and status = 'RUNNING'
+    </update>
+
+    <update id="transitionRun">
+        update agent_run
+        set status = #{record.status},
+            current_step = #{record.currentStep},
+            latency_ms = #{record.latencyMs},
+            fallback_reason = #{record.fallbackReason},
+            error_code = #{record.errorCode},
+            finished_at = #{record.finishedAt}
+        where run_id = #{record.runId}
+          and status = #{expectedStatus}
+    </update>
+
+    <update id="markTraditionalFallback">
+        update agent_run
+        set fallback_reason = #{fallbackReason}
+        where run_id = #{runId}
+          and status = 'AWAITING_TURN'
+    </update>
+
+    <update id="addRunTokenUsage">
+        update agent_run
+        set prompt_tokens = prompt_tokens + #{promptTokens},
+            completion_tokens = completion_tokens + #{completionTokens}
+        where run_id = #{runId}
+    </update>
 
     <insert id="insertStep">
         insert into agent_step (
@@ -67,12 +101,12 @@
           #{inputSummary}, #{outputSummary}, #{promptTokens}, #{completionTokens}, #{latencyMs}, #{errorCode}, #{createdAt}
         )
         on duplicate key update
-          created_at = if(values(attempt) &gt; attempt, values(created_at), created_at),
-          attempt = values(attempt),
-          status = values(status), decision_code = values(decision_code),
-          input_summary = values(input_summary), output_summary = values(output_summary),
-          prompt_tokens = values(prompt_tokens), completion_tokens = values(completion_tokens),
-          latency_ms = values(latency_ms), error_code = values(error_code)
+          created_at = if(#{attempt} &gt; attempt, #{createdAt}, created_at),
+          attempt = #{attempt},
+          status = #{status}, decision_code = #{decisionCode},
+          input_summary = #{inputSummary}, output_summary = #{outputSummary},
+          prompt_tokens = #{promptTokens}, completion_tokens = #{completionTokens},
+          latency_ms = #{latencyMs}, error_code = #{errorCode}
     </insert>
 
     <select id="findRun" resultMap="RunMap">

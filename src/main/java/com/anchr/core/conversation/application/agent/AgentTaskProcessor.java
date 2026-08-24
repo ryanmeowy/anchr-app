@@ -661,7 +661,10 @@ public class AgentTaskProcessor {
             run.setErrorCode(error);
             run.setFinishedAt(System.currentTimeMillis());
             run.setLatencyMs(run.getFinishedAt() - run.getStartedAt());
-            traceRepository.saveRun(run);
+            if (!traceRepository.transitionRun(run, AgentRunStatus.WAITING_TASK.name())) {
+                log.warn("Agent task run transition ignored because status changed, taskId={}, runId={}, targetStatus={}",
+                        task.getTaskId(), task.getRunId(), status);
+            }
         });
     }
 
@@ -777,11 +780,10 @@ public class AgentTaskProcessor {
         int safeCompletion = Math.max(0, completionTokens);
         if (safePrompt > 0 || safeCompletion > 0) {
             try {
-                traceRepository.findRun(task.getRunId()).ifPresent(run -> {
-                    run.setPromptTokens(run.getPromptTokens() + safePrompt);
-                    run.setCompletionTokens(run.getCompletionTokens() + safeCompletion);
-                    traceRepository.saveRun(run);
-                });
+                if (!traceRepository.addRunTokenUsage(task.getRunId(), safePrompt, safeCompletion)) {
+                    log.warn("Agent task run token trace skipped because run is missing, taskId={}, runId={}",
+                            task.getTaskId(), task.getRunId());
+                }
             } catch (Exception e) {
                 log.warn("Agent task run token trace failed, taskId={}", task.getTaskId(), e);
             }

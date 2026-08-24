@@ -87,7 +87,7 @@ class AgentTaskProcessorTerminalOrderingTest {
                 snapshotService, eventPublisher);
         order.verify(taskRepository).saveClaimed(task, owner());
         order.verify(conversationRepository).saveTurn(any(ConversationTurn.class));
-        order.verify(traceRepository).saveRun(any(AgentRun.class));
+        order.verify(traceRepository).transitionRun(any(AgentRun.class), eq(AgentRunStatus.WAITING_TASK.name()));
         order.verify(snapshotService).publishTask("run-1", task);
         AnswerIdentity identity = AnswerIdentity.forTask(task);
         order.verify(eventPublisher).progress(identity, "COMPLETED", 100);
@@ -109,7 +109,7 @@ class AgentTaskProcessorTerminalOrderingTest {
         order.verify(eventPublisher).snapshot(identity, "");
         order.verify(taskRepository).saveClaimed(task, owner());
         order.verify(conversationRepository).saveTurn(any(ConversationTurn.class));
-        order.verify(traceRepository).saveRun(any(AgentRun.class));
+        order.verify(traceRepository).transitionRun(any(AgentRun.class), eq(AgentRunStatus.WAITING_TASK.name()));
         order.verify(snapshotService).publishTask("run-1", task);
         order.verify(eventPublisher).progress(identity, "FAILED", 100);
         order.verify(eventPublisher).citations(identity, List.of());
@@ -128,7 +128,7 @@ class AgentTaskProcessorTerminalOrderingTest {
         order.verify(taskRepository).saveClaimed(task, owner());
         order.verify(eventPublisher).progress(identity, "RETRY_WAIT", task.getProgress());
         verify(conversationRepository, never()).saveTurn(any());
-        verify(traceRepository, never()).saveRun(any());
+        verify(traceRepository, never()).transitionRun(any(), any());
         verify(snapshotService, never()).publishTask(any(), any());
         verify(eventPublisher, never()).completed(any());
     }
@@ -143,7 +143,7 @@ class AgentTaskProcessorTerminalOrderingTest {
                 .isInstanceOf(RuntimeException.class);
 
         verify(conversationRepository, never()).saveTurn(any());
-        verify(traceRepository, never()).saveRun(any());
+        verify(traceRepository, never()).transitionRun(any(), any());
         verify(snapshotService, never()).publishTask(any(), any());
         verify(eventPublisher, never()).completed(any());
     }

@@ -1,8 +1,10 @@
 package com.anchr.core.conversation.application;
 
 import com.anchr.core.conversation.application.agent.AgentTaskProcessor;
+import com.anchr.core.conversation.application.agent.AgentRunStatus;
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.domain.model.AgentTask;
+import com.anchr.core.conversation.domain.model.AgentRun;
 import com.anchr.core.conversation.domain.model.ConversationSession;
 import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
@@ -46,6 +48,12 @@ class AgentTaskQueryServiceTest {
         turn.setTurnId("turn-1");
         turn.setSessionId("session-1");
         when(conversations.findTurn("session-1", "turn-1")).thenReturn(Optional.of(turn));
+        AgentRun run = new AgentRun();
+        run.setRunId("run-1");
+        run.setStatus(AgentRunStatus.WAITING_TASK.name());
+        run.setStartedAt(System.currentTimeMillis() - 100);
+        when(traces.findRun("run-1")).thenReturn(Optional.of(run));
+        when(traces.transitionRun(any(), eq(AgentRunStatus.WAITING_TASK.name()))).thenReturn(true);
         when(codec.parseCitations(any())).thenReturn(List.of());
 
         var result = service.cancel("task-1");
@@ -58,6 +66,8 @@ class AgentTaskQueryServiceTest {
         assertThat(turn.getAnswerStatus()).isEqualTo("CANCELLED");
         assertThat(turn.getAnswer()).isEqualTo("任务已取消。");
         verify(conversations).saveTurn(turn);
+        verify(traces).transitionRun(run, AgentRunStatus.WAITING_TASK.name());
+        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.CANCELLED.name());
         verify(processor).recordCancellation(running);
         verify(processor).interrupt("task-1");
         AnswerIdentity identity = AnswerIdentity.forTask(cancelled);
