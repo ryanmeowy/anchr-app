@@ -22,8 +22,6 @@ public interface IngestionTaskRepository {
 
     List<IngestionTask> listRecent(int limit);
 
-    List<IngestionTaskItem> listItems(String taskId);
-
     List<IngestionTaskItem> listFailedItems(String kbId, String taskId);
 
     List<IngestionTaskItem> listRunningItems();

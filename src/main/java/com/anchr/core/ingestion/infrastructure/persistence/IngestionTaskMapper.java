@@ -28,7 +28,8 @@ public interface IngestionTaskMapper {
 
     List<IngestionTaskRecord> listRecentTasks(@Param("limit") int limit);
 
-    List<IngestionTaskItemRecord> listItems(@Param("taskId") String taskId);
+    List<IngestionTaskItemRecord> listItemsByTaskIds(
+            @Param("taskIds") List<String> taskIds);
 
     List<IngestionTaskItemRecord> listFailedItems(@Param("kbId") String kbId,
                                                   @Param("taskId") String taskId);

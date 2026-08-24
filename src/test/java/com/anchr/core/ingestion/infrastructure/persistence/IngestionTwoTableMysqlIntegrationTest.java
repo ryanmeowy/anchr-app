@@ -23,6 +23,7 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -126,11 +127,41 @@ class IngestionTwoTableMysqlIntegrationTest {
         assertThat(stored.getTargetIndexGeneration()).isEqualTo(8L);
     }
 
+    @Test
+    void itemListShouldBatchAcrossTasksAndKeepStablePerTaskOrder() {
+        LocalDateTime now = LocalDateTime.now();
+        insertTask("3001", "2001", "user-a", now);
+        insertItem("4002", "3001", "second.pdf", now);
+        insertItem("4001", "3001", "first.pdf", now.minusSeconds(1));
+        insertTask("3002", "2001", "user-b", now);
+        insertItem("4003", "3002", "third.pdf", now.minusSeconds(2));
+        sqlSession.commit();
+
+        List<IngestionTaskItemRecord> items =
+                mapper.listItemsByTaskIds(List.of("3002", "3001"));
+
+        assertThat(items).extracting(IngestionTaskItemRecord::getId)
+                .containsExactly("4001", "4002", "4003");
+        assertThat(items).extracting(IngestionTaskItemRecord::getTaskId)
+                .containsExactly("3001", "3001", "3002");
+        assertThat(items).allSatisfy(item -> {
+            assertThat(item.getKbId()).isNull();
+            assertThat(item.getTaskCreatedBy()).isNull();
+            assertThat(item.getDedupeStrategy()).isNull();
+        });
+    }
+
     private void insertPendingItem() {
         LocalDateTime now = LocalDateTime.now();
+        insertTask("3001", "2001", "user-a", now);
+        insertItem("4001", "3001", "document.pdf", now);
+        sqlSession.commit();
+    }
+
+    private void insertTask(String taskId, String kbId, String createdBy, LocalDateTime now) {
         IngestionTaskRecord task = new IngestionTaskRecord();
-        task.setId("3001");
-        task.setKbId("2001");
+        task.setId(taskId);
+        task.setKbId(kbId);
         task.setSourceType("UPLOAD");
         task.setDedupeStrategy("SKIP");
         task.setStatus("PENDING");
@@ -138,25 +169,26 @@ class IngestionTwoTableMysqlIntegrationTest {
         task.setSuccessCount(0);
         task.setFailureCount(0);
         task.setRunningCount(0);
-        task.setCreatedBy("user-a");
-        task.setUpdatedBy("user-a");
+        task.setCreatedBy(createdBy);
+        task.setUpdatedBy(createdBy);
         task.setCreatedAt(now);
         task.setUpdatedAt(now);
         mapper.insertTask(task);
+    }
 
+    private void insertItem(String itemId, String taskId, String fileName, LocalDateTime now) {
         IngestionTaskItemRecord item = new IngestionTaskItemRecord();
-        item.setId("4001");
-        item.setTaskId("3001");
+        item.setId(itemId);
+        item.setTaskId(taskId);
         item.setAssetId("5001");
         item.setTargetIndexGeneration(1L);
-        item.setFileName("document.pdf");
+        item.setFileName(fileName);
         item.setStage("UPLOAD");
         item.setStatus("PENDING");
         item.setProgress(0);
         item.setCreatedAt(now);
         item.setUpdatedAt(now);
         mapper.insertItem(item);
-        sqlSession.commit();
     }
 
     private static boolean tableExists(Connection connection, String table) throws Exception {

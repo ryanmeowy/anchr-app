@@ -59,6 +59,14 @@
         iti.created_at, iti.updated_at, iti.finished_at
     </sql>
 
+    <sql id="ItemColumns">
+        iti.id, iti.task_id,
+        iti.asset_id, iti.target_index_generation, iti.file_name, iti.file_hash,
+        iti.stage, iti.status, iti.progress,
+        iti.dedupe_result, iti.duplicate_asset_id, iti.error_code, iti.error_message,
+        iti.created_at, iti.updated_at, iti.finished_at
+    </sql>
+
     <insert id="insertTask" parameterType="com.anchr.core.ingestion.infrastructure.persistence.IngestionTaskRecord">
         insert into ingestion_task (
             id, kb_id, source_type, client_request_id, request_hash, dedupe_strategy,
@@ -112,12 +120,14 @@
         limit #{limit}
     </select>
 
-    <select id="listItems" resultMap="IngestionTaskItemRecordMap">
-        select <include refid="JoinedItemColumns"/>
+    <select id="listItemsByTaskIds" resultMap="IngestionTaskItemRecordMap">
+        select <include refid="ItemColumns"/>
         from ingestion_task_item iti
-        inner join ingestion_task it on it.id = iti.task_id
-        where iti.task_id = #{taskId}
-        order by iti.created_at asc, iti.id asc
+        where iti.task_id in
+        <foreach collection="taskIds" item="taskId" open="(" separator="," close=")">
+            #{taskId}
+        </foreach>
+        order by iti.task_id asc, iti.created_at asc, iti.id asc
     </select>
 
     <select id="listFailedItems" resultMap="IngestionTaskItemRecordMap">
