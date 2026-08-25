@@ -342,7 +342,7 @@ Tool Call 去重规则：
 
 ```mermaid
 flowchart LR
-    A["查询"] --> B["Query Rewrite"]
+    A["search_knowledge 查询"] --> B["Query Rewrite"]
     B --> C["文本 BM25"]
     B --> D["文本向量"]
     B --> E["文档图片向量"]
@@ -350,7 +350,7 @@ flowchart LR
     D --> F
     E --> F
     F --> G["Active generation 过滤"]
-    G --> H["多样化与 Rerank"]
+    G --> H["按范围执行多样化与 Rerank"]
     H --> I["按 Asset 聚合"]
 ```
 
@@ -368,12 +368,13 @@ flowchart LR
 
 1. 通过 `SearchKnowledgeAcl` 解析当前可见 KB，并应用 KB/Asset/类型过滤。
 2. 为查询生成一次 Embedding。
-3. 并列执行全文/关键词召回、文本向量召回、文档图片向量召回。
+3. 依次执行全文/关键词召回、文本向量召回、文档图片向量召回；当前实现没有并行调度这三次调用。
 4. 以 `segmentId` 做 RRF 融合。
 5. 查询每个资产当前激活的 `indexGeneration`，丢弃 generation 不匹配的候选。
-6. 做候选多样化。
+6. 多资产或未限定单一资产时，先按 `assetId + segmentType` 做候选多样化，每组最多保留 3 条。
 7. 对有竞争力的窗口执行 Rerank。
-8. 按 Asset 聚合 Top Chunks。
+8. 显式限定单一资产时，为避免在 Rerank 前丢掉仍可能被恢复的同文档片段，延后到 Rerank 之后再做多样化。
+9. 按 Asset 聚合 Top Chunks。
 
 RRF：
 
@@ -407,7 +408,12 @@ Evidence Finalizer 使用当前 Run 已注册的证据生成受限答案，不�
 4. 在剩余时间允许时最多尝试 2 次，每次仍受 Agent 单次模型时限约束。
 5. 成功后继续走与 `deliver_answer` 相同的引用校验。
 
-严格 JSON 是生成协议，不是旧输出的硬切断边界。为兼容已有模型行为，解析器在收到非 JSON 文本时仍保留正文；若正文含合法 `{{segment:...}}` Marker，则推断为 `KNOWLEDGE` 并继续走同一 Evidence 校验，不能因协议重构丢失已有引用语义。没有 Marker 且不能确定 Answer Type 的文本仍按无效 Finalizer 输出处理。
+严格 JSON 是生成协议。JSON 缺少 `answerType`、但正文含合法
+`{{segment:...}}` Marker 时，解析器可以推断为 `KNOWLEDGE`，但仍必须提供与 Marker
+一致的 `citedSegmentIds` 才能通过 Evidence 校验。非 JSON 文本也会保留正文并尝试推断
+类型；由于它没有独立的 `citedSegmentIds` 字段，当前会被校验器以 `INVALID_CITATION`
+拒绝，并在预算和次数允许时触发下一次 Finalizer 尝试，不会直接作为合法答案接受。
+没有 Marker 且不能确定 Answer Type 的文本同样按无效 Finalizer 输出处理。
 
 Finalizer 不可用或两次调用均失败时：
 
@@ -446,10 +452,10 @@ KNOWLEDGE 依次校验当前 Run 是否有证据、引用 ID 是否属于本轮�
 结论内容 {{segment:真实SegmentID}}
 ```
 
-渲染步骤：
+校验与渲染步骤：
 
-1. 删除模型自行写入的 `[数字]` 引用。
-2. 只识别当前 Evidence Registry 中的 Marker。
+1. 模型自行写入 `[数字]` 或 `[数字-数字]` 时，校验器以 `UNTRUSTED_VISIBLE_CITATION` 拒绝该答案；首次失败返回模型修复，不会直接删除后接受。
+2. 渲染器只识别当前 Evidence Registry 中的 Marker。
 3. 按正文首次出现顺序分配文档和 Segment 索引。
 4. 渲染成 `[1-1]`、`[1-2]`、`[2-1]`。
 5. 生成包含 `kbId`、`assetId`、`segmentId`、页码、锚点和命中原因的 Citation。
@@ -500,7 +506,7 @@ QUEUED -> READING -> MAP_SUMMARY -> REDUCE_SUMMARY -> FINALIZING -> COMPLETED
 2. `MAP_SUMMARY`：按约 12000 字符分批生成局部总结，并保留 Marker。
 3. `REDUCE_SUMMARY`：分层合并，直到形成单一草稿。
 4. `FINALIZING`：执行一次最终模型压缩，并将安全的可见正文增量发送到任务 SSE。
-5. 后端再用确定性 `compactCitationMarkers` 收敛引用：最多 10 个不同引用、12 个 Marker、每段最多 3 个 Marker。
+5. 后端再用 `AgentCitationPolicy.compactMarkers` 确定性收敛引用：最多 10 个不同引用、12 个 Marker、每段最多 3 个 Marker。
 
 任务用 Lease 和 Owner 保证单任务单执行者；Lease 过期的 RUNNING 任务可以重新 Claim。可重试失败的延迟为 `30 秒 × 当前 attempt`，上限 120 秒。
 
@@ -508,11 +514,11 @@ QUEUED -> READING -> MAP_SUMMARY -> REDUCE_SUMMARY -> FINALIZING -> COMPLETED
 
 - `task`：状态、进度和阶段。
 - `delta`：仅 Final 阶段的安全可见增量；Map/Reduce 中间结果不会发送。
-- `answer_reset`：持久化后的 canonical 完整答案，用于校准 provisional 内容。
+- `answer_reset`：任务开始、重试或失败时可用空内容清理旧 provisional 输出；成功时在 Task 与 Turn 持久化后发送 canonical 完整答案。
 - `citations`：最终 Citation 列表。
 - `done`：任务结束。
 
-Final 模型使用不含 Segment ID 的临时引用 token；增量渲染器缓存不完整 token 和 Markdown fence，转换为可见引用后才发送。完整答案通过引用范围和密度校验、事务保存 Task 与 Turn 后，再按 `answer_reset → citations → done` 完成。
+Final 模型使用不含 Segment ID 的临时引用 token；增量渲染器缓存不完整 token 和 Markdown fence，转换为可见引用后才发送。完整答案经过引用范围校验和确定性密度收敛；若收敛后密度检查仍异常，当前实现记录警告但不单独中止任务。Task 与 Turn 事务保存成功后，再按 `answer_reset → citations → done` 完成。
 
 ## 11. 持久化与状态
 
@@ -563,6 +569,11 @@ FALLBACK
 ```
 
 API 展示时，`DEGRADED` 映射为 `AGENT_DEGRADED`，`FALLBACK` 映射为 `AGENT_FALLBACK`。
+
+Run 终态写入使用带预期状态的条件更新，而不是无条件覆盖：同步 Workflow 只能从
+`RUNNING` 提交结果，Turn 保存后的 Finalizer 只能从 `AWAITING_TURN` 提交终态，
+异步 Task 完成、失败或取消只能从 `WAITING_TASK` 提交终态。迟到的完成、失败或取消
+不能覆盖已经落库的其他终态。
 
 ## 12. SSE 与恢复
 
@@ -628,10 +639,10 @@ SSE 断开或 120 秒传输超时时：
 | 再次最终答案校验失败 | 本地安全无证据回答 | `NO_EVIDENCE/COMPLETED` |
 | 预算耗尽且已有证据 | Evidence Finalizer | 失败时 `MODEL_FALLBACK/DEGRADED` |
 | 预算耗尽且无证据 | 本地澄清 | `NO_EVIDENCE/DEGRADED` |
-| Agent 初始化失败 | 封装为 `AgentWorkflowException`；此时尚无 Agent Trace | 配置允许时走传统路径，最终 Run 为 `FALLBACK` |
+| Agent 初始化失败 | 封装为 `AgentWorkflowException`；此时尚无 Agent Trace | 配置允许时走传统路径，Turn/响应的执行模式为 `AGENT_FALLBACK`；由于没有 `agent_run` 记录，不存在可更新为 `FALLBACK` 的 Run |
 | Answer Verifier 异常 | 转成 `AnswerVerificationFailed`，状态机生成 `FAILED` Terminal | Workflow 抛 `AgentWorkflowException`；配置允许时走传统路径 |
 | 已建模的 Model 或 Verify 异常 | Effect 转为失败 Event，状态机生成 `FAILED` Terminal 并保留 cause | Workflow 抛 `AgentWorkflowException`；配置允许时走传统路径 |
-| 状态循环本身的未预期异常 | Workflow 统一封装为 `AgentWorkflowException`，不让裸异常逃逸 | 配置允许时走传统路径，最终 Run 为 `FALLBACK` |
+| 状态循环本身的未预期异常 | Workflow 统一封装为 `AgentWorkflowException`，不让裸异常逃逸 | 配置允许时走传统路径；已有 Trace 的 Run 在传统答案成功保存后为 `FALLBACK`，Trace 尚未创建时只有 Turn/响应记录 `AGENT_FALLBACK` 执行模式 |
 | Finalizer 模型异常 | `FinalizerModelFailed` 携带 cause；预算和次数允许时重试 | 超限后 `MODEL_FALLBACK/DEGRADED` |
 | Presentation 异常或输出非法 | 记录失败 cause，丢弃非法候选并使用已验证草稿 | Run 仍为 `COMPLETED`，客户端与落库答案一致 |
 | 传统 RAG 无合格证据 | 固定无证据模板 | `NO_EVIDENCE` |
@@ -675,9 +686,12 @@ Query Rewrite
 
 Observer 同时恢复运行期操作日志：Run 开始/结束、模型决策完成、工具开始/完成/失败、duplicate 拒绝、`read_document` 限制、协议错误和答案校验拒绝都会留下带 `runId`、step/attempt 及必要摘要的日志。Finalizer 和 Presentation 的异常通过 `EffectFailure` Signal 传递，日志记录 phase、异常消息和完整 cause；状态机本身不直接写日志。Observer、Trace、Metrics 或 Progress 发送失败仍按 best-effort 处理，不改变 State 或 Terminal。
 
-异常指标保持重构前语义：`agent.run.result` 只记录正常产生的业务终态，不为抛出 `AgentWorkflowException` 的 `FAILED` Terminal 增加 `status=FAILED` 序列；异常 Run 仍由 `agent.run.count{status=FAILED}` 统计。模型调用失败继续保留原有 `MODEL_DECISION` 失败 Trace 和 `decision_failed` Progress；`AgentToolResult.failure` 继续保留原有工具失败 Trace/Progress。只有 Tool Effect 边界自身抛出的异常直接结束 Run，不额外制造 FAILED Step，因此不会新增 `agent.step.latency{step=FAILED}` 或空 usage 的 `agent.model.tokens` 样本。
+`agent.run.result` 只记录正常产生的非 `FAILED` 业务终态，不为抛出 `AgentWorkflowException` 的 `FAILED` Terminal 增加 `status=FAILED` 序列。关闭传统降级、Recorder 实际提交 `FAILED`，或者 Turn 保存失败由 Finalizer 提交 `FAILED` 时，使用 `agent.run.count{status=FAILED}` 统计；默认开启传统降级时，失败 Workflow 先把已有 Run 转为 `AWAITING_TURN`，传统答案保存后最终统计为 `agent.run.count{status=FALLBACK}`。模型调用失败继续保留原有 `MODEL_DECISION` 失败 Trace 和 `decision_failed` Progress；`AgentToolResult.failure` 继续保留原有工具失败 Trace/Progress。只有 Tool Effect 边界自身抛出的异常直接结束 Run，不额外制造 FAILED Step，因此不会新增 `agent.step.latency{step=FAILED}` 或空 usage 的 `agent.model.tokens` 样本。
 
-异步任务阶段使用固定 Trace Order `101–106`：
+异步任务阶段不再使用固定 Trace Order `101–106`。Processor 会先锁定对应 Run，
+在事务内以当前最大 `stepOrder + 1` 为新阶段分配顺序；同一个 `taskId + attempt + stage`
+更新已有 Step，不同重试 attempt 会产生独立 Step。已有旧数据中的固定 `101–106`
+仍可被识别并原位更新。阶段语义为：
 
 ```text
 READING -> MAP_SUMMARY -> REDUCE_SUMMARY -> FINALIZING
@@ -710,18 +724,25 @@ Trace 只保存响应形态和摘要，不保存完整模型回答或思维链�
 2. 模型只能调用注册工具，不能扩大 KB/Asset 权限。
 3. 文档工具必须通过服务端范围校验，不能相信模型提供的 ID。
 4. KNOWLEDGE 只能引用当前 Run 的 Evidence Registry。
-5. 后端删除伪造的数字引用，只渲染合法 Segment Marker。
+5. 后端拒绝模型伪造的数字引用，只把合法 Segment Marker 渲染为可见引用。
 6. 异步任务使用 Lease、Owner 和条件更新防止重复认领与重复写入；这是任务并发保护，不代表整个应用支持多实例部署。
-7. 保存 Turn 前锁定未删除会话，避免会话删除与回答落库竞态。
-8. 删除会话时取消活动 Run/Task，并删除相关 Trace 与 Task 记录。
-9. Redis 快照不参与权限或业务终态判断，MySQL 仍是权威来源。
+7. Agent Run 创建前和 Turn 保存前都会锁定未删除会话，避免会话删除与 Run/回答落库竞态。
+8. 异步阶段分配 Trace Order 时锁定 Run；Run 不存在时跳过写入，避免新增孤立 Step。
+9. Run 与 Task 的终态更新校验预期源状态，避免并发完成、取消和迟到写入互相覆盖。
+10. 删除会话时取消活动 Run/Task，并删除相关 Trace 与 Task 记录。
+11. Redis 快照不参与权限或业务终态判断，MySQL 仍是权威来源。
 
 ## 16. 关键配置
 
-Agent 的开关、工具模式、预算、超时、异步重试和总结限制，统一使用
+Agent 的开关、工具模式、预算、超时、异步重试和大部分总结限制使用
 Settings 中的 `AGENT` 运行配置。Conversation 的传统证据降级使用
-`CONVERSATION.legacyEvidenceFallbackEnabled`。配置在一次 Run 或 Task
-开始时读取并冻结，后续修改只影响下一次操作。
+`CONVERSATION.legacyEvidenceFallbackEnabled`。同步 Run 在初始化时读取并冻结配置；
+异步 Task 每次被 Claim 并开始一个执行 attempt 时重新读取配置，因此同一 Task 的后续
+重试可能使用更新后的配置，但单个 attempt 内不会变化。
+
+文档总结数量目前仍由代码常量固定为 1–3 份。Settings Catalog 虽然包含
+`AGENT.summaryMaxDocuments`，但 `AgentRuntimeSettings`、`SummarizeDocumentsTool` 和
+`AgentTaskProcessor` 当前都使用固定值 3，因此该配置项尚未实际控制运行行为。
 
 异步任务 Lease 固定为 2 分钟，Claim 轮询间隔固定为 5 秒，不接受外部配置。
 
