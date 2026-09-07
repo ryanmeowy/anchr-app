@@ -118,6 +118,8 @@ public class ConversationMessageStreamAdapter {
             } catch (BusinessException exception) {
                 String errorCode = exception.getError() == null
                         ? ApiError.INTERNAL_ERROR.name() : exception.getError().name();
+                logFailure(identityRef.get(), request, errorCode,
+                        exception.getError() == null || exception.getCode() >= 500, exception);
                 sendError(
                         emitter,
                         errorCode,
@@ -129,6 +131,7 @@ public class ConversationMessageStreamAdapter {
                     log.debug("SSE client disconnected, sessionId={}, runId={}",
                             sessionId, activeRunId.get());
                 } else {
+                    logFailure(identityRef.get(), request, ApiError.INTERNAL_ERROR.name(), true, exception);
                     sendError(
                             emitter,
                             ApiError.INTERNAL_ERROR.name(),
@@ -141,6 +144,27 @@ public class ConversationMessageStreamAdapter {
             }
         });
         return emitter;
+    }
+
+    private void logFailure(
+            AnswerIdentity identity,
+            ConversationMessageRequestDTO request,
+            String errorCode,
+            boolean serverError,
+            Exception exception
+    ) {
+        // Exceptions handled in the stream worker never reach GlobalExceptionHandler.
+        String message = "Conversation stream failed, sessionId={}, turnId={}, runId={}, "
+                + "channelId={}, agentEnabled={}, answerMode={}, errorCode={}";
+        if (serverError) {
+            log.error(message, identity.sessionId(), identity.answerId(), identity.runId(),
+                    identity.channelId(), Boolean.TRUE.equals(request.getAgentEnabled()),
+                    request.getAnswerMode(), errorCode, exception);
+        } else {
+            log.warn(message, identity.sessionId(), identity.answerId(), identity.runId(),
+                    identity.channelId(), Boolean.TRUE.equals(request.getAgentEnabled()),
+                    request.getAnswerMode(), errorCode);
+        }
     }
 
     private ConversationProgressListener progressListener(
