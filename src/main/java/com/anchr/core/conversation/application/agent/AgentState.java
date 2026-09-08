@@ -234,6 +234,7 @@ public record AgentState(
                 .segmentId(source.getSegmentId()).kbId(source.getKbId()).assetId(source.getAssetId())
                 .assetType(source.getAssetType()).resultType(source.getResultType())
                 .segmentType(source.getSegmentType()).title(source.getTitle()).sourceRef(source.getSourceRef())
+                .fileName(source.getFileName())
                 .content(source.getContent()).snippet(source.getSnippet()).score(source.getScore())
                 .pageNo(source.getPageNo()).anchor(copyAnchor(source.getAnchor()))
                 .explain(copyExplain(source.getExplain())).build();

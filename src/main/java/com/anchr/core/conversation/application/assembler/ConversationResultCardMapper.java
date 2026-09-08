@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.application.assembler;
 
+import com.anchr.core.common.util.CitationFileName;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultAnchorDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
@@ -129,19 +130,8 @@ public class ConversationResultCardMapper {
     }
 
     private String resolveFileName(ConversationRetrievalCandidate candidate) {
-        if ("DOCUMENT_IMAGE".equalsIgnoreCase(candidate.getSegmentType())
-                && StringUtils.hasText(candidate.getTitle())) {
-            return candidate.getTitle().trim();
-        }
-        if (!StringUtils.hasText(candidate.getSourceRef())) {
-            return null;
-        }
-        String sourceRef = candidate.getSourceRef().trim();
-        int slashIndex = sourceRef.lastIndexOf('/');
-        if (slashIndex < 0 || slashIndex == sourceRef.length() - 1) {
-            return sourceRef;
-        }
-        return sourceRef.substring(slashIndex + 1);
+        return CitationFileName.resolve(candidate.getFileName(), candidate.getSourceRef(),
+                candidate.getSegmentType(), candidate.getTitle());
     }
 
     private String resolveTitle(ConversationRetrievalCandidate candidate) {

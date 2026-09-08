@@ -17,6 +17,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SearchAnswerServiceImplTest {
 
     @Test
+    void searchCitationPrefersAssetNameOverStorageBasename() {
+        var knowledge = org.mockito.Mockito.mock(com.anchr.core.search.application.acl.SearchKnowledgeAcl.class);
+        org.mockito.Mockito.when(knowledge.findActiveDocument("kb-1", "asset-1"))
+                .thenReturn(java.util.Optional.of(new com.anchr.core.kb.application.api.model.DocumentSummary(
+                        "asset-1", "kb-1", "guide.pdf", "Guide", "PDF", "application/pdf",
+                        "uploads/anchr-eval-uuid-guide.pdf", null, 1L, 2)));
+        var raw = new RetrievalHit("TEXT_CHUNK", "Section", "body", null, "DOCUMENT",
+                "evidence", 1, 0.9D, null, null, null, null, null, List.of(),
+                "seg-1", "kb-1", "asset-1", "uploads/anchr-eval-uuid-guide.pdf", null, null);
+        var service = new SearchAnswerServiceImpl(request -> Map.of(), knowledge);
+        var answer = service.answer(new SearchAnswerRequest("question", null), List.of(raw, raw));
+        assertThat(answer.citations().getFirst().fileName()).isEqualTo("guide.pdf");
+        org.mockito.Mockito.verify(knowledge).findActiveDocument("kb-1", "asset-1");
+        org.mockito.Mockito.when(knowledge.findActiveDocument("kb-1", "asset-1"))
+                .thenReturn(java.util.Optional.empty());
+        assertThat(service.answer(new SearchAnswerRequest("question", null), List.of(raw))
+                .citations().getFirst().fileName()).isEqualTo("anchr-eval-uuid-guide.pdf");
+    }
+
+    @Test
     void answerShouldKeepVisualResultButNeverUseItAsTextEvidence() {
         RetrievalHit visualOnly = hit("visual-1", SegmentType.IMAGE_VISUAL.name(), "asset-1",
                 "diagram.png", "diagram.png", null, null, List.of());
@@ -82,7 +102,7 @@ class SearchAnswerServiceImplTest {
                 "seg-1", "第一处说明核心机制。",
                 "seg-2", "第二处补充应用场景。"
         );
-        var answer = new SearchAnswerServiceImpl(reasonService).answer(query, List.of(result));
+        var answer = new SearchAnswerServiceImpl(reasonService, org.mockito.Mockito.mock(com.anchr.core.search.application.acl.SearchKnowledgeAcl.class)).answer(query, List.of(result));
 
         assertThat(answer.citations()).singleElement().satisfies(citation -> {
             assertThat(citation.assetId()).isEqualTo("asset-1");
@@ -106,7 +126,7 @@ class SearchAnswerServiceImplTest {
 
     private SearchAnswerServiceImpl service() {
         RetrievalCitationReasonApi reasonService = request -> Map.of();
-        return new SearchAnswerServiceImpl(reasonService);
+        return new SearchAnswerServiceImpl(reasonService, org.mockito.Mockito.mock(com.anchr.core.search.application.acl.SearchKnowledgeAcl.class));
     }
 
     private RetrievalTopChunk chunk(String id, String type, String snippet, Double score,

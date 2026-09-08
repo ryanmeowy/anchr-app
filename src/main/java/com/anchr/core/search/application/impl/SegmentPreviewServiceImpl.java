@@ -1,6 +1,7 @@
 package com.anchr.core.search.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.util.CitationFileName;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.kb.application.api.model.DocumentSummary;
@@ -44,8 +45,8 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         String accessTokenHash = currentAccessTokenHash();
         Segment segment = kbSegmentRepository.findBySegmentId(segmentId.trim())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
-        requireActiveSegment(segment);
-        PreviewSegmentDTO preview = toPreview(segment, accessTokenHash, request);
+        DocumentSummary asset = requireActiveSegment(segment);
+        PreviewSegmentDTO preview = toPreview(segment, asset, accessTokenHash, request);
         if (!StringUtils.hasText(request.getRecordId()) && request.getCitationInfo() != null) {
             recordCitationOpened(preview, request);
         }
@@ -71,16 +72,17 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return getSegmentPreview(segmentId, request);
     }
 
-    private void requireActiveSegment(Segment segment) {
+    private DocumentSummary requireActiveSegment(Segment segment) {
         DocumentSummary asset = searchKnowledgeAcl
                 .findActiveDocument(segment.getKbId(), segment.getAssetId())
                 .orElseThrow(() -> new BusinessException(ApiError.SEGMENT_NOT_FOUND));
         if (segment.getIndexGeneration() != asset.activeIndexGeneration()) {
             throw new BusinessException(ApiError.SEGMENT_NOT_FOUND);
         }
+        return asset;
     }
 
-    private PreviewSegmentDTO toPreview(Segment segment, String accessTokenHash, PreviewRequestDTO request) {
+    private PreviewSegmentDTO toPreview(Segment segment, DocumentSummary asset, String accessTokenHash, PreviewRequestDTO request) {
         KnowledgeBaseSummary knowledgeBase = searchKnowledgeAcl.findActiveKnowledgeBase(segment.getKbId())
                 .orElseThrow(() -> new BusinessException(ApiError.KNOWLEDGE_BASE_NOT_FOUND));
         DocumentSummary parentAsset = resolveParentAsset(segment);
@@ -97,7 +99,7 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
                 .kbName(knowledgeBase.name())
                 .assetType(segment.getAssetType())
                 .segmentType(toCode(segment.getSegmentType()))
-                .fileName(resolveFileName(segment, parentAsset))
+                .fileName(resolveFileName(segment, asset))
                 .previewType(segment.getAssetType())
                 .previewUrl(previewAccess.url())
                 .expiresAt(previewAccess.expiresAt())
@@ -311,21 +313,10 @@ public class SegmentPreviewServiceImpl implements SegmentPreviewService {
         return segment.getTitle();
     }
 
-    private String resolveFileName(Segment segment, DocumentSummary parentAsset) {
-        if (parentAsset != null && StringUtils.hasText(parentAsset.fileName())) {
-            return parentAsset.fileName().trim();
-        }
-        if (StringUtils.hasText(segment.getSourceRef())) {
-            String sourceRef = segment.getSourceRef().trim();
-            int queryIndex = sourceRef.indexOf('?');
-            String path = queryIndex >= 0 ? sourceRef.substring(0, queryIndex) : sourceRef;
-            int slashIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-            if (slashIndex < 0 || slashIndex == path.length() - 1) {
-                return path;
-            }
-            return path.substring(slashIndex + 1);
-        }
-        return StringUtils.hasText(segment.getTitle()) ? segment.getTitle().trim() : null;
+    private String resolveFileName(Segment segment, DocumentSummary asset) {
+        String name = CitationFileName.resolve(asset.fileName(), segment.getSourceRef(), null, null);
+        return StringUtils.hasText(name) ? name
+                : StringUtils.hasText(segment.getTitle()) ? segment.getTitle().trim() : null;
     }
 
     private String toCode(Enum<?> value) {

@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.application.assembler;
 
+import com.anchr.core.common.util.CitationFileName;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import org.springframework.stereotype.Component;
@@ -22,7 +23,6 @@ public class ConversationCitationMapper {
     private static final String SEGMENT_IMAGE_OCR = "IMAGE_OCR_BLOCK";
     private static final String SEGMENT_IMAGE_CAPTION = "IMAGE_CAPTION";
     private static final String SEGMENT_TEXT = "TEXT_CHUNK";
-    private static final String SEGMENT_DOCUMENT_IMAGE = "DOCUMENT_IMAGE";
 
     public List<ConversationCitation> mapFromSearchResults(List<ConversationRetrievalCandidate> results) {
         if (results == null || results.isEmpty()) {
@@ -91,22 +91,8 @@ public class ConversationCitationMapper {
     }
 
     private String resolveFileName(ConversationRetrievalCandidate result) {
-        if (SEGMENT_DOCUMENT_IMAGE.equals(safeUpper(result.getSegmentType()))
-                && StringUtils.hasText(result.getTitle())) {
-            return result.getTitle().trim();
-        }
-        String sourceRef = result.getSourceRef();
-        if (!StringUtils.hasText(sourceRef)) {
-            return null;
-        }
-        String trimmed = sourceRef.trim();
-        int queryIndex = trimmed.indexOf('?');
-        String path = queryIndex >= 0 ? trimmed.substring(0, queryIndex) : trimmed;
-        int slashIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-        if (slashIndex < 0 || slashIndex == path.length() - 1) {
-            return path;
-        }
-        return path.substring(slashIndex + 1);
+        return CitationFileName.resolve(result.getFileName(), result.getSourceRef(),
+                result.getSegmentType(), result.getTitle());
     }
 
     private ConversationCitation.CitationWhy buildCitationWhy(ConversationRetrievalCandidate candidate) {

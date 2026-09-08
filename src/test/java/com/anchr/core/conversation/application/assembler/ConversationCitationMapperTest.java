@@ -12,6 +12,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ConversationCitationMapperTest {
 
     @Test
+    void citationsAndCardsUseCanonicalNameAndPreserveStorageReference() {
+        var candidate = ConversationRetrievalCandidate.builder()
+                .assetId("asset-1").segmentId("seg-1")
+                .fileName("anchr-deployment-v1.pdf")
+                .sourceRef("uploads/anchr-eval-06a6cb00-anchr-deployment-v1.pdf")
+                .segmentType("DOCUMENT_IMAGE").title("embedded-image.png").build();
+        var citations = new ConversationCitationMapper().mapFromSearchResults(List.of(candidate));
+        var cards = new ConversationResultCardMapper().map(List.of(candidate));
+        assertThat(citations.getFirst().getFileName()).isEqualTo("anchr-deployment-v1.pdf");
+        assertThat(cards.getFirst().getFileName()).isEqualTo("anchr-deployment-v1.pdf");
+        assertThat(candidate.getSourceRef()).isEqualTo("uploads/anchr-eval-06a6cb00-anchr-deployment-v1.pdf");
+        var codec = new ConversationTurnCodec(new ObjectMapper());
+        assertThat(codec.parseCitations(codec.serializeCitations(citations)).getFirst().getFileName())
+                .isEqualTo("anchr-deployment-v1.pdf");
+    }
+
+    @Test
+    void legacyCandidatesUseTheSamePathFallbackInCitationsAndCards() {
+        var candidate = ConversationRetrievalCandidate.builder().assetId("asset-1").segmentId("seg-1")
+                .fileName("  ").sourceRef("https://oss.example/docs/legacy.pdf?signature=secret#page=2").build();
+        assertThat(new ConversationCitationMapper().mapFromSearchResults(List.of(candidate)).getFirst().getFileName())
+                .isEqualTo("legacy.pdf");
+        assertThat(new ConversationResultCardMapper().map(List.of(candidate)).getFirst().getFileName())
+                .isEqualTo("legacy.pdf");
+    }
+
+
+    @Test
     void mapAndCodec_shouldCarryDocumentChunkOrder() {
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg-1")
