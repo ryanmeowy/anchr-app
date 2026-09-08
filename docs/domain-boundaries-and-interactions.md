@@ -116,7 +116,7 @@ Segment 是 Asset generation 的检索投影。业务可见性由 Knowledge Cont
 **职责**：
 
 - 管理会话和 Turn 生命周期。
-- 执行 CHAT、OTHER、KB_QUERY 等意图路由。
+- 执行 CHAT / KB_QUERY 意图路由，明确普通交流才走 CHAT，其余默认检索；保留历史 OTHER 读取兼容。
 - 编排传统 RAG：专用上下文改写与关键词提取、检索、证据筛选、回答生成及引用校验、引用和结果卡片。
 - 编排 Agent 工具循环、运行轨迹、异步任务、恢复、取消和 SSE 推送。
 - 保存回答时实际使用的证据快照。
@@ -342,7 +342,7 @@ REST Search 或 Ask
 
 1. 加载或创建会话，并通过 `ConversationKnowledgeAcl` 解析用户可见知识范围。
 2. 生成 Turn/Run 标识，执行意图路由。
-3. CHAT 调用普通回答生成，OTHER 返回固定引导文案；KB_QUERY 由 `TraditionalRagRewriteService` 一次输出完整问题与关键词数组，通过 `ConversationRetrievalAcl` 检索一次（内部执行 RRF/Rerank）。
+3. 明确 CHAT 调用普通回答生成，其余有效请求及分类异常默认 KB_QUERY；KB_QUERY 由 `TraditionalRagRewriteService` 一次输出完整问题与关键词数组，通过 `ConversationRetrievalAcl` 检索一次（内部执行 RRF/Rerank）。
 4. 将候选转换为结果卡片和可引用证据，最多调用一次答案模型，对照完整问题回答；部分缺证明确说明，全部无证据拒答，后端校验引用。
 5. 只保留回答实际使用且仍有效的引用，并通过 Retrieval 生成引用理由。
 6. 在事务中保存 Turn；成功后 best-effort 记录 QUESTION 活动。

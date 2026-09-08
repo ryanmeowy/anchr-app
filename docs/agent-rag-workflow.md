@@ -19,7 +19,7 @@ flowchart LR
 关键约束：
 
 - 模型决定工具调用；权限、预算、证据、引用和终态由后端校验。
-- 传统流程先路由 `CHAT`、`OTHER` 和 `KB_QUERY`，仅 `KB_QUERY` 执行 RAG。
+- 传统流程只产生 `CHAT` 和 `KB_QUERY`：明确普通交流才跳过检索，其余有效请求默认进入 RAG。
 - Agent 只能引用当前 Run 注册的 Segment。
 - Elasticsearch 可同时保留多个 generation，查询只接受资产的 active generation。
 - SSE 断开不取消执行；Turn 仍会落库，客户端通过 Run、Task 或消息接口恢复状态。
@@ -93,8 +93,13 @@ request.agentEnabled == true
 非 Agent 路径先执行 Intent Router：
 
 - `CHAT`：普通聊天生成，不执行知识检索。
-- `OTHER`：返回能力范围澄清。
-- `KB_QUERY`：进入传统 RAG Pipeline。
+- `KB_QUERY`：其余有效请求默认进入传统 RAG Pipeline，包括不确定、缺少任务对象以及分类失败的情况。
+
+独立问候、感谢、告别的精确规则命中 `CHAT`；混合知识任务的问候、短句和追问交给模型结合最近对话判断。
+模型只能返回 `CHAT|KB_QUERY`，不得在检索前推断知识库无资料。模型 `CHAT` 的置信度低于 0.8 时按不确定处理，回退 `KB_QUERY`；能力介绍等明确普通交流可返回高置信度 `CHAT`。
+超时、空输出、非法 JSON、未知分类、缺失置信度或返回旧值 `OTHER` 均回退 `KB_QUERY`，记录 `source=FALLBACK`、`fallback=true` 和原因。关闭意图路由时仍直接进入 `KB_QUERY`。
+`OTHER` 枚举保留用于读取历史记录，新路由不再产生该值；编排器收到旧式 `OTHER` 结果也会转换为 `KB_QUERY` 后执行和保存。接口对空输入、非法参数和权限的校验保持不变。
+路由完成日志 `Conversation intent routing completed` 记录 sessionId、type、source、fallback、confidence 和 reason。默认检索可能增加模糊请求的耗时，不代表系统能执行任意任务；答案只依据证据，缺少对象时应请求补充，不能猜测或假装执行外部操作。
 
 Agent 路径不执行 Intent Router。Agent 出现未预期异常且
 `AGENT.fallbackToTraditional=true` 时，编排器重新路由并执行传统流程，执行模式记为 `AGENT_FALLBACK`。
@@ -685,8 +690,8 @@ TraditionalRagRewriteService（一次模型调用，结合历史补全完整问�
 rewrite 模型失败、完整问题不合法、关键词不是数组或关键词项越界时，完整问题和 query 回退为用户原文，关键词为空；不重复调用模型或 search。
 
 兼容边界：`ConversationRetrievalOrchestrator` 增加关键词重载，`ConversationRetrievalAcl` 将关键词传入 `RetrievalHitQuery`；后者新增可选关键词列表并保留旧构造方式，旧调用默认空列表。
-`RetrievalQueryServiceImpl` 的 Hit 查询入口将关键词传到已有的 `searchInternal`，不改变其匹配逻辑。普通 Top-N 搜索继续使用原有关键词入口；Agent 继续使用无关键词重载，共用 rewrite 和意图分类均不改变。
-Agent 异常后的 `KB_QUERY` 回退复用此传统流程，`CHAT` 与 `OTHER` 仍不进入 RAG。
+`RetrievalQueryServiceImpl` 的 Hit 查询入口将关键词传到已有的 `searchInternal`，不改变其匹配逻辑。普通 Top-N 搜索继续使用原有关键词入口；Agent 继续使用无关键词重载，共用 rewrite 不改变；意图路由遵循第 3 节的二分类默认检索规则。
+Agent 异常后的 `KB_QUERY` 回退复用此传统流程，只有 `CHAT` 跳过 RAG。
 
 回答模式：
 

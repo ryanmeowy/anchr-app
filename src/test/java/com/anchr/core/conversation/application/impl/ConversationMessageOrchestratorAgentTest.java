@@ -65,7 +65,7 @@ class ConversationMessageOrchestratorAgentTest {
     void agentFallback_shouldPreserveTraditionalGenerationFailureStatus() {
         ConversationIntentRouter router = mock(ConversationIntentRouter.class);
         when(router.route("session", "RAG 是什么")).thenReturn(new ConversationIntentResult(
-                ConversationIntentType.KB_QUERY, 1, "model", ConversationIntentSource.MODEL, false));
+                ConversationIntentType.OTHER, 1, "legacy model", ConversationIntentSource.MODEL, false));
         ChatResponseService chat = mock(ChatResponseService.class);
         ConversationMessagePipeline pipeline = mock(ConversationMessagePipeline.class);
         AgentWorkflow workflow = mock(AgentWorkflow.class);
@@ -96,6 +96,8 @@ class ConversationMessageOrchestratorAgentTest {
                 "session", "turn-1", "run-1", request, ConversationProgressListener.NOOP);
 
         assertThat(result.executionMode()).isEqualTo(ConversationExecutionMode.AGENT_FALLBACK);
+        assertThat(result.intent().type()).isEqualTo(ConversationIntentType.KB_QUERY);
+        assertThat(result.intent().fallbackUsed()).isTrue();
         assertThat(result.answerStatus()).isEqualTo(AnswerStatus.GENERATION_FAILED);
         assertThat(result.fallbackReason()).isEqualTo("model_unavailable");
         verify(pipeline).execute(

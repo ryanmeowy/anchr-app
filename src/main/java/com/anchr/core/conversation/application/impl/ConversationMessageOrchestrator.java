@@ -14,6 +14,8 @@ import com.anchr.core.conversation.application.model.AnswerStatus;
 import com.anchr.core.conversation.application.model.ChatResponseResult;
 import com.anchr.core.conversation.application.model.ConversationExecutionResult;
 import com.anchr.core.conversation.application.model.ConversationIntentResult;
+import com.anchr.core.conversation.application.model.ConversationIntentType;
+import com.anchr.core.conversation.application.model.ConversationIntentSource;
 import com.anchr.core.conversation.application.model.ConversationMessagePipelineResult;
 import com.anchr.core.conversation.application.model.ConversationExecutionMode;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
@@ -86,12 +88,11 @@ public class ConversationMessageOrchestrator {
             } catch (AgentWorkflowException e) {
                 if (!fallbackToTraditional) throw e;
                 meterRegistry.counter("agent.workflow.fallback.count", "target", "traditional").increment();
-                ConversationIntentResult fallbackIntent = intentRouter.route(sessionId, request.getQuery().trim());
+                ConversationIntentResult fallbackIntent = normalizeIntent(intentRouter.route(sessionId, request.getQuery().trim()));
                 progress.onRoutingCompleted(fallbackIntent);
                 ConversationExecutionResult fallback = switch (fallbackIntent.type()) {
                     case CHAT -> executeChat(sessionId, request, fallbackIntent, progress);
-                    case OTHER -> executeOther(fallbackIntent);
-                    case KB_QUERY -> executeLegacyRag(sessionId, request, fallbackIntent, progress, runId);
+                    case OTHER, KB_QUERY -> executeLegacyRag(sessionId, request, fallbackIntent, progress, runId);
                 };
                 agentRunFinalizer.prepareTraditionalFallback(runId);
                 return new ConversationExecutionResult(fallback.intent(), fallback.retrievalExecuted(),
@@ -100,12 +101,11 @@ public class ConversationMessageOrchestrator {
                         ConversationExecutionMode.AGENT_FALLBACK, null);
             }
         }
-        ConversationIntentResult intent = intentRouter.route(sessionId, request.getQuery().trim());
+        ConversationIntentResult intent = normalizeIntent(intentRouter.route(sessionId, request.getQuery().trim()));
         progress.onRoutingCompleted(intent);
         return switch (intent.type()) {
             case CHAT -> executeChat(sessionId, request, intent, progress);
-            case OTHER -> executeOther(intent);
-            case KB_QUERY -> executeLegacyRag(sessionId, request, intent, progress, null);
+            case OTHER, KB_QUERY -> executeLegacyRag(sessionId, request, intent, progress, null);
         };
     }
 
@@ -122,11 +122,11 @@ public class ConversationMessageOrchestrator {
                 chat.fallbackReason(), List.of(), List.of(), null, null);
     }
 
-    private ConversationExecutionResult executeOther(ConversationIntentResult intent) {
-        meterRegistry.counter("conversation.retrieval.skipped.count", "type", "OTHER").increment();
-        return new ConversationExecutionResult(intent, false, null,
-                "我目前主要用于查询、总结和理解知识库中的内容。请补充你想查询的文档或具体问题。", AnswerStatus.ANSWERED,
-                null, List.of(), List.of(), null, null);
+    private ConversationIntentResult normalizeIntent(ConversationIntentResult intent) {
+        if (intent.type() != ConversationIntentType.OTHER) return intent;
+        return new ConversationIntentResult(ConversationIntentType.KB_QUERY,
+                0D, "legacy_other_defaulted_to_kb_query",
+                ConversationIntentSource.FALLBACK, true);
     }
 
     private ConversationExecutionResult executeLegacyRag(String sessionId,

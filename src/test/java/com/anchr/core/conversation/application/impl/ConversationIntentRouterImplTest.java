@@ -65,8 +65,8 @@ class ConversationIntentRouterImplTest {
 
         var result = router.route("session", "1");
 
-        assertThat(result.type()).isEqualTo(ConversationIntentType.OTHER);
-        assertThat(result.source()).isEqualTo(ConversationIntentSource.MODEL);
+        assertThat(result.type()).isEqualTo(ConversationIntentType.KB_QUERY);
+        assertThat(result.source()).isEqualTo(ConversationIntentSource.FALLBACK);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ConversationModelMessage>> messages = ArgumentCaptor.forClass(List.class);
         verify(generationPort).generate(messages.capture(), any());
@@ -98,27 +98,65 @@ class ConversationIntentRouterImplTest {
     }
 
     @Test
-    void shouldKeepModelClassificationWhenSelfReportedConfidenceIsLow() {
+    void shouldDefaultToRetrievalWhenChatConfidenceIsLow() {
         when(repository.findRecentTurns("session", 5)).thenReturn(List.of());
         when(generationPort.generate(any(), any())).thenReturn(
                 "```json\n{\"type\":\"CHAT\",\"confidence\":0.5,\"reason\":\"不确定\"}\n```");
 
         var result = router.route("session", "今天怎么样");
 
-        assertThat(result.type()).isEqualTo(ConversationIntentType.CHAT);
-        assertThat(result.confidence()).isEqualTo(0.5D);
-        assertThat(result.source()).isEqualTo(ConversationIntentSource.MODEL);
-        assertThat(result.fallbackUsed()).isFalse();
+        assertThat(result.type()).isEqualTo(ConversationIntentType.KB_QUERY);
+        assertThat(result.source()).isEqualTo(ConversationIntentSource.FALLBACK);
+        assertThat(result.reason()).isEqualTo("uncertain_chat_classification");
+        assertThat(result.fallbackUsed()).isTrue();
     }
 
     @Test
-    void shouldFallbackToClarificationForInvalidModelResponse() {
+    void shouldUseChatForConfidentCapabilityIntroduction() {
+        when(repository.findRecentTurns("session", 5)).thenReturn(List.of());
+        when(generationPort.generate(any(), any())).thenReturn(
+                "{\"type\":\"CHAT\",\"confidence\":0.95,\"reason\":\"普通能力介绍\"}");
+        assertThat(router.route("session", "你能做什么？").type()).isEqualTo(ConversationIntentType.CHAT);
+    }
+
+    @Test
+    void shouldDefaultToRetrievalForEmptyUnknownOrLegacyModelResponses() {
+        when(repository.findRecentTurns("session", 5)).thenReturn(List.of());
+        for (String raw : List.of("", "{}", "{\"type\":\"OTHER\",\"confidence\":0.99}",
+                "{\"type\":\"UNKNOWN\"}", "{\"type\":\"CHAT\"}")) {
+            when(generationPort.generate(any(), any())).thenReturn(raw);
+            var result = router.route("session", "继续");
+            assertThat(result.type()).isEqualTo(ConversationIntentType.KB_QUERY);
+            assertThat(result.fallbackUsed()).isTrue();
+        }
+    }
+
+    @Test
+    void shouldDefaultToRetrievalWhenModelTimesOut() {
+        when(repository.findRecentTurns("session", 5)).thenReturn(List.of());
+        when(generationPort.generate(any(), any())).thenThrow(new IllegalStateException("timeout"));
+        var result = router.route("session", "第二个呢？");
+        assertThat(result.type()).isEqualTo(ConversationIntentType.KB_QUERY);
+        assertThat(result.reason()).isEqualTo("model_unavailable");
+        assertThat(result.fallbackUsed()).isTrue();
+    }
+
+    @Test
+    void disablingRoutingStillSkipsModelAndDefaultsToRetrieval() {
+        var disabled = new ConversationIntentRouterImpl(repository, generationPort,
+                new ObjectMapper(), new SimpleMeterRegistry(), RuntimeConfigTestUnits.defaults());
+        assertThat(disabled.route("session", "你好").type()).isEqualTo(ConversationIntentType.KB_QUERY);
+        verify(generationPort, never()).generate(any(), any());
+    }
+
+    @Test
+    void shouldFallbackToRetrievalForInvalidModelResponse() {
         when(repository.findRecentTurns("session", 5)).thenReturn(List.of());
         when(generationPort.generate(any(), any())).thenReturn("not-json");
 
         var result = router.route("session", "帮我看看");
 
-        assertThat(result.type()).isEqualTo(ConversationIntentType.OTHER);
+        assertThat(result.type()).isEqualTo(ConversationIntentType.KB_QUERY);
         assertThat(result.source()).isEqualTo(ConversationIntentSource.FALLBACK);
     }
 }

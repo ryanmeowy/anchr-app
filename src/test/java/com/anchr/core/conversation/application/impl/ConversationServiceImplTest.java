@@ -236,22 +236,24 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void createMessage_shouldReturnClarificationWithoutModelOrRetrievalForOther() {
+    void createMessage_shouldDefaultLegacyOtherToRetrieval() {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         when(conversationIntentRouter.route(eq(session.getSessionId()), eq("帮我查天气"))).thenReturn(
                 new ConversationIntentResult(ConversationIntentType.OTHER, 0.95D,
                         "需要外部天气能力", ConversationIntentSource.MODEL, false));
 
-        ConversationMessageResponseDTO response = service.createMessage(
-                session.getSessionId(), buildMessageRequest("帮我查天气"));
-
-        assertThat(response.getIntent().getType()).isEqualTo("OTHER");
-        assertThat(response.getRetrievalStage()).isEqualTo("SKIPPED");
-        assertThat(response.getAnswer()).contains("知识库");
-        assertThat(response.getCitations()).isEmpty();
+        when(queryRewriteService.rewrite(any(), any())).thenReturn(buildRewrite("帮我查天气", "帮我查天气", "test", false));
+        when(conversationRetrievalOrchestrator.retrieve(any(), any(), any(), any(), any()))
+                .thenReturn(buildRetrievalResult(List.of()));
+        AnswerGenerationResult answer = new AnswerGenerationResult();
+        answer.setAnswerText("未找到足够证据"); answer.setFallbackUsed(true); answer.setFallbackReason("no_evidence_no_grounding_segment");
+        when(answerGenerationService.generate(any(), any(), any(), anyList(), anyList())).thenReturn(answer);
+        ConversationMessageResponseDTO response = service.createMessage(session.getSessionId(), buildMessageRequest("帮我查天气"));
+        assertThat(response.getIntent().getType()).isEqualTo("KB_QUERY");
+        assertThat(response.getIntent().getSource()).isEqualTo("FALLBACK");
+        verify(queryRewriteService).rewrite(any(), any());
+        verify(conversationRetrievalOrchestrator).retrieve(any(), any(), any(), any(), any());
         verify(chatResponseService, never()).generate(any(), any());
-        verify(queryRewriteService, never()).rewrite(any(), any());
-        verify(activityEventService, never()).recordQuestionAsked(any(), any(), any(), any());
     }
 
     @Test
@@ -969,6 +971,8 @@ class ConversationServiceImplTest {
         legacyTurn.setTurnId("turn_legacy");
         legacyTurn.setSessionId(session.getSessionId());
         legacyTurn.setQuery("legacy query");
+        legacyTurn.setIntentType("OTHER");
+        legacyTurn.setIntentSource("MODEL");
         legacyTurn.setRewrittenQuery("legacy query");
         legacyTurn.setAnswer("legacy answer");
         legacyTurn.setCitationsJson("[]");
@@ -979,6 +983,7 @@ class ConversationServiceImplTest {
         ConversationTurnListDTO response = service.listMessages(session.getSessionId(), 20, null);
 
         assertThat(response.getTurns()).hasSize(1);
+        assertThat(response.getTurns().getFirst().getIntent().getType()).isEqualTo("OTHER");
         assertThat(response.getTurns().getFirst().getAnswerStatus()).isEqualTo(AnswerStatus.NO_EVIDENCE.name());
         assertThat(response.getTurns().getFirst().getAnswerFallbackReason())
                 .isEqualTo("no_evidence_low_retrieval_score");
