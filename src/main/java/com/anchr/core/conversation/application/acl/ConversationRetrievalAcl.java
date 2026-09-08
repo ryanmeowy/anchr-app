@@ -41,6 +41,7 @@ public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrat
     private final RetrievalDocumentContentQueryApi retrievalDocumentContentQueryApi;
     private final RetrievalCitationReasonApi retrievalCitationReasonApi;
     private final MeterRegistry meterRegistry;
+    private final ConversationKnowledgeAcl conversationKnowledgeAcl;
 
     @Override
     public ConversationRetrievalResult retrieve(String rewrittenQuery,
@@ -69,6 +70,14 @@ public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrat
                             candidate -> candidate.getScore() == null ? 0.0D : candidate.getScore(),
                             Comparator.reverseOrder()))
                     .toList();
+            Map<List<String>, java.util.Optional<ConversationDocumentReference>> documents = new java.util.HashMap<>();
+            for (ConversationRetrievalCandidate candidate : candidates) {
+                if (!StringUtils.hasText(candidate.getKbId()) || !StringUtils.hasText(candidate.getAssetId())) continue;
+                List<String> key = List.of(candidate.getKbId().trim(), candidate.getAssetId().trim());
+                documents.computeIfAbsent(key, ignored -> conversationKnowledgeAcl.findActiveDocument(
+                                List.of(key.getFirst()), key.getLast()))
+                        .ifPresent(document -> candidate.setFileName(document.fileName()));
+            }
             ConversationRetrievalResult result = new ConversationRetrievalResult();
             result.setTopCandidates(candidates);
             meterRegistry.summary("conversation.retrieval.topk").record(candidates.size());
@@ -206,6 +215,7 @@ public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrat
                 .assetId(chunk.assetId())
                 .assetType(chunk.assetType())
                 .segmentType(chunk.segmentType())
+                .fileName(document.fileName())
                 .sourceRef(sourceRef)
                 .title(chunk.title())
                 .content(chunk.content())

@@ -28,6 +28,8 @@ public class ConversationRetrievalCandidate {
     private String segmentType;
     private String title;
     private String sourceRef;
+    /** Canonical asset display name, separate from the storage reference. */
+    private String fileName;
     /**
      * Original segment content used as grounding evidence for answer generation.
      */

@@ -40,6 +40,9 @@ class ConversationRetrievalAclTest {
     @Mock
     private RetrievalCitationReasonApi retrievalCitationReasonApi;
 
+    @Mock
+    private ConversationKnowledgeAcl conversationKnowledgeAcl;
+
     private ConversationRetrievalAcl orchestrator;
 
     @BeforeEach
@@ -48,12 +51,43 @@ class ConversationRetrievalAclTest {
                 retrievalHitQueryApi,
                 retrievalDocumentContentQueryApi,
                 retrievalCitationReasonApi,
-                new SimpleMeterRegistry()
+                new SimpleMeterRegistry(), conversationKnowledgeAcl
         );
         Mockito.lenient().when(retrievalHitQueryApi.query(any(RetrievalHitQuery.class))).thenReturn(List.of(
                 result("seg_text", "TEXT_CHUNK"),
                 result("seg_image", "IMAGE_CAPTION")
         ));
+    }
+
+    @Test
+    void retrievalResolvesAssetNameOnceForAllChunksAndPreservesObjectKey() {
+        var raw = new RetrievalHit("TEXT_CHUNK", "Section", "body", null, "DOCUMENT",
+                "evidence", 1, 0.9D, null, null, null, null, null, List.of(),
+                "seg-1", "kb-1", "asset-1", "uploads/anchr-eval-uuid-guide.pdf", null, null);
+        when(retrievalHitQueryApi.query(any(RetrievalHitQuery.class))).thenReturn(List.of(raw, raw));
+        when(conversationKnowledgeAcl.findActiveDocument(List.of("kb-1"), "asset-1"))
+                .thenReturn(java.util.Optional.of(new ConversationDocumentReference(
+                        "asset-1", "kb-1", "guide.pdf", "Guide", "PDF", "application/pdf", 1L, 2)));
+        var candidates = orchestrator.retrieve("question", 10, List.of("kb-1"), null, null).getTopCandidates();
+        assertThat(candidates).hasSize(2).allSatisfy(candidate -> {
+            assertThat(candidate.getFileName()).isEqualTo("guide.pdf");
+            assertThat(candidate.getSourceRef()).isEqualTo("uploads/anchr-eval-uuid-guide.pdf");
+        });
+        verify(conversationKnowledgeAcl).findActiveDocument(List.of("kb-1"), "asset-1");
+        assertThat(new com.anchr.core.conversation.application.assembler.ConversationCitationMapper()
+                .mapFromSearchResults(candidates)).allSatisfy(citation ->
+                        assertThat(citation.getFileName()).isEqualTo("guide.pdf"));
+    }
+
+    @Test
+    void unavailableAssetKeepsLegacyPathFallback() {
+        var raw = new RetrievalHit("TEXT_CHUNK", "Section", "body", null, "DOCUMENT",
+                "evidence", 1, 0.9D, null, null, null, null, null, List.of(),
+                "seg-1", "kb-1", "asset-1", "uploads/legacy.pdf", null, null);
+        when(retrievalHitQueryApi.query(any(RetrievalHitQuery.class))).thenReturn(List.of(raw));
+        var candidates = orchestrator.retrieve("question", 10, List.of("kb-1"), null, null).getTopCandidates();
+        assertThat(new com.anchr.core.conversation.application.assembler.ConversationCitationMapper()
+                .mapFromSearchResults(candidates).getFirst().getFileName()).isEqualTo("legacy.pdf");
     }
 
     @Test
@@ -151,6 +185,7 @@ class ConversationRetrievalAclTest {
             assertThat(candidate.getSegmentId()).isEqualTo("seg-1");
             assertThat(candidate.getContent()).isEqualTo("original text");
             assertThat(candidate.getSourceRef()).isEqualTo("guide.pdf");
+            assertThat(candidate.getFileName()).isEqualTo("guide.pdf");
             assertThat(candidate.getAnchor().getChunkOrder()).isEqualTo(9);
         });
         ArgumentCaptor<RetrievalDocumentContentQuery> query =

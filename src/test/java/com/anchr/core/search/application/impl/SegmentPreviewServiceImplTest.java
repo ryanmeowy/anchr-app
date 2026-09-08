@@ -73,6 +73,35 @@ class SegmentPreviewServiceImplTest {
     }
 
     @Test
+    void textPreviewAndRefreshUseAssetNameWhileKeepingStorageLocation() {
+        String key = "documents/anchr-eval-06a6cb00-anchr-deployment-v1.pdf";
+        Segment segment = segment("Deployment content", null, "Deployment")
+                .toBuilder().sourceRef(key).build();
+        when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(segment));
+        when(searchKnowledgeAcl.findActiveDocument("kb-1", "asset-1"))
+                .thenReturn(Optional.of(document("asset-1", "anchr-deployment-v1.pdf", key, null, 0L)));
+        when(objectStoragePort.buildPreviewUrl(key)).thenReturn(
+                new SearchObjectStoragePort.SignedObjectUrl("https://preview/document", System.currentTimeMillis() + 120_000L));
+
+        var preview = service.getSegmentPreview("seg-1", new PreviewRequestDTO());
+        var refreshed = service.refreshSegmentPreview("seg-1", new PreviewRequestDTO());
+        for (var result : List.of(preview, refreshed)) {
+            assertThat(result.getFileName()).isEqualTo("anchr-deployment-v1.pdf");
+            assertThat(result.getSourceRef()).isEqualTo(key);
+            assertThat(result.getPreviewUrl()).isEqualTo("https://preview/document");
+        }
+    }
+
+    @Test
+    void textPreviewFallsBackToStorageNameWhenAssetNameIsBlank() {
+        Segment segment = segment("Content", null, "Section").toBuilder()
+                .sourceRef("https://example.com/legacy.pdf?signature=secret").build();
+        when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(segment));
+        var preview = service.getSegmentPreview("seg-1", new PreviewRequestDTO());
+        assertThat(preview.getFileName()).isEqualTo("legacy.pdf");
+    }
+
+    @Test
     void getSegmentPreview_shouldPreferOriginalContentAndRecordIt() {
         Segment segment = segment("Original content", "OCR content", "Title");
         when(segmentRepository.findBySegmentId("seg-1")).thenReturn(Optional.of(segment));

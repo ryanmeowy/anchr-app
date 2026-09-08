@@ -1,6 +1,8 @@
 package com.anchr.core.search.application.impl;
 
 import com.anchr.core.search.application.SearchAnswerService;
+import com.anchr.core.search.application.acl.SearchKnowledgeAcl;
+import com.anchr.core.common.util.CitationFileName;
 import com.anchr.core.search.application.api.RetrievalCitationReasonApi;
 import com.anchr.core.search.application.api.model.RetrievalAnchor;
 import com.anchr.core.search.application.api.model.RetrievalCitationReasonRequest;
@@ -28,6 +30,7 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
     private static final int CHUNK_LIMIT_PER_ASSET = 3;
 
     private final RetrievalCitationReasonApi retrievalCitationReasonApi;
+    private final SearchKnowledgeAcl searchKnowledgeAcl;
 
     @Override
     public SearchAnswerResult answer(SearchAnswerRequest request, List<RetrievalHit> existingResults) {
@@ -162,15 +165,14 @@ public class SearchAnswerServiceImpl implements SearchAnswerService {
     }
 
     private String resolveFileName(CitationSource source) {
-        if (SegmentType.DOCUMENT_IMAGE.name().equals(source.segmentType())
-                && StringUtils.hasText(source.title())) return source.title().trim();
-        String sourceRef = source.sourceRef();
-        if (!StringUtils.hasText(sourceRef)) return null;
-        String trimmed = sourceRef.trim();
-        int queryIndex = trimmed.indexOf('?');
-        String path = queryIndex >= 0 ? trimmed.substring(0, queryIndex) : trimmed;
-        int slashIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-        return slashIndex < 0 || slashIndex == path.length() - 1 ? path : path.substring(slashIndex + 1);
+        String kbId = source.topChunk() != null && StringUtils.hasText(source.topChunk().kbId())
+                ? source.topChunk().kbId() : source.result().kbId();
+        String assetId = source.result().assetId();
+        String fileName = StringUtils.hasText(kbId) && StringUtils.hasText(assetId)
+                ? searchKnowledgeAcl.findActiveDocument(kbId.trim(), assetId.trim())
+                    .map(document -> document.fileName()).orElse(null)
+                : null;
+        return CitationFileName.resolve(fileName, source.sourceRef(), source.segmentType(), source.title());
     }
 
     private record CitationGroup(

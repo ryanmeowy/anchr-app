@@ -53,7 +53,7 @@ class AgentStateTest {
     void evidenceValuesAreDefensivelyCopiedAcrossSnapshotBoundary() {
         List<String> hitSources = new ArrayList<>(List.of("vector"));
         var candidate = ConversationRetrievalCandidate.builder()
-                .segmentId("seg-1").content("original")
+                .segmentId("seg-1").fileName("guide.pdf").content("original")
                 .explain(ConversationRetrievalCandidate.Explain.builder()
                         .strategyEffective("hybrid").hitSources(hitSources).build())
                 .build();
@@ -66,6 +66,7 @@ class AgentStateTest {
         exposed.setContent("mutated accessor result");
 
         assertThat(state.evidence().get("seg-1").getContent()).isEqualTo("original");
+        assertThat(state.evidence().get("seg-1").getFileName()).isEqualTo("guide.pdf");
         assertThat(state.evidence().get("seg-1").getExplain().getHitSources())
                 .containsExactly("vector");
     }
