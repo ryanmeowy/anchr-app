@@ -18,6 +18,7 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageReques
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -28,6 +29,7 @@ import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ConversationMessagePipeline {
 
     private static final int ANSWER_CITATION_LIMIT = 5;
@@ -46,7 +48,24 @@ public class ConversationMessagePipeline {
                                                      ConversationMessageRequestDTO request,
                                                      ConversationProgressListener progress) {
         RewriteResult rewriteResult = queryRewriteService.rewrite(sessionId, request.getQuery().trim());
-        return execute(request, rewriteResult, progress);
+        log.info("Traditional retrieval started, sessionId={}, originalQuery={}, rewrittenQuery={}, "
+                        + "rewriteFallback={}, rewriteReason={}, kbIds={}, assetIds={}, modalities={}, limit={}",
+                sessionId, logQuery(request.getQuery()), logQuery(rewriteResult.getRewrittenQuery()),
+                rewriteResult.isFallbackUsed(), logQuery(rewriteResult.getRewriteReason()),
+                request.getKbIds(), request.getAssetIdList(), request.getPreferredModalities(), request.getLimit());
+        ConversationMessagePipelineResult result = execute(request, rewriteResult, progress);
+        log.info("Traditional retrieval completed, sessionId={}, rewrittenQuery={}, segmentIds={}, "
+                        + "answerStatus={}, fallbackReason={}",
+                sessionId, logQuery(rewriteResult.getRewrittenQuery()),
+                result.retrievalResult().getTopCandidates().stream()
+                        .map(ConversationRetrievalCandidate::getSegmentId).toList(),
+                AnswerStatus.from(result.answerGenerationResult()),
+                result.answerGenerationResult().getFallbackReason());
+        return result;
+    }
+
+    private static String logQuery(String value) {
+        return value == null ? null : value.replace('\r', ' ').replace('\n', ' ');
     }
 
     public ConversationMessagePipelineResult execute(ConversationMessageRequestDTO request,

@@ -101,9 +101,10 @@ public class RetrievalQueryServiceImpl implements RetrievalHitQueryApi, Retrieva
                 routeFilter(filter, true));
         int textHitCount = textHits.size();
         int vectorHitCount = textVectorHits.size() + imageVectorHits.size();
-        log.info("kb search recall completed, queryLength={}, kbScope={}, assetScope={}, "
+        log.info("kb search recall completed, query={}, queryLength={}, kbScope={}, assetScope={}, "
                         + "recallTopK={}, textHits={}, textVectorHits={}, "
                         + "documentImageVectorHits={}, latencyMs={}",
+                rawQuery.replace('\r', ' ').replace('\n', ' '),
                 rawQuery.length(),
                 filter.getKbIds().size(),
                 filter.getAssetIds() == null ? 0 : filter.getAssetIds().size(),

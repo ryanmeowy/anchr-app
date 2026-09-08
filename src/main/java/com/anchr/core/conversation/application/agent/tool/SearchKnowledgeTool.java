@@ -12,6 +12,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -28,6 +29,7 @@ import static com.anchr.core.conversation.application.constant.AgentConstant.SEA
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input> {
     public record Input(@NotBlank @Size(max = SEARCH_KNOWLEDGE_QUERY_MAX_CHARS) String query,
                         @Size(max = SEARCH_KNOWLEDGE_MAX_ASSETS) List<String> assetIds,
@@ -50,6 +52,13 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
     public AgentToolResult execute(Input input, AgentExecutionContext context) {
         List<String> assets = resolveAssets(input.assetIds(), context);
         var rewrite = queryRewriteService.rewrite(context.sessionId(), input.query().trim());
+        log.info("Agent knowledge search started, sessionId={}, runId={}, turnId={}, toolQuery={}, "
+                        + "rewrittenQuery={}, rewriteFallback={}, rewriteReason={}, kbIds={}, "
+                        + "assetIds={}, modalities={}, limit={}",
+                context.sessionId(), context.runId(), context.turnId(), logQuery(input.query()),
+                logQuery(rewrite.getRewrittenQuery()), rewrite.isFallbackUsed(), logQuery(rewrite.getRewriteReason()),
+                context.kbIds(), assets, normalizeModalities(input.modalities()),
+                input.limit() == null ? SEARCH_KNOWLEDGE_DEFAULT_LIMIT : input.limit());
         var retrieval = retrievalOrchestrator.retrieve(
                 rewrite.getRewrittenQuery(),
                 input.limit() == null ? SEARCH_KNOWLEDGE_DEFAULT_LIMIT : input.limit(),
@@ -60,6 +69,10 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
                 : retrieval.getTopCandidates().stream()
                         .filter(ConversationRetrievalCandidate::isCitableEvidence)
                         .toList();
+        log.info("Agent knowledge search completed, sessionId={}, runId={}, turnId={}, rewrittenQuery={}, "
+                        + "evidenceCount={}, segmentIds={}",
+                context.sessionId(), context.runId(), context.turnId(), logQuery(rewrite.getRewrittenQuery()),
+                evidence.size(), evidence.stream().map(ConversationRetrievalCandidate::getSegmentId).toList());
         try {
             return AgentToolResult.success(objectMapper.writeValueAsString(Map.of(
                     "success", true,
@@ -102,6 +115,9 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
     }
 
     private String safe(String value) { return value == null ? "" : value; }
+    private static String logQuery(String value) {
+        return value == null ? null : value.replace('\r', ' ').replace('\n', ' ');
+    }
     private String clip(String value, int limit) {
         String text = value == null ? "" : value;
         return text.length() <= limit ? text : text.substring(0, limit);

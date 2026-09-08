@@ -18,6 +18,7 @@ import com.anchr.core.conversation.application.model.ConversationMessagePipeline
 import com.anchr.core.conversation.application.model.ConversationExecutionMode;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import io.micrometer.core.instrument.MeterRegistry;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -26,6 +27,7 @@ import java.util.UUID;
 import static com.anchr.core.conversation.application.constant.ConversationConstant.SINGLE_USER_ID;
 
 @Service
+@Slf4j
 public class ConversationMessageOrchestrator {
 
     private final ConversationIntentRouter intentRouter;
@@ -73,6 +75,10 @@ public class ConversationMessageOrchestrator {
                 RuntimeConfigType.AGENT,
                 AgentRuntimeConfigKey.FALLBACK_TO_TRADITIONAL,
                 true);
+        log.info("Conversation execution started, sessionId={}, turnId={}, runId={}, agentRequested={}, "
+                        + "agentEnabled={}, originalQuery={}",
+                sessionId, turnId, runId, request.getAgentEnabled(), agentEnabled,
+                request.getQuery().trim().replace('\r', ' ').replace('\n', ' '));
         if (Boolean.TRUE.equals(request.getAgentEnabled()) && agentEnabled) {
             try {
                 return agentWorkflow.execute(new AgentRunRequest(runId, turnId, sessionId,
