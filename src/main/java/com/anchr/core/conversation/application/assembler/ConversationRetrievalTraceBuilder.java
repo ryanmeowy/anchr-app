@@ -32,6 +32,11 @@ public class ConversationRetrievalTraceBuilder {
         trace.put("kbIds", request.getKbIds());
         trace.put("answerMode", request.getAnswerMode());
         trace.put("rewriteReason", rewriteResult.getRewriteReason());
+        if (rewriteResult.getResolvedQuestion() != null) {
+            trace.put("resolvedQuestion", rewriteResult.getResolvedQuestion());
+            trace.put("searchQuery", rewriteResult.getRewrittenQuery());
+            trace.put("keywords", rewriteResult.getKeywords());
+        }
         trace.put("topicEntities", rewriteResult.getTopicEntities());
         trace.put("preferredModalities", request.getPreferredModalities());
         trace.put("rewriteConfidence", rewriteResult.getConfidence());

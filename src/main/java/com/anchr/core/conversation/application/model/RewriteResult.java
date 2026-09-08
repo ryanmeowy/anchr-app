@@ -12,6 +12,10 @@ import java.util.List;
 public class RewriteResult {
 
     private String originalQuery;
+    /** Full context-resolved question, populated only by traditional RAG rewrite. */
+    private String resolvedQuestion;
+    /** Text-recall keywords, populated only by traditional RAG rewrite. */
+    private List<String> keywords = new ArrayList<>();
     private String rewrittenQuery;
     private String rewriteReason;
     private List<String> topicEntities = new ArrayList<>();

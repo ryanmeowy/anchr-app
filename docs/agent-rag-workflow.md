@@ -579,7 +579,7 @@ Run 终态写入使用带预期状态的条件更新，而不是无条件覆盖�
 
 ### 12.1 消息 SSE
 
-消息 SSE 开启回答流能力。CHAT 直接转发模型增量，传统 RAG 通过增量 JSON 解码器只发送回答正文；需要整体校验的 Agent 引用答案只发送已经验证的文本。最终答案与 provisional 内容不一致时使用 `answer_reset` 校准。
+消息 SSE 开启回答流能力。CHAT 直接转发模型增量；传统 RAG 通过增量 JSON 解码器发送 provisional 正文，最终校验后校准；Agent 引用答案只发送已经验证的文本。最终答案与 provisional 内容不一致时使用 `answer_reset` 校准。
 
 典型事件：
 
@@ -646,24 +646,47 @@ SSE 断开或 120 秒传输超时时：
 | Finalizer 模型异常 | `FinalizerModelFailed` 携带 cause；预算和次数允许时重试 | 超限后 `MODEL_FALLBACK/DEGRADED` |
 | Presentation 异常或输出非法 | 记录失败 cause，丢弃非法候选并使用已验证草稿 | Run 仍为 `COMPLETED`，客户端与落库答案一致 |
 | 传统 RAG 无合格证据 | 固定无证据模板 | `NO_EVIDENCE` |
-| 传统答案格式错误或模型失败 | 默认返回生成失败文案 | `MODEL_FALLBACK`；只有打开 legacy 配置才拼接证据 |
+| 传统答案格式错误或模型失败 | 默认返回生成失败文案；显式开启 legacy 配置时拼接证据 | 默认 `GENERATION_FAILED`，legacy 降级为 `MODEL_FALLBACK` |
 | 异步总结临时失败 | 延迟重试 | 重试耗尽后 `FAILED` |
 | 异步总结永久错误 | 不重试 | Task/Run `FAILED`，Turn 更新为 `MODEL_FALLBACK` |
 
 ## 14. 传统 RAG
 
-Agent 关闭或 Agent 异常降级时，`KB_QUERY` 执行：
+Agent 关闭或 Agent 异常降级时，`KB_QUERY` 执行固定流程：
 
 ```text
-Query Rewrite
-  -> Unified Retrieval
+TraditionalRagRewriteService（一次模型调用，结合历史补全完整问题并提取关键词数组）
+  -> Unified Retrieval（一次调用，内部文本/向量召回、RRF、Rerank）
   -> Result Card Mapping
-  -> 选择最多 5 个可追溯候选
+  -> 选择最多 5 个可追溯且可引用的候选
   -> Citation Mapping
-  -> Grounded Answer Generation
-  -> 只保留答案实际使用的 Citation
-  -> 生成引用原因
+  -> Grounded Answer Generation（最多一次模型调用）
+  -> 引用校验与规范化，只保留答案实际使用的 Citation
+  -> 生成引用原因并保存 Turn
 ```
+
+专用 rewrite 返回 `resolvedQuestion`、`keywords`、`rewriteReason` 和 `confidence`。
+`resolvedQuestion` 保留全部子问题、假设、否定和必要条件，作为完整 `query` 传给 search；`keywords` 是最多 8 项、每项最多 100 字符的关键词或短语数组，规范化后去重，不是多个搜索请求。
+`RewriteResult.rewrittenQuery` 和 Turn 的 `rewritten_query` 现在保存完整检索问题，与 `resolvedQuestion` 一致。
+
+一次 search 内按用途分工：
+
+- 文本召回：有关键词时使用关键词列表；为空时回退完整 query。
+- 向量召回：使用完整 query 生成 embedding。
+- Rerank：使用完整 query 判断候选与问题的相关性。
+- 答案生成：使用原问题、补全后的完整问题和证据。
+
+技术标识符中的点号或美元分隔符仅在传统关键词构造时替换为空格，保留各组成部分；完整 query 不变，不修改 ES 分词配置。
+生产提示词仅定义通用规则，不硬编码业务配置名或预设答案。提示模型提取 1–8 项必要词，但接受空数组，使用已有的无关键词检索行为。
+当前文本检索每个短语要求匹配 70% 的分词，关键词数不超过 2 时全部必须匹配，多于 2 时要求匹配其中 70%；不配置单独关键词权重。
+关键词过多仍可能降低召回率，现有字段权重、RRF/Rerank 和相似度阈值不作调整。
+
+没有独立 Planner、覆盖检查模型或空召回补查循环。一次 rewrite、一次 search、最多一次答案生成；search 内部仍有 embedding 和 rerank 调用。
+rewrite 模型失败、完整问题不合法、关键词不是数组或关键词项越界时，完整问题和 query 回退为用户原文，关键词为空；不重复调用模型或 search。
+
+兼容边界：`ConversationRetrievalOrchestrator` 增加关键词重载，`ConversationRetrievalAcl` 将关键词传入 `RetrievalHitQuery`；后者新增可选关键词列表并保留旧构造方式，旧调用默认空列表。
+`RetrievalQueryServiceImpl` 的 Hit 查询入口将关键词传到已有的 `searchInternal`，不改变其匹配逻辑。普通 Top-N 搜索继续使用原有关键词入口；Agent 继续使用无关键词重载，共用 rewrite 和意图分类均不改变。
+Agent 异常后的 `KB_QUERY` 回退复用此传统流程，`CHAT` 与 `OTHER` 仍不进入 RAG。
 
 回答模式：
 
@@ -673,10 +696,19 @@ Query Rewrite
 | `SUMMARY` | 3 | 60 | 0.10 | 否 |
 | `EXPLORE` | 5 | 40 | 0.08 | 是，且必须明确标注 |
 
-传统答案模型必须输出 `ANSWERED|NO_EVIDENCE` 严格 JSON，并使用 `[1]` 引用输入证据。后端校验引用范围、规范化文档索引，并只保留答案真正使用的 Segment。
+答案模型仍输出 `{"status":"ANSWERED|NO_EVIDENCE","answer":"正文"}`，使用 `[1]` 引用输入证据。
+它对照用户原问题和补全后的完整问题回答，不能把关键词数组当成回答目标。
+部分问题有证据时回答已确认部分，并明确说明其他部分无法确认；证据无法支持任何实质性回答时整题返回 `NO_EVIDENCE`。
+现有证据字符数、Top Score、引用范围和引用存在性校验继续生效。语义完整性由答案模型遵循提示词保证，不设独立覆盖判定模型，也不声称程序能够严格证明答案完整。
 
-运行配置 `CONVERSATION.legacyEvidenceFallbackEnabled` 默认是 `false`。
-模型失败或格式不合法时，默认返回 `GENERATION_FAILED`；启用该配置后才使用证据拼接旧式保守答案。
+传统 SSE 恢复增量 JSON 解码，只发送 provisional 正文；最终引用或格式校验改变答案时通过 `answer_reset` 校准。
+`CONVERSATION.legacyEvidenceFallbackEnabled` 默认是 `false`。模型失败或格式不合法时返回 `GENERATION_FAILED`；显式启用此配置时沿用原有证据拼接降级，状态为 `MODEL_FALLBACK`。
+
+`retrieval_trace` JSON 保存 `resolvedQuestion`、`searchQuery`（完整问题）和 `keywords`，不再写入 Planner/覆盖信息；数据库表和外部请求字段不变。
+日志 `Traditional retrieval started` 记录 `originalQuery`、`resolvedQuestion`、`query`、`keywords` 以及范围与回退状态；`Traditional retrieval completed` 记录 `query`、`keywords` 和最终结果。
+底层 `kb search recall completed` 同时记录完整 `query`、实际传入的 `keywords` 和各路召回数量。旧 Agent 调用的关键词为空。
+日志不再用 `searchQuery` 标记精简短语；`Traditional RAG rewrite fallback` 记录 sessionId 和失败原因。
+历史 Turn 已持久化的规划追踪保留原样。
 
 ## 15. 可观测性与安全
 
@@ -779,6 +811,6 @@ Settings 中的 `AGENT` 运行配置。Conversation 的传统证据降级使用
 | Runtime Snapshot | `AgentRuntimeSnapshotService.java` |
 | Run 查询与恢复列表 | `AgentRunActivityService.java` |
 | Run Trace 与终态 | `AgentTraceRecorder.java`、`AgentRunFinalizer.java` |
-| 传统 RAG | `ConversationMessagePipeline.java`、`AnswerGenerationServiceImpl.java` |
+| 传统 RAG | `ConversationMessagePipeline.java`、`TraditionalRagRewriteService.java`、`AnswerGenerationServiceImpl.java` |
 | Conversation 表 | `V6__create_conversation_tables.sql` |
 | Agent 表 | `V7__create_agent_tables.sql` |

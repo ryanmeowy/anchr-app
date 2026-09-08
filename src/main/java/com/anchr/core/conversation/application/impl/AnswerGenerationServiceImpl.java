@@ -233,7 +233,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         builder.append("回答模式：").append(answerMode.name()).append("。");
         builder.append(policy.styleInstruction());
         builder.append("当 status=ANSWERED 时，answer 必须遵守以下引用格式：");
-        builder.append("引用编号必须紧跟在它所支持的总结、事实或结论之后，格式示例：“参数记忆保存模型内知识[1]，非参数记忆通过外部知识库提供事实依据[2]。”；");
+        builder.append("引用编号必须紧跟在它所支持的总结、事实或结论之后，格式示例：“第一项结论[1]，第二项结论[2]。”；");
         builder.append("其中前一句必须确实由证据[1]支持，后一句必须确实由证据[2]支持；");
         builder.append("一个陈述同时由多条证据支持时使用“结论[1][2]”，编号之间不加逗号、空格或其他文字；");
         builder.append("禁止把引用编号放在段首、要点符号之后或与对应内容分离；");
@@ -242,10 +242,10 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         if (policy.allowSpeculation()) {
             builder.append("如果提供可能方向或建议，必须单独成段，推测必须明确标注。");
         }
-        builder.append("如果证据足以回答，status 必须为 ANSWERED。");
-        builder.append("如果证据不足，status 必须为 NO_EVIDENCE，answer 只能使用“未找到足够内容支持该问题”，且不得输出任何引用编号。");
+        builder.append("必须对照用户完整问题回答各子问题，不得把检索短语当作回答目标。复合问题中的拒答要求按子问题分别应用：证据支持全部或部分问题时，status 必须为 ANSWERED；有证据的部分正常回答，缺少证据的部分明确说明无法确认，不得猜测或省略。");
+        builder.append("仅当证据无法支持任何实质性回答时，status 必须为 NO_EVIDENCE，answer 只能使用“未找到足够内容支持该问题”，且不得输出任何引用编号。");
         builder.append("用户问题：").append(userQuery).append("。");
-        builder.append("检索改写：").append(rewrittenQuery).append("。");
+        builder.append("上下文补全后的完整问题（仅用于澄清原问题）：").append(rewrittenQuery).append("。");
         builder.append("证据列表：");
         for (GroundingSegment segment : segments) {
             builder.append("[")

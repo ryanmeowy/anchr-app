@@ -36,6 +36,29 @@ import static org.mockito.Mockito.when;
 class RetrievalQueryServiceImplCharacterizationTest {
 
     @Test
+    void hitQueryUsesKeywordsForTextButFullQuestionForEmbeddingAndRerank() {
+        var repository = mock(SegmentRepository.class);
+        var embedding = mock(QueryEmbeddingService.class);
+        var knowledge = mock(SearchKnowledgeAcl.class);
+        var rerank = mock(SearchRerankPort.class);
+        when(knowledge.resolveVisibleKbIds(anyList())).thenReturn(List.of("kb1"));
+        when(knowledge.findActiveIndexGenerations(anyCollection())).thenReturn(Map.of("asset-1", 1L));
+        when(embedding.embedQuery("完整问题")).thenReturn(List.of(0.1F));
+        when(repository.textSearch(eq("完整问题"), eq(List.of("实体", "关系")), anyInt(), any()))
+                .thenReturn(List.of(hit("s1", "asset-1", 1)));
+        when(repository.vectorSearch(anyList(), anyInt(), anyFloat(), any())).thenReturn(List.of());
+        var service = RetrievalQueryServiceTestFactory.create(repository, embedding, knowledge, rerank,
+                RuntimeConfigTestUnits.defaults(), new SimpleMeterRegistry());
+        service.query(new com.anchr.core.search.application.api.model.RetrievalHitQuery(
+                "完整问题", 5, List.of("kb1"), List.of("asset-1"), List.of(), List.of("实体", "关系")));
+        verify(repository).textSearch(eq("完整问题"), eq(List.of("实体", "关系")), anyInt(), any());
+        verify(embedding).embedQuery("完整问题");
+        verify(rerank).rerank(eq("完整问题"), anyList(), eq(1));
+        assertThat(new com.anchr.core.search.application.api.model.RetrievalHitQuery(
+                "旧调用", 5, List.of(), List.of(), List.of()).keywords()).isEmpty();
+    }
+
+    @Test
     void singleAssetQueryShouldRerankMoreThanThreeTextChunksBeforeDiversifyingResult() {
         SearchRerankPort rerankPort = mock(SearchRerankPort.class);
         List<SegmentHit> hits = List.of(

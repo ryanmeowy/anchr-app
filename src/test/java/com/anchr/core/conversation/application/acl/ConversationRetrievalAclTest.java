@@ -57,6 +57,18 @@ class ConversationRetrievalAclTest {
     }
 
     @Test
+    void retrieveShouldForwardKeywordsAndRetainScopes() {
+        orchestrator.retrieve("完整问题", List.of("实体", "关系"), 5, List.of("kb1"), List.of("TEXT"), List.of("a1"));
+        ArgumentCaptor<RetrievalHitQuery> captor = ArgumentCaptor.forClass(RetrievalHitQuery.class);
+        verify(retrievalHitQueryApi).query(captor.capture());
+        assertThat(captor.getValue().query()).isEqualTo("完整问题");
+        assertThat(captor.getValue().keywords()).containsExactly("实体", "关系");
+        assertThat(captor.getValue().kbIds()).containsExactly("kb1");
+        assertThat(captor.getValue().assetIds()).containsExactly("a1");
+        assertThat(captor.getValue().hitTypes()).containsExactly("TEXT_CHUNK");
+    }
+
+    @Test
     void retrieve_shouldKeepAllModalitiesWhenUserDoesNotRestrictThem() {
         var result = orchestrator.retrieve("RAG 架构", 10, List.of("kb_1"), List.of("MIXED"), null);
 
@@ -68,6 +80,7 @@ class ConversationRetrievalAclTest {
         ArgumentCaptor<RetrievalHitQuery> queryCaptor = ArgumentCaptor.forClass(RetrievalHitQuery.class);
         verify(retrievalHitQueryApi).query(queryCaptor.capture());
         assertThat(queryCaptor.getValue().hitTypes()).isEmpty();
+        assertThat(queryCaptor.getValue().keywords()).isEmpty();
     }
 
     @Test

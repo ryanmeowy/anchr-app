@@ -48,11 +48,18 @@ public class ConversationRetrievalAcl implements ConversationRetrievalOrchestrat
                                                 List<String> kbIds,
                                                 List<String> preferredModalities,
                                                 List<String> assetIdList) {
+        return retrieve(rewrittenQuery, List.of(), limit, kbIds, preferredModalities, assetIdList);
+    }
+
+    @Override
+    public ConversationRetrievalResult retrieve(String rewrittenQuery, List<String> keywords,
+                                                Integer limit, List<String> kbIds,
+                                                List<String> preferredModalities, List<String> assetIdList) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             RetrievalHitQuery query = new RetrievalHitQuery(
                     rewrittenQuery, limit, kbIds, assetIdList,
-                    resolveSegmentTypes(preferredModalities));
+                    resolveSegmentTypes(preferredModalities), keywords);
 
             List<RetrievalHit> rawResults = retrievalHitQueryApi.query(query);
             List<ConversationRetrievalCandidate> candidates = rawResults.stream()

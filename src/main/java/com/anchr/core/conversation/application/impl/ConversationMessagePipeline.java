@@ -2,7 +2,6 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationRetrievalOrchestrator;
-import com.anchr.core.conversation.application.QueryRewriteService;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
@@ -34,7 +33,7 @@ public class ConversationMessagePipeline {
 
     private static final int ANSWER_CITATION_LIMIT = 5;
 
-    private final QueryRewriteService queryRewriteService;
+    private final TraditionalRagRewriteService queryRewriteService;
     private final ConversationRetrievalOrchestrator conversationRetrievalOrchestrator;
     private final ConversationCitationMapper conversationCitationMapper;
     private final ConversationResultCardMapper conversationResultCardMapper;
@@ -48,15 +47,15 @@ public class ConversationMessagePipeline {
                                                      ConversationMessageRequestDTO request,
                                                      ConversationProgressListener progress) {
         RewriteResult rewriteResult = queryRewriteService.rewrite(sessionId, request.getQuery().trim());
-        log.info("Traditional retrieval started, sessionId={}, originalQuery={}, rewrittenQuery={}, "
+        log.info("Traditional retrieval started, sessionId={}, originalQuery={}, resolvedQuestion={}, query={}, keywords={}, "
                         + "rewriteFallback={}, rewriteReason={}, kbIds={}, assetIds={}, modalities={}, limit={}",
-                sessionId, logQuery(request.getQuery()), logQuery(rewriteResult.getRewrittenQuery()),
+                sessionId, logQuery(request.getQuery()), logQuery(rewriteResult.getResolvedQuestion()), logQuery(rewriteResult.getRewrittenQuery()), rewriteResult.getKeywords(),
                 rewriteResult.isFallbackUsed(), logQuery(rewriteResult.getRewriteReason()),
                 request.getKbIds(), request.getAssetIdList(), request.getPreferredModalities(), request.getLimit());
         ConversationMessagePipelineResult result = execute(request, rewriteResult, progress);
-        log.info("Traditional retrieval completed, sessionId={}, rewrittenQuery={}, segmentIds={}, "
+        log.info("Traditional retrieval completed, sessionId={}, query={}, keywords={}, segmentIds={}, "
                         + "answerStatus={}, fallbackReason={}",
-                sessionId, logQuery(rewriteResult.getRewrittenQuery()),
+                sessionId, logQuery(rewriteResult.getRewrittenQuery()), rewriteResult.getKeywords(),
                 result.retrievalResult().getTopCandidates().stream()
                         .map(ConversationRetrievalCandidate::getSegmentId).toList(),
                 AnswerStatus.from(result.answerGenerationResult()),
@@ -76,7 +75,10 @@ public class ConversationMessagePipeline {
     public ConversationMessagePipelineResult execute(ConversationMessageRequestDTO request,
                                                      RewriteResult rewriteResult,
                                                      ConversationProgressListener progress) {
-        ConversationRetrievalResult retrievalResult = conversationRetrievalOrchestrator.retrieve(
+        ConversationRetrievalResult retrievalResult = rewriteResult.getKeywords() != null && !rewriteResult.getKeywords().isEmpty()
+                ? conversationRetrievalOrchestrator.retrieve(rewriteResult.getRewrittenQuery(), rewriteResult.getKeywords(),
+                        request.getLimit(), request.getKbIds(), request.getPreferredModalities(), request.getAssetIdList())
+                : conversationRetrievalOrchestrator.retrieve(
                 rewriteResult.getRewrittenQuery(),
                 request.getLimit(),
                 request.getKbIds(),
@@ -95,14 +97,14 @@ public class ConversationMessagePipeline {
         AnswerGenerationResult answerGenerationResult = progress != null && progress.supportsAnswerStreaming()
                 ? answerGenerationService.generateStream(
                         request.getQuery().trim(),
-                        rewriteResult.getRewrittenQuery(),
+                        resolveQuestion(request, rewriteResult),
                         AnswerMode.from(request.getAnswerMode()),
                         answerCandidates,
                         candidateCitations,
                         progress)
                 : answerGenerationService.generate(
                         request.getQuery().trim(),
-                        rewriteResult.getRewrittenQuery(),
+                        resolveQuestion(request, rewriteResult),
                         AnswerMode.from(request.getAnswerMode()),
                         answerCandidates,
                         candidateCitations);
@@ -118,6 +120,11 @@ public class ConversationMessagePipeline {
                 answerCitations,
                 answerGenerationResult
         );
+    }
+
+    private String resolveQuestion(ConversationMessageRequestDTO request, RewriteResult rewrite) {
+        return StringUtils.hasText(rewrite.getResolvedQuestion())
+                ? rewrite.getResolvedQuestion() : request.getQuery().trim();
     }
 
     private List<ConversationCitation> filterEffectiveCitations(List<ConversationCitation> candidateCitations,

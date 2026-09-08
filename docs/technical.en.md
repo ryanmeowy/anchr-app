@@ -35,7 +35,7 @@ The application is a Java 21 and Spring Boot modular monolith. MySQL owns busine
 | **Knowledge content** | Knowledge-base and document lifecycle, health and statistics, object-storage references, deduplication, versioned asset generations, and reliable cleanup. |
 | **Document ingestion** | Asynchronous batch ingestion, idempotent client requests, parse/embed/index stage tracking, manual whole-document retry after failure, reparse/re-embed operations, and Docling integration. |
 | **Hybrid retrieval** | Full-text and vector recall, Chinese IK analysis, Reciprocal Rank Fusion, bounded reranking, metadata and modality filters, and generation-aware visibility. |
-| **Evidence-first answers** | Query rewriting, answer generation, source citations, result cards, follow-up questions, segment preview, and document-context restoration. |
+| **Evidence-first answers** | Traditional RAG context resolution and keyword extraction (keywords for text recall, full questions for embeddings and reranking), fixed retrieval and answer generation, citation validation; source citations, result cards, follow-ups, segment previews, and source context. |
 | **Agentic RAG** | Budgeted tool execution, knowledge search, document discovery and reading, asynchronous summaries, trace persistence, runtime recovery, cancellation, and traditional RAG fallback. |
 | **Streaming workflows** | Server-Sent Events for answers and long-running Agent tasks, with persisted terminal state for refresh-safe clients. |
 | **Runtime configuration** | Encrypted Generation, Embedding, multimodal Embedding, Rerank, and Aliyun OSS configuration with connection testing and controlled activation. |

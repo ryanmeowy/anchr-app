@@ -99,7 +99,7 @@ import static org.mockito.Mockito.when;
 class ConversationServiceImplTest {
 
     @Mock
-    private QueryRewriteService queryRewriteService;
+    private TraditionalRagRewriteService queryRewriteService;
     @Mock
     private ConversationRetrievalOrchestrator conversationRetrievalOrchestrator;
     @Mock
@@ -1054,6 +1054,7 @@ class ConversationServiceImplTest {
         RewriteResult result = new RewriteResult();
         result.setOriginalQuery(originalQuery);
         result.setRewrittenQuery(rewrittenQuery);
+        result.setResolvedQuestion(rewrittenQuery);
         result.setRewriteReason(reason);
         result.setTopicEntities(List.of("mysql", "innodb"));
         result.setConfidence(0.92d);

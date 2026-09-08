@@ -8,9 +8,16 @@ public record RetrievalHitQuery(
         Integer limit,
         List<String> kbIds,
         List<String> assetIds,
-        List<String> hitTypes
+        List<String> hitTypes,
+        List<String> keywords
 ) {
+    public RetrievalHitQuery(String query, Integer limit, List<String> kbIds,
+                             List<String> assetIds, List<String> hitTypes) {
+        this(query, limit, kbIds, assetIds, hitTypes, List.of());
+    }
+
     public RetrievalHitQuery {
+        keywords = copy(keywords);
         kbIds = copy(kbIds);
         assetIds = copy(assetIds);
         hitTypes = copy(hitTypes);
