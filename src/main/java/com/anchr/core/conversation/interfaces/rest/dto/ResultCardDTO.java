@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Asset-level Top3 result card.
+ * Asset-level traditional retrieval result card (up to five assets).
  */
 @Data
 public class ResultCardDTO implements Serializable {

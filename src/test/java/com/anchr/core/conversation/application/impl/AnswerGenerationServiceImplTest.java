@@ -68,6 +68,7 @@ class AnswerGenerationServiceImplTest {
     void generate_shouldFallbackWhenEvidenceTooShort() {
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_001")
+                .assetId("asset_" + "seg_001")
                 .score(0.88D)
                 .snippet("too short")
                 .build();
@@ -109,10 +110,31 @@ class AnswerGenerationServiceImplTest {
     }
 
     @Test
+    void generate_shouldKeepPartialAnswerAndExplicitMissingEvidenceWithoutCoverageModel() {
+        String content = "组件的数量上限为三项，当前配置不会调整该上限。".repeat(5);
+        var candidate = ConversationRetrievalCandidate.builder().segmentId("partial")
+                .assetId("asset_" + "partial")
+                .score(0.9).content(content).build();
+        when(generationPort.generate(any(), any())).thenReturn("""
+                {"status":"ANSWERED","answer":"数量上限为三项。[1] 配置何时读取暂无足够证据，无法确认。"}
+                """);
+        var result = service.generate("数量限制和读取时机？", "组件的数量限制和配置读取时机？",
+                AnswerMode.STRICT, List.of(candidate), List.of(buildCitation("partial", content)));
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.getAnswerText()).contains("数量上限为三项", "无法确认");
+        assertThat(result.getAnswerInputSegmentIds()).containsExactly("partial");
+        var prompt = modelMessagesCaptor();
+        verify(generationPort).generate(prompt.capture(), any());
+        assertThat(prompt.getValue().getFirst().content()).contains("按子问题分别应用", "组件的数量限制和配置读取时机？");
+        org.mockito.Mockito.verifyNoMoreInteractions(generationPort);
+    }
+
+    @Test
     void generate_shouldUseOriginalContentInsteadOfSnippetAsModelEvidence() {
         String originalContent = "InnoDB 是 MySQL 的事务型存储引擎，支持事务、行级锁、外键以及崩溃恢复能力。".repeat(4);
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_original_content")
+                .assetId("asset_" + "seg_original_content")
                 .score(0.88D)
                 .content(originalContent)
                 .snippet("InnoDB 摘要")
@@ -133,8 +155,8 @@ class AnswerGenerationServiceImplTest {
         verify(generationPort).generate(promptCaptor.capture(), any());
         assertThat(result.isFallbackUsed()).isFalse();
         assertThat(promptCaptor.getValue().getFirst().content())
-                .contains("content=" + originalContent)
-                .doesNotContain("content=InnoDB 摘要");
+                .contains("正文：\n" + originalContent)
+                .doesNotContain("正文：\nInnoDB 摘要");
     }
 
     @Test
@@ -142,6 +164,7 @@ class AnswerGenerationServiceImplTest {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(4);
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_002")
+                .assetId("asset_" + "seg_002")
                 .score(0.03D)
                 .snippet(longEvidence)
                 .build();
@@ -168,6 +191,7 @@ class AnswerGenerationServiceImplTest {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_003")
+                .assetId("asset_" + "seg_003")
                 .score(0.88D)
                 .snippet(longEvidence)
                 .build();
@@ -187,7 +211,7 @@ class AnswerGenerationServiceImplTest {
 
         assertThat(result.isFallbackUsed()).isFalse();
         assertThat(result.isGenerationFailed()).isTrue();
-        assertThat(result.getFallbackReason()).isEqualTo("invalid_answer_citation");
+        assertThat(result.getFallbackReason()).isEqualTo("missing_answer_citation");
         assertThat(result.getAnswerText()).isEqualTo("回答模型未能生成可靠结果，请稍后重试。");
         assertThat(result.getAnswerInputSegmentIds()).isEmpty();
     }
@@ -241,6 +265,7 @@ class AnswerGenerationServiceImplTest {
         String longEvidence = "InnoDB 支持事务和行级锁，且具备崩溃恢复能力。".repeat(5);
         ConversationRetrievalCandidate candidate = ConversationRetrievalCandidate.builder()
                 .segmentId("seg_004")
+                .assetId("asset_" + "seg_004")
                 .score(0.88D)
                 .snippet(longEvidence)
                 .build();
@@ -326,11 +351,11 @@ class AnswerGenerationServiceImplTest {
         assertThat(result.isFallbackUsed()).isFalse();
         String prompt = promptCaptor.getValue().getFirst().content();
         assertThat(prompt).contains("回答模式：SUMMARY");
-        assertThat(prompt).contains("最多3条要点");
+        assertThat(prompt).contains("按问题主题组织").doesNotContain("最多3条要点");
         assertThat(prompt).contains("引用编号必须紧跟在它所支持的总结、事实或结论之后");
         assertThat(prompt).contains("禁止输出“参考来源”“引用来源”“References”");
         assertThat(prompt).contains("[3]");
-        assertThat(prompt).doesNotContain("[4]");
+        assertThat(prompt).contains("[4]");
         assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_1", "seg_2");
     }
 
@@ -356,12 +381,12 @@ class AnswerGenerationServiceImplTest {
         );
 
         assertThat(result.isFallbackUsed()).isFalse();
-        assertThat(result.getAnswerText()).isEqualTo("先引用第三条[1]，再引用第一条[2]，重复第三条。");
+        assertThat(result.getAnswerText()).isEqualTo("先引用第三条[1-1]，再引用第一条[2-1]，重复第三条[1-1]。");
         assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_3", "seg_1");
     }
 
     @Test
-    void generate_shouldUseOneReferenceNumberForMultipleSegmentsFromTheSameAsset() {
+    void generate_shouldUseDistinctSegmentLabelsFromTheSameAsset() {
         ConversationRetrievalCandidate first = buildCandidate(
                 "seg_1", "同一文档第一处证据介绍生成式回答。".repeat(4));
         first.setAssetId("asset-1");
@@ -384,7 +409,7 @@ class AnswerGenerationServiceImplTest {
         );
 
         assertThat(result.isFallbackUsed()).isFalse();
-        assertThat(result.getAnswerText()).isEqualTo("两处证据共同支持结论[1]。");
+        assertThat(result.getAnswerText()).isEqualTo("两处证据共同支持结论[1-1][1-2]。");
         assertThat(result.getAnswerInputSegmentIds()).containsExactly("seg_1", "seg_2");
     }
 
@@ -432,7 +457,7 @@ class AnswerGenerationServiceImplTest {
         assertThat(result.isFallbackUsed()).isFalse();
         String prompt = promptCaptor.getValue().getFirst().content();
         assertThat(prompt).contains("回答模式：EXPLORE");
-        assertThat(prompt).contains("可能方向/建议");
+        assertThat(prompt).contains("可能方向或建议");
         assertThat(prompt).contains("推测必须明确标注");
     }
 
@@ -462,9 +487,61 @@ class AnswerGenerationServiceImplTest {
                 "InnoDB 是什么", "InnoDB 定义", AnswerMode.STRICT,
                 List.of(candidate), List.of(citation), progress);
 
-        assertThat(streamed.toString()).isEqualTo("InnoDB 支持\n事务[1]");
+        assertThat(streamed.toString()).isEqualTo("InnoDB 支持\n事务[1-1]");
         assertThat(reset.get()).isNull();
         assertThat(result.getAnswerText()).isEqualTo(streamed.toString());
+    }
+
+    @Test
+    void pipelineStreamingAndStoredCitationsShouldAgreeOnFirstAppearance() {
+        var a1 = buildCandidate("a1", "第一份材料的第一处完整证据。".repeat(8));
+        var a2 = buildCandidate("a2", "第一份材料的第二处完整证据。".repeat(8));
+        var b1 = buildCandidate("b1", "第二份材料的完整证据。".repeat(8));
+        a1.setAssetId("a"); a2.setAssetId("a"); b1.setAssetId("b");
+        var retrieval = new com.anchr.core.conversation.application.model.ConversationRetrievalResult();
+        retrieval.setTopCandidates(List.of(a1, b1, a2));
+        var searches = new java.util.concurrent.atomic.AtomicInteger();
+        var pipeline = new ConversationMessagePipeline(null,
+                (query, limit, kb, modalities, assets) -> { searches.incrementAndGet(); return retrieval; },
+                new com.anchr.core.conversation.application.assembler.ConversationCitationMapper(),
+                new com.anchr.core.conversation.application.assembler.ConversationResultCardMapper(), service);
+        String raw = "{\"status\":\"ANSWERED\",\"answer\":\"结论[2]另一份材料[3]补充[1]重复[2]\"}";
+        when(generationPort.generateStream(any(), any(), any())).thenAnswer(invocation -> {
+            Consumer<String> delta = invocation.getArgument(2);
+            for (int i = 0; i < raw.length(); i++) delta.accept(raw.substring(i, i + 1));
+            return new ConversationGenerationResult(raw, 0, 0);
+        });
+        var streamed = new StringBuilder();
+        var request = new com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO();
+        request.setQuery("综合这些材料"); request.setAnswerMode("SUMMARY");
+        var rewrite = new com.anchr.core.conversation.application.model.RewriteResult();
+        rewrite.setRewrittenQuery(request.getQuery());
+        var result = pipeline.execute(request, rewrite, new ConversationProgressListener() {
+            @Override public boolean supportsAnswerStreaming() { return true; }
+            @Override public void onAnswerDelta(String delta) { streamed.append(delta); }
+            @Override public void onAnswerReset(String answer) { streamed.setLength(0); streamed.append(answer); }
+        });
+        assertThat(searches.get()).isEqualTo(1);
+        assertThat(streamed.toString()).isEqualTo("结论[1-1]另一份材料[2-1]补充[1-2]重复[1-1]");
+        assertThat(result.answerGenerationResult().getAnswerText()).isEqualTo(streamed.toString());
+        assertThat(result.answerCitations()).extracting(ConversationCitation::getSegmentId).containsExactly("a2", "b1", "a1");
+        var codec = new com.anchr.core.conversation.application.assembler.ConversationTurnCodec(new ObjectMapper());
+        var restored = codec.parseCitations(codec.serializeCitations(result.answerCitations()));
+        assertThat(restored).hasSize(2);
+        assertThat(restored.getFirst().getChunks()).extracting(c -> c.getCitationLabel()).containsExactly("1-1", "1-2");
+        assertThat(restored.getFirst().getChunks()).extracting(c -> c.getSegmentId()).containsExactly("a2", "a1");
+        verify(generationPort).generateStream(any(), any(), any());
+    }
+
+    @Test
+    void wholeOversizeEvidenceMustNotCallTheAnswerModel() {
+        var candidate = buildCandidate("large", "short snippet");
+        candidate.setContent("完整表格".repeat(10_000));
+        var result = service.generate("总结", "总结", AnswerMode.SUMMARY,
+                List.of(candidate), List.of(buildCitation("large", "short snippet")));
+        assertThat(result.isGenerationFailed()).isTrue();
+        assertThat(result.getFallbackReason()).isEqualTo("evidence_budget_exceeded");
+        verifyNoInteractions(generationPort);
     }
 
     @SuppressWarnings("unchecked")
@@ -475,6 +552,7 @@ class AnswerGenerationServiceImplTest {
     private ConversationRetrievalCandidate buildCandidate(String segmentId, String snippet) {
         return ConversationRetrievalCandidate.builder()
                 .segmentId(segmentId)
+                .assetId("asset_" + segmentId)
                 .score(0.88D)
                 .snippet(snippet)
                 .build();

@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,7 +19,7 @@ import java.util.Objects;
 @Component
 public class ConversationResultCardMapper {
 
-    private static final int MAX_RESULT_CARDS = 3;
+    private static final int MAX_RESULT_CARDS = 5;
     private static final int MAX_ADDITIONAL_HITS = 2;
 
     public List<ResultCardDTO> map(List<ConversationRetrievalCandidate> candidates) {
@@ -29,7 +28,6 @@ public class ConversationResultCardMapper {
         }
         List<ConversationRetrievalCandidate> sortedCandidates = candidates.stream()
                 .filter(this::canBuildHit)
-                .sorted(candidateComparator())
                 .toList();
         if (sortedCandidates.isEmpty()) {
             return List.of();
@@ -114,21 +112,10 @@ public class ConversationResultCardMapper {
                 .build();
     }
 
-    private Comparator<ConversationRetrievalCandidate> candidateComparator() {
-        return Comparator
-                .comparing((ConversationRetrievalCandidate candidate) -> nullSafeScore(candidate.getScore())).reversed()
-                .thenComparing(candidate -> nullSafeText(candidate.getAssetId()))
-                .thenComparing(candidate -> nullSafeText(candidate.getSegmentId()));
-    }
-
     private boolean canBuildHit(ConversationRetrievalCandidate candidate) {
         return candidate != null
                 && StringUtils.hasText(candidate.getAssetId())
                 && StringUtils.hasText(candidate.getSegmentId());
-    }
-
-    private double nullSafeScore(Double score) {
-        return score == null ? 0.0d : score;
     }
 
     private String resolveAssetType(ConversationRetrievalCandidate candidate) {
@@ -165,7 +152,4 @@ public class ConversationResultCardMapper {
         return candidate.getAssetId();
     }
 
-    private String nullSafeText(String text) {
-        return StringUtils.hasText(text) ? text.trim() : "";
-    }
 }

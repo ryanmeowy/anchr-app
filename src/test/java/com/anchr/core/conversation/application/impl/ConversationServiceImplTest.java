@@ -610,7 +610,7 @@ class ConversationServiceImplTest {
     }
 
     @Test
-    void createMessage_shouldGenerateAnswerOnlyFromResultCardSegments() {
+    void createMessage_shouldUseEvidenceBeyondFormerThreeCardLimit() {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         String sessionId = session.getSessionId();
 
@@ -636,7 +636,7 @@ class ConversationServiceImplTest {
         ConversationMessageResponseDTO response = service.createMessage(sessionId, buildMessageRequest("mysql 索引有哪些"));
 
         assertThat(response.getResultCards()).extracting(ResultCardDTO::getAssetId)
-                .containsExactly("asset_1", "asset_2", "asset_3");
+                .containsExactly("asset_1", "asset_2", "asset_3", "asset_4");
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ConversationRetrievalCandidate>> candidatesCaptor = ArgumentCaptor.forClass(List.class);
         @SuppressWarnings("unchecked")
@@ -649,9 +649,9 @@ class ConversationServiceImplTest {
                 citationsCaptor.capture()
         );
         assertThat(candidatesCaptor.getValue()).extracting(ConversationRetrievalCandidate::getSegmentId)
-                .containsExactly("seg_asset_1", "seg_asset_2", "seg_asset_3");
+                .containsExactly("seg_asset_1", "seg_asset_2", "seg_asset_3", "seg_asset_4");
         assertThat(citationsCaptor.getValue()).extracting(ConversationCitation::getSegmentId)
-                .containsExactly("seg_asset_1", "seg_asset_2", "seg_asset_3");
+                .containsExactly("seg_asset_1", "seg_asset_2", "seg_asset_3", "seg_asset_4");
     }
 
     @Test

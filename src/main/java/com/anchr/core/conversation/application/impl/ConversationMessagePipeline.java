@@ -15,13 +15,11 @@ import com.anchr.core.conversation.application.model.RewriteResult;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
 import com.anchr.core.conversation.interfaces.rest.dto.ResultCardDTO;
-import com.anchr.core.conversation.interfaces.rest.dto.ResultHitDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -30,8 +28,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 public class ConversationMessagePipeline {
-
-    private static final int ANSWER_CITATION_LIMIT = 5;
 
     private final TraditionalRagRewriteService queryRewriteService;
     private final ConversationRetrievalOrchestrator conversationRetrievalOrchestrator;
@@ -85,16 +81,26 @@ public class ConversationMessagePipeline {
                 request.getPreferredModalities(),
                 request.getAssetIdList()
         );
-        List<ResultCardDTO> resultCards = conversationResultCardMapper.map(retrievalResult.getTopCandidates());
-        LinkedHashSet<String> resultCardSegmentIds = collectResultCardSegmentIds(resultCards);
-        List<ConversationRetrievalCandidate> answerCandidates = retrievalResult.getTopCandidates()
-                .stream()
-                .filter(candidate -> isTraceableCandidate(candidate, resultCardSegmentIds))
-                .filter(ConversationRetrievalCandidate::isCitableEvidence)
-                .limit(ANSWER_CITATION_LIMIT)
-                .toList();
+        long selectionStart = System.nanoTime();
+        var selection = TraditionalRagEvidencePolicy.select(retrievalResult.getTopCandidates());
+        List<ConversationRetrievalCandidate> answerCandidates = selection.candidates();
+        // Prioritize selected evidence so result cards can never hide an answer source.
+        var cardCandidates = new java.util.ArrayList<>(answerCandidates);
+        var selectedIds = answerCandidates.stream().map(ConversationRetrievalCandidate::getSegmentId)
+                .collect(java.util.stream.Collectors.toSet());
+        retrievalResult.getTopCandidates().stream().filter(java.util.Objects::nonNull)
+                .filter(c -> !selectedIds.contains(c.getSegmentId())).forEach(cardCandidates::add);
+        List<ResultCardDTO> resultCards = conversationResultCardMapper.map(cardCandidates);
+        log.info("Traditional evidence selected, candidateCount={}, assets={}, segments={}, contextChars={}, budget={}, excluded={}, inputSegmentIds={}, latencyMs={}",
+                retrievalResult.getTopCandidates().size(), answerCandidates.stream().map(ConversationRetrievalCandidate::getAssetId).distinct().count(),
+                answerCandidates.size(), selection.contextChars(), TraditionalRagEvidencePolicy.MAX_CONTEXT_CHARS,
+                selection.excluded(), answerCandidates.stream().map(ConversationRetrievalCandidate::getSegmentId).toList(),
+                (System.nanoTime() - selectionStart) / 1_000_000);
         List<ConversationCitation> candidateCitations = conversationCitationMapper.mapFromSearchResults(answerCandidates);
-        AnswerGenerationResult answerGenerationResult = progress != null && progress.supportsAnswerStreaming()
+        long generationStart = System.nanoTime();
+        AnswerGenerationResult answerGenerationResult = selection.budgetExceeded()
+                ? budgetFailure()
+                : progress != null && progress.supportsAnswerStreaming()
                 ? answerGenerationService.generateStream(
                         request.getQuery().trim(),
                         resolveQuestion(request, rewriteResult),
@@ -113,6 +119,18 @@ public class ConversationMessagePipeline {
                 answerGenerationResult.getAnswerInputSegmentIds(),
                 AnswerStatus.from(answerGenerationResult)
         );
+        Map<String, Integer> assetIndexes = new LinkedHashMap<>();
+        Map<String, Integer> segmentIndexes = new LinkedHashMap<>();
+        for (ConversationCitation citation : answerCitations) {
+            String asset = citation.getAssetId();
+            citation.setAssetCitationIndex(assetIndexes.computeIfAbsent(asset, ignored -> assetIndexes.size() + 1));
+            citation.setSegmentCitationIndex(segmentIndexes.merge(asset, 1, Integer::sum));
+        }
+        log.info("Traditional answer citations, citationCount={}, references={}, answerStatus={}, fallbackReason={}, generationLatencyMs={}",
+                answerCitations.size(), answerCitations.stream().map(c -> c.getAssetCitationIndex() + "-"
+                        + c.getSegmentCitationIndex() + "=" + c.getSegmentId()).toList(),
+                AnswerStatus.from(answerGenerationResult), answerGenerationResult.getFallbackReason(),
+                (System.nanoTime() - generationStart) / 1_000_000);
         return new ConversationMessagePipelineResult(
                 rewriteResult,
                 retrievalResult,
@@ -120,6 +138,15 @@ public class ConversationMessagePipeline {
                 answerCitations,
                 answerGenerationResult
         );
+    }
+
+    private static AnswerGenerationResult budgetFailure() {
+        var result = new AnswerGenerationResult();
+        result.setFallbackReason("evidence_budget_exceeded");
+        result.setGenerationFailed(true);
+        result.setAnswerText("命中内容超过本次回答的证据容量，请缩小问题范围后重试。");
+        result.setAnswerInputSegmentIds(List.of());
+        return result;
     }
 
     private String resolveQuestion(ConversationMessageRequestDTO request, RewriteResult rewrite) {
@@ -154,35 +181,4 @@ public class ConversationMessagePipeline {
                 .toList();
     }
 
-    private LinkedHashSet<String> collectResultCardSegmentIds(List<ResultCardDTO> resultCards) {
-        if (resultCards == null || resultCards.isEmpty()) {
-            return new LinkedHashSet<>();
-        }
-        LinkedHashSet<String> segmentIds = new LinkedHashSet<>();
-        for (ResultCardDTO card : resultCards) {
-            if (card == null) {
-                continue;
-            }
-            addHitSegmentId(segmentIds, card.getPrimaryHit());
-            if (card.getAdditionalHits() == null || card.getAdditionalHits().isEmpty()) {
-                continue;
-            }
-            for (ResultHitDTO hit : card.getAdditionalHits()) {
-                addHitSegmentId(segmentIds, hit);
-            }
-        }
-        return segmentIds;
-    }
-
-    private void addHitSegmentId(LinkedHashSet<String> segmentIds, ResultHitDTO hit) {
-        if (hit != null && StringUtils.hasText(hit.getSegmentId())) {
-            segmentIds.add(hit.getSegmentId().trim());
-        }
-    }
-
-    private boolean isTraceableCandidate(ConversationRetrievalCandidate candidate, LinkedHashSet<String> resultCardSegmentIds) {
-        return candidate != null
-                && StringUtils.hasText(candidate.getSegmentId())
-                && resultCardSegmentIds.contains(candidate.getSegmentId().trim());
-    }
 }

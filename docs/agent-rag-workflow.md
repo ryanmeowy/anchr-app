@@ -662,9 +662,9 @@ Agent 关闭或 Agent 异常降级时，`KB_QUERY` 执行固定流程：
 ```text
 TraditionalRagRewriteService（一次模型调用，结合历史补全完整问题并提取关键词数组）
   -> Unified Retrieval（一次调用，内部文本/向量召回、RRF、Rerank）
-  -> Result Card Mapping
-  -> 选择最多 5 个可追溯且可引用的候选
-  -> Citation Mapping
+  -> 按检索排名选择完整证据（最多 5 个 asset、每 asset 3 段、共 10 段）
+  -> 按 asset 聚合；证据区含元数据不超过 24000 个 Unicode 字符
+  -> Result Card / Citation Mapping（卡片展示不限制模型证据）
   -> Grounded Answer Generation（最多一次模型调用）
   -> 引用校验与规范化，只保留答案实际使用的 Citation
   -> 生成引用原因并保存 Turn
@@ -697,19 +697,30 @@ Agent 异常后的 `KB_QUERY` 回退复用此传统流程，只有 `CHAT` 跳过
 
 | 模式 | Grounding 数 | 最少证据字符 | 最低 Top Score | 是否允许推测 |
 | --- | ---: | ---: | ---: | --- |
-| `STRICT` | 5 | 80 | 0.12 | 否 |
-| `SUMMARY` | 3 | 60 | 0.10 | 否 |
-| `EXPLORE` | 5 | 40 | 0.08 | 是，且必须明确标注 |
+| `STRICT` | 10 | 80 | 0.12 | 否 |
+| `SUMMARY` | 10 | 60 | 0.10 | 否 |
+| `EXPLORE` | 10 | 40 | 0.08 | 是，且必须明确标注 |
 
-答案模型仍输出 `{"status":"ANSWERED|NO_EVIDENCE","answer":"正文"}`，使用 `[1]` 引用输入证据。
+以上 Grounding 数为总上限，须同时满足最多 5 个 asset、每 asset 最多 3 段，以及完整证据区 24000 个 Unicode 字符的预算。
+`TraditionalRagEvidencePolicy` 按检索排名逐个选择，不为低排名文档预留名额；先按 segmentId、再按同 asset 完全相同正文去重。选完后按 asset 分组，组内优先 chunkOrder、其次完整页码信息排序，否则保留检索顺序。
+正文优先 content，只有原始 content 为空时才使用 snippet。超预算片段整段跳过，不截断、不以短 snippet 替换正文、不扩展邻近片段、不读全文；若所有有效候选均放不下，返回 `GENERATION_FAILED/evidence_budget_exceeded`，不调用答案模型。
+24000 是含文档与片段元数据的证据区字符预算，不是生成模型的 token 保证，也不随入库配置自动变化。默认入库 `chunkMaxTokens=1200`，Markdown 切片通常以约 2400 字符为目标，但表格、结构块和历史内容可以更长。上线前需用实际模型验证问题、提示词及输出预留后的容量。
+
+SUMMARY 提示词先给综合结论，再按问题主题组织必要要点，不再限制最多 3 条；所有传统模式保留条件、例外、时序和文档差异，不将片段总结宣称为全文阅读。Agent 共用模式策略不变。
+
+答案模型仍输出 `{"status":"ANSWERED|NO_EVIDENCE","answer":"正文"}`，使用 `[1]` 等局部编号引用输入证据；后端按正文首次引用顺序映射为 `[1-1]`、`[1-2]`（文档编号与文档内片段编号），重复片段保持编号且允许重复出现。只保留实际引用的片段，非法编号被移除，无任何有效编号则按生成失败/既有 legacy 策略处理。
 它对照用户原问题和补全后的完整问题回答，不能把关键词数组当成回答目标。
 部分问题有证据时回答已确认部分，并明确说明其他部分无法确认；证据无法支持任何实质性回答时整题返回 `NO_EVIDENCE`。
-现有证据字符数、Top Score、引用范围和引用存在性校验继续生效。语义完整性由答案模型遵循提示词保证，不设独立覆盖判定模型，也不声称程序能够严格证明答案完整。
+现有证据字符数、Top Score、引用范围和引用存在性校验继续生效。语义完整性通过提示词引导，并需对照证据评审，不设独立覆盖判定模型，也不声称程序能够严格证明答案完整。
 
-传统 SSE 恢复增量 JSON 解码，只发送 provisional 正文；最终引用或格式校验改变答案时通过 `answer_reset` 校准。
+传统 SSE 增量解码 JSON，并用同一映射规则转换引用；未闭合数字引用暂存，只发送 provisional 正文；最终引用或格式校验改变答案时通过 `answer_reset` 校准。
 `CONVERSATION.legacyEvidenceFallbackEnabled` 默认是 `false`。模型失败或格式不合法时返回 `GENERATION_FAILED`；显式启用此配置时沿用原有证据拼接降级，状态为 `MODEL_FALLBACK`。
 
 `retrieval_trace` JSON 保存 `resolvedQuestion`、`searchQuery`（完整问题）和 `keywords`，不再写入 Planner/覆盖信息；数据库表和外部请求字段不变。
+传统引用沿用 `assetCitationIndex/segmentCitationIndex`，对外为 `citationIndex` 和 `chunks[].segmentIndex/citationLabel`，同步、SSE 和历史回放一致；历史 `[1]` 不迁移、不重新编号。结果卡片最多 5 个文档，优先保留模型选中证据，卡片 hitCount 仍计检索命中；前端引用区只按实际引用计数。
+前端传统来源卡片单行横向滑动，有溢出才显示左右按钮与边缘提示；多片段通过滚动容器外的浮层选择，正文双层引用精确定位 segment，不能回退首片段。Agent 卡片保持原交互。
+
+日志 `Traditional evidence selected` 记录候选数、入选 asset/segment 数、精确字符数、预算、排除原因数量、输入 segmentId 和选择耗时；`Traditional answer references normalized` 记录无效编号数量；`Traditional answer citations` 记录最终编号映射、状态、失败原因和生成耗时。不在 INFO 重复输出正文。
 日志 `Traditional retrieval started` 记录 `originalQuery`、`resolvedQuestion`、`query`、`keywords` 以及范围与回退状态；`Traditional retrieval completed` 记录 `query`、`keywords` 和最终结果。
 底层 `kb search recall completed` 同时记录完整 `query`、实际传入的 `keywords` 和各路召回数量。旧 Agent 调用的关键词为空。
 日志不再用 `searchQuery` 标记精简短语；`Traditional RAG rewrite fallback` 记录 sessionId 和失败原因。

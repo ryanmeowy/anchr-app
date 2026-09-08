@@ -47,10 +47,10 @@ class ConversationMessagePipelineVisualEvidenceTest {
 
         assertThat(result.resultCards()).singleElement().satisfies(card -> {
             assertThat(card.getPrimaryHit().getSegmentId())
-                    .isEqualTo("visual-1");
+                    .isEqualTo("ocr-1");
             assertThat(card.getAdditionalHits()).singleElement()
                     .satisfies(hit -> assertThat(hit.getSegmentId())
-                            .isEqualTo("ocr-1"));
+                            .isEqualTo("visual-1"));
         });
         assertThat(answerInput.get())
                 .extracting(ConversationRetrievalCandidate::getSegmentId)
