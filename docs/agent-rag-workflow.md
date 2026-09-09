@@ -140,7 +140,7 @@ Phase 变更统一经过 `AgentWorkflowPhase.canTransitionTo` 运行时校验。
 3. 每个历史问题和回答最多 1200 字符。
 4. 历史总字符数最多 12000。
 5. 删除历史回答中的旧 `[1]`、`[1-1]` 引用，避免把旧 Run 的编号当成当前证据。
-6. 当前服务端资源上下文和用户问题。
+6. 当前服务端资源身份、授权范围和用户问题。资源名称、标题和正文通过工具结果提供，在进入模型前接受证据检查。
 
 ### 4.3 默认预算
 
@@ -201,7 +201,8 @@ flowchart LR
     C -- "否" --> E{"重复或 Read Limit?"}
     E -- "是" --> F["追加 Guard Tool Message"]
     E -- "否" --> G["CallTool"]
-    G --> H["ToolCompleted"]
+    G --> G1["资料工具结果：检查并隔离攻击段落"]
+    G1 --> H["ToolCompleted"]
     H --> I["登记可引用 Evidence"]
     I --> J{"还有 Pending Call?"}
     J -- "是" --> C
@@ -210,6 +211,8 @@ flowchart LR
 ```
 
 duplicate 和 read-limit guard 不增加实际工具调用数。合法工具在发出 `CallTool` 前增加 `toolCallCount`；工具完成 Event 携带压缩后的模型消息、Evidence、Trace 摘要和耗时。
+
+`AgentToolEffect` 在 `search_knowledge`、`find_documents`、`read_document` 返回后调用 `EvidenceCleaningService`，检查正文与文档元数据，并从 KEEP 原文重建工具消息和 Evidence。find_documents 在关联正文被移除时清空 matchedSegmentId/matchSnippet，保留可用的文档身份；其他工具仅返回保留片段。摘要从清洗后正文生成，read_document 游标保留原始读取进度。检查报告保存在 Trace 中。检查失败时，本批资料不进入模型；Run 可继续使用此前通过检查的证据，若无可用证据则以 `GENERATION_FAILED/evidence_check_failed` 结束。
 
 #### 阶段三：验证、Finalizer 与 Presentation
 
@@ -508,10 +511,11 @@ QUEUED -> READING -> MAP_SUMMARY -> REDUCE_SUMMARY -> FINALIZING -> COMPLETED
 ### 10.2 处理阶段
 
 1. `READING`：按文档原始 Segment 顺序读取全文。
-2. `MAP_SUMMARY`：按约 12000 字符分批生成局部总结，并保留 Marker。
-3. `REDUCE_SUMMARY`：分层合并，直到形成单一草稿。
-4. `FINALIZING`：执行一次最终模型压缩，并将安全的可见正文增量发送到任务 SSE。
-5. 后端再用 `AgentCitationPolicy.compactMarkers` 确定性收敛引用：最多 10 个不同引用、12 个 Marker、每段最多 3 个 Marker。
+2. `EVIDENCE_CHECK_N`：调用前设置任务当前阶段并记录 RUNNING，显式记录各批真实调用次数、用量与耗时，再记录完成或失败；仅保留通过检查的原文。检查失败或全部正文被隔离时以 `EVIDENCE_CHECK_FAILED` 结束，该错误为永久失败。
+3. `MAP_SUMMARY`：将清洗后的正文按约 12000 字符分批生成局部总结，并保留 Marker。
+4. `REDUCE_SUMMARY`：分层合并，直到形成单一草稿。
+5. `FINALIZING`：执行一次最终模型压缩，并将安全的可见正文增量发送到任务 SSE。
+6. 后端再用 `AgentCitationPolicy.compactMarkers` 确定性收敛引用：最多 10 个不同引用、12 个 Marker、每段最多 3 个 Marker。
 
 任务用 Lease 和 Owner 保证单任务单执行者；Lease 过期的 RUNNING 任务可以重新 Claim。可重试失败的延迟为 `30 秒 × 当前 attempt`，上限 120 秒。
 
@@ -665,14 +669,15 @@ TraditionalRagRewriteService（一次模型调用，结合历史补全完整问�
   -> 按检索排名选择完整证据（最多 5 个 asset、每 asset 3 段、共 10 段）
   -> 按 asset 聚合；证据区含元数据不超过 24000 个 Unicode 字符
   -> Result Card / Citation Mapping（卡片展示不限制模型证据）
-  -> Grounded Answer Generation（最多一次模型调用）
+  -> Evidence Check（独立模型检查，失败不放行原文）
+  -> Grounded Answer Generation（最多一次答案生成调用）
   -> 引用校验与规范化，只保留答案实际使用的 Citation
   -> 生成引用原因并保存 Turn
 ```
 
 专用 rewrite 返回 `resolvedQuestion`、`keywords`、`rewriteReason` 和 `confidence`。
 `resolvedQuestion` 保留全部子问题、假设、否定和必要条件，作为完整 `query` 传给 search；`keywords` 是最多 8 项、每项最多 100 字符的关键词或短语数组，规范化后去重，不是多个搜索请求。
-`RewriteResult.rewrittenQuery` 和 Turn 的 `rewritten_query` 现在保存完整检索问题，与 `resolvedQuestion` 一致。
+`RewriteResult.rewrittenQuery` 和 Turn 的 `rewritten_query` 保存完整检索问题，与 `resolvedQuestion` 一致。
 
 一次 search 内按用途分工：
 
@@ -686,10 +691,10 @@ TraditionalRagRewriteService（一次模型调用，结合历史补全完整问�
 当前文本检索每个短语要求匹配 70% 的分词，关键词数不超过 2 时全部必须匹配，多于 2 时要求匹配其中 70%；不配置单独关键词权重。
 关键词过多仍可能降低召回率，现有字段权重、RRF/Rerank 和相似度阈值不作调整。
 
-没有独立 Planner、覆盖检查模型或空召回补查循环。一次 rewrite、一次 search、最多一次答案生成；search 内部仍有 embedding 和 rerank 调用。
+一次 rewrite、一次 search、证据非空时增加一次独立证据检查、最多一次答案生成；search 内部仍有 embedding 和 rerank 调用。
 rewrite 模型失败、完整问题不合法、关键词不是数组或关键词项越界时，完整问题和 query 回退为用户原文，关键词为空；不重复调用模型或 search。
 
-兼容边界：`ConversationRetrievalOrchestrator` 增加关键词重载，`ConversationRetrievalAcl` 将关键词传入 `RetrievalHitQuery`；后者新增可选关键词列表并保留旧构造方式，旧调用默认空列表。
+关键词通过 `ConversationRetrievalOrchestrator` 的重载与 `ConversationRetrievalAcl` 传入 `RetrievalHitQuery`；该参数可选，省略时使用空列表。
 `RetrievalQueryServiceImpl` 的 Hit 查询入口将关键词传到已有的 `searchInternal`，不改变其匹配逻辑。普通 Top-N 搜索继续使用原有关键词入口；Agent 继续使用无关键词重载，共用 rewrite 不改变；意图路由遵循第 3 节的二分类默认检索规则。
 Agent 异常后的 `KB_QUERY` 回退复用此传统流程，只有 `CHAT` 跳过 RAG。
 
@@ -706,25 +711,24 @@ Agent 异常后的 `KB_QUERY` 回退复用此传统流程，只有 `CHAT` 跳过
 正文优先 content，只有原始 content 为空时才使用 snippet。超预算片段整段跳过，不截断、不以短 snippet 替换正文、不扩展邻近片段、不读全文；若所有有效候选均放不下，返回 `GENERATION_FAILED/evidence_budget_exceeded`，不调用答案模型。
 24000 是含文档与片段元数据的证据区字符预算，不是生成模型的 token 保证，也不随入库配置自动变化。默认入库 `chunkMaxTokens=1200`，Markdown 切片通常以约 2400 字符为目标，但表格、结构块和历史内容可以更长。上线前需用实际模型验证问题、提示词及输出预留后的容量。
 
-SUMMARY 提示词先给综合结论，再按问题主题组织必要要点，不再限制最多 3 条；所有传统模式保留条件、例外、时序和文档差异，不将片段总结宣称为全文阅读。Agent 共用模式策略不变。
+SUMMARY 提示词先给综合结论，再按问题主题组织必要要点；所有传统模式保留条件、例外、时序和文档差异，不将片段总结宣称为全文阅读。Agent 共用模式策略不变。
 
 答案模型仍输出 `{"status":"ANSWERED|NO_EVIDENCE","answer":"正文"}`，使用 `[1]` 等局部编号引用输入证据；后端按正文首次引用顺序映射为 `[1-1]`、`[1-2]`（文档编号与文档内片段编号），重复片段保持编号且允许重复出现。只保留实际引用的片段，非法编号被移除，无任何有效编号则按生成失败/既有 legacy 策略处理。
 它对照用户原问题和补全后的完整问题回答，不能把关键词数组当成回答目标。
 部分问题有证据时回答已确认部分，并明确说明其他部分无法确认；证据无法支持任何实质性回答时整题返回 `NO_EVIDENCE`。
-现有证据字符数、Top Score、引用范围和引用存在性校验继续生效。语义完整性通过提示词引导，并需对照证据评审，不设独立覆盖判定模型，也不声称程序能够严格证明答案完整。
+程序校验证据字符数、Top Score、引用范围和引用存在性；回答的语义完整性与事实支持程度通过真实模型验收评审。
 
 传统 SSE 增量解码 JSON，并用同一映射规则转换引用；未闭合数字引用暂存，只发送 provisional 正文；最终引用或格式校验改变答案时通过 `answer_reset` 校准。
-`CONVERSATION.legacyEvidenceFallbackEnabled` 默认是 `false`。模型失败或格式不合法时返回 `GENERATION_FAILED`；显式启用此配置时沿用原有证据拼接降级，状态为 `MODEL_FALLBACK`。
+`CONVERSATION.legacyEvidenceFallbackEnabled` 默认是 `false`。模型失败或格式不合法时返回 `GENERATION_FAILED`；显式启用此配置时仅允许使用已通过检查的证据拼接降级，状态为 `MODEL_FALLBACK`。证据检查失败或清洗后无可用正文时，不允许 legacy 降级。
 
-`retrieval_trace` JSON 保存 `resolvedQuestion`、`searchQuery`（完整问题）和 `keywords`，不再写入 Planner/覆盖信息；数据库表和外部请求字段不变。
+`retrieval_trace` JSON 保存 `resolvedQuestion`、`searchQuery`（完整问题）和 `keywords`，以及 `evidenceCheck` 段落检查报告。
 传统引用沿用 `assetCitationIndex/segmentCitationIndex`，对外为 `citationIndex` 和 `chunks[].segmentIndex/citationLabel`，同步、SSE 和历史回放一致；历史 `[1]` 不迁移、不重新编号。结果卡片最多 5 个文档，优先保留模型选中证据，卡片 hitCount 仍计检索命中；前端引用区只按实际引用计数。
 前端传统来源卡片单行横向滑动，有溢出才显示左右按钮与边缘提示；多片段通过滚动容器外的浮层选择，正文双层引用精确定位 segment，不能回退首片段。Agent 卡片保持原交互。
 
 日志 `Traditional evidence selected` 记录候选数、入选 asset/segment 数、精确字符数、预算、排除原因数量、输入 segmentId 和选择耗时；`Traditional answer references normalized` 记录无效编号数量；`Traditional answer citations` 记录最终编号映射、状态、失败原因和生成耗时。不在 INFO 重复输出正文。
 日志 `Traditional retrieval started` 记录 `originalQuery`、`resolvedQuestion`、`query`、`keywords` 以及范围与回退状态；`Traditional retrieval completed` 记录 `query`、`keywords` 和最终结果。
 底层 `kb search recall completed` 同时记录完整 `query`、实际传入的 `keywords` 和各路召回数量。旧 Agent 调用的关键词为空。
-日志不再用 `searchQuery` 标记精简短语；`Traditional RAG rewrite fallback` 记录 sessionId 和失败原因。
-历史 Turn 已持久化的规划追踪保留原样。
+`Traditional RAG rewrite fallback` 记录 sessionId 和失败原因。
 
 ## 15. 可观测性与安全
 
@@ -766,6 +770,8 @@ READING -> MAP_SUMMARY -> REDUCE_SUMMARY -> FINALIZING
 
 Trace 只保存响应形态和摘要，不保存完整模型回答或思维链。
 
+证据检查报告记录段落及字段对应关系、原文与清洗后文本指纹、KEEP/ISOLATE/UNCERTAIN 数量、失败类型、模型名称、用量和耗时。传统报告保存在 `retrieval_trace.evidenceCheck`；Agent 工具报告保存在 Step 输出摘要；异步报告保存在 `EVIDENCE_CHECK_N` 阶段。检查用量计入 Agent Run/Task，阶段切换保留原报告。工具统计分别记录原始候选、保留 evidence、最终模型消息片段、返回文档；答案完成后统计实际引用。原始工具 trace 不得覆盖清洗后的数量。常规日志只输出统计和指纹。
+
 ### 15.2 安全与可靠性
 
 1. 用户输入、历史消息、文档正文和工具结果都视为不可信数据。
@@ -779,6 +785,10 @@ Trace 只保存响应形态和摘要，不保存完整模型回答或思维链�
 9. Run 与 Task 的终态更新校验预期源状态，避免并发完成、取消和迟到写入互相覆盖。
 10. 删除会话时取消活动 Run/Task，并删除相关 Trace 与 Task 记录。
 11. Redis 快照不参与权限或业务终态判断，MySQL 仍是权威来源。
+
+资料检查和回答规则放在 system 消息中，用户问题与 JSON 序列化证据作为独立输入。检查模型逐段返回 KEEP、ISOLATE 或 UNCERTAIN，程序验证编号完整性并保留 KEEP 原文。格式错误、漏检、超时或调用失败均阻止该批资料进入模型，legacy 降级也只使用已检查的证据。清洗保留来源定位，源文档与索引维持原始内容。
+
+检查服务复用当前 GENERATION 配置，每批最多 28000 个正文 Unicode 字符、128 个结构检查单元，完整序列化消息最多 48000 字符，输出预留 8192 token。传统链路限定一批，按自然段、列表、表格和代码块组织；超出单元数时按同字段最短相邻对合并，保留原始区间。容量超限单独记录；Agent 工具结果可分批且全部通过后才放行。检查能力及真实模型验收结果见[模型输入证据检查](evidence-cleaning.md)。
 
 ## 16. 关键配置
 

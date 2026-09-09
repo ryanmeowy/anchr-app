@@ -1,10 +1,10 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
-import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.anchr.core.conversation.domain.model.AgentTask;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
-import org.junit.jupiter.api.Test;
+import com.anchr.core.testsupport.EvidenceCleaningTestSupport;
+import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 
 import java.util.Collection;
 import java.util.List;
@@ -12,6 +12,8 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -88,7 +90,7 @@ class AgentTaskProcessorSchedulingTest {
                 executor,
                 mock(AgentRuntimeSnapshotService.class),
                 new AgentCitationPolicy(),
-                null);
+                null, EvidenceCleaningTestSupport.allowing());
     }
 
     private static final class TestTaskRepository implements AgentTaskRepository {

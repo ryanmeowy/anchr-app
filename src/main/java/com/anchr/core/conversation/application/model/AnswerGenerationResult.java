@@ -1,9 +1,9 @@
 package com.anchr.core.conversation.application.model;
 
-import lombok.Data;
-
 import java.util.ArrayList;
 import java.util.List;
+
+import lombok.Data;
 
 /**
  * Generated answer result with fallback metadata.
@@ -11,6 +11,7 @@ import java.util.List;
 @Data
 public class AnswerGenerationResult {
 
+    private EvidenceCheckReport evidenceCheck;
     private String answerText;
     private boolean fallbackUsed;
     private boolean generationFailed;

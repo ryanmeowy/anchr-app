@@ -2,10 +2,13 @@ package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
+import com.anchr.core.conversation.application.impl.EvidenceCleaningService;
 import com.anchr.core.conversation.domain.port.AgentModelPort;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.testsupport.EvidenceCleaningTestSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -40,6 +43,8 @@ class AgentWorkflowSpringWiringTest {
                     AgentModelEffect.class, AgentToolEffect.class, AgentCompletionEffect.class,
                     AgentEffectRunner.class, AgentRunObserver.class,
                     AgentWorkflowConfiguration.class, AgentWorkflowImpl.class);
+            context.registerBean(EvidenceCleaningService.class,
+                    EvidenceCleaningTestSupport::allowing);
             context.refresh();
 
             AgentWorkflowImpl workflow = context.getBean(AgentWorkflowImpl.class);

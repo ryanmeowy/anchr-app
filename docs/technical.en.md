@@ -168,6 +168,12 @@ Solid arrows denote synchronous dependencies; dashed arrows denote activity reco
 
 For the full boundary decision, see [Domain boundaries and interactions](./domain-boundaries-and-interactions.md).
 
+### Evidence flow into answer models
+
+Traditional RAG inspects selected retrieval evidence in a separate model request before generating an answer. Agent search and document-reading tools inspect material before returning it to the model; asynchronous summaries inspect source batches before summarization. Inspection covers body text, titles and summaries. The application validates paragraph decisions, retains accepted original text and records its provenance. Failed batches are withheld from downstream models.
+
+Inspection uses the active GENERATION configuration and adds model latency and usage. Source files and Elasticsearch retain the original material, and citations preserve source locations. See [Evidence inspection](evidence-cleaning.md) for the processing rules and evaluation results.
+
 ## Quick start
 
 ### Prerequisites

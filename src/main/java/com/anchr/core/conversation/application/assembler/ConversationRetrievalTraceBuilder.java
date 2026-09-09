@@ -8,11 +8,13 @@ import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageReques
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageResponseDTO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -29,6 +31,7 @@ public class ConversationRetrievalTraceBuilder {
                                  AnswerGenerationResult answerGenerationResult) {
         Map<String, Object> trace = new LinkedHashMap<>();
         trace.put("limit", request.getLimit());
+        trace.put("evidenceCheck", answerGenerationResult.getEvidenceCheck());
         trace.put("kbIds", request.getKbIds());
         trace.put("answerMode", request.getAnswerMode());
         trace.put("rewriteReason", rewriteResult.getRewriteReason());

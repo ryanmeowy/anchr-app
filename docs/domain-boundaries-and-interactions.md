@@ -116,8 +116,8 @@ Segment 是 Asset generation 的检索投影。业务可见性由 Knowledge Cont
 **职责**：
 
 - 管理会话和 Turn 生命周期。
-- 执行 CHAT、OTHER、KB_QUERY 等意图路由。
-- 编排传统 RAG：问题改写、检索、证据筛选、回答生成、引用和结果卡片。
+- 执行 CHAT、KB_QUERY 意图路由。
+- 编排传统 RAG：问题改写、检索、证据筛选与安全检查、回答生成、引用和结果卡片。
 - 编排 Agent 工具循环、运行轨迹、异步任务、恢复、取消和 SSE 推送。
 - 保存回答时实际使用的证据快照。
 
@@ -128,6 +128,8 @@ Segment 是 Asset generation 的检索投影。业务可见性由 Knowledge Cont
 - 进程内：Agent 取消注册、运行线程和 SSE 订阅者等瞬时状态。
 
 Ask 不拥有知识库、Asset 或 Segment。知识范围通过 `ConversationKnowledgeAcl` 查询，检索和文档内容通过 `ConversationRetrievalAcl` 获取。Agent 是 Ask 的执行模式，不单独划分业务上下文。
+
+`EvidenceCleaningService` 属于 Ask 应用层，使用 `ConversationGenerationPort` 检查传统回答候选、Agent 工具资料和异步总结原文。Ask 负责验证段落判定、隔离不可信指令、保存检查报告，并向后续模型提供保留的原文和来源标识；Knowledge Content 与 Retrieval 继续保存和提供原始资料。检查模型的名称与用量由生成适配器返回。
 
 ### 3.4 Activity：最近活动读模型
 
@@ -343,11 +345,11 @@ REST Search 或 Ask
 1. 加载或创建会话，并通过 `ConversationKnowledgeAcl` 解析用户可见知识范围。
 2. 生成 Turn/Run 标识，执行意图路由。
 3. 明确 CHAT 调用普通回答生成，其余有效请求及分类异常默认 KB_QUERY；KB_QUERY 由 `TraditionalRagRewriteService` 一次输出完整问题与关键词数组，通过 `ConversationRetrievalAcl` 检索一次（内部执行 RRF/Rerank）。
-4. 传统专属策略按检索排名选择完整片段：最多 5 个 asset、每 asset 3 段、共 10 段，含元数据的证据区最多 24000 个 Unicode 字符。超预算整段跳过，不扩展邻近片段或读取全文；先选证据再按 asset 聚合，卡片不反向限制证据。最多调用一次答案模型，部分缺证明确说明，全部无证据拒答。后端将局部引用映射为双层编号并只保留实际引用片段；历史单层编号兼容。
+4. 传统专属策略按检索排名选择完整片段：最多 5 个 asset、每 asset 3 段、共 10 段，含元数据的证据区最多 24000 个 Unicode 字符。超预算整段跳过，不扩展邻近片段或读取全文；先选证据再按 asset 聚合，卡片不反向限制证据。选中证据先经一次独立安全检查，再最多调用一次答案模型，部分缺证明确说明，全部无证据拒答。后端将局部引用映射为双层编号并只保留实际引用片段；历史单层编号兼容。
 5. 只保留回答实际使用且仍有效的引用，并通过 Retrieval 生成引用理由。
 6. 在事务中保存 Turn；成功后 best-effort 记录 QUESTION 活动。
 
-上述专用 rewrite 只由传统 RAG 调用（含 Agent 异常后的传统回退），不修改 Search、Agent 或共用 rewrite 的行为。关键词经兼容重载传到已有文本检索；向量与重排使用完整 query，旧调用默认空关键词。没有 Planner、覆盖模型或补查循环。前端传统引用卡片最多 5 张、单行横向滑动，多片段浮层选择并精确定位；Agent 展示保持不变。传统 SSE 增量发送已转换引用编号的 provisional 正文，最终校验后校准；完整问题和搜索 query 保存在 Turn 的 `retrieval_trace.resolvedQuestion/searchQuery/keywords`。
+上述专用 rewrite 只由传统 RAG 调用（含 Agent 异常后的传统回退），不修改 Search、Agent 或共用 rewrite 的行为。关键词经兼容重载传到已有文本检索；向量与重排使用完整 query，旧调用默认空关键词。前端传统引用卡片最多 5 张、单行横向滑动，多片段浮层选择并精确定位；Agent 展示保持不变。传统 SSE 增量发送已转换引用编号的 provisional 正文，最终校验后校准；完整问题和搜索 query 保存在 Turn 的 `retrieval_trace.resolvedQuestion/searchQuery/keywords`。
 
 Agent 模式复用相同的知识范围和检索边界：
 
@@ -358,6 +360,8 @@ Agent 模式复用相同的知识范围和检索边界：
 - SSE 是传输和订阅机制，不另建一套问答业务流程。
 - Conversation SSE、异步 Task SSE、轮询和 Snapshot 使用同一 `turnId` 回答身份；实时 delta 是 provisional，MySQL Turn 中的 canonical 终态是最终事实。
 - Conversation 与 Task 共用的 Answer Event Broker 只保证单 JVM 内实时分发；当前未使用 Redis Pub/Sub。Task/Turn 查询只能用于单实例中的断线与重启恢复，不能据此部署多个 App 副本。
+
+资料进入模型前的检查由调用方执行：传统链路在选证据后检查；Agent 工具在返回模型消息及登记证据前检查；异步任务在局部总结前分批检查。检查失败的批次不放行原文，Agent 仅可继续使用此前已通过检查的证据。报告分别保存到 Turn retrieval trace 或 Agent Step，详见[证据检查说明](evidence-cleaning.md)。
 
 ### 6.4 Embedding 配置部署与索引切换
 

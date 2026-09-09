@@ -1,33 +1,36 @@
 package com.anchr.core.conversation.application.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.anchr.core.common.util.RuntimeConfigUnit;
-import com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey;
-import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import com.anchr.core.conversation.application.AnswerGenerationService;
 import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
+import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.AnswerModePolicy;
-import com.anchr.core.conversation.application.model.AnswerGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.application.model.GenerationOptions;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
+import com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey;
+import com.anchr.core.settings.domain.model.RuntimeConfigType;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import static com.anchr.core.conversation.application.constant.ConversationConstant.DEFAULT_TIMEOUT;
 
@@ -56,6 +59,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final RuntimeConfigUnit runtimeConfigUnit;
+    private final EvidenceCleaningService evidenceCleaningService;
 
     @Override
     public AnswerGenerationResult generate(String userQuery,
@@ -78,7 +82,49 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
                 progress == null ? ConversationProgressListener.NOOP : progress);
     }
 
-    private AnswerGenerationResult generateInternal(String userQuery,
+    private AnswerGenerationResult generateInternal(String userQuery, String rewrittenQuery, AnswerMode answerMode,
+            List<ConversationRetrievalCandidate> topCandidates, List<ConversationCitation> citations,
+            ConversationProgressListener progress) {
+        var selected = TraditionalRagEvidencePolicy.select(topCandidates);
+        if (selected.budgetExceeded()) return buildGenerationFailure("evidence_budget_exceeded");
+        if (selected.candidates().isEmpty()) return generateCheckedInternal(userQuery, rewrittenQuery, answerMode,
+                List.of(), citations, progress);
+        var check = evidenceCleaningService.clean(objectMapper.valueToTree(Map.of("evidence", selected.candidates())),
+                true, DEFAULT_TIMEOUT);
+        AnswerGenerationResult result;
+        if (!check.success()) {
+            result = cleaningFailure();
+            if (check.report().capacityExceeded()) {
+                result.setFallbackReason("evidence_check_capacity_exceeded");
+                result.setAnswerText(EvidenceCleaningService.CAPACITY_MESSAGE);
+            }
+        } else {
+            List<ConversationRetrievalCandidate> safe = EvidenceCleaningService.candidates(objectMapper,
+                    selected.candidates(), check.cleaned().path("evidence"));
+            if (safe.isEmpty()) result = cleaningFailure();
+            else {
+                var safeCitations = new ConversationCitationMapper().mapFromSearchResults(safe);
+                // Downstream reason generation and persistence must use the inspected text too.
+                for (ConversationCitation target : citations) for (ConversationCitation source : safeCitations) {
+                    if (Objects.equals(target.getSegmentId(), source.getSegmentId())) {
+                        target.setContent(source.getContent()); target.setSnippet(source.getSnippet());
+                        target.setTitle(source.getTitle()); target.setFileName(source.getFileName());
+                    }
+                }
+                result = generateCheckedInternal(userQuery, rewrittenQuery, answerMode, safe, safeCitations, progress);
+            }
+        }
+        result.setEvidenceCheck(check.report());
+        return result;
+    }
+
+    private AnswerGenerationResult cleaningFailure() {
+        var result = buildGenerationFailure("evidence_check_failed");
+        result.setAnswerText(EvidenceCleaningService.FAILURE_MESSAGE);
+        return result;
+    }
+
+    private AnswerGenerationResult generateCheckedInternal(String userQuery,
                                                     String rewrittenQuery,
                                                     AnswerMode answerMode,
                                                     List<ConversationRetrievalCandidate> topCandidates,
@@ -103,16 +149,20 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
                 return buildNoEvidenceFallback(noEvidenceReason);
             }
 
-            String prompt = buildPrompt(userQuery, rewrittenQuery, groundingSegments, resolvedMode, policy, selection.context());
+            String prompt = buildPrompt(resolvedMode, policy);
+            List<ConversationModelMessage> messages = List.of(new ConversationModelMessage("system", prompt),
+                    new ConversationModelMessage("user", objectMapper.writeValueAsString(Map.of(
+                            "question", userQuery, "resolvedQuestion", rewrittenQuery,
+                            "untrustedEvidence", objectMapper.readTree(selection.context())))));
             StreamingJsonAnswerDecoder decoder = new StreamingJsonAnswerDecoder(progress, groundingSegments);
             GenerationOptions options = new GenerationOptions(null, null, DEFAULT_TIMEOUT);
             String rawText = progress.supportsAnswerStreaming()
                     ? generationPort.generateStream(
-                            List.of(new ConversationModelMessage("user", prompt)),
+                            messages,
                             options,
                             decoder::accept).content()
                     : generationPort.generate(
-                            List.of(new ConversationModelMessage("user", prompt)), options);
+                            messages, options);
             ModelAnswer modelAnswer = parseModelAnswer(rawText);
             if (modelAnswer == null) {
                 return finalizeStream(buildGenerationFailureOrLegacyFallback(
@@ -177,7 +227,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         }
         List<GroundingSegment> segments = new ArrayList<>();
         Map<String, ConversationCitation> byId = new LinkedHashMap<>();
-        citations.stream().filter(java.util.Objects::nonNull).forEach(c -> byId.putIfAbsent(c.getSegmentId(), c));
+        citations.stream().filter(Objects::nonNull).forEach(c -> byId.putIfAbsent(c.getSegmentId(), c));
         int limit = topCandidates.size();
         for (int i = 0; i < limit; i++) {
             ConversationRetrievalCandidate candidate = topCandidates.get(i);
@@ -215,11 +265,7 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         return null;
     }
 
-    private String buildPrompt(String userQuery,
-                               String rewrittenQuery,
-                               List<GroundingSegment> segments,
-                               AnswerMode answerMode,
-                               AnswerModePolicy policy, String evidenceContext) {
+    private String buildPrompt(AnswerMode answerMode, AnswerModePolicy policy) {
         StringBuilder builder = new StringBuilder();
         builder.append("你是知识库问答助手。");
         builder.append("只能基于给定证据回答，不得编造。");
@@ -245,10 +291,6 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
         }
         builder.append("必须对照用户完整问题回答各子问题，不得把检索短语当作回答目标。复合问题中的拒答要求按子问题分别应用：证据支持全部或部分问题时，status 必须为 ANSWERED；有证据的部分正常回答，缺少证据的部分明确说明无法确认，不得猜测或省略。");
         builder.append("仅当证据无法支持任何实质性回答时，status 必须为 NO_EVIDENCE，answer 只能使用“未找到足够内容支持该问题”，且不得输出任何引用编号。");
-        builder.append("用户问题：").append(userQuery).append("。");
-        builder.append("上下文补全后的完整问题（仅用于澄清原问题）：").append(rewrittenQuery).append("。");
-        builder.append("证据列表：");
-        builder.append(evidenceContext);
         return builder.toString();
     }
 

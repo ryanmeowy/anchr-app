@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.application.agent;
 
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
+import com.anchr.core.conversation.application.model.EvidenceCheckReport;
 
 import java.util.List;
 import java.util.Map;
@@ -11,7 +12,15 @@ public record AgentToolResult(boolean success,
                               AgentDeferredTask deferredTask,
                               AgentFinalAnswer finalAnswer,
                               String errorCode,
-                              Map<String, Object> traceDetails) {
+                              Map<String, Object> traceDetails,
+                              EvidenceCheckReport evidenceCheck,
+                              EvidenceStatistics evidenceStatistics) {
+
+    public AgentToolResult(boolean success, String content, List<ConversationRetrievalCandidate> evidence,
+                           AgentDeferredTask deferredTask, AgentFinalAnswer finalAnswer, String errorCode,
+                           Map<String, Object> traceDetails) {
+        this(success, content, evidence, deferredTask, finalAnswer, errorCode, traceDetails, null, null);
+    }
 
     public AgentToolResult {
         content = content == null ? "{}" : content;

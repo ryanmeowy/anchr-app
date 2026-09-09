@@ -1,10 +1,11 @@
 package com.anchr.core.conversation.application.agent;
 
+import com.anchr.core.conversation.application.impl.EvidenceCleaningService;
 import com.anchr.core.conversation.application.model.AgentMessage;
 import com.anchr.core.conversation.application.model.AgentTokenUsage;
 import com.anchr.core.conversation.application.model.AgentToolCall;
 import com.anchr.core.conversation.application.model.AnswerStatus;
-import org.springframework.util.StringUtils;
+import com.anchr.core.conversation.domain.model.ConversationCitation;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -12,8 +13,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_MAX_ATTEMPTS;
+import org.springframework.util.StringUtils;
+
 import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_EVIDENCE_ITEM_CHARS;
+import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_MAX_ATTEMPTS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.FINALIZER_MIN_REMAINING_MILLIS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_FINALIZER_EVIDENCE;
 import static com.anchr.core.conversation.application.constant.AgentConstant.MAX_FINALIZER_EVIDENCE_CHARS;
@@ -120,19 +123,28 @@ public final class AgentTransitionEngine {
         AgentState next = state.registerEvidence(result.evidence())
                 .appendMessage(AgentMessage.tool(event.call().id(), event.call().name(), event.modelMessage()));
         int order = next.traceOrder() + 1;
-        next = next.withTraceOrder(order);
+        var check = result.evidenceCheck();
+        int checkPrompt = check == null ? 0 : check.promptTokens();
+        int checkCompletion = check == null ? 0 : check.completionTokens();
+        next = next.withTraceAndUsage(order, checkPrompt, checkCompletion);
         Map<String, Object> summary = toolSummary(event.call(), result, event.durationMs());
         List<AgentSignal> signals = new ArrayList<>();
         signals.add(new AgentSignal.Trace(order,
                 result.success() ? AgentStepType.TOOL_RESULT : AgentStepType.FAILED,
                 event.attempt(), result.success() ? "SUCCESS" : "ERROR",
                 Map.of("tool", safe(event.call().name()), "callId", safe(event.call().id())),
-                summary, AgentTokenUsage.EMPTY, event.durationMs(), result.errorCode()));
+                summary, new AgentTokenUsage(checkPrompt, checkCompletion), event.durationMs(), result.errorCode()));
         Map<String, Object> details = new LinkedHashMap<>(summary);
+        details.remove("evidenceCheck");
         details.put("stepOrder", order);
         details.put("toolCallOrder", event.attempt());
         signals.add(progress("tool_result", result.success() ? "completed" : "failed",
                 next.stepCount(), details));
+        if ("EVIDENCE_CHECK_FAILED".equals(result.errorCode()) && next.evidence().isEmpty()) {
+            return terminal(next, check != null && check.capacityExceeded() ? EvidenceCleaningService.CAPACITY_MESSAGE : EvidenceCleaningService.FAILURE_MESSAGE,
+                    AnswerStatus.GENERATION_FAILED, check != null && check.capacityExceeded() ? "evidence_check_capacity_exceeded" : "evidence_check_failed", AgentRunStatus.DEGRADED,
+                    null, null, signals);
+        }
         if (result.finalAnswer() != null) {
             next = next.clearPendingTools()
                     .withPhase(AgentWorkflowPhase.EVIDENCE_VALIDATION, AgentStepType.FINAL_ANSWER);
@@ -420,7 +432,7 @@ public final class AgentTransitionEngine {
     private AgentTransition terminal(AgentState state, String answer, AnswerStatus answerStatus,
                                      String reason, AgentRunStatus status, AgentDeferredTask task,
                                      RuntimeException cause, List<AgentSignal> signals,
-                                     List<com.anchr.core.conversation.domain.model.ConversationCitation> citations) {
+                                     List<ConversationCitation> citations) {
         AgentWorkflowPhase phase = status == AgentRunStatus.FAILED ? AgentWorkflowPhase.FAILED
                 : status == AgentRunStatus.CANCELLED ? AgentWorkflowPhase.CANCELLED : AgentWorkflowPhase.COMPLETED;
         AgentState next = state.withPhase(phase,
@@ -455,6 +467,15 @@ public final class AgentTransitionEngine {
                 details.put(key, value);
             }
         });
+        if (result.evidenceCheck() != null) details.put("evidenceCheck", result.evidenceCheck());
+        details.put("evidenceCount", result.evidence().size());
+        if (result.evidenceStatistics() != null) {
+            var counts = result.evidenceStatistics();
+            details.put("originalEvidenceCount", counts.originalEvidenceCount());
+            details.put("evidenceCount", counts.evidenceCount());
+            details.put("segmentCount", counts.segmentCount());
+            details.put("documentCount", counts.documentCount());
+        }
         return details;
     }
 

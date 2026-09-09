@@ -10,12 +10,14 @@ import com.anchr.core.conversation.application.model.ConversationRetrievalCandid
 import com.anchr.core.conversation.domain.port.AgentModelPort;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
+import com.anchr.core.testsupport.EvidenceCleaningTestSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -71,7 +73,7 @@ class AgentEffectRunnerTest {
         AgentEffectRunner runner = new AgentEffectRunner(
                 new AgentModelEffect(request -> { throw new AssertionError(); },
                         new AgentToolRegistry(List.of()), new AgentActionProtocol(mapper)),
-                new AgentToolEffect(mock(AgentToolExecutor.class), mapper),
+                new AgentToolEffect(mock(AgentToolExecutor.class), mapper, EvidenceCleaningTestSupport.allowing()),
                 new AgentCompletionEffect(mock(ConversationGenerationPort.class), verifier, mapper));
         UnverifiedAgentAnswer submitted = new UnverifiedAgentAnswer(
                 new AgentFinalAnswer(AgentAnswerType.CHAT, "raw", List.of()), null, null);
@@ -94,7 +96,7 @@ class AgentEffectRunnerTest {
         AgentEffectRunner runner = new AgentEffectRunner(
                 new AgentModelEffect(request -> { throw new AssertionError(); },
                         new AgentToolRegistry(List.of()), new AgentActionProtocol(mapper)),
-                new AgentToolEffect(mock(AgentToolExecutor.class), mapper),
+                new AgentToolEffect(mock(AgentToolExecutor.class), mapper, EvidenceCleaningTestSupport.allowing()),
                 new AgentCompletionEffect(generation, verifier, mapper));
         List<String> resets = new ArrayList<>();
         ConversationProgressListener progress = new ConversationProgressListener() {
@@ -122,7 +124,7 @@ class AgentEffectRunnerTest {
         AgentEffectRunner runner = new AgentEffectRunner(
                 new AgentModelEffect(request -> { throw new AssertionError(); },
                         new AgentToolRegistry(List.of()), new AgentActionProtocol(mapper)),
-                new AgentToolEffect(mock(AgentToolExecutor.class), mapper),
+                new AgentToolEffect(mock(AgentToolExecutor.class), mapper, EvidenceCleaningTestSupport.allowing()),
                 new AgentCompletionEffect(generation, verifier, mapper));
         AgentState state = state().registerEvidence(List.of(
                 ConversationRetrievalCandidate.builder().segmentId("seg-1").content("事实").build()));
@@ -144,7 +146,7 @@ class AgentEffectRunnerTest {
                 new ConversationCitationMapper(), new AgentCitationPolicy());
         return new AgentEffectRunner(
                 new AgentModelEffect(model, registry, new AgentActionProtocol(mapper)),
-                new AgentToolEffect(mock(AgentToolExecutor.class), mapper),
+                new AgentToolEffect(mock(AgentToolExecutor.class), mapper, EvidenceCleaningTestSupport.allowing()),
                 new AgentCompletionEffect(mock(ConversationGenerationPort.class), verifier, mapper));
     }
 

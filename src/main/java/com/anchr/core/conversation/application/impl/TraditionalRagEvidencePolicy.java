@@ -2,9 +2,11 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
-import org.springframework.util.StringUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.*;
+
+import org.springframework.util.StringUtils;
 
 /** Limits only traditional answer inputs; never changes retrieval or Agent policy. */
 public final class TraditionalRagEvidencePolicy {
@@ -93,23 +95,29 @@ public final class TraditionalRagEvidencePolicy {
 
     /** The exact evidence region inserted into the prompt, including all metadata and delimiters. */
     public static String render(List<ConversationRetrievalCandidate> candidates) {
-        StringBuilder result = new StringBuilder();
         var citations = new ConversationCitationMapper().mapFromSearchResults(candidates);
-        String previousAsset = null;
+        Map<String, Map<String, Object>> groups = new LinkedHashMap<>();
         for (int i = 0; i < candidates.size(); i++) {
             var candidate = candidates.get(i);
             var citation = citations.get(i);
-            if (!Objects.equals(previousAsset, candidate.getAssetId())) {
-                result.append("\n文档 asset=").append(candidate.getAssetId())
-                        .append(",file=").append(Objects.toString(citation.getFileName(), "NA")).append('\n');
-                previousAsset = candidate.getAssetId();
-            }
-            result.append('[').append(i + 1).append("] segmentId=").append(candidate.getSegmentId())
-                    .append(",page=").append(Objects.toString(citation.getPageNo(), "NA"))
-                    .append(",section=").append(Objects.toString(citation.getTitle(), "NA"))
-                    .append(",type=").append(Objects.toString(citation.getHitType(), "NA"))
-                    .append("\n正文：\n").append(body(candidate)).append("\n片段结束\n");
+            var group = groups.computeIfAbsent(candidate.getAssetId(), asset -> {
+                Map<String, Object> document = new LinkedHashMap<>();
+                document.put("assetId", asset);
+                document.put("fileName", Objects.toString(citation.getFileName(), ""));
+                document.put("segments", new ArrayList<Map<String, Object>>());
+                return document;
+            });
+            @SuppressWarnings("unchecked")
+            var segments = (List<Map<String, Object>>) group.get("segments");
+            Map<String, Object> segment = new LinkedHashMap<>();
+            segment.put("citation", "[" + (i + 1) + "]");
+            segment.put("segmentId", candidate.getSegmentId());
+            segment.put("pageNo", citation.getPageNo());
+            segment.put("title", citation.getTitle());
+            segment.put("content", body(candidate));
+            segments.add(segment);
         }
-        return result.toString();
+        try { return new ObjectMapper().writeValueAsString(groups.values()); }
+        catch (Exception e) { throw new IllegalStateException("Evidence serialization failed", e); }
     }
 }

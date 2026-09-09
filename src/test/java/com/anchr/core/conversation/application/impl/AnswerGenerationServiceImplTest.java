@@ -1,24 +1,36 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.conversation.application.ConversationProgressListener;
+import com.anchr.core.conversation.application.assembler.ConversationCitationMapper;
+import com.anchr.core.conversation.application.assembler.ConversationResultCardMapper;
+import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.ConversationGenerationResult;
 import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
+import com.anchr.core.conversation.application.model.ConversationRetrievalResult;
+import com.anchr.core.conversation.application.model.RewriteResult;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
+import com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO;
+import com.anchr.core.testsupport.EvidenceCleaningTestSupport;
 import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,6 +48,52 @@ class AnswerGenerationServiceImplTest {
     private AnswerGenerationServiceImpl service;
     private SimpleMeterRegistry meterRegistry;
 
+    @Test
+    void inspectionFailureCannotUseLegacyEvidenceOrCallAnswerModel() {
+        var checkerPort = Mockito.mock(ConversationGenerationPort.class);
+        when(checkerPort.generateWithUsage(any(), any())).thenReturn(new ConversationGenerationResult("{}", 1, 1));
+        var mapper = new ObjectMapper();
+        var guarded = new AnswerGenerationServiceImpl(generationPort, mapper, meterRegistry,
+                RuntimeConfigTestUnits.values(Map.of("CONVERSATION.legacyEvidenceFallbackEnabled", "true")),
+                new EvidenceCleaningService(checkerPort, mapper));
+        var candidate = buildCandidate("s", "未经检查的原始证据正文。".repeat(12));
+        var result = guarded.generate("问题", "问题", AnswerMode.STRICT, List.of(candidate), List.of());
+        assertThat(result.isGenerationFailed()).isTrue();
+        assertThat(result.getAnswerText()).isEqualTo(EvidenceCleaningService.FAILURE_MESSAGE);
+        assertThat(result.getFallbackReason()).isEqualTo("evidence_check_failed");
+        assertThat(result.getEvidenceCheck().success()).isFalse();
+        verifyNoInteractions(generationPort);
+    }
+
+    @Test
+    void answerAndCitationReasonsOnlyReceiveRetainedOriginalText() throws Exception {
+        var checkerPort = Mockito.mock(ConversationGenerationPort.class);
+        var mapper = new ObjectMapper();
+        when(checkerPort.generateWithUsage(any(), any())).thenAnswer(call -> {
+            List<ConversationModelMessage> messages = call.getArgument(0);
+            var decisions = mapper.createArrayNode();
+            for (var paragraph : mapper.readTree(messages.get(1).content()).path("paragraphs")) {
+                decisions.addObject().put("id", paragraph.path("id").asText()).put("decision",
+                        paragraph.path("text").asText().contains("ATTACK") ? "ISOLATE" : "KEEP").put("reason", "test");
+            }
+            return new ConversationGenerationResult(mapper.createObjectNode().set("decisions", decisions).toString(), 1, 1);
+        });
+        when(generationPort.generate(any(), any())).thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"保留的事实[1]\"}");
+        var guarded = new AnswerGenerationServiceImpl(generationPort, mapper, meterRegistry,
+                RuntimeConfigTestUnits.defaults(), new EvidenceCleaningService(checkerPort, mapper));
+        String fact = "这是有依据的事实和必要的适用条件。".repeat(10) + "\n\n";
+        var candidate = buildCandidate("s", "ATTACK"); candidate.setContent(fact + "ATTACK\n");
+        var citations = new ConversationCitationMapper().mapFromSearchResults(List.of(candidate));
+        var result = guarded.generate("问题", "问题", AnswerMode.STRICT, List.of(candidate), citations);
+        assertThat(result.isGenerationFailed()).isFalse();
+        var captured = modelMessagesCaptor();
+        verify(generationPort).generate(captured.capture(), any());
+        assertThat(captured.getValue()).extracting(ConversationModelMessage::role).containsExactly("system", "user");
+        assertThat(captured.getValue().get(1).content()).contains("这是有依据的事实").doesNotContain("ATTACK");
+        assertThat(citations.getFirst().getContent()).doesNotContain("ATTACK");
+        assertThat(candidate.getContent()).endsWith("ATTACK\n");
+    }
+
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
@@ -43,8 +101,8 @@ class AnswerGenerationServiceImplTest {
                 generationPort,
                 new ObjectMapper(),
                 meterRegistry,
-                RuntimeConfigTestUnits.defaults()
-        );
+                RuntimeConfigTestUnits.defaults(),
+                EvidenceCleaningTestSupport.allowing());
     }
 
     @Test
@@ -94,25 +152,6 @@ class AnswerGenerationServiceImplTest {
     void generate_shouldKeepPartialAnswerAndExplicitMissingEvidenceWithoutCoverageModel() {
         String content = "组件的数量上限为三项，当前配置不会调整该上限。".repeat(5);
         var candidate = ConversationRetrievalCandidate.builder().segmentId("partial")
-                .score(0.9).content(content).build();
-        when(generationPort.generate(any(), any())).thenReturn("""
-                {"status":"ANSWERED","answer":"数量上限为三项。[1] 配置何时读取暂无足够证据，无法确认。"}
-                """);
-        var result = service.generate("数量限制和读取时机？", "组件的数量限制和配置读取时机？",
-                AnswerMode.STRICT, List.of(candidate), List.of(buildCitation("partial", content)));
-        assertThat(result.isFallbackUsed()).isFalse();
-        assertThat(result.getAnswerText()).contains("数量上限为三项", "无法确认");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("partial");
-        var prompt = modelMessagesCaptor();
-        verify(generationPort).generate(prompt.capture(), any());
-        assertThat(prompt.getValue().getFirst().content()).contains("按子问题分别应用", "组件的数量限制和配置读取时机？");
-        org.mockito.Mockito.verifyNoMoreInteractions(generationPort);
-    }
-
-    @Test
-    void generate_shouldKeepPartialAnswerAndExplicitMissingEvidenceWithoutCoverageModel() {
-        String content = "组件的数量上限为三项，当前配置不会调整该上限。".repeat(5);
-        var candidate = ConversationRetrievalCandidate.builder().segmentId("partial")
                 .assetId("asset_" + "partial")
                 .score(0.9).content(content).build();
         when(generationPort.generate(any(), any())).thenReturn("""
@@ -125,8 +164,8 @@ class AnswerGenerationServiceImplTest {
         assertThat(result.getAnswerInputSegmentIds()).containsExactly("partial");
         var prompt = modelMessagesCaptor();
         verify(generationPort).generate(prompt.capture(), any());
-        assertThat(prompt.getValue().getFirst().content()).contains("按子问题分别应用", "组件的数量限制和配置读取时机？");
-        org.mockito.Mockito.verifyNoMoreInteractions(generationPort);
+        assertThat(prompt.getValue().toString()).contains("按子问题分别应用", "组件的数量限制和配置读取时机？");
+        Mockito.verifyNoMoreInteractions(generationPort);
     }
 
     @Test
@@ -154,9 +193,9 @@ class AnswerGenerationServiceImplTest {
         var promptCaptor = modelMessagesCaptor();
         verify(generationPort).generate(promptCaptor.capture(), any());
         assertThat(result.isFallbackUsed()).isFalse();
-        assertThat(promptCaptor.getValue().getFirst().content())
-                .contains("正文：\n" + originalContent)
-                .doesNotContain("正文：\nInnoDB 摘要");
+        assertThat(promptCaptor.getValue().get(1).content())
+                .contains(originalContent)
+                .doesNotContain("InnoDB 摘要");
     }
 
     @Test
@@ -304,7 +343,7 @@ class AnswerGenerationServiceImplTest {
                 new ObjectMapper(),
                 meterRegistry,
                 RuntimeConfigTestUnits.values(Map.of(
-                        "CONVERSATION.legacyEvidenceFallbackEnabled", "true")));
+                        "CONVERSATION.legacyEvidenceFallbackEnabled", "true")), EvidenceCleaningTestSupport.allowing());
 
         var result = service.generate(
                 "那 InnoDB 呢",
@@ -349,7 +388,7 @@ class AnswerGenerationServiceImplTest {
         var promptCaptor = modelMessagesCaptor();
         verify(generationPort).generate(promptCaptor.capture(), any());
         assertThat(result.isFallbackUsed()).isFalse();
-        String prompt = promptCaptor.getValue().getFirst().content();
+        String prompt = promptCaptor.getValue().stream().map(ConversationModelMessage::content).collect(Collectors.joining("\n"));
         assertThat(prompt).contains("回答模式：SUMMARY");
         assertThat(prompt).contains("按问题主题组织").doesNotContain("最多3条要点");
         assertThat(prompt).contains("引用编号必须紧跟在它所支持的总结、事实或结论之后");
@@ -455,7 +494,7 @@ class AnswerGenerationServiceImplTest {
         var promptCaptor = modelMessagesCaptor();
         verify(generationPort).generate(promptCaptor.capture(), any());
         assertThat(result.isFallbackUsed()).isFalse();
-        String prompt = promptCaptor.getValue().getFirst().content();
+        String prompt = promptCaptor.getValue().stream().map(ConversationModelMessage::content).collect(Collectors.joining("\n"));
         assertThat(prompt).contains("回答模式：EXPLORE");
         assertThat(prompt).contains("可能方向或建议");
         assertThat(prompt).contains("推测必须明确标注");
@@ -498,13 +537,13 @@ class AnswerGenerationServiceImplTest {
         var a2 = buildCandidate("a2", "第一份材料的第二处完整证据。".repeat(8));
         var b1 = buildCandidate("b1", "第二份材料的完整证据。".repeat(8));
         a1.setAssetId("a"); a2.setAssetId("a"); b1.setAssetId("b");
-        var retrieval = new com.anchr.core.conversation.application.model.ConversationRetrievalResult();
+        var retrieval = new ConversationRetrievalResult();
         retrieval.setTopCandidates(List.of(a1, b1, a2));
-        var searches = new java.util.concurrent.atomic.AtomicInteger();
+        var searches = new AtomicInteger();
         var pipeline = new ConversationMessagePipeline(null,
                 (query, limit, kb, modalities, assets) -> { searches.incrementAndGet(); return retrieval; },
-                new com.anchr.core.conversation.application.assembler.ConversationCitationMapper(),
-                new com.anchr.core.conversation.application.assembler.ConversationResultCardMapper(), service);
+                new ConversationCitationMapper(),
+                new ConversationResultCardMapper(), service);
         String raw = "{\"status\":\"ANSWERED\",\"answer\":\"结论[2]另一份材料[3]补充[1]重复[2]\"}";
         when(generationPort.generateStream(any(), any(), any())).thenAnswer(invocation -> {
             Consumer<String> delta = invocation.getArgument(2);
@@ -512,9 +551,9 @@ class AnswerGenerationServiceImplTest {
             return new ConversationGenerationResult(raw, 0, 0);
         });
         var streamed = new StringBuilder();
-        var request = new com.anchr.core.conversation.interfaces.rest.dto.ConversationMessageRequestDTO();
+        var request = new ConversationMessageRequestDTO();
         request.setQuery("综合这些材料"); request.setAnswerMode("SUMMARY");
-        var rewrite = new com.anchr.core.conversation.application.model.RewriteResult();
+        var rewrite = new RewriteResult();
         rewrite.setRewrittenQuery(request.getQuery());
         var result = pipeline.execute(request, rewrite, new ConversationProgressListener() {
             @Override public boolean supportsAnswerStreaming() { return true; }
@@ -525,7 +564,7 @@ class AnswerGenerationServiceImplTest {
         assertThat(streamed.toString()).isEqualTo("结论[1-1]另一份材料[2-1]补充[1-2]重复[1-1]");
         assertThat(result.answerGenerationResult().getAnswerText()).isEqualTo(streamed.toString());
         assertThat(result.answerCitations()).extracting(ConversationCitation::getSegmentId).containsExactly("a2", "b1", "a1");
-        var codec = new com.anchr.core.conversation.application.assembler.ConversationTurnCodec(new ObjectMapper());
+        var codec = new ConversationTurnCodec(new ObjectMapper());
         var restored = codec.parseCitations(codec.serializeCitations(result.answerCitations()));
         assertThat(restored).hasSize(2);
         assertThat(restored.getFirst().getChunks()).extracting(c -> c.getCitationLabel()).containsExactly("1-1", "1-2");
@@ -545,7 +584,7 @@ class AnswerGenerationServiceImplTest {
     }
 
     @SuppressWarnings("unchecked")
-    private org.mockito.ArgumentCaptor<List<ConversationModelMessage>> modelMessagesCaptor() {
+    private ArgumentCaptor<List<ConversationModelMessage>> modelMessagesCaptor() {
         return ArgumentCaptor.forClass(List.class);
     }
 

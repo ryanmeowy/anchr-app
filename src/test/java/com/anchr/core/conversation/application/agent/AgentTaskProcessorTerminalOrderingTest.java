@@ -10,23 +10,25 @@ import com.anchr.core.conversation.application.assembler.ConversationCitationMap
 import com.anchr.core.conversation.application.assembler.ConversationTurnCodec;
 import com.anchr.core.conversation.domain.model.AgentRun;
 import com.anchr.core.conversation.domain.model.AgentTask;
-import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
+import com.anchr.core.conversation.domain.model.ConversationTurn;
 import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.conversation.domain.repository.AgentTaskRepository;
 import com.anchr.core.conversation.domain.repository.AgentTraceRepository;
 import com.anchr.core.conversation.domain.repository.ConversationRepository;
+import com.anchr.core.testsupport.EvidenceCleaningTestSupport;
 import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.List;
+import java.util.Optional;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
-
-import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -72,7 +74,7 @@ class AgentTaskProcessorTerminalOrderingTest {
                 Runnable::run,
                 snapshotService,
                 new AgentCitationPolicy(),
-                citationReasonEnricher);
+                citationReasonEnricher, EvidenceCleaningTestSupport.allowing());
     }
 
     @Test

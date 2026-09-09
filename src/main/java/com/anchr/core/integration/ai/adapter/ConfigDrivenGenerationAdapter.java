@@ -1,9 +1,9 @@
 package com.anchr.core.integration.ai.adapter;
 
-import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
-import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.ConversationGenerationResult;
+import com.anchr.core.conversation.application.model.ConversationModelMessage;
 import com.anchr.core.conversation.application.model.GenerationOptions;
+import com.anchr.core.conversation.domain.port.ConversationGenerationPort;
 import com.anchr.core.integration.ai.client.CapabilityClientFactory;
 import com.anchr.core.integration.ai.client.CapabilityResolver;
 import com.anchr.core.integration.ai.client.ClientCacheManager;
@@ -12,16 +12,17 @@ import com.anchr.core.search.domain.port.SearchGenerationPort;
 import com.anchr.core.settings.domain.model.CapabilityConfig;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Primary;
-import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Primary;
+import org.springframework.stereotype.Service;
 
 @Slf4j
 @Primary
@@ -84,7 +85,7 @@ public class ConfigDrivenGenerationAdapter implements ConversationGenerationPort
                 ? client.generate(resolved.config().getModelName(), mappedMessages, extraConfig, timeout)
                 : client.generateStream(resolved.config().getModelName(), mappedMessages, extraConfig, timeout, onDelta);
         return new ConversationGenerationResult(
-                result.content(), result.promptTokens(), result.completionTokens());
+                result.content(), result.promptTokens(), result.completionTokens(), resolved.config().getModelName());
     }
 
     private Map<String, Object> parseExtraConfig(String raw) {
