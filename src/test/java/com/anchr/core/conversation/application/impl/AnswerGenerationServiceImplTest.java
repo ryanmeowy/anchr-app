@@ -94,25 +94,6 @@ class AnswerGenerationServiceImplTest {
     void generate_shouldKeepPartialAnswerAndExplicitMissingEvidenceWithoutCoverageModel() {
         String content = "组件的数量上限为三项，当前配置不会调整该上限。".repeat(5);
         var candidate = ConversationRetrievalCandidate.builder().segmentId("partial")
-                .score(0.9).content(content).build();
-        when(generationPort.generate(any(), any())).thenReturn("""
-                {"status":"ANSWERED","answer":"数量上限为三项。[1] 配置何时读取暂无足够证据，无法确认。"}
-                """);
-        var result = service.generate("数量限制和读取时机？", "组件的数量限制和配置读取时机？",
-                AnswerMode.STRICT, List.of(candidate), List.of(buildCitation("partial", content)));
-        assertThat(result.isFallbackUsed()).isFalse();
-        assertThat(result.getAnswerText()).contains("数量上限为三项", "无法确认");
-        assertThat(result.getAnswerInputSegmentIds()).containsExactly("partial");
-        var prompt = modelMessagesCaptor();
-        verify(generationPort).generate(prompt.capture(), any());
-        assertThat(prompt.getValue().getFirst().content()).contains("按子问题分别应用", "组件的数量限制和配置读取时机？");
-        org.mockito.Mockito.verifyNoMoreInteractions(generationPort);
-    }
-
-    @Test
-    void generate_shouldKeepPartialAnswerAndExplicitMissingEvidenceWithoutCoverageModel() {
-        String content = "组件的数量上限为三项，当前配置不会调整该上限。".repeat(5);
-        var candidate = ConversationRetrievalCandidate.builder().segmentId("partial")
                 .assetId("asset_" + "partial")
                 .score(0.9).content(content).build();
         when(generationPort.generate(any(), any())).thenReturn("""

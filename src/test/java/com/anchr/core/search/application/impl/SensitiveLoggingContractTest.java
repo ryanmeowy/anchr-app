@@ -40,9 +40,10 @@ import static org.mockito.Mockito.when;
 class SensitiveLoggingContractTest {
 
     private static final String SENSITIVE_QUERY = "207B_PRIVATE_QUERY_7f3a1d";
+    private static final String SENSITIVE_KEYWORD = "207B_PRIVATE_KEYWORD_8a4b2e";
 
     @Test
-    void retrievalSuccessShouldLogCountsButNotTheRawQuery() {
+    void retrievalSuccessShouldLogCountsButNotTheRawQueryOrKeywords() {
         SegmentRepository repository = mock(SegmentRepository.class);
         QueryEmbeddingService embedding = mock(QueryEmbeddingService.class);
         SearchKnowledgeAcl knowledgeAcl = mock(SearchKnowledgeAcl.class);
@@ -66,7 +67,7 @@ class SensitiveLoggingContractTest {
         try (LogCapture logs = LogCapture.start(RetrievalQueryServiceImpl.class)) {
             service.query(new RetrievalTopNQuery(
                     SENSITIVE_QUERY,
-                    List.of(),
+                    List.of(SENSITIVE_KEYWORD),
                     5,
                     List.of("kb-1"),
                     List.of(),
@@ -78,6 +79,7 @@ class SensitiveLoggingContractTest {
             assertSafe(logs);
             assertThat(logs.messages())
                     .anyMatch(message -> message.contains("queryLength=")
+                            && message.contains("keywordCount=1")
                             && message.contains("recallTopK=")
                             && message.contains("latencyMs="));
         }
@@ -198,6 +200,7 @@ class SensitiveLoggingContractTest {
 
     private void assertSafe(LogCapture logs) {
         assertThat(logs.messages()).noneMatch(message -> message.contains(SENSITIVE_QUERY));
+        assertThat(logs.messages()).noneMatch(message -> message.contains(SENSITIVE_KEYWORD));
         assertThat(logs.throwableMessages()).noneMatch(message -> message.contains(SENSITIVE_QUERY));
     }
 
