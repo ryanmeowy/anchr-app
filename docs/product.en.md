@@ -10,7 +10,7 @@ From ingestion and hybrid search to Agent-assisted deep reading, Anchr keeps ans
 [![Deployment](https://img.shields.io/badge/Deployment-Self--hosted-2f855a?style=flat-square)](./technical.en.md)
 [![License](https://img.shields.io/badge/License-MIT-bbff66?style=flat-square)](../LICENSE)
 
-[中文产品介绍](../README.md) · Product overview · [中文技术文档](./technical.zh-CN.md) · [English technical guide](./technical.en.md)
+[中文产品介绍](./product.zh-CN.md) · Product overview · [中文技术文档](./technical.zh-CN.md) · [English technical guide](./technical.en.md)
 
 
 </div>
@@ -291,7 +291,7 @@ The live workspace is available at [anchr.cloud](https://anchr.cloud). Review th
 
 ## Documentation
 
-- [中文产品介绍](../README.md)
+- [中文产品介绍](./product.zh-CN.md)
 - [English technical guide](./technical.en.md)
 - [中文技术文档](./technical.zh-CN.md)
 - [Agent RAG implementation](./agent-rag-workflow.md)
