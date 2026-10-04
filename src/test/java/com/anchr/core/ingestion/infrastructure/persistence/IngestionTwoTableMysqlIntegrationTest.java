@@ -282,7 +282,8 @@ class IngestionTwoTableMysqlIntegrationTest {
                     where id = 4001
                     """);
         }
-        sqlSession.commit();
+        // Direct JDBC updates do not mark the MyBatis session dirty.
+        sqlSession.commit(true);
     }
 
     private void assertItemWasReset() {
