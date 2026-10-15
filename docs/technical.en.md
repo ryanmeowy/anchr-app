@@ -166,7 +166,7 @@ flowchart TB
 
 Solid arrows denote synchronous dependencies; dashed arrows denote activity recording that does not affect the main flow. Cross-domain calls use application APIs and caller-owned ACLs; state transitions and the outbox preserve cross-store consistency.
 
-For the full boundary decision, see [Domain boundaries and interactions](./domain-boundaries-and-interactions.md).
+For the full boundary decision, see [Domain boundaries and interactions](./domain-boundaries-and-interactions.en.md).
 
 ## Quick start
 
@@ -355,8 +355,9 @@ See [`project_layout.text`](../project_layout.text) for the maintained repositor
 
 ### Further reading
 
-- [Agent RAG workflow](./agent-rag-workflow.md)
-- [Domain boundaries and interactions](./domain-boundaries-and-interactions.md)
+- [Agent RAG workflow](./agent-rag-workflow.en.md)
+- [Domain boundaries and interactions](./domain-boundaries-and-interactions.en.md)
+- [Online index rebuild](./segment-index-online-rebuild.en.md)
 - [Docker deployment](../docker/README.md)
 
 ## Production notes
