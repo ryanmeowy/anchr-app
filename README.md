@@ -290,13 +290,20 @@ The live workspace is available at [anchr.cloud](https://anchr.cloud). Review th
 
 ## Documentation
 
-- [中文产品介绍](./docs/product.zh-CN.md)
-- [English technical guide](./docs/technical.en.md)
-- [中文技术文档](./docs/technical.zh-CN.md)
-- [Agent RAG implementation](./docs/agent-rag-workflow.md)
-- [Domain boundaries and interactions](./docs/domain-boundaries-and-interactions.md)
-- [Index Rebuild Implementation Notes](./docs/segment-index-online-rebuild.md)
+**English**
+
+- [Technical guide](./docs/technical.en.md)
 - [Docker deployment](./docker/README.md)
+
+The product overview and the deeper implementation notes are written in Chinese.
+
+**中文**
+
+- [中文产品介绍](./docs/product.zh-CN.md)
+- [中文技术文档](./docs/technical.zh-CN.md)
+- [Agent RAG 实现](./docs/agent-rag-workflow.md)
+- [领域边界与交互](./docs/domain-boundaries-and-interactions.md)
+- [索引在线重建实现说明](./docs/segment-index-online-rebuild.md)
 
 ---
 
