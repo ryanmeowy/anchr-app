@@ -1,0 +1,90 @@
+name: Bug report
+description: Something in Anchr App is broken or behaves unexpectedly.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        Anchr spans three repositories — if the problem is in the browser workspace or in
+        document parsing, please file it there instead:
+        - Web workspace: https://github.com/ryanmeowy/anchr-web/issues
+        - Document parsing: https://github.com/ryanmeowy/anchr-docling/issues
+
+        **Do not paste access tokens, provider API keys, or full documents.** Redact them.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the observed behaviour and what you expected instead.
+      placeholder: |
+        Observed:
+
+        Expected:
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that reliably shows the problem.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Anchr App version or commit
+      description: The release tag, or the output of `git rev-parse --short HEAD`.
+      placeholder: "v0.1.0 or 26b5ae4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Ingestion / parsing
+        - Search / retrieval
+        - Knowledge answers and citations
+        - Agent runs
+        - Configuration / providers
+        - API
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >
+        JDK version, Elasticsearch / MySQL / Redis versions, how you deployed
+        (docker compose, jar, container), and which model provider is configured.
+      placeholder: |
+        JDK: 21
+        Elasticsearch: 8.x with the IK plugin
+        MySQL: 8.x
+        Redis: 7.x
+        Deployment: docker compose
+        Generation provider:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or trace output
+      description: Redact secrets, tokens, and document content before pasting.
+      render: shell
+    validations:
+      required: false
