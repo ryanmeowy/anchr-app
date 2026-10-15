@@ -53,9 +53,7 @@ account, or acting as an appointed representative at an online or offline event.
 Instances of abusive, harassing, or otherwise unacceptable behaviour may be reported to the
 community leaders responsible for enforcement.
 
-<!-- MAINTAINER: replace the placeholder below with a real contact address before publishing. -->
-
-Reports can be sent to **`REPLACE-WITH-CONTACT-EMAIL`**, or raised through
+Reports can be sent to **`ryanxys@gmail.com`**, or raised through
 [GitHub](https://github.com/ryanmeowy) if you prefer not to use email.
 
 All complaints will be reviewed and investigated promptly and fairly. All community leaders
