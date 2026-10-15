@@ -1,0 +1,65 @@
+name: Feature request
+description: Propose a capability or an improvement to Anchr App.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check
+        [Discussions](https://github.com/ryanmeowy/anchr-app/discussions) — an earlier thread
+        may already cover this.
+
+        Large changes (new retrieval strategies, schema changes, new provider integrations)
+        start here as a discussion of the approach before any code is written.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: >
+        Describe the situation you are in, not the solution you have in mind. What are you
+        trying to accomplish, and where does Anchr currently get in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: What would you like to see? Sketches and API shapes are welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else could solve this, including workarounds you already tried?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Ingestion / parsing
+        - Search / retrieval
+        - Knowledge answers and citations
+        - Agent runs
+        - Configuration / providers
+        - API
+        - Deployment / operations
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a pull request for this
+          required: false

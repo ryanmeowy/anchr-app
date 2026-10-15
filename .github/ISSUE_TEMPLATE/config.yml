@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or deployment help
+    url: https://github.com/ryanmeowy/anchr-app/discussions
+    about: Ask about setup, configuration, or how something is supposed to work.
+  - name: Security report
+    url: https://github.com/ryanmeowy/anchr-app/security/advisories/new
+    about: Report a vulnerability privately. Please do not open a public issue.
+  - name: Web workspace issue
+    url: https://github.com/ryanmeowy/anchr-web/issues
+    about: Problems in the browser workspace belong in the anchr-web repository.
+  - name: Document parsing issue
+    url: https://github.com/ryanmeowy/anchr-docling/issues
+    about: Problems converting or parsing documents belong in the anchr-docling repository.
