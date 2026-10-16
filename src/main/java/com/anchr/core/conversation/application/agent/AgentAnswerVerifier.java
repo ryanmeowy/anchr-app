@@ -11,11 +11,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+@Slf4j
 @Component
 final class AgentAnswerVerifier {
     private static final Pattern AUTHORED_VISIBLE_CITATION =
@@ -47,6 +50,16 @@ final class AgentAnswerVerifier {
             AgentFinalAnswer answer,
             Collection<ConversationRetrievalCandidate> allowedEvidence,
             boolean evidenceOnly
+    ) {
+        return verify(state, answer, allowedEvidence, evidenceOnly, true);
+    }
+
+    private AgentAnswerValidationOutcome verify(
+            AgentState state,
+            AgentFinalAnswer answer,
+            Collection<ConversationRetrievalCandidate> allowedEvidence,
+            boolean evidenceOnly,
+            boolean allowRepair
     ) {
         if (answer == null || answer.answerType() == null || !StringUtils.hasText(answer.answer())) {
             return rejected("INVALID_FINAL_ANSWER",
@@ -110,11 +123,22 @@ final class AgentAnswerVerifier {
                     "missing_agent_citation_marker");
         }
         if (!requestedSet.equals(markerSet)) {
+            AgentFinalAnswer normalized = allowRepair ? repairCitationBinding(answer, allowedById.keySet()) : null;
+            if (normalized != null) {
+                log.info("Agent citation binding normalized before validation, declared={}, markers={}, kept={}",
+                        requestedSet.size(), markerSet.size(), normalized.citedSegmentIds());
+                return verify(state, normalized, allowedEvidence, evidenceOnly, false);
+            }
             return rejected("CITATION_BINDING_MISMATCH",
                     "citedSegmentIds 必须与 answer 中实际出现的证据 Marker 一一对应",
                     "invalid_agent_citation_binding");
         }
         if (!citationPolicy.withinLimits(answer.answer())) {
+            AgentFinalAnswer compacted = allowRepair ? repairCitationDensity(answer) : null;
+            if (compacted != null) {
+                log.info("Agent citation density compacted before validation, kept={}", compacted.citedSegmentIds());
+                return verify(state, compacted, allowedEvidence, evidenceOnly, false);
+            }
             return rejected("CITATION_DENSITY_EXCEEDED",
                     "引用超过限制：全文最多 10 个不同引用、12 个 Marker，每段最多 3 个 Marker",
                     "agent_citation_density_exceeded");
@@ -133,6 +157,37 @@ final class AgentAnswerVerifier {
         List<ConversationCitation> citations = citationMapper.mapFromSearchResults(citedEvidence);
         AgentCitationIndexPlan.apply(citations, rendered.references());
         return verified(new VerifiedCitedAnswer(rendered.answer(), citations, citedEvidence));
+    }
+
+    private AgentFinalAnswer repairCitationBinding(AgentFinalAnswer answer, Collection<String> allowedIds) {
+        String text = answer.answer() == null ? "" : answer.answer();
+        Matcher matcher = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(text);
+        StringBuilder normalized = new StringBuilder();
+        Set<String> kept = new LinkedHashSet<>();
+        while (matcher.find()) {
+            String segmentId = matcher.group(1).trim();
+            if (!StringUtils.hasText(segmentId) || !allowedIds.contains(segmentId)) {
+                matcher.appendReplacement(normalized, "");
+                continue;
+            }
+            kept.add(segmentId);
+            matcher.appendReplacement(normalized, Matcher.quoteReplacement(matcher.group()));
+        }
+        matcher.appendTail(normalized);
+        if (kept.isEmpty()) return null;
+        String repaired = normalized.toString();
+        if (!citationPolicy.withinLimits(repaired)) repaired = citationPolicy.compactMarkers(repaired);
+        List<String> markerIds = AgentCitationRenderer.extractSegmentIds(repaired);
+        if (markerIds.isEmpty()) return null;
+        return new AgentFinalAnswer(answer.answerType(), repaired, markerIds);
+    }
+
+    private AgentFinalAnswer repairCitationDensity(AgentFinalAnswer answer) {
+        String compacted = citationPolicy.compactMarkers(answer.answer());
+        if (!StringUtils.hasText(compacted) || !citationPolicy.withinLimits(compacted)) return null;
+        List<String> markerIds = AgentCitationRenderer.extractSegmentIds(compacted);
+        if (markerIds.isEmpty()) return null;
+        return new AgentFinalAnswer(answer.answerType(), compacted, markerIds);
     }
 
     private AgentAnswerValidationOutcome verified(VerifiedAgentAnswer answer) {

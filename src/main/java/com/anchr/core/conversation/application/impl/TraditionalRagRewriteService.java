@@ -25,6 +25,8 @@ import static com.anchr.core.conversation.application.constant.ConversationConst
 @RequiredArgsConstructor
 @Slf4j
 public class TraditionalRagRewriteService {
+    /** Upper bound for the rewrite keyword array; extra items are dropped instead of failing the whole rewrite. */
+    private static final int MAX_KEYWORDS = 8;
     private static final String SYSTEM_PROMPT = """
             你是传统知识库 RAG 的查询改写器，不回答问题，不规划工具或后续操作。
             结合最近对话，将最后一条用户消息一次转换为完整问题和一份精简关键词数组。
@@ -117,13 +119,16 @@ public class TraditionalRagRewriteService {
 
     private List<String> keywords(JsonNode root) {
         JsonNode values = root.path("keywords");
-        if (!values.isArray() || values.size() > 8) throw new IllegalArgumentException("invalid_keywords");
+        if (!values.isArray()) throw new IllegalArgumentException("invalid_keywords");
         List<String> result = new ArrayList<>();
         for (JsonNode value : values) {
-            if (!value.isTextual() || value.asText().isBlank() || value.asText().length() > 100)
-                throw new IllegalArgumentException("invalid_keyword_item");
+            if (result.size() >= MAX_KEYWORDS) break;
+            if (!value.isTextual() || value.asText().isBlank() || value.asText().length() > 100) continue;
             String normalized = normalize(value.asText());
             if (!result.contains(normalized)) result.add(normalized);
+        }
+        if (values.size() > MAX_KEYWORDS) {
+            log.info("Traditional RAG rewrite keywords capped, rawCount={}, keptCount={}", values.size(), result.size());
         }
         return List.copyOf(result);
     }

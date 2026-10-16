@@ -154,6 +154,11 @@ public class ConversationMessagePipeline {
                 ? rewrite.getResolvedQuestion() : request.getQuery().trim();
     }
 
+    /**
+     * Keeps only the citations the generated answer actually rests on. A clarification answer
+     * ({@link AnswerStatus#CLARIFICATION}) is intentionally not filtered out: it lists branch facts
+     * that must stay traceable, while plain NO_EVIDENCE and failure answers carry no citations.
+     */
     private List<ConversationCitation> filterEffectiveCitations(List<ConversationCitation> candidateCitations,
                                                                  List<String> answerInputSegmentIds,
                                                                  AnswerStatus answerStatus) {

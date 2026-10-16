@@ -9,11 +9,20 @@ public enum AnswerStatus {
     CANCELLED,
     NO_EVIDENCE,
     GENERATION_FAILED,
-    MODEL_FALLBACK;
+    MODEL_FALLBACK,
+    /**
+     * The system could not answer yet because the question is under-specified; it asks the user to
+     * disambiguate. Unlike NO_EVIDENCE, a clarification answer may carry citations for the branch
+     * facts it lists.
+     */
+    CLARIFICATION;
 
     public static AnswerStatus from(AnswerGenerationResult result) {
         if (result != null && result.isGenerationFailed()) {
             return GENERATION_FAILED;
+        }
+        if (result != null && result.isClarificationRequested()) {
+            return CLARIFICATION;
         }
         if (result == null || !result.isFallbackUsed()) {
             return ANSWERED;

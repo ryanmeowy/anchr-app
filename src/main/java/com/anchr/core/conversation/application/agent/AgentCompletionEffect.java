@@ -40,6 +40,9 @@ class AgentCompletionEffect {
             只有证据能直接支持核心答案时 answerType 才能为 KNOWLEDGE，并遵守以下引用规则。
             回答使用用户的主要语言和 Markdown。每个事实结论后使用 {{segment:实际ID}} 标记最直接的依据；
             每个结论通常一个证据，确需交叉验证时最多两个，每段最多三个不同证据，全文通常不超过十个不同证据。
+            逐条覆盖 EVIDENCE_DATA 中与用户问题直接相关的全部要点：数量、阈值、时间、条件、分支前提、标识符、字段名、错误码与例外都必须写入答案，不得只给概括性结论而省略证据已经明确的细节。
+            生成答案前先自查：证据中与该问题直接相关、且被证据支持的全部要点是否都已写入答案；不得因为答案已覆盖问题的概括部分就省略其余要点。
+            同一片段支撑的多个要点，可在该段落末尾共用一个该片段的 Marker；不要为同一片段重复输出 Marker。
             segmentId 只能出现在 {{segment:...}} 和 citedSegmentIds 中，不得在正文中解释或直接展示。
             只能输出一个 JSON 对象，不要输出 Markdown 代码围栏、前言或其他文本：
             {"answerType":"KNOWLEDGE|NO_EVIDENCE","answer":"最终回答","citedSegmentIds":["实际ID"]}

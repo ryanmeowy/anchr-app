@@ -374,10 +374,10 @@ class AgentWorkflowImplTest {
                     "call-1", "test_search", "{\"query\":\"权限\"}")),
                     AgentTokenUsage.EMPTY, "model", "tool_calls", "req-1");
             case 1 -> new AgentModelResponse(null, List.of(new AgentToolCall("call-2", "deliver_answer",
-                    "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"默认关闭 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\",\"seg-2\"]}")),
+                    "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"默认关闭 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\",\"forged\"]}")),
                     AgentTokenUsage.EMPTY, "model", "tool_calls", "req-2");
             default -> {
-                assertThat(request.messages().getLast().content()).contains("CITATION_BINDING_MISMATCH");
+                assertThat(request.messages().getLast().content()).contains("INVALID_CITATION");
                 yield new AgentModelResponse(null, List.of(new AgentToolCall("call-3", "deliver_answer",
                         "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"默认关闭 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\"]}")),
                         AgentTokenUsage.EMPTY, "model", "tool_calls", "req-3");
@@ -429,7 +429,7 @@ class AgentWorkflowImplTest {
     }
 
     @Test
-    void citationDensityExceeded_shouldUseTheExistingSingleAnswerRepair() {
+    void citationDensityExceeded_shouldBeCompactedWithoutAskingTheModelAgain() {
         AtomicInteger calls = new AtomicInteger();
         AgentModelPort model = request -> switch (calls.getAndIncrement()) {
             case 0 -> new AgentModelResponse(null, List.of(new AgentToolCall(
@@ -441,16 +441,7 @@ class AgentWorkflowImplTest {
                             + "\"answer\":\"默认关闭 {{segment:seg-1}} {{segment:seg-1}} {{segment:seg-1}} {{segment:seg-1}}\","
                             + "\"citedSegmentIds\":[\"seg-1\"]}")),
                     AgentTokenUsage.EMPTY, "model", "tool_calls", "req-2");
-            default -> {
-                assertThat(request.messages().getLast().content())
-                        .contains("CITATION_DENSITY_EXCEEDED");
-                yield new AgentModelResponse(null, List.of(new AgentToolCall(
-                        "call-3", "deliver_answer",
-                        "{\"answerType\":\"KNOWLEDGE\","
-                                + "\"answer\":\"默认关闭 {{segment:seg-1}}\","
-                                + "\"citedSegmentIds\":[\"seg-1\"]}")),
-                        AgentTokenUsage.EMPTY, "model", "tool_calls", "req-3");
-            }
+            default -> throw new AssertionError("引用超限应被确定性压缩，不应再次询问模型");
         };
         ConversationRepository conversations = mock(ConversationRepository.class);
         when(conversations.findRecentTurns("session", 10)).thenReturn(List.of());
@@ -460,8 +451,9 @@ class AgentWorkflowImplTest {
         ConversationExecutionResult result = workflow.execute(
                 run("权限默认值是什么"), ConversationProgressListener.NOOP);
 
-        assertThat(calls).hasValue(3);
-        assertThat(result.answer()).isEqualTo("默认关闭 [1-1]");
+        assertThat(calls).hasValue(2);
+        assertThat(result.answer()).isEqualTo("默认关闭 [1-1] [1-1] [1-1]");
+        assertThat(result.citations()).hasSize(1);
     }
 
     @Test
@@ -554,8 +546,8 @@ class AgentWorkflowImplTest {
         when(generation.generateWithUsage(any(), any()))
                 .thenReturn(new ConversationGenerationResult(
                         "{\"answerType\":\"KNOWLEDGE\","
-                                + "\"answer\":\"默认关闭 {{segment:seg-1}} {{segment:seg-1}} {{segment:seg-1}} {{segment:seg-1}}\","
-                                + "\"citedSegmentIds\":[\"seg-1\"]}", 20, 8))
+                                + "\"answer\":\"默认关闭 {{segment:forged}}\","
+                                + "\"citedSegmentIds\":[\"forged\"]}", 20, 8))
                 .thenReturn(new ConversationGenerationResult(
                         "{\"answerType\":\"KNOWLEDGE\","
                                 + "\"answer\":\"默认关闭 {{segment:seg-1}}\","

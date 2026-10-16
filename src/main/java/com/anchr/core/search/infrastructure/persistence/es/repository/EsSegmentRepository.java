@@ -32,7 +32,9 @@ import org.springframework.stereotype.Repository;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -52,6 +54,27 @@ public class EsSegmentRepository implements SegmentRepository {
     private final SegmentIndexManager segmentIndexManager;
     private final SegmentIndexWriteBarrier indexWriteBarrier;
     private final SegmentRebuildMutationTracker rebuildMutationTracker;
+
+    /** Per-keyword and outer keyword-match requirements of the strict text recall pass. */
+    static final String STRICT_KEYWORD_MINIMUM_SHOULD_MATCH = "70%";
+    static final String STRICT_OVERALL_MINIMUM_SHOULD_MATCH = "2<70%";
+    /**
+     * Relaxed keyword-match requirements applied when the strict pass cannot fill the requested
+     * page: each keyword only needs half of its analyzed terms and at least two - or half of the
+     * keywords when there are more than two - must match. Strictly matched segments keep their
+     * ranking precedence; relaxed-only segments are appended after them.
+     */
+    static final String RELAXED_KEYWORD_MINIMUM_SHOULD_MATCH = "50%";
+    static final String RELAXED_OVERALL_MINIMUM_SHOULD_MATCH = "2<50%";
+    /**
+     * Last-resort text recall applied when the rewrite produced no keyword at all - the long
+     * natural-language question is then the only text clause and neither the strict nor the
+     * relaxed keyword bar can be met by it. The bar is lowered until roughly a third of the
+     * question terms have to match, still ranked by the same scoring, so a keyword-less question
+     * keeps a non-empty candidate pool instead of degrading to the vector channel alone.
+     */
+    static final String LAST_RESORT_KEYWORD_MINIMUM_SHOULD_MATCH = "30%";
+    static final String LAST_RESORT_OVERALL_MINIMUM_SHOULD_MATCH = "1";
 
     private void assertIndexReadable() {
         SegmentIndexStatusDTO status = segmentIndexManager.status();
@@ -85,14 +108,101 @@ public class EsSegmentRepository implements SegmentRepository {
         if ((!StringUtils.hasText(query) && (keywords == null || keywords.isEmpty())) || limit <= 0) {
             return List.of();
         }
+        String effectiveQuery = query != null ? query.trim() : "";
+        List<SegmentHit> strictHits;
         try {
-            SearchRequest request = buildTextSearchRequest(query != null ? query.trim() : "", keywords, limit, filter);
-            SearchResponse<SegmentDocument> response = esClient.search(request, SegmentDocument.class);
-            return convertHits(response);
+            SearchRequest request = buildTextSearchRequest(
+                    effectiveQuery, keywords, limit, filter,
+                    STRICT_KEYWORD_MINIMUM_SHOULD_MATCH, STRICT_OVERALL_MINIMUM_SHOULD_MATCH);
+            strictHits = convertHits(esClient.search(request, SegmentDocument.class));
         } catch (Exception e) {
             log.error("kb text search failed", e);
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE);
         }
+        if (strictHits.size() >= limit) {
+            return strictHits;
+        }
+        List<SegmentHit> merged = mergeRelaxedHits(strictHits,
+                relaxedTextSearch(effectiveQuery, keywords, limit, filter), limit);
+        if (merged.size() >= limit || (keywords != null && !keywords.isEmpty())) {
+            return merged;
+        }
+        return mergeRelaxedHits(merged, lastResortTextSearch(effectiveQuery, limit, filter), limit);
+    }
+
+    /**
+     * Best-effort last-resort recall for a keyword-less question. Keyword-centric passes cannot
+     * match a long question because the whole question is a single text clause evaluated against
+     * the strict/relaxed term-coverage bars; this pass lowers the bar to a third of the question
+     * terms. A failure degrades to the already merged hits instead of failing the retrieval.
+     */
+    private List<SegmentHit> lastResortTextSearch(String query, int limit, SearchFilter filter) {
+        try {
+            SearchRequest request = buildTextSearchRequest(
+                    query, List.of(), limit, filter,
+                    LAST_RESORT_KEYWORD_MINIMUM_SHOULD_MATCH, LAST_RESORT_OVERALL_MINIMUM_SHOULD_MATCH);
+            List<SegmentHit> hits = convertHits(esClient.search(request, SegmentDocument.class));
+            if (!hits.isEmpty()) {
+                log.info("kb text search last-resort recall applied, limit={}, hits={}", limit, hits.size());
+            }
+            return hits;
+        } catch (Exception e) {
+            log.warn("kb last-resort text search failed, keeping merged hits", e);
+            return List.of();
+        }
+    }
+
+    /**
+     * Best-effort relaxed keyword recall for the strict {@link #textSearch(String, List, int, SearchFilter)}
+     * pass. A failure of the secondary query degrades to the strict result set instead of failing
+     * the whole retrieval.
+     */
+    private List<SegmentHit> relaxedTextSearch(String query, List<String> keywords, int limit, SearchFilter filter) {
+        try {
+            SearchRequest request = buildTextSearchRequest(
+                    query, keywords, limit, filter,
+                    RELAXED_KEYWORD_MINIMUM_SHOULD_MATCH, RELAXED_OVERALL_MINIMUM_SHOULD_MATCH);
+            return convertHits(esClient.search(request, SegmentDocument.class));
+        } catch (Exception e) {
+            log.warn("kb relaxed text search failed, falling back to strict hits", e);
+            return List.of();
+        }
+    }
+
+    private List<SegmentHit> mergeRelaxedHits(List<SegmentHit> strictHits,
+                                              List<SegmentHit> relaxedHits,
+                                              int limit) {
+        if (CollectionUtils.isEmpty(relaxedHits)) {
+            return strictHits;
+        }
+        List<SegmentHit> merged = new ArrayList<>(strictHits);
+        LinkedHashSet<String> knownSegmentIds = new LinkedHashSet<>();
+        for (SegmentHit hit : strictHits) {
+            String segmentId = segmentIdOf(hit);
+            if (StringUtils.hasText(segmentId)) {
+                knownSegmentIds.add(segmentId);
+            }
+        }
+        int appended = 0;
+        for (SegmentHit hit : relaxedHits) {
+            String segmentId = segmentIdOf(hit);
+            if (StringUtils.hasText(segmentId) && !knownSegmentIds.add(segmentId)) {
+                continue;
+            }
+            merged.add(hit);
+            appended++;
+        }
+        if (appended > 0) {
+            log.info("kb text search relaxed keyword recall applied, limit={}, strictHits={}, "
+                            + "relaxedHits={}, appended={}, mergedHits={}",
+                    limit, strictHits.size(), relaxedHits.size(), appended, merged.size());
+        }
+        return merged;
+    }
+
+    private String segmentIdOf(SegmentHit hit) {
+        Segment segment = hit == null ? null : hit.getSegment();
+        return segment == null ? null : segment.getSegmentId();
     }
 
     @Override
@@ -309,14 +419,25 @@ public class EsSegmentRepository implements SegmentRepository {
     /**
      * Builds one term-centric combined-fields query per rewritten keyword.
      * Rewritten keywords are preferred when available; the original query is
-     * retained only as the rewrite fallback. Each keyword must match 70% of
-     * its analyzed terms, while the outer bool query requires all keywords
-     * when there are at most two and 70% when there are more than two.
+     * retained only as the rewrite fallback. Each keyword must match
+     * {@code keywordMinimumShouldMatch} of its analyzed terms, while the outer
+     * bool query requires every keyword when there are at most two and
+     * {@code overallMinimumShouldMatch} when there are more than two.
      */
     SearchRequest buildTextSearchRequest(String query,
                                          List<String> keywords,
                                          int limit,
                                          SearchFilter filter) {
+        return buildTextSearchRequest(query, keywords, limit, filter,
+                STRICT_KEYWORD_MINIMUM_SHOULD_MATCH, STRICT_OVERALL_MINIMUM_SHOULD_MATCH);
+    }
+
+    SearchRequest buildTextSearchRequest(String query,
+                                         List<String> keywords,
+                                         int limit,
+                                         SearchFilter filter,
+                                         String keywordMinimumShouldMatch,
+                                         String overallMinimumShouldMatch) {
         List<String> effectiveKeywords = keywords == null
                 ? List.of()
                 : keywords.stream()
@@ -340,10 +461,10 @@ public class EsSegmentRepository implements SegmentRepository {
                         b.should(sh -> sh.combinedFields(cf -> cf
                                 .query(textQuery)
                                 .fields("title^2.5", "contentText^4.0", "ocrText^3.0")
-                                .minimumShouldMatch("70%")
+                                .minimumShouldMatch(keywordMinimumShouldMatch)
                         ));
                     }
-                    b.minimumShouldMatch("2<70%");
+                    b.minimumShouldMatch(overallMinimumShouldMatch);
                     return b;
                 }))
                 .highlight(h -> h
