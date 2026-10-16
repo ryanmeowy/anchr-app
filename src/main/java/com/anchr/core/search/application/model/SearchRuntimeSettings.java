@@ -36,6 +36,15 @@ public record SearchRuntimeSettings(
         double fusionAlpha,
         double fusionBeta
 ) {
+    /**
+     * 向量通道的默认相似度下限。
+     *
+     * <p>multimodal-embedding-v1 对相关片段的相似度普遍低于 0.75；阈值取 0.75 时向量通道整体失效
+     * （本地评测中 textVectorHits 绝大多数为 0，相关片段只能靠关键词文本通道召回）。取 0.45 可恢复
+     * 向量召回，精度由 RRF 融合与 rerank 阶段兜底；部署仍可通过运行时配置覆盖该值。
+     */
+    public static final float DEFAULT_TEXT_SIMILARITY = 0.45F;
+
     public static SearchRuntimeSettings load(RuntimeConfigUnit unit) {
         return new SearchRuntimeSettings(
                 unit.getInt(RuntimeConfigType.SEARCH, RANK_CONSTANT, 60),
@@ -43,7 +52,7 @@ public record SearchRuntimeSettings(
                 unit.getInt(RuntimeConfigType.SEARCH, MAX_CANDIDATES, 200),
                 unit.getInt(RuntimeConfigType.SEARCH, TEXT_TOP_K, 80),
                 unit.getInt(RuntimeConfigType.SEARCH, DOCUMENT_IMAGE_TOP_K, 40),
-                unit.getFloat(RuntimeConfigType.SEARCH, TEXT_SIMILARITY, 0.75F),
+                unit.getFloat(RuntimeConfigType.SEARCH, TEXT_SIMILARITY, DEFAULT_TEXT_SIMILARITY),
                 unit.getFloat(
                         RuntimeConfigType.SEARCH, DOCUMENT_IMAGE_SIMILARITY, 0.70F),
                 unit.getInt(RuntimeConfigType.SEARCH, MAX_DOC_CHARS, 1200),
@@ -58,7 +67,7 @@ public record SearchRuntimeSettings(
 
     public static SearchRuntimeSettings defaults() {
         return new SearchRuntimeSettings(
-                60, 4, 200, 80, 40, 0.75F, 0.70F,
+                60, 4, 200, 80, 40, DEFAULT_TEXT_SIMILARITY, 0.70F,
                 1200, true, 40, 3, 20, 80, 0.6D, 0.4D);
     }
 }

@@ -96,6 +96,36 @@ class AgentAnswerVerifierTest {
     }
 
     @Test
+    void normalizesModelAuthoredVisibleCitationsWhenTheDeclaredOrderReproducesThem() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A [1-1]，B [2-1]", List.of("seg-1", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).isEqualTo("A [1-1]，B [2-1]");
+        assertThat(answer.citations()).hasSize(2);
+    }
+
+    @Test
+    void rejectsModelAuthoredVisibleCitationsThatDoNotMatchTheDeclaredOrder() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        assertRejected(verifier.verify(state, knowledge(
+                "A [2-1]，B [1-1]", List.of("seg-1", "seg-3"))),
+                "UNTRUSTED_VISIBLE_CITATION");
+        assertRejected(verifier.verify(state, knowledge(
+                "A [1-1]", List.of("seg-1", "seg-3"))),
+                "UNTRUSTED_VISIBLE_CITATION");
+    }
+
+    @Test
     void dropsMarkersForSegmentsOutsideCurrentRunEvidenceBeforeRejecting() {
         AgentState state = state("STRICT").registerEvidence(List.of(
                 evidence("seg-1", "asset-1"),

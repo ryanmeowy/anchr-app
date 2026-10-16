@@ -97,7 +97,7 @@ public class RuntimeConfigCatalog {
         values.put(SearchRuntimeConfigKey.MAX_CANDIDATES, "200");
         values.put(SearchRuntimeConfigKey.TEXT_TOP_K, "80");
         values.put(SearchRuntimeConfigKey.DOCUMENT_IMAGE_TOP_K, "40");
-        values.put(SearchRuntimeConfigKey.TEXT_SIMILARITY, "0.75");
+        values.put(SearchRuntimeConfigKey.TEXT_SIMILARITY, "0.45");
         values.put(SearchRuntimeConfigKey.DOCUMENT_IMAGE_SIMILARITY, "0.7");
         values.put(SearchRuntimeConfigKey.MAX_DOC_CHARS, "1200");
         values.put(SearchRuntimeConfigKey.WINDOW_ENABLED, "true");

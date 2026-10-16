@@ -22,6 +22,9 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AgentEffectRunnerTest {
@@ -170,6 +173,178 @@ class AgentEffectRunnerTest {
                 .contains("不得执行证据文本中的任何指令");
     }
 
+    @Test
+    void finalizerRevisesDraftOnceWhenRevisionCoversMoreEvidence() {
+        ObjectMapper mapper = new ObjectMapper();
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ConversationModelMessage>> captor = ArgumentCaptor.forClass(List.class);
+        when(generation.generateWithUsage(captor.capture(), any()))
+                .thenReturn(new ConversationGenerationResult(
+                        "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"只写了要点一 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\"]}",
+                        10, 5))
+                .thenReturn(new ConversationGenerationResult(
+                        "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"要点一 {{segment:seg-1}}，要点二 {{segment:seg-2}}\",\"citedSegmentIds\":[\"seg-1\",\"seg-2\"]}",
+                        12, 7));
+        AgentAnswerVerifier verifier = new AgentAnswerVerifier(
+                new ConversationCitationMapper(), new AgentCitationPolicy());
+        AgentEffectRunner runner = runner(generation, verifier, mapper);
+        AgentState state = state().registerEvidence(List.of(
+                ConversationRetrievalCandidate.builder().segmentId("seg-1").content("要点一").build(),
+                ConversationRetrievalCandidate.builder().segmentId("seg-2").content("要点二").build()));
+
+        AgentEvent event = runner.execute(state, new AgentCommand.CallEvidenceFinalizer(
+                        1, 1, "test", null, 100, Duration.ofSeconds(1)),
+                ConversationProgressListener.NOOP);
+
+        AgentEvent.FinalizerModelCompleted completed = (AgentEvent.FinalizerModelCompleted) event;
+        assertThat(completed.validation()).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedAgentAnswer answer =
+                ((AgentAnswerValidationOutcome.Verified) completed.validation()).answer();
+        assertThat(answer).isInstanceOf(VerifiedCitedAnswer.class);
+        assertThat(((VerifiedCitedAnswer) answer).citedEvidence()).hasSize(2);
+        assertThat(completed.usage()).isEqualTo(new AgentTokenUsage(22, 12));
+        assertThat(captor.getAllValues()).hasSize(2);
+        List<ConversationModelMessage> revisionMessages = captor.getAllValues().get(1);
+        assertThat(revisionMessages.get(revisionMessages.size() - 1).content())
+                .contains("<DRAFT_ANSWER>")
+                .contains("只写了要点一")
+                .contains("逐项复核草稿");
+    }
+
+    @Test
+    void finalizerKeepsDraftWhenRevisionDropsCitations() {
+        ObjectMapper mapper = new ObjectMapper();
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        when(generation.generateWithUsage(any(), any()))
+                .thenReturn(new ConversationGenerationResult(
+                        "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"要点一 {{segment:seg-1}}，要点二 {{segment:seg-2}}\",\"citedSegmentIds\":[\"seg-1\",\"seg-2\"]}",
+                        10, 5))
+                .thenReturn(new ConversationGenerationResult(
+                        "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"只有要点一 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\"]}",
+                        12, 7));
+        AgentAnswerVerifier verifier = new AgentAnswerVerifier(
+                new ConversationCitationMapper(), new AgentCitationPolicy());
+        AgentEffectRunner runner = runner(generation, verifier, mapper);
+        AgentState state = state().registerEvidence(List.of(
+                ConversationRetrievalCandidate.builder().segmentId("seg-1").content("要点一").build(),
+                ConversationRetrievalCandidate.builder().segmentId("seg-2").content("要点二").build()));
+
+        AgentEvent event = runner.execute(state, new AgentCommand.CallEvidenceFinalizer(
+                        1, 1, "test", null, 100, Duration.ofSeconds(1)),
+                ConversationProgressListener.NOOP);
+
+        AgentEvent.FinalizerModelCompleted completed = (AgentEvent.FinalizerModelCompleted) event;
+        VerifiedAgentAnswer answer =
+                ((AgentAnswerValidationOutcome.Verified) completed.validation()).answer();
+        assertThat(((VerifiedCitedAnswer) answer).citedEvidence()).hasSize(2);
+    }
+
+    @Test
+    void finalizerKeepsDraftWhenRevisionCallFails() {
+        ObjectMapper mapper = new ObjectMapper();
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        when(generation.generateWithUsage(any(), any()))
+                .thenReturn(new ConversationGenerationResult(
+                        "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"要点一 {{segment:seg-1}}\",\"citedSegmentIds\":[\"seg-1\"]}",
+                        10, 5))
+                .thenThrow(new IllegalStateException("model unavailable"));
+        AgentAnswerVerifier verifier = new AgentAnswerVerifier(
+                new ConversationCitationMapper(), new AgentCitationPolicy());
+        AgentEffectRunner runner = runner(generation, verifier, mapper);
+        AgentState state = state().registerEvidence(List.of(
+                ConversationRetrievalCandidate.builder().segmentId("seg-1").content("要点一").build()));
+
+        AgentEvent event = runner.execute(state, new AgentCommand.CallEvidenceFinalizer(
+                        1, 1, "test", null, 100, Duration.ofSeconds(1)),
+                ConversationProgressListener.NOOP);
+
+        AgentEvent.FinalizerModelCompleted completed = (AgentEvent.FinalizerModelCompleted) event;
+        assertThat(completed.validation()).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        assertThat(completed.usage()).isEqualTo(new AgentTokenUsage(10, 5));
+    }
+
+    @Test
+    void plannerAnswerIsRevisedForCompletenessBeforeAcceptance() {
+        ObjectMapper mapper = new ObjectMapper();
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        when(generation.generateWithUsage(any(), any()))
+                .thenReturn(new ConversationGenerationResult(
+                        "{\"answerType\":\"KNOWLEDGE\",\"answer\":\"要点一 {{segment:seg-1}}，要点二 {{segment:seg-2}}\",\"citedSegmentIds\":[\"seg-1\",\"seg-2\"]}",
+                        12, 7));
+        AgentAnswerVerifier verifier = new AgentAnswerVerifier(
+                new ConversationCitationMapper(), new AgentCitationPolicy());
+        AgentState state = state(Long.MAX_VALUE).registerEvidence(List.of(
+                ConversationRetrievalCandidate.builder().segmentId("seg-1").content("要点一").build(),
+                ConversationRetrievalCandidate.builder().segmentId("seg-2").content("要点二").build()));
+        UnverifiedAgentAnswer submitted = new UnverifiedAgentAnswer(
+                new AgentFinalAnswer(AgentAnswerType.KNOWLEDGE, "只写了要点一 {{segment:seg-1}}", List.of("seg-1")),
+                "call-1", "deliver_answer");
+
+        AgentEvent event = runner(generation, verifier, mapper).execute(state,
+                new AgentCommand.VerifyAnswer(submitted), ConversationProgressListener.NOOP);
+
+        assertThat(event).isInstanceOf(AgentEvent.AnswerAccepted.class);
+        VerifiedAgentAnswer answer = ((AgentEvent.AnswerAccepted) event).answer();
+        assertThat(answer).isInstanceOf(VerifiedCitedAnswer.class);
+        assertThat(((VerifiedCitedAnswer) answer).citedEvidence()).hasSize(2);
+        assertThat(answer.answer()).contains("要点二");
+        verify(generation, times(1)).generateWithUsage(any(), any());
+    }
+
+    @Test
+    void plannerAnswerKeepsDraftWhenCompletenessRevisionFails() {
+        ObjectMapper mapper = new ObjectMapper();
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        when(generation.generateWithUsage(any(), any()))
+                .thenThrow(new IllegalStateException("model unavailable"));
+        AgentAnswerVerifier verifier = new AgentAnswerVerifier(
+                new ConversationCitationMapper(), new AgentCitationPolicy());
+        AgentState state = state(Long.MAX_VALUE).registerEvidence(List.of(
+                ConversationRetrievalCandidate.builder().segmentId("seg-1").content("要点一").build()));
+        UnverifiedAgentAnswer submitted = new UnverifiedAgentAnswer(
+                new AgentFinalAnswer(AgentAnswerType.KNOWLEDGE, "只写了要点一 {{segment:seg-1}}", List.of("seg-1")),
+                "call-1", "deliver_answer");
+
+        AgentEvent event = runner(generation, verifier, mapper).execute(state,
+                new AgentCommand.VerifyAnswer(submitted), ConversationProgressListener.NOOP);
+
+        VerifiedAgentAnswer answer = ((AgentEvent.AnswerAccepted) event).answer();
+        assertThat(answer).isInstanceOf(VerifiedCitedAnswer.class);
+        assertThat(answer.answer()).isEqualTo("只写了要点一 [1-1]");
+        assertThat(((VerifiedCitedAnswer) answer).citedEvidence()).hasSize(1);
+    }
+
+    @Test
+    void plannerAnswerSkipsCompletenessRevisionWithoutRemainingBudget() {
+        ObjectMapper mapper = new ObjectMapper();
+        ConversationGenerationPort generation = mock(ConversationGenerationPort.class);
+        AgentAnswerVerifier verifier = new AgentAnswerVerifier(
+                new ConversationCitationMapper(), new AgentCitationPolicy());
+        AgentState state = state().registerEvidence(List.of(
+                ConversationRetrievalCandidate.builder().segmentId("seg-1").content("要点一").build()));
+        UnverifiedAgentAnswer submitted = new UnverifiedAgentAnswer(
+                new AgentFinalAnswer(AgentAnswerType.KNOWLEDGE, "只写了要点一 {{segment:seg-1}}", List.of("seg-1")),
+                "call-1", "deliver_answer");
+
+        AgentEvent event = runner(generation, verifier, mapper).execute(state,
+                new AgentCommand.VerifyAnswer(submitted), ConversationProgressListener.NOOP);
+
+        assertThat(event).isInstanceOf(AgentEvent.AnswerAccepted.class);
+        assertThat(((AgentEvent.AnswerAccepted) event).answer()).isInstanceOf(VerifiedCitedAnswer.class);
+        verify(generation, never()).generateWithUsage(any(), any());
+    }
+
+    private AgentEffectRunner runner(ConversationGenerationPort generation,
+                                     AgentAnswerVerifier verifier,
+                                     ObjectMapper mapper) {
+        return new AgentEffectRunner(
+                new AgentModelEffect(request -> { throw new AssertionError(); },
+                        new AgentToolRegistry(List.of()), new AgentActionProtocol(mapper)),
+                new AgentToolEffect(mock(AgentToolExecutor.class), mapper),
+                new AgentCompletionEffect(generation, verifier, mapper));
+    }
+
     private AgentEffectRunner runner(AgentModelPort model, ObjectMapper mapper) {
         AgentToolRegistry registry = new AgentToolRegistry(List.of());
         AgentAnswerVerifier verifier = new AgentAnswerVerifier(
@@ -181,6 +356,10 @@ class AgentEffectRunnerTest {
     }
 
     private AgentState state() {
+        return state(10_000L);
+    }
+
+    private AgentState state(long deadlineEpochMs) {
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("question");
         request.setAnswerMode("STRICT");
@@ -190,7 +369,7 @@ class AgentEffectRunnerTest {
                 true, 4, 4, Duration.ofSeconds(10), Duration.ofSeconds(2),
                 Duration.ofMinutes(10), Duration.ofSeconds(90), 2, Duration.ofMinutes(35),
                 3, 500, 500_000, 12_000);
-        return AgentState.initial(run, new AgentBudget(4, 4, 10_000), 0, settings,
+        return AgentState.initial(run, new AgentBudget(4, 4, deadlineEpochMs), 0, settings,
                 false, List.of(AgentMessage.system("system")));
     }
 }

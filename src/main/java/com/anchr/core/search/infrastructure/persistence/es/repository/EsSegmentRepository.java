@@ -17,6 +17,7 @@ import com.anchr.core.common.constant.EmbeddingConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
+import com.anchr.core.search.application.model.SearchRuntimeSettings;
 import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
 import com.anchr.core.search.domain.model.SearchFilter;
@@ -212,7 +213,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     @Override
     public List<SegmentHit> vectorSearch(List<Float> queryVector, int topK, SearchFilter filter) {
-        return vectorSearch(queryVector, topK, 0.75f, filter);
+        return vectorSearch(queryVector, topK, SearchRuntimeSettings.DEFAULT_TEXT_SIMILARITY, filter);
     }
 
     @Override
@@ -481,7 +482,8 @@ public class EsSegmentRepository implements SegmentRepository {
             int topK,
             SearchFilter filter
     ) {
-        return buildVectorSearchRequest(queryVector, topK, 0.75f, filter);
+        return buildVectorSearchRequest(
+                queryVector, topK, SearchRuntimeSettings.DEFAULT_TEXT_SIMILARITY, filter);
     }
 
     SearchRequest buildVectorSearchRequest(

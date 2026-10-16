@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -529,7 +530,8 @@ class AgentWorkflowImplTest {
         assertThat(result.answer()).isEqualTo("CRAG 会评估检索结果并选择后续动作 [1-1]");
         assertThat(result.fallbackReason()).isNull();
         assertThat(result.citations()).hasSize(1);
-        verify(generation).generateWithUsage(any(), any());
+        // 1 次终点器草稿 + 1 次通过校验后的完整性修订
+        verify(generation, times(2)).generateWithUsage(any(), any());
     }
 
     @Test
@@ -564,7 +566,15 @@ class AgentWorkflowImplTest {
                 run("权限默认值是什么"), ConversationProgressListener.NOOP);
 
         assertThat(result.answer()).isEqualTo("默认关闭 [1-1]");
-        verify(generation, times(2)).generateWithUsage(any(), any());
+        // 草稿被拒 1 次 + 校验失败重试 1 次 + 通过校验后的完整性修订 1 次
+        verify(generation, times(3)).generateWithUsage(any(), any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ConversationModelMessage>> captor = ArgumentCaptor.forClass(List.class);
+        verify(generation, times(3)).generateWithUsage(captor.capture(), any());
+        assertThat(captor.getAllValues().stream()
+                .filter(messages -> messages.stream()
+                        .anyMatch(message -> message.content().contains("上一次输出未通过校验")))
+                .count()).isEqualTo(1L);
     }
 
     @Test

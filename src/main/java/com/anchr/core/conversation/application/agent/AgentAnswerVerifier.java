@@ -4,6 +4,7 @@ import com.anchr.core.conversation.application.assembler.ConversationCitationMap
 import com.anchr.core.conversation.application.model.AnswerMode;
 import com.anchr.core.conversation.application.model.ConversationRetrievalCandidate;
 import com.anchr.core.conversation.domain.model.ConversationCitation;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -23,6 +24,8 @@ import org.springframework.util.StringUtils;
 final class AgentAnswerVerifier {
     private static final Pattern AUTHORED_VISIBLE_CITATION =
             Pattern.compile("(?<![A-Za-z0-9_])\\[(?:\\d+)(?:-\\d+)?](?!\\s*\\()");
+    private static final Pattern VISIBLE_CITATION =
+            Pattern.compile("(?<![A-Za-z0-9_])\\[(\\d+)(?:-(\\d+))?](?!\\s*\\()");
     private final ConversationCitationMapper citationMapper;
     private final AgentCitationPolicy citationPolicy;
 
@@ -108,6 +111,20 @@ final class AgentAnswerVerifier {
                 .filter(StringUtils::hasText)
                 .map(String::trim)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<ConversationRetrievalCandidate> selected = requestedSet.stream()
+                .map(allowedById::get).filter(Objects::nonNull).toList();
+        if (AUTHORED_VISIBLE_CITATION.matcher(answer.answer()).find()) {
+            AgentFinalAnswer normalized = allowRepair
+                    ? repairVisibleCitations(answer, requested, selected) : null;
+            if (normalized != null) {
+                log.info("Agent visible citations normalized before validation, kept={}",
+                        normalized.citedSegmentIds());
+                return verify(state, normalized, allowedEvidence, evidenceOnly, false);
+            }
+            return rejected("UNTRUSTED_VISIBLE_CITATION",
+                    "不要自行生成数字引用；只使用当前证据的 {{segment:实际ID}} Marker",
+                    "untrusted_visible_citation");
+        }
         Set<String> markerSet = new LinkedHashSet<>(markers);
         List<String> illegal = requestedSet.stream()
                 .filter(id -> !allowedById.containsKey(id)).toList();
@@ -143,20 +160,66 @@ final class AgentAnswerVerifier {
                     "引用超过限制：全文最多 10 个不同引用、12 个 Marker，每段最多 3 个 Marker",
                     "agent_citation_density_exceeded");
         }
-        List<ConversationRetrievalCandidate> selected = requestedSet.stream()
-                .map(allowedById::get).filter(Objects::nonNull).toList();
         AgentCitationRenderResult rendered = AgentCitationRenderer.render(answer.answer(), selected);
-        if (AUTHORED_VISIBLE_CITATION.matcher(answer.answer()).find()) {
-            return rejected("UNTRUSTED_VISIBLE_CITATION",
-                    "不要自行生成数字引用；只使用当前证据的 {{segment:实际ID}} Marker",
-                    "untrusted_visible_citation");
-        }
         List<ConversationRetrievalCandidate> citedEvidence = selected.stream()
                 .filter(candidate -> rendered.references().containsKey(candidate.getSegmentId()))
                 .toList();
         List<ConversationCitation> citations = citationMapper.mapFromSearchResults(citedEvidence);
         AgentCitationIndexPlan.apply(citations, rendered.references());
         return verified(new VerifiedCitedAnswer(rendered.answer(), citations, citedEvidence));
+    }
+
+    /**
+     * Rewrites model-authored visible labels such as {@code [1-2]} back into the internal segment markers when
+     * the declared evidence order reproduces those exact labels. The mapping is accepted only when rendering the
+     * rewritten answer yields the same labels in the same order, so a guessed or inconsistent numbering is still
+     * rejected instead of being bound to the wrong segment.
+     */
+    private AgentFinalAnswer repairVisibleCitations(AgentFinalAnswer answer,
+                                                    List<String> requested,
+                                                    List<ConversationRetrievalCandidate> selected) {
+        String text = answer.answer();
+        List<String> labels = new ArrayList<>();
+        List<String> distinct = new ArrayList<>();
+        Matcher matcher = VISIBLE_CITATION.matcher(text);
+        while (matcher.find()) {
+            String label = visibleLabel(matcher);
+            labels.add(label);
+            if (!distinct.contains(label)) distinct.add(label);
+        }
+        List<String> declared = requested.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (distinct.isEmpty() || distinct.size() != declared.size()) return null;
+
+        Map<String, String> segmentByLabel = new LinkedHashMap<>();
+        for (int index = 0; index < distinct.size(); index++) {
+            segmentByLabel.put(distinct.get(index), declared.get(index));
+        }
+        StringBuilder rewritten = new StringBuilder();
+        Matcher occurrence = VISIBLE_CITATION.matcher(text);
+        while (occurrence.find()) {
+            String segmentId = segmentByLabel.get(visibleLabel(occurrence));
+            occurrence.appendReplacement(rewritten,
+                    Matcher.quoteReplacement("{{segment:" + segmentId + "}}"));
+        }
+        occurrence.appendTail(rewritten);
+        String candidate = rewritten.toString();
+
+        AgentCitationRenderResult rendered = AgentCitationRenderer.render(candidate, selected);
+        List<String> renderedLabels = new ArrayList<>();
+        Matcher renderedMatcher = VISIBLE_CITATION.matcher(rendered.answer());
+        while (renderedMatcher.find()) {
+            renderedLabels.add(visibleLabel(renderedMatcher));
+        }
+        if (!renderedLabels.equals(labels)) return null;
+        return new AgentFinalAnswer(answer.answerType(), candidate, declared);
+    }
+
+    private static String visibleLabel(Matcher matcher) {
+        return matcher.group(2) == null ? matcher.group(1) : matcher.group(1) + "-" + matcher.group(2);
     }
 
     private AgentFinalAnswer repairCitationBinding(AgentFinalAnswer answer, Collection<String> allowedIds) {
