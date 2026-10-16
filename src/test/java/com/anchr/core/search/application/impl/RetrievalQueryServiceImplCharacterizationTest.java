@@ -59,7 +59,7 @@ class RetrievalQueryServiceImplCharacterizationTest {
     }
 
     @Test
-    void singleAssetQueryShouldRerankMoreThanThreeTextChunksBeforeDiversifyingResult() {
+    void singleAssetQueryShouldRerankBeforeDiversifyingWithoutPerAssetPreTruncation() {
         SearchRerankPort rerankPort = mock(SearchRerankPort.class);
         List<SegmentHit> hits = List.of(
                 hit("text-1", "asset-1", 1),
@@ -85,10 +85,10 @@ class RetrievalQueryServiceImplCharacterizationTest {
         assertThat(result.insight().pipeline().fusedRetained()).isEqualTo(4);
         assertThat(result.insight().pipeline().rerankAdopted()).isEqualTo(4);
         assertThat(result.items()).singleElement().satisfies(item -> {
-            assertThat(item.totalHits()).isEqualTo(3);
+            assertThat(item.totalHits()).isEqualTo(4);
             assertThat(item.topChunks())
                     .extracting(chunk -> chunk.segmentId())
-                    .containsExactly("text-4", "text-1", "text-2");
+                    .containsExactly("text-4", "text-1", "text-2", "text-3");
         });
     }
 
@@ -100,8 +100,12 @@ class RetrievalQueryServiceImplCharacterizationTest {
                 hit("asset-1-text-2", "asset-1", 2),
                 hit("asset-1-text-3", "asset-1", 3),
                 hit("asset-1-text-4", "asset-1", 4),
+                hit("asset-1-text-5", "asset-1", 5),
+                hit("asset-1-text-6", "asset-1", 6),
+                hit("asset-1-text-7", "asset-1", 7),
+                hit("asset-1-text-8", "asset-1", 8),
                 hit("asset-2-text-1", "asset-2", 1));
-        when(rerankPort.rerank(eq("query"), anyList(), eq(4))).thenReturn(List.of(
+        when(rerankPort.rerank(eq("query"), anyList(), eq(7))).thenReturn(List.of(
                 new SearchRerankPort.RerankItem(0, 1D),
                 new SearchRerankPort.RerankItem(1, 0.8D),
                 new SearchRerankPort.RerankItem(2, 0.6D),
@@ -113,13 +117,15 @@ class RetrievalQueryServiceImplCharacterizationTest {
 
         verify(rerankPort).rerank(
                 eq("query"),
-                argThat(documents -> documents.size() == 4
+                argThat(documents -> documents.size() == 7
+                        && documents.stream().anyMatch(
+                                document -> document.contains("content-asset-1-text-6"))
                         && documents.stream().noneMatch(
-                                document -> document.contains("content-asset-1-text-4"))
+                                document -> document.contains("content-asset-1-text-7"))
                         && documents.stream().anyMatch(
                                 document -> document.contains("content-asset-2-text-1"))),
-                eq(4));
-        assertThat(result.insight().pipeline().fusedRetained()).isEqualTo(4);
+                eq(7));
+        assertThat(result.insight().pipeline().fusedRetained()).isEqualTo(7);
         assertThat(result.items()).hasSize(2);
     }
 

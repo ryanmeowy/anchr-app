@@ -16,9 +16,17 @@ import java.util.Objects;
 
 /**
  * Pure RRF fusion and per-asset/type diversification used by the Retrieval query use case.
+ *
+ * <p>The per-asset/type limit exists to stop one document from crowding out every other
+ * document, not to cap how much of a single document may reach the answer: a lower value
+ * silently dropped relevant segments of the very documents the question is about, so it is
+ * kept equal to the per-document part of the traditional evidence budget.</p>
  */
 @Component
 final class RetrievalRrfFusionPolicy {
+
+    /** Maximum segments of one (assetId, segmentType) pair kept by {@link #diversify}. */
+    static final int PER_ASSET_TYPE_LIMIT = 6;
 
     List<SegmentRerankCandidate> fuse(
             List<SegmentHit> textHits,
@@ -52,7 +60,7 @@ final class RetrievalRrfFusionPolicy {
             String key = Objects.toString(segment.getAssetId(), "") + "\n"
                     + Objects.toString(segment.getSegmentType(), "");
             int count = counts.getOrDefault(key, 0);
-            if (count >= 3) {
+            if (count >= PER_ASSET_TYPE_LIMIT) {
                 continue;
             }
             counts.put(key, count + 1);
