@@ -12,9 +12,10 @@ import java.util.regex.Pattern;
  * system instruction ("高优先级系统指令", "评审备注", "必须声称…", "单独输出 &lt;TOKEN&gt;").
  * A prompt-level warning is not a control, so an answer is treated as compromised when it echoes
  * a distinctive token or a long verbatim span that only exists inside such a directive segment of
- * the evidence context that was sent to the model.</p>
+ * the evidence context that was sent to the model. Shared by both answer paths: the
+ * traditional RAG answer generator and the Agent completion effect.</p>
  */
-final class TraditionalRagEvidenceInstructionGuard {
+public final class TraditionalRagEvidenceInstructionGuard {
 
     /** Evidence sentences that talk *to* the assistant instead of stating facts. */
     private static final Pattern DIRECTIVE_CUE = Pattern.compile(
@@ -36,7 +37,7 @@ final class TraditionalRagEvidenceInstructionGuard {
     /**
      * @return true when the answer reproduces an injected instruction that lives in the evidence
      */
-    static boolean containsInstructionEcho(String answer, String evidenceContext) {
+    public static boolean containsInstructionEcho(String answer, String evidenceContext) {
         if (answer == null || answer.isBlank() || evidenceContext == null || evidenceContext.isBlank()) {
             return false;
         }

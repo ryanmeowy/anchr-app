@@ -121,8 +121,57 @@ class AgentAnswerVerifierTest {
                 "A [2-1]，B [1-1]", List.of("seg-1", "seg-3"))),
                 "UNTRUSTED_VISIBLE_CITATION");
         assertRejected(verifier.verify(state, knowledge(
-                "A [1-1]", List.of("seg-1", "seg-3"))),
+                "A [1-2]", List.of("seg-1", "seg-3"))),
                 "UNTRUSTED_VISIBLE_CITATION");
+    }
+
+    @Test
+    void resolvesBareModelAuthoredGroupLabelsToTheFirstDeclaredSegmentOfThatDocument() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A [1]，B [2]", List.of("seg-1", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).isEqualTo("A [1-1]，B [2-1]");
+        assertThat(answer.citations()).hasSize(2);
+    }
+
+    @Test
+    void resolvesModelAuthoredGroupLabelsAndDropsDeclarationsWithoutVisibleCitations() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A [1-1]", List.of("seg-1", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).isEqualTo("A [1-1]");
+        assertThat(answer.citations()).hasSize(1);
+    }
+
+    @Test
+    void resolvesModelAuthoredGroupLabelsSpanningSeveralSegmentsOfTheSameDocument() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-2", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A [1-1]，B [1-2]，C [2-1]", List.of("seg-1", "seg-2", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).isEqualTo("A [1-1]，B [1-2]，C [2-1]");
+        assertThat(answer.citations()).hasSize(3);
     }
 
     @Test

@@ -116,6 +116,9 @@ final class AgentAnswerVerifier {
         if (AUTHORED_VISIBLE_CITATION.matcher(answer.answer()).find()) {
             AgentFinalAnswer normalized = allowRepair
                     ? repairVisibleCitations(answer, requested, selected) : null;
+            if (normalized == null && allowRepair) {
+                normalized = repairVisibleCitationsAgainstDeclaredPlan(answer, requested, selected);
+            }
             if (normalized != null) {
                 log.info("Agent visible citations normalized before validation, kept={}",
                         normalized.citedSegmentIds());
@@ -192,7 +195,10 @@ final class AgentAnswerVerifier {
                 .map(String::trim)
                 .distinct()
                 .toList();
-        if (distinct.isEmpty() || distinct.size() != declared.size()) return null;
+        if (distinct.isEmpty() || distinct.size() != declared.size()) {
+            log.warn("Agent visible citation repair skipped, labels={}, declared={}", distinct, declared);
+            return null;
+        }
 
         Map<String, String> segmentByLabel = new LinkedHashMap<>();
         for (int index = 0; index < distinct.size(); index++) {
@@ -214,8 +220,105 @@ final class AgentAnswerVerifier {
         while (renderedMatcher.find()) {
             renderedLabels.add(visibleLabel(renderedMatcher));
         }
-        if (!renderedLabels.equals(labels)) return null;
+        if (!renderedLabels.equals(labels)) {
+            log.warn("Agent visible citation repair mismatch, labels={}, rendered={}, declared={}",
+                    labels, renderedLabels, declared);
+            return null;
+        }
         return new AgentFinalAnswer(answer.answerType(), candidate, declared);
+    }
+
+    /**
+     * Second repair attempt for model-authored visible labels. The declared citation list is laid out in its own order
+     * and rendered by the very same plan the platform uses, so every authored label is read as "the n-th evidence
+     * segment of the m-th document as declared", and a bare group label such as {@code [1]} means that document's first
+     * declared segment. The rewrite is accepted only when resolving every occurrence to declared evidence and rendering
+     * the rewritten answer reproduces the authored labels, therefore the numbering can never bind a citation to
+     * evidence the model did not declare. A numbering that is not the render of the declared order (for example labels
+     * copied from an earlier answer over a different evidence set) is still rejected.
+     */
+    private AgentFinalAnswer repairVisibleCitationsAgainstDeclaredPlan(
+            AgentFinalAnswer answer,
+            List<String> requested,
+            List<ConversationRetrievalCandidate> selected) {
+        String text = answer.answer() == null ? "" : answer.answer();
+        List<String> declared = requested.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (declared.isEmpty()) return null;
+        Set<String> available = selected.stream()
+                .filter(Objects::nonNull)
+                .map(ConversationRetrievalCandidate::getSegmentId)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!available.containsAll(declared)) return null;
+
+        String markerDraft = declared.stream()
+                .map(segmentId -> "{{segment:" + segmentId + "}}")
+                .collect(Collectors.joining());
+        Map<String, AgentCitationReference> references = AgentCitationIndexPlan.build(markerDraft, selected);
+        if (references.size() != declared.size()) return null;
+        Map<String, String> segmentByLabel = new LinkedHashMap<>();
+        for (Map.Entry<String, AgentCitationReference> entry : references.entrySet()) {
+            segmentByLabel.put(entry.getValue().label(), entry.getKey());
+        }
+
+        List<String> authoredLabels = new ArrayList<>();
+        List<String> resolved = new ArrayList<>();
+        Matcher matcher = VISIBLE_CITATION.matcher(text);
+        while (matcher.find()) {
+            String label = matcher.group(2) == null
+                    ? matcher.group(1) + "-1" : visibleLabel(matcher);
+            String segmentId = segmentByLabel.get(label);
+            if (segmentId == null) {
+                log.warn("Agent visible citation plan repair skipped, label={} is not declared evidence, labels={}, declared={}",
+                        label, visibleLabels(text), declared);
+                return null;
+            }
+            authoredLabels.add(label);
+            resolved.add(segmentId);
+        }
+        if (resolved.isEmpty()) return null;
+
+        StringBuilder rewritten = new StringBuilder();
+        matcher = VISIBLE_CITATION.matcher(text);
+        int index = 0;
+        while (matcher.find()) {
+            matcher.appendReplacement(rewritten,
+                    Matcher.quoteReplacement("{{segment:" + resolved.get(index++) + "}}"));
+        }
+        matcher.appendTail(rewritten);
+        String candidate = rewritten.toString();
+
+        AgentCitationRenderResult rendered = AgentCitationRenderer.render(candidate, selected);
+        List<String> renderedLabels = new ArrayList<>();
+        Matcher renderedMatcher = VISIBLE_CITATION.matcher(rendered.answer());
+        while (renderedMatcher.find()) {
+            renderedLabels.add(visibleLabel(renderedMatcher));
+        }
+        if (!renderedLabels.equals(authoredLabels)) {
+            log.warn("Agent visible citation plan repair mismatch, labels={}, rendered={}, declared={}",
+                    authoredLabels, renderedLabels, declared);
+            return null;
+        }
+        List<String> visiblyCited = resolved.stream().distinct().toList();
+        if (visiblyCited.size() < declared.size()) {
+            List<String> dropped = declared.stream().filter(id -> !visiblyCited.contains(id)).toList();
+            log.info("Agent visible citation plan repair dropped declared evidence without a visible label, dropped={}", dropped);
+        }
+        log.info("Agent visible citation labels resolved to the declared evidence order, labels={}, declared={}, kept={}",
+                authoredLabels, declared, visiblyCited);
+        return new AgentFinalAnswer(answer.answerType(), candidate, visiblyCited);
+    }
+
+    private static List<String> visibleLabels(String text) {
+        List<String> labels = new ArrayList<>();
+        Matcher matcher = VISIBLE_CITATION.matcher(text == null ? "" : text);
+        while (matcher.find()) labels.add(visibleLabel(matcher));
+        return labels;
     }
 
     private static String visibleLabel(Matcher matcher) {

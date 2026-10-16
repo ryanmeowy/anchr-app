@@ -7,7 +7,7 @@ import java.util.regex.*;
 final class TraditionalRagCitationNormalizer {
     private static final Pattern MARKER = Pattern.compile("\\[(\\d+(?:-\\d+)*)]");
     private static final Pattern PENDING = Pattern.compile("\\[\\d*(?:-\\d*)*$");
-    record Result(String text, List<String> segmentIds, int invalidCount) {}
+    record Result(String text, List<String> segmentIds, int invalidCount, Map<String, Integer> indexByLabel) {}
 
     static Result normalize(String text, List<String> assets, List<String> segments, boolean partial) {
         if (partial) {
@@ -17,6 +17,7 @@ final class TraditionalRagCitationNormalizer {
         Map<String, Integer> assetIndexes = new LinkedHashMap<>();
         Map<String, Integer> perAsset = new HashMap<>();
         Map<Integer, String> labels = new LinkedHashMap<>();
+        Map<String, Integer> labelIndexes = new LinkedHashMap<>();
         Matcher matcher = MARKER.matcher(text);
         StringBuilder result = new StringBuilder();
         int invalid = 0;
@@ -34,12 +35,14 @@ final class TraditionalRagCitationNormalizer {
                     int assetIndex = assetIndexes.computeIfAbsent(asset, ignored -> assetIndexes.size() + 1);
                     label = assetIndex + "-" + perAsset.merge(asset, 1, Integer::sum);
                     labels.put(index, label);
+                    labelIndexes.putIfAbsent(label, index);
                 }
                 replacement = "[" + label + "]";
             }
             matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(result);
-        return new Result(result.toString(), labels.keySet().stream().map(segments::get).toList(), invalid);
+        return new Result(result.toString(), labels.keySet().stream().map(segments::get).toList(), invalid,
+                Map.copyOf(labelIndexes));
     }
 }
