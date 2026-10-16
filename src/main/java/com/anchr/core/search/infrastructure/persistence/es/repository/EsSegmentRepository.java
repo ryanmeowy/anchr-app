@@ -14,6 +14,7 @@ import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import com.anchr.core.common.constant.EmbeddingConstant;
+import com.anchr.core.common.constant.SegmentIndexConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
@@ -40,8 +41,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static com.anchr.core.common.constant.SegmentIndexConstant.READ_ALIAS;
-import static com.anchr.core.common.constant.SegmentIndexConstant.WRITE_ALIAS;
 
 /**
  * Elasticsearch repository for unified kb_segment retrieval.
@@ -260,7 +259,7 @@ public class EsSegmentRepository implements SegmentRepository {
 
     GetRequest buildFindBySegmentIdRequest(String segmentId) {
         return GetRequest.of(g -> g
-                .index(READ_ALIAS)
+                .index(SegmentIndexConstant.readAlias())
                 .id(segmentId.trim())
                 .sourceExcludes("embedding"));
     }
@@ -305,7 +304,7 @@ public class EsSegmentRepository implements SegmentRepository {
             int limit
     ) {
         SearchRequest.Builder builder = new SearchRequest.Builder()
-                .index(READ_ALIAS)
+                .index(SegmentIndexConstant.readAlias())
                 .size(Math.min(limit, 100))
                 .query(q -> q.bool(b -> b
                         .filter(f -> f.term(t -> t
@@ -353,7 +352,7 @@ public class EsSegmentRepository implements SegmentRepository {
         assertIndexWritable();
         try {
             DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
-                    .index(WRITE_ALIAS)
+                    .index(SegmentIndexConstant.writeAlias())
                     .refresh(true)
                     .query(q -> q.term(t -> t.field("assetId").value(assetId))));
             DeleteByQueryResponse response = esClient.deleteByQuery(request);
@@ -376,7 +375,7 @@ public class EsSegmentRepository implements SegmentRepository {
         assertIndexWritable();
         try {
             DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
-                    .index(WRITE_ALIAS)
+                    .index(SegmentIndexConstant.writeAlias())
                     .refresh(true)
                     .query(q -> q.bool(b -> b
                             .filter(f -> f.term(t -> t.field("assetId").value(assetId)))
@@ -451,7 +450,7 @@ public class EsSegmentRepository implements SegmentRepository {
                 : effectiveKeywords;
 
         return SearchRequest.of(s -> s
-                .index(READ_ALIAS)
+                .index(SegmentIndexConstant.readAlias())
                 .size(limit)
                 .query(q -> q.bool(b -> {
                     applyFilters(b, filter);
@@ -494,7 +493,7 @@ public class EsSegmentRepository implements SegmentRepository {
     ) {
         int numCandidates = Math.max(EmbeddingConstant.DEFAULT_NUM_CANDIDATES, topK * EmbeddingConstant.NUM_CANDIDATES_FACTOR);
         return SearchRequest.of(s -> s
-                .index(READ_ALIAS)
+                .index(SegmentIndexConstant.readAlias())
                 .size(topK)
                 .source(src -> src.filter(f -> f.excludes("embedding")))
                 .knn(k -> {

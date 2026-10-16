@@ -5,6 +5,7 @@ import co.elastic.clients.elasticsearch._types.ErrorCause;
 import co.elastic.clients.elasticsearch._types.Refresh;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
+import com.anchr.core.common.constant.SegmentIndexConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.search.application.SegmentIndexManager;
@@ -21,7 +22,6 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 import java.util.Objects;
 
-import static com.anchr.core.common.constant.SegmentIndexConstant.WRITE_ALIAS;
 
 /**
  * Shared bulk writer for kb_segment index.
@@ -38,7 +38,7 @@ public class SearchSegmentBulkWriter {
 
     public WriteResult write(List<Segment> segments) {
         if (segments == null || segments.isEmpty()) {
-            return new WriteResult(0, WRITE_ALIAS, null);
+            return new WriteResult(0, SegmentIndexConstant.writeAlias(), null);
         }
         validateSegments(segments);
         return indexWriteBarrier.withWritePermit(() -> doWrite(segments));
@@ -64,7 +64,7 @@ public class SearchSegmentBulkWriter {
             throw new BusinessException(ApiError.SEARCH_BACKEND_UNAVAILABLE,
                     "Search index is not writable, current status: " + status.getStatus());
         }
-        String indexName = WRITE_ALIAS;
+        String indexName = SegmentIndexConstant.writeAlias();
         try {
             var requestBuilder = new co.elastic.clients.elasticsearch.core.BulkRequest.Builder();
             requestBuilder.refresh(Refresh.WaitFor);

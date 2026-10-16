@@ -4,6 +4,7 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.mapping.TypeMapping;
 import co.elastic.clients.elasticsearch.indices.IndexSettings;
 import co.elastic.clients.json.JsonData;
+import com.anchr.core.common.constant.SegmentIndexConstant;
 import com.anchr.core.search.domain.model.EmbeddingProfile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +20,6 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Set;
 
-import static com.anchr.core.common.constant.SegmentIndexConstant.INDEX_NAME;
 
 @Slf4j
 @Component
@@ -40,7 +40,7 @@ final class SegmentPhysicalIndexFactory {
     private final ElasticsearchClient esClient;
 
     String newPhysicalIndexName() {
-        return INDEX_NAME + "_" + System.currentTimeMillis();
+        return SegmentIndexConstant.indexName() + "_" + System.currentTimeMillis();
     }
 
     void create(String physicalIndexName, EmbeddingProfile profile) throws Exception {
@@ -121,7 +121,7 @@ final class SegmentPhysicalIndexFactory {
     void cleanupAbandonedRebuildTargets(Set<String> protectedIndices) {
         try {
             var mappings = esClient.indices().getMapping(
-                    request -> request.index(INDEX_NAME + "_*")).result();
+                    request -> request.index(SegmentIndexConstant.indexName() + "_*")).result();
             for (var entry : mappings.entrySet()) {
                 if (protectedIndices.contains(entry.getKey())
                         || entry.getValue().mappings() == null) {
