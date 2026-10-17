@@ -109,4 +109,36 @@ class TraditionalRagPipelineTest {
         verify(retrieval).retrieve(eq("不存在的实体"), any(), any(), any(), any());
         verifyNoMoreInteractions(retrieval);
     }
+
+    @Test
+    void traceDtoExposesTheSegmentsThatWerePutInFrontOfTheModel() {
+        var request = new ConversationMessageRequestDTO();
+        request.setQuery("问题"); request.setLimit(5);
+        var rewrite = new RewriteResult(); rewrite.setRewrittenQuery("问题");
+        var result = new ConversationRetrievalResult();
+        result.setTopCandidates(List.of(
+                ConversationRetrievalCandidate.builder().segmentId("s1").assetId("a1")
+                        .kbId("kb1").segmentType("TEXT_CHUNK").content("c1").score(0.9).build(),
+                ConversationRetrievalCandidate.builder().segmentId("s2").assetId("a1")
+                        .kbId("kb1").segmentType("TEXT_CHUNK").content("c2").score(0.8).build()));
+        var generation = new AnswerGenerationResult();
+        generation.setAnswerInputSegmentIds(List.of("s1", "s2"));
+
+        var dto = new ConversationRetrievalTraceBuilder(new com.fasterxml.jackson.databind.ObjectMapper())
+                .buildTraceDto(request, rewrite, result, generation);
+
+        assertThat(dto.getAnswerInputSegmentIds()).containsExactly("s1", "s2");
+        assertThat(dto.getTopSegmentIds()).containsExactly("s1", "s2");
+    }
+
+    @Test
+    void traceDtoFallsBackToAnEmptyListWhenNoContextWasSelected() {
+        var request = new ConversationMessageRequestDTO(); request.setQuery("问题");
+        var rewrite = new RewriteResult(); rewrite.setRewrittenQuery("问题");
+
+        var dto = new ConversationRetrievalTraceBuilder(new com.fasterxml.jackson.databind.ObjectMapper())
+                .buildTraceDto(request, rewrite, new ConversationRetrievalResult(), new AnswerGenerationResult());
+
+        assertThat(dto.getAnswerInputSegmentIds()).isEmpty();
+    }
 }

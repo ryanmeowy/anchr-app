@@ -62,6 +62,13 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
 
     /** Most cited-evidence sentences handed to one coverage check. */
     private static final int MAX_COVERAGE_SENTENCES = 40;
+    /**
+     * A single sentence-level coverage pass only rewrites what the verifier flagged in that pass; probing
+     * r18 showed the revision can add some flagged points and silently drop others. A second pass re-labels
+     * the revised answer, so the loop stops as soon as a pass reports nothing missing or its revision is
+     * rejected.
+     */
+    private static final int MAX_COVERAGE_PASSES = 2;
 
     /** Shortest cited-evidence sentence worth checking. */
     private static final int MIN_COVERAGE_SENTENCE_CHARS = 6;
@@ -172,9 +179,12 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
             if (completed != null) {
                 normalized = completed;
             }
-            NormalizedAnswerCitations coverageCompleted = reviseAnswerWithVerifiedMissingPoints(
-                    prompt, userQuery, rewrittenQuery, normalized, groundingSegments, selection.context());
-            if (coverageCompleted != null) {
+            for (int coveragePass = 1; coveragePass <= MAX_COVERAGE_PASSES; coveragePass++) {
+                NormalizedAnswerCitations coverageCompleted = reviseAnswerWithVerifiedMissingPoints(
+                        prompt, userQuery, rewrittenQuery, normalized, groundingSegments, selection.context());
+                if (coverageCompleted == null) {
+                    break;
+                }
                 normalized = coverageCompleted;
             }
             AnswerGenerationResult result = new AnswerGenerationResult();

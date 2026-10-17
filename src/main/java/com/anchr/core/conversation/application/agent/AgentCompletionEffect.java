@@ -92,6 +92,12 @@ class AgentCompletionEffect {
     private static final int MAX_MISSING_POINTS_CHARS = 2_000;
     private static final long COMPLETENESS_REVISION_MIN_REMAINING_MILLIS = 1_000L;
     private static final long COVERAGE_REVISION_MIN_REMAINING_MILLIS = 1_000L;
+    /**
+     * One coverage pass only rewrites what the verifier flagged; a second pass re-labels the revised answer so
+     * points the first rewrite dropped can still be added. Each pass is skipped when the run budget is short,
+     * and the loop stops as soon as a pass reports nothing missing or its revision is rejected.
+     */
+    private static final int MAX_COVERAGE_PASSES = 2;
     private static final long ECHO_REWRITE_MIN_REMAINING_MILLIS = 1_000L;
 
     private final ConversationGenerationPort generationPort;
@@ -130,8 +136,16 @@ class AgentCompletionEffect {
                             state, command.answer().value(), cited, now, usage);
                     accepted = completed.answer();
                     if (accepted instanceof VerifiedCitedAnswer current) {
-                        accepted = reviseAcceptedAnswerForVerifiedMissingPoints(
-                                state, current, completed.draftText(), now, usage);
+                        AcceptedRevision coverage = new AcceptedRevision(current, completed.draftText());
+                        for (int coveragePass = 1; coveragePass <= MAX_COVERAGE_PASSES; coveragePass++) {
+                            AcceptedRevision next = reviseAcceptedAnswerForVerifiedMissingPoints(
+                                    state, (VerifiedCitedAnswer) coverage.answer(), coverage.draftText(), now, usage);
+                            if (next.answer() == coverage.answer()) {
+                                break;
+                            }
+                            coverage = next;
+                        }
+                        accepted = coverage.answer();
                     }
                     if (accepted instanceof VerifiedCitedAnswer echoed) {
                         accepted = rewriteAnswerWhenEvidenceInstructionsEchoed(state, echoed, now, usage);
@@ -389,19 +403,19 @@ class AgentCompletionEffect {
      * sentences the answer already relies on as written or not written; parsing and acceptance stay
      * deterministic and never reduce the citation set of the answer it replaces.
      */
-    private VerifiedAgentAnswer reviseAcceptedAnswerForVerifiedMissingPoints(AgentState state,
-                                                                            VerifiedCitedAnswer current,
-                                                                            String currentText,
-                                                                            long now,
-                                                                            RevisionUsage usage) {
+    private AcceptedRevision reviseAcceptedAnswerForVerifiedMissingPoints(AgentState state,
+                                                                           VerifiedCitedAnswer current,
+                                                                           String currentText,
+                                                                           long now,
+                                                                           RevisionUsage usage) {
         if (state.budget().remainingMillis(now) < COVERAGE_REVISION_MIN_REMAINING_MILLIS) {
             log.info("Agent coverage revision skipped, remaining budget too small");
-            return current;
+            return new AcceptedRevision(current, currentText);
         }
         List<ConversationRetrievalCandidate> evidence = selectEvidence(state);
         List<String> sentences = coverageSentences(current, evidence);
         if (sentences.isEmpty()) {
-            return current;
+            return new AcceptedRevision(current, currentText);
         }
         String userQuery = userQuestion(state);
         Duration timeout = state.budget().boundedTimeout(state.runtimeConfig().modelTimeout(), now);
@@ -410,7 +424,7 @@ class AgentCompletionEffect {
         if (missing.isEmpty()) {
             log.info("Agent coverage sentence check marked every evidence sentence as written, sentences={}",
                     sentences.size());
-            return current;
+            return new AcceptedRevision(current, currentText);
         }
         String missingPoints = String.join("\n", missing);
         if (missingPoints.length() > MAX_MISSING_POINTS_CHARS) {
@@ -421,7 +435,7 @@ class AgentCompletionEffect {
                 missingPoints.replaceAll("\\s+", " ").substring(0, Math.min(400, missingPoints.length())));
         if (state.budget().remainingMillis(System.currentTimeMillis()) < COVERAGE_REVISION_MIN_REMAINING_MILLIS) {
             log.info("Agent coverage revision skipped after sentence check, remaining budget too small");
-            return current;
+            return new AcceptedRevision(current, currentText);
         }
         List<String> currentCitations = citedSegmentIds(current);
         String draftJson;
@@ -432,7 +446,7 @@ class AgentCompletionEffect {
                     "citedSegmentIds", currentCitations));
         } catch (Exception e) {
             log.warn("Agent coverage revision could not encode draft, keeping current answer", e);
-            return current;
+            return new AcceptedRevision(current, currentText);
         }
         List<ConversationModelMessage> messages = new ArrayList<>();
         messages.add(new ConversationModelMessage("system", EVIDENCE_FINALIZER_PROMPT
@@ -451,7 +465,7 @@ class AgentCompletionEffect {
                     new GenerationOptions(FINALIZER_TEMPERATURE, FINALIZER_MAX_TOKENS, timeout));
         } catch (RuntimeException e) {
             log.warn("Agent coverage revision call failed, keeping current answer", e);
-            return current;
+            return new AcceptedRevision(current, currentText);
         }
         usage.add(generated);
         AgentFinalAnswer revised = generated == null ? null : parseFinalAnswer(generated.content());
@@ -463,12 +477,12 @@ class AgentCompletionEffect {
             log.info("Agent coverage revision rejected, keeping current, currentChars={}, revisedChars={}, currentCitations={}, revisedCitations={}",
                     currentText.length(), revised == null ? 0 : revised.answer().length(),
                     currentCitations.size(), revisedCited == null ? 0 : revisedCited.citedEvidence().size());
-            return current;
+            return new AcceptedRevision(current, currentText);
         }
         log.info("Agent coverage revision applied, currentChars={}, revisedChars={}, currentCitations={}, revisedCitations={}",
                 currentText.length(), revisedCited.answer().length(),
                 currentCitations.size(), revisedCited.citedEvidence().size());
-        return revisedCited;
+        return new AcceptedRevision(revisedCited, revised.answer());
     }
 
     private List<String> coverageSentences(VerifiedCitedAnswer current,
