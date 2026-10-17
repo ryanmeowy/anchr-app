@@ -4,6 +4,7 @@ import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.settings.domain.model.RuntimeConfigType;
 import java.time.Duration;
 
+import static com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey.EVIDENCE_OUTLINE_ENABLED;
 import static com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey.INTENT_CONTEXT_TURN_LIMIT;
 import static com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey.INTENT_ROUTING_ENABLED;
 import static com.anchr.core.settings.domain.model.ConversationRuntimeConfigKey.INTENT_TIMEOUT_SECONDS;
@@ -13,7 +14,8 @@ public record ConversationRuntimeSettings(
         boolean intentRoutingEnabled,
         int intentContextTurnLimit,
         Duration intentTimeout,
-        boolean legacyEvidenceFallbackEnabled
+        boolean legacyEvidenceFallbackEnabled,
+        boolean evidenceOutlineEnabled
 ) {
     public static ConversationRuntimeSettings load(RuntimeConfigUnit unit) {
         return new ConversationRuntimeSettings(
@@ -26,6 +28,9 @@ public record ConversationRuntimeSettings(
                         Duration.ofSeconds(5)),
                 unit.getBoolean(
                         RuntimeConfigType.CONVERSATION,
-                        LEGACY_EVIDENCE_FALLBACK_ENABLED, false));
+                        LEGACY_EVIDENCE_FALLBACK_ENABLED, false),
+                unit.getBoolean(
+                        RuntimeConfigType.CONVERSATION,
+                        EVIDENCE_OUTLINE_ENABLED, false));
     }
 }

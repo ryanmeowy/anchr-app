@@ -128,6 +128,8 @@ public class RuntimeConfigCatalog {
         values.put(ConversationRuntimeConfigKey.INTENT_TIMEOUT_SECONDS, "5");
         values.put(
                 ConversationRuntimeConfigKey.LEGACY_EVIDENCE_FALLBACK_ENABLED, "false");
+        values.put(
+                ConversationRuntimeConfigKey.EVIDENCE_OUTLINE_ENABLED, "false");
         return values;
     }
 
@@ -200,7 +202,7 @@ public class RuntimeConfigCatalog {
         ConversationRuntimeConfigKey conversationKey =
                 (ConversationRuntimeConfigKey) key;
         return switch (conversationKey) {
-            case INTENT_ROUTING_ENABLED, LEGACY_EVIDENCE_FALLBACK_ENABLED ->
+            case INTENT_ROUTING_ENABLED, LEGACY_EVIDENCE_FALLBACK_ENABLED, EVIDENCE_OUTLINE_ENABLED ->
                     booleanText(value, key);
             default -> positiveInteger(value, key);
         };

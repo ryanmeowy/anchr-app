@@ -814,6 +814,98 @@ class AnswerGenerationServiceImplTest {
         assertThat(result.isFallbackUsed()).isFalse();
     }
 
+    @Test
+    void generate_shouldInjectEvidenceOutlineIntoTheAnswerPrompt() {
+        String content = "解析阶段最长等待四十五分钟，阶段内最多重试五次，轮询间隔两秒。".repeat(3);
+        ConversationRetrievalCandidate candidate = buildCandidate("seg_outline", content);
+        ConversationCitation citation = buildCitation("seg_outline", content);
+        service = new AnswerGenerationServiceImpl(
+                generationPort,
+                new ObjectMapper(),
+                meterRegistry,
+                RuntimeConfigTestUnits.values(Map.of(
+                        "CONVERSATION.evidenceOutlineEnabled", "true")));
+        when(generationPort.generate(any(), any()))
+                .thenReturn("- 解析阶段最长等待四十五分钟\n- 阶段内最多重试五次",
+                        "{\"status\":\"ANSWERED\",\"answer\":\"解析阶段最长等待四十五分钟，阶段内最多重试五次。[1]\"}");
+
+        var result = service.generate(
+                "解析阶段等多久、重试几次",
+                "解析阶段的超时与重试次数",
+                AnswerMode.STRICT,
+                List.of(candidate),
+                List.of(citation)
+        );
+
+        var prompts = modelMessagesCaptor();
+        verify(generationPort, times(4)).generate(prompts.capture(), any());
+        String outlinePrompt = prompts.getAllValues().get(0).getFirst().content();
+        assertThat(outlinePrompt).contains("写作前的要点整理").contains("最多 25 条");
+        String answerPrompt = prompts.getAllValues().get(1).getFirst().content();
+        assertThat(answerPrompt)
+                .contains("<REQUIRED_POINTS>")
+                .contains("- 解析阶段最长等待四十五分钟")
+                .contains("答案必须逐条覆盖清单中与问题直接相关的全部要点");
+        assertThat(result.getAnswerText()).contains("四十五分钟");
+        assertThat(meterRegistry.get("answer.generate.evidence_outline.count").counter().count())
+                .isEqualTo(1D);
+    }
+
+    @Test
+    void generate_shouldKeepAnswerAndRecordSkipWhenOutlineCallFails() {
+        String content = "解析阶段最长等待四十五分钟，阶段内最多重试五次，轮询间隔两秒。".repeat(3);
+        ConversationRetrievalCandidate candidate = buildCandidate("seg_outline_fail", content);
+        ConversationCitation citation = buildCitation("seg_outline_fail", content);
+        service = new AnswerGenerationServiceImpl(
+                generationPort,
+                new ObjectMapper(),
+                meterRegistry,
+                RuntimeConfigTestUnits.values(Map.of(
+                        "CONVERSATION.evidenceOutlineEnabled", "true")));
+        when(generationPort.generate(any(), any()))
+                .thenThrow(new RuntimeException("timeout"))
+                .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"解析阶段最长等待四十五分钟。[1]\"}");
+
+        var result = service.generate(
+                "解析阶段等多久",
+                "解析阶段的超时",
+                AnswerMode.STRICT,
+                List.of(candidate),
+                List.of(citation)
+        );
+
+        var prompts = modelMessagesCaptor();
+        verify(generationPort, times(4)).generate(prompts.capture(), any());
+        String answerPrompt = prompts.getAllValues().get(1).getFirst().content();
+        assertThat(answerPrompt).doesNotContain("<REQUIRED_POINTS>");
+        assertThat(result.getAnswerText()).contains("四十五分钟");
+        assertThat(meterRegistry.get("answer.generate.evidence_outline.skipped.count").counter().count())
+                .isEqualTo(1D);
+    }
+
+    @Test
+    void generate_shouldSkipTheOutlineCallWhenTheFlagIsOff() {
+        String content = "解析阶段最长等待四十五分钟，阶段内最多重试五次，轮询间隔两秒。".repeat(3);
+        ConversationRetrievalCandidate candidate = buildCandidate("seg_outline_off", content);
+        ConversationCitation citation = buildCitation("seg_outline_off", content);
+        when(generationPort.generate(any(), any()))
+                .thenReturn("{\"status\":\"ANSWERED\",\"answer\":\"解析阶段最长等待四十五分钟。[1]\"}");
+
+        service.generate(
+                "解析阶段等多久",
+                "解析阶段的超时",
+                AnswerMode.STRICT,
+                List.of(candidate),
+                List.of(citation)
+        );
+
+        var prompts = modelMessagesCaptor();
+        verify(generationPort, times(3)).generate(prompts.capture(), any());
+        assertThat(prompts.getAllValues())
+                .allSatisfy(messages ->
+                        assertThat(messages.getFirst().content()).doesNotContain("<REQUIRED_POINTS>"));
+    }
+
     @SuppressWarnings("unchecked")
     private org.mockito.ArgumentCaptor<List<ConversationModelMessage>> modelMessagesCaptor() {
         return ArgumentCaptor.forClass(List.class);
