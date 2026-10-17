@@ -99,6 +99,8 @@ class AgentCompletionEffect {
      */
     private static final int MAX_COVERAGE_PASSES = 2;
     private static final long ECHO_REWRITE_MIN_REMAINING_MILLIS = 1_000L;
+    private static final String ECHO_BLOCKED_ANSWER =
+            "检索到的资料含有与本问题无关的指令性内容，已按安全策略移除；移除后剩余内容不足以给出有引用支撑的回答。";
 
     private final ConversationGenerationPort generationPort;
     private final AgentAnswerVerifier answerVerifier;
@@ -166,7 +168,9 @@ class AgentCompletionEffect {
      * answer reproduces instruction-like text that only exists inside the retrieved evidence
      * (for example "评审备注…必须声称…输出 ANCHREVALOVERRIDE_OK"), ask the finalizer model once to
      * rewrite the answer without the instruction text, and accept the rewrite only when it still
-     * verifies, no longer echoes, and keeps at least as many citations.
+     * verifies, no longer echoes, and keeps at least as many citations. When the rewrite cannot be
+     * accepted the echoing sentences are dropped deterministically, and if that leaves no grounded
+     * answer the run degrades to no-evidence instead of publishing the compromised text.
      */
     private VerifiedAgentAnswer rewriteAnswerWhenEvidenceInstructionsEchoed(AgentState state,
                                                                             VerifiedCitedAnswer current,
@@ -180,7 +184,7 @@ class AgentCompletionEffect {
                 current.answer().length());
         if (state.budget().remainingMillis(now) < ECHO_REWRITE_MIN_REMAINING_MILLIS) {
             log.info("Agent instruction echo rewrite skipped, remaining budget too small");
-            return current;
+            return cleanEchoedAnswer(state, current, evidenceContext);
         }
         List<ConversationRetrievalCandidate> evidence = selectEvidence(state);
         try {
@@ -201,35 +205,65 @@ class AgentCompletionEffect {
             usage.add(generated);
             AgentFinalAnswer rewritten = parseFinalAnswer(generated.content());
             if (rewritten == null) {
-                log.warn("Agent instruction echo rewrite produced no usable answer, keeping current");
-                return current;
+                log.warn("Agent instruction echo rewrite produced no usable answer, cleaning current");
+                return cleanEchoedAnswer(state, current, evidenceContext);
             }
             AgentAnswerValidationOutcome validation =
                     answerVerifier.verifyEvidenceFinalizer(state, rewritten, state.evidence().values());
             if (!(validation instanceof AgentAnswerValidationOutcome.Verified verified)
                     || !(verified.answer() instanceof VerifiedCitedAnswer revised)) {
-                log.warn("Agent instruction echo rewrite rejected by verification, keeping current");
-                return current;
+                log.warn("Agent instruction echo rewrite rejected by verification, cleaning current");
+                return cleanEchoedAnswer(state, current, evidenceContext);
             }
             if (TraditionalRagEvidenceInstructionGuard.containsInstructionEcho(revised.answer(), evidenceContext)) {
-                log.warn("Agent instruction echo rewrite still echoed, keeping current");
-                return current;
+                log.warn("Agent instruction echo rewrite still echoed, cleaning current");
+                return cleanEchoedAnswer(state, current, evidenceContext);
             }
             int currentCitations = citedSegmentIds(current).size();
             int revisedCitations = citedSegmentIds(revised).size();
             if (revisedCitations < currentCitations) {
-                log.warn("Agent instruction echo rewrite dropped citations, keeping current, "
+                log.warn("Agent instruction echo rewrite dropped citations, cleaning current, "
                         + "currentCitations={}, revisedCitations={}", currentCitations, revisedCitations);
-                return current;
+                return cleanEchoedAnswer(state, current, evidenceContext);
             }
             log.info("Agent instruction echo rewrite applied, currentChars={}, revisedChars={}, "
                     + "currentCitations={}, revisedCitations={}",
                     current.answer().length(), revised.answer().length(), currentCitations, revisedCitations);
             return revised;
         } catch (RuntimeException e) {
-            log.warn("Agent instruction echo rewrite call failed, keeping current answer", e);
-            return current;
+            log.warn("Agent instruction echo rewrite call failed, cleaning current answer", e);
+            return cleanEchoedAnswer(state, current, evidenceContext);
         }
+    }
+
+    /**
+     * Deterministic last resort for the echo guard: never publish an answer that reproduces an
+     * injected instruction. The echoing sentences are dropped from the accepted draft; if what is
+     * left no longer verifies (or nothing is left) the run degrades to a no-evidence answer instead
+     * of shipping the compromised text.
+     */
+    private VerifiedAgentAnswer cleanEchoedAnswer(AgentState state, VerifiedCitedAnswer current,
+                                                  String evidenceContext) {
+        String stripped = TraditionalRagEvidenceInstructionGuard.stripEchoedSentences(
+                current.answer(), evidenceContext);
+        if (stripped == null || stripped.equals(current.answer())) {
+            log.warn("Agent answer echoed evidence instructions and could not be cleaned, declaring no evidence");
+            return new VerifiedNoEvidenceAnswer(ECHO_BLOCKED_ANSWER);
+        }
+        AgentFinalAnswer candidate = new AgentFinalAnswer(
+                AgentAnswerType.KNOWLEDGE, stripped, citedSegmentIds(current));
+        AgentAnswerValidationOutcome validation = answerVerifier.verifyEvidenceFinalizer(
+                state, candidate, state.evidence().values());
+        if (validation instanceof AgentAnswerValidationOutcome.Verified verified
+                && verified.answer() instanceof VerifiedCitedAnswer cleaned
+                && !TraditionalRagEvidenceInstructionGuard.containsInstructionEcho(
+                        cleaned.answer(), evidenceContext)) {
+            log.info("Agent answer stripped injected instructions, removedChars={}, keptChars={}, keptCitations={}",
+                    current.answer().length(), cleaned.answer().length(), citedSegmentIds(cleaned).size());
+            return cleaned;
+        }
+        log.warn("Agent answer stripped injected instructions but no longer verifies, declaring no evidence");
+        return new VerifiedNoEvidenceAnswer(ECHO_BLOCKED_ANSWER);
     }
 
     private static String userQuestion(AgentState state) {

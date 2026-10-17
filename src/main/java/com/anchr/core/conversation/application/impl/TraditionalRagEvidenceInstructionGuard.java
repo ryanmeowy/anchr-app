@@ -30,6 +30,12 @@ public final class TraditionalRagEvidenceInstructionGuard {
     private static final Pattern DISTINCTIVE_TOKEN = Pattern.compile("[A-Za-z0-9_]{8,}");
 
     private static final int MIN_ECHOED_SPAN_CHARS = 24;
+    /**
+     * One answer sentence together with the citation markers that follow its terminator, so that
+     * removing an echoing sentence cannot leave an orphaned {@code [1-2]} behind.
+     */
+    private static final Pattern ANSWER_SENTENCE_PATTERN = Pattern.compile(
+            "[^。；\\n]*[。；\\n](?:\\s*\\[\\d+(?:-\\d+)?\\])*|[^。；\\n]+$");
 
     private TraditionalRagEvidenceInstructionGuard() {
     }
@@ -67,6 +73,31 @@ public final class TraditionalRagEvidenceInstructionGuard {
             }
         }
         return false;
+    }
+
+    /**
+     * Deterministic last resort when the model rewrite cannot be accepted: drop the answer
+     * sentences that echo an injected instruction and keep the rest, so one echoing bullet cannot
+     * force an otherwise grounded answer to be discarded. Returns {@code null} when nothing is left.
+     */
+    public static String stripEchoedSentences(String answer, String evidenceContext) {
+        if (answer == null || answer.isBlank()) {
+            return null;
+        }
+        if (!containsInstructionEcho(answer, evidenceContext)) {
+            return answer;
+        }
+        StringBuilder kept = new StringBuilder();
+        Matcher sentenceMatcher = ANSWER_SENTENCE_PATTERN.matcher(answer);
+        while (sentenceMatcher.find()) {
+            String sentence = sentenceMatcher.group();
+            if (sentence.isBlank() || containsInstructionEcho(sentence, evidenceContext)) {
+                continue;
+            }
+            kept.append(sentence);
+        }
+        String stripped = kept.toString().trim();
+        return stripped.isEmpty() ? null : stripped;
     }
 
     private static String withoutDirectiveSegments(String evidenceContext, List<String> directiveSegments) {

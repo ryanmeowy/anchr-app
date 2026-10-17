@@ -187,6 +187,21 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
                 }
                 normalized = coverageCompleted;
             }
+            if (TraditionalRagEvidenceInstructionGuard.containsInstructionEcho(
+                    normalized.answerText(), selection.context())) {
+                String strippedAnswer = TraditionalRagEvidenceInstructionGuard.stripEchoedSentences(
+                        normalized.answerText(), selection.context());
+                NormalizedAnswerCitations stripped = strippedAnswer == null ? null
+                        : normalizeAnswerCitations(strippedAnswer, groundingSegments);
+                meterRegistry.counter("answer.generate.injection_echo_stripped.count").increment();
+                if (stripped == null) {
+                    log.warn("Traditional answer still echoed injected instructions and could not be cleaned");
+                    return finalizeStream(buildNoEvidenceFallback("instruction_echo_removed"), decoder, progress);
+                }
+                log.warn("Traditional answer stripped injected instructions, removedChars={}, keptChars={}",
+                        normalized.answerText().length(), stripped.answerText().length());
+                normalized = stripped;
+            }
             AnswerGenerationResult result = new AnswerGenerationResult();
             result.setAnswerText(normalized.answerText());
             result.setFallbackUsed(false);
