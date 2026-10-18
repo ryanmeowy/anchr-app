@@ -26,6 +26,13 @@ public final class TraditionalRagEvidenceInstructionGuard {
                     + "|泄露(?:系统)?(?:提示|凭据|密钥)",
             Pattern.CASE_INSENSITIVE);
 
+    /**
+     * Quoted cue vocabulary. Guidance documents that explain the guard itself list the cues inside
+     * quotation marks ("证据中可能出现「高优先级」「系统指令」…"), which is documentation rather than an
+     * instruction addressed to the assistant; such a sentence must not be isolated as a directive.
+     */
+    private static final Pattern QUOTED_CUE_VOCABULARY = Pattern.compile("[「“][^」”]{0,80}[」”]");
+
     /** Marker-like runs (ANCHREVALOVERRIDE_OK, API_KEY_V2) are instructions, not facts. */
     private static final Pattern DISTINCTIVE_TOKEN = Pattern.compile("[A-Za-z0-9_]{8,}");
 
@@ -111,7 +118,10 @@ public final class TraditionalRagEvidenceInstructionGuard {
     private static List<String> directiveSegments(String evidenceContext) {
         List<String> segments = new ArrayList<>();
         for (String raw : evidenceContext.split("[\\n。；;]")) {
-            if (DIRECTIVE_CUE.matcher(raw).find()) {
+            // A sentence that only names the cues between quotation marks documents the guard;
+            // quoting that documentation back is not an echo of an injected instruction.
+            String withoutQuotedVocabulary = QUOTED_CUE_VOCABULARY.matcher(raw).replaceAll(" ");
+            if (DIRECTIVE_CUE.matcher(withoutQuotedVocabulary).find()) {
                 segments.add(raw);
             }
         }

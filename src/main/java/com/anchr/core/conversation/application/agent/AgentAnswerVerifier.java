@@ -299,10 +299,28 @@ final class AgentAnswerVerifier {
         while (renderedMatcher.find()) {
             renderedLabels.add(visibleLabel(renderedMatcher));
         }
+        boolean mixedAuthoredForms = AgentCitationIndexPlan.SEGMENT_MARKER.matcher(text).find();
         if (!renderedLabels.equals(authoredLabels)) {
-            log.warn("Agent visible citation plan repair mismatch, labels={}, rendered={}, declared={}",
-                    authoredLabels, renderedLabels, declared);
-            return null;
+            if (!mixedAuthoredForms) {
+                log.warn("Agent visible citation plan repair mismatch, labels={}, rendered={}, declared={}",
+                        authoredLabels, renderedLabels, declared);
+                return null;
+            }
+            // The model mixed internal segment markers with model-authored visible labels. Every label
+            // still resolves to declared evidence, and the renderer renumbers the whole answer, so only
+            // the rendered set has to stay inside the declared evidence.
+            List<String> renderedSegments = List.copyOf(rendered.references().keySet());
+            List<String> authoredSegments = resolved.stream().distinct().toList();
+            if (renderedSegments.isEmpty()
+                    || !declared.containsAll(renderedSegments)
+                    || renderedSegments.size() <= authoredSegments.size()) {
+                log.warn("Agent visible citation plan repair resolved outside declared evidence, rendered={}, declared={}",
+                        renderedSegments, declared);
+                return null;
+            }
+            log.info("Agent visible citation plan renumbered mixed authored forms, labels={}, rendered={}, declared={}, kept={}",
+                    authoredLabels, renderedLabels, declared, renderedSegments);
+            return new AgentFinalAnswer(answer.answerType(), candidate, renderedSegments);
         }
         List<String> visiblyCited = resolved.stream().distinct().toList();
         if (visiblyCited.size() < declared.size()) {

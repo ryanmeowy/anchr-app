@@ -158,6 +158,23 @@ class AgentAnswerVerifierTest {
     }
 
     @Test
+    void resolvesMixedAuthoredLabelAndInternalMarkersAgainstTheDeclaredOrder() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-2", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A {{segment:seg-1}}，B [1-2]", List.of("seg-1", "seg-2", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).doesNotContain("{{segment:");
+        assertThat(answer.citations()).hasSize(2);
+    }
+
+    @Test
     void resolvesModelAuthoredGroupLabelsSpanningSeveralSegmentsOfTheSameDocument() {
         AgentState state = state("STRICT").registerEvidence(List.of(
                 evidence("seg-1", "asset-1"),
