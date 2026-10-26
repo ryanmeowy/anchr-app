@@ -134,7 +134,9 @@ public class DemoQuotaInterceptor implements AsyncHandlerInterceptor {
     }
 
     private void reject(HttpServletResponse response, Object handler, ApiError error) {
-        errorResponseWriter.write(response, HttpStatus.resolve(error.getCode()),
+        HttpStatus status = HttpStatus.resolve(error.getCode());
+        errorResponseWriter.write(response,
+                status == null ? HttpStatus.INTERNAL_SERVER_ERROR : status,
                 error, error.getMessage(), UUID.randomUUID().toString(),
                 uploadCleanupPolicy.forPreControllerRejection(handler));
     }

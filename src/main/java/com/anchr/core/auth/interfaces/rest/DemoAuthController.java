@@ -124,7 +124,10 @@ public class DemoAuthController {
     private String browserCookie(String value) {
         return ResponseCookie.from(DemoConstant.BROWSER_COOKIE, value)
                 .httpOnly(true)
-                .secure(true)
+                // Browsers drop a Secure cookie over plain HTTP. The demo runs behind HTTPS, but
+                // local development with Turnstile off would then re-issue a token on every load
+                // and quietly burn the daily issue budget.
+                .secure(demoProperties.turnstileVerificationActive())
                 .sameSite("Lax")
                 .path("/")
                 .maxAge(java.time.Duration.ofHours(demoProperties.tokenTtlHours()))
