@@ -10,7 +10,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -25,7 +24,6 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class TurnstileVerifier {
 
     private static final String VERIFY_ENDPOINT =
@@ -40,6 +38,18 @@ public class TurnstileVerifier {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final DemoProperties demoProperties;
+
+    /**
+     * Only tests reassign these; production always uses the Cloudflare endpoint with the shared
+     * client. Kept as fields rather than constructor arguments so the bean keeps a single
+     * construction path (enforced by {@code SpringBeanConstructorContractTest}).
+     */
+    HttpClient httpClient = HTTP_CLIENT;
+    String verifyEndpoint = VERIFY_ENDPOINT;
+
+    public TurnstileVerifier(DemoProperties demoProperties) {
+        this.demoProperties = demoProperties;
+    }
 
     /**
      * @return true only when Cloudflare explicitly accepted the token
@@ -58,13 +68,13 @@ public class TurnstileVerifier {
         }
         String form = "secret=" + encode(demoProperties.turnstileSecretKey())
                 + "&response=" + encode(token);
-        HttpRequest request = HttpRequest.newBuilder(URI.create(VERIFY_ENDPOINT))
+        HttpRequest request = HttpRequest.newBuilder(URI.create(verifyEndpoint))
                 .timeout(REQUEST_TIMEOUT)
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
                 .build();
         try {
-            HttpResponse<String> response = HTTP_CLIENT.send(
+            HttpResponse<String> response = httpClient.send(
                     request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() != 200) {
                 log.warn("Turnstile verification returned HTTP {}", response.statusCode());
