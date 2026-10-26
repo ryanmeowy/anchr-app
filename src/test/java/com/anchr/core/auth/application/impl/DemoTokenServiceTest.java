@@ -5,6 +5,7 @@ import com.anchr.core.common.constant.DemoConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.auth.application.impl.DemoTokenService.DemoTokenResult;
+import com.anchr.core.auth.application.model.DemoUsage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.Map;
@@ -85,6 +86,46 @@ class DemoTokenServiceTest {
         // The rejected attempt is rolled back.
         assertThat(values.get(DemoConstant.QUOTA_DAILY_ISSUED_PREFIX + java.time.LocalDate.now()))
                 .isEqualTo("2");
+    }
+
+    @Test
+    void usageShouldReportRemainingCreditsForADemoToken() {
+        DemoTokenResult issued = service.issue("browser-usage");
+        values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(issued.issue().token()), "3");
+
+        DemoUsage usage = service.usage(issued.issue().token());
+
+        assertThat(usage).isNotNull();
+        assertThat(usage.quota()).isEqualTo(8);
+        assertThat(usage.used()).isEqualTo(3);
+        assertThat(usage.remaining()).isEqualTo(5);
+        assertThat(usage.expiresAt()).isGreaterThan(System.currentTimeMillis());
+    }
+
+    @Test
+    void usageShouldNeverGoNegativeWhenTheCountExceedsTheQuota() {
+        DemoTokenResult issued = service.issue("browser-negative");
+        values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(issued.issue().token()), "99");
+
+        DemoUsage usage = service.usage(issued.issue().token());
+
+        assertThat(usage).isNotNull();
+        assertThat(usage.remaining()).isZero();
+    }
+
+    @Test
+    void usageShouldBeNullForANonDemoToken() {
+        // An operator token is a real ADMIN credential, not a trial; reporting a quota for it
+        // would make the sidebar claim eight credits that do not exist.
+        values.put("sys:config:auth-token:operator",
+                "{\"role\":\"ADMIN\",\"userId\":\"system\",\"createdAt\":1}");
+
+        assertThat(service.usage("operator")).isNull();
+    }
+
+    @Test
+    void usageShouldBeNullForAnUnknownToken() {
+        assertThat(service.usage("never-issued")).isNull();
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.anchr.core.auth.application.impl;
 
 import com.anchr.core.auth.application.model.DemoTokenIssue;
+import com.anchr.core.auth.application.model.DemoUsage;
 import com.anchr.core.common.config.DemoProperties;
 import com.anchr.core.common.constant.DemoConstant;
 import com.anchr.core.common.exception.ApiError;
@@ -101,6 +102,42 @@ public class DemoTokenService {
             throw new BusinessException(ApiError.INTERNAL_ERROR);
         }
         return new DemoTokenIssue(token, userId, expiresAt);
+    }
+
+    /**
+     * Reads the caller's own usage. Returns null when the token is not a demo token or its
+     * record has already expired, so the caller can fall back to a fresh claim.
+     */
+    public DemoUsage usage(String token) {
+        if (!StringUtils.hasText(token)) {
+            return null;
+        }
+        String hash = sha256(token);
+        try {
+            String tokenJson = redisTemplate.opsForValue()
+                    .get(DemoConstant.TOKEN_CACHE_PREFIX + token.trim());
+            if (!StringUtils.hasText(tokenJson)) {
+                return null;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = objectMapper.readValue(tokenJson, Map.class);
+            // Only demo-issued tokens carry usage. An operator's own token must not be reported
+            // as a trial with eight credits.
+            if (!Boolean.TRUE.equals(data.get("demo"))) {
+                return null;
+            }
+            Object createdAt = data.get("createdAt");
+            long expiresAt = createdAt instanceof Number number
+                    ? number.longValue() + Duration.ofHours(demoProperties.tokenTtlHours()).toMillis()
+                    : System.currentTimeMillis();
+            String used = redisTemplate.opsForValue()
+                    .get(DemoConstant.QUOTA_TOKEN_PREFIX + hash);
+            int usedCount = used == null ? 0 : Integer.parseInt(used.trim());
+            return new DemoUsage(demoProperties.tokenQuota(), usedCount, expiresAt);
+        } catch (Exception exception) {
+            log.warn("Failed to read demo usage: {}", exception.getMessage());
+            return null;
+        }
     }
 
     /** True when every credit on this token has been charged. */

@@ -1,6 +1,7 @@
 package com.anchr.core.auth.interfaces.rest;
 
 import com.anchr.core.auth.application.impl.DemoTokenService;
+import com.anchr.core.auth.application.model.DemoUsage;
 import com.anchr.core.auth.application.model.DemoTokenIssue;
 import com.anchr.core.common.config.DemoProperties;
 import com.anchr.core.common.exception.ApiError;
@@ -149,6 +150,42 @@ class DemoAuthControllerContractTest {
                 .andExpect(jsonPath("$.data.enabled").value(true))
                 .andExpect(jsonPath("$.data.tokenQuota").value(8))
                 .andExpect(jsonPath("$.data.secretKey").doesNotExist());
+    }
+
+    @Test
+    void usageShouldReportCreditsForTheCallersOwnToken() throws Exception {
+        DemoTokenService service = mock(DemoTokenService.class);
+        when(service.usage("demo-token"))
+                .thenReturn(new DemoUsage(8, 3, System.currentTimeMillis() + 60_000));
+        DemoAuthController controller = controller(demoEnabled(), mockOffKillSwitch(),
+                service, mock(TurnstileVerifier.class));
+
+        mvc(controller)
+                .perform(get("/api/v1/auth/demo/usage").header("X-Access-Token", "demo-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.quota").value(8))
+                .andExpect(jsonPath("$.data.used").value(3))
+                .andExpect(jsonPath("$.data.remaining").value(5));
+    }
+
+    @Test
+    void usageShouldReturnNoPayloadForANonDemoToken() throws Exception {
+        // The sidebar must not promise credits for an operator token.
+        DemoTokenService service = mock(DemoTokenService.class);
+        when(service.usage("operator-token")).thenReturn(null);
+        DemoAuthController controller = controller(demoEnabled(), mockOffKillSwitch(),
+                service, mock(TurnstileVerifier.class));
+
+        mvc(controller)
+                .perform(get("/api/v1/auth/demo/usage").header("X-Access-Token", "operator-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    private DemoKillSwitch mockOffKillSwitch() {
+        DemoKillSwitch killSwitch = mock(DemoKillSwitch.class);
+        when(killSwitch.isOn()).thenReturn(false);
+        return killSwitch;
     }
 
     @Test

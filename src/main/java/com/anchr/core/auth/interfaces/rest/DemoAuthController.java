@@ -3,12 +3,15 @@ package com.anchr.core.auth.interfaces.rest;
 import com.anchr.core.auth.application.impl.DemoTokenService;
 import com.anchr.core.auth.interfaces.rest.dto.DemoTokenDTO;
 import com.anchr.core.auth.interfaces.rest.dto.DemoStatusDTO;
+import com.anchr.core.auth.interfaces.rest.dto.DemoUsageDTO;
+import com.anchr.core.auth.application.model.DemoUsage;
 import com.anchr.core.auth.interfaces.rest.dto.DemoTokenRequestDTO;
 import com.anchr.core.common.config.DemoProperties;
 import com.anchr.core.common.constant.DemoConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.infrastructure.DemoKillSwitch;
 import com.anchr.core.common.infrastructure.PermitAll;
+import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.integration.security.TurnstileVerifier;
 import jakarta.servlet.http.Cookie;
@@ -62,6 +65,23 @@ public class DemoAuthController {
                 killSwitch.isOn(),
                 demoProperties.tokenQuota(),
                 demoProperties.siteKey()));
+    }
+
+    /**
+     * Usage of the caller's own demo token, so the UI can show remaining credits and a countdown.
+     * Requires a token; an expired or non-demo token yields a null payload rather than an error,
+     * because "no usable token" is a normal state the entry card handles.
+     */
+    @RequireAuth(roles = {"ADMIN", "USER"})
+    @GetMapping("/usage")
+    public Result<DemoUsageDTO> usage(@RequestHeader(value = "X-Access-Token", required = false)
+                                      String accessToken) {
+        DemoUsage usage = demoTokenService.usage(accessToken);
+        if (usage == null) {
+            return Result.success(null);
+        }
+        return Result.success(new DemoUsageDTO(
+                usage.quota(), usage.used(), usage.remaining(), usage.expiresAt()));
     }
 
     @PermitAll
