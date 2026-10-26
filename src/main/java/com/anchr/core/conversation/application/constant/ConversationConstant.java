@@ -7,7 +7,6 @@ import java.time.ZoneId;
 /** Conversation-wide identity, compatibility and generation constants. */
 public final class ConversationConstant {
 
-    public static final String SINGLE_USER_ID = "single_user";
     public static final int MAX_SESSION_LIST_LIMIT = 50;
     public static final int QUERY_REWRITE_CONTEXT_TURN_LIMIT = 5;
     public static final int QUERY_REWRITE_MAX_CONTEXT_CHARS = 6_000;

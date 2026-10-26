@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.interfaces.rest;
 
+import com.anchr.core.common.infrastructure.DemoQuota;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.conversation.application.constant.AgentConstant;
@@ -97,6 +98,7 @@ public class ConversationController {
     
     @PostMapping("/{sessionId}/messages")
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @DemoQuota
     public Result<ConversationMessageResponseDTO> createMessage(
             @PathVariable @NotBlank String sessionId,
             @Valid @RequestBody ConversationMessageRequestDTO request) {
@@ -105,6 +107,7 @@ public class ConversationController {
 
     @PostMapping(value = "/{sessionId}/messages/stream", produces = "text/event-stream;charset=UTF-8")
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @DemoQuota
     public SseEmitter streamMessage(
             @PathVariable @NotBlank String sessionId,
             @Valid @RequestBody ConversationMessageRequestDTO request,

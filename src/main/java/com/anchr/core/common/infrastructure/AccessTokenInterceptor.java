@@ -82,10 +82,15 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
             return false;
         }
         String role;
+        String userId;
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> tokenData = objectMapper.readValue(tokenJson, Map.class);
             role = (String) tokenData.getOrDefault("role", "");
+            Object storedUserId = tokenData.get("userId");
+            userId = storedUserId instanceof String text && !text.isBlank()
+                    ? text.trim()
+                    : RequestUserContext.DEFAULT_USER_ID;
         } catch (Exception e) {
             log.warn("Failed to parse token JSON", e);
             reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);
@@ -98,7 +103,7 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
             return false;
         }
         UserContextHolder.set(new RequestUserContext(
-                RequestUserContext.DEFAULT_USER_ID,
+                userId,
                 role,
                 tokenHash(clientToken)
         ));

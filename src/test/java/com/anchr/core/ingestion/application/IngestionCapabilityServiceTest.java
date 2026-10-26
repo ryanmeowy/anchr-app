@@ -1,5 +1,6 @@
 package com.anchr.core.ingestion.application;
 
+import com.anchr.core.common.config.DemoProperties;
 import com.anchr.core.ingestion.application.constant.IngestionConstant;
 import org.junit.jupiter.api.Test;
 
@@ -7,7 +8,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class IngestionCapabilityServiceTest {
 
-    private final IngestionCapabilityService service = new IngestionCapabilityService();
+    private final IngestionCapabilityService service =
+            new IngestionCapabilityService(DemoProperties.defaults());
 
     @Test
     void shouldDeclareBackendOwnedUploadLimits() {

@@ -1,5 +1,7 @@
 package com.anchr.core.conversation.application;
 
+import com.anchr.core.common.application.context.RequestUserContext;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.domain.model.AgentRun;
 import com.anchr.core.conversation.domain.model.AgentStep;
@@ -174,6 +176,7 @@ class AgentRunActivityServiceTest {
         AgentRunActivityService service = new AgentRunActivityService(traces, conversations, new ObjectMapper());
         AgentRun run = run("RUNNING");
         run.setCurrentStep("MODEL_DECISION");
+        UserContextHolder.set(new RequestUserContext("single_user", "USER"));
         when(traces.findRecoverableRuns("single_user", 20)).thenReturn(List.of(run));
 
         var result = service.listRecoverable(99);

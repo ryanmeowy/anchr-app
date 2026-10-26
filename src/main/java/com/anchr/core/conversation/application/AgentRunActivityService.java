@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.application;
 
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.domain.model.AgentRun;
@@ -21,7 +22,6 @@ import java.util.Map;
 
 import static com.anchr.core.conversation.application.constant.AgentConstant.AGENT_ACTIVITY_MAX_STEPS;
 import static com.anchr.core.conversation.application.constant.AgentConstant.AGENT_ACTIVITY_DEFAULT_STEP_LIMIT;
-import static com.anchr.core.conversation.application.constant.ConversationConstant.SINGLE_USER_ID;
 
 @Service
 @RequiredArgsConstructor
@@ -66,7 +66,8 @@ public class AgentRunActivityService {
 
     public List<AgentRunSummaryDTO> listRecoverable(int limit) {
         int boundedLimit = Math.max(1, Math.min(limit, AGENT_ACTIVITY_DEFAULT_STEP_LIMIT));
-        return traceRepository.findRecoverableRuns(SINGLE_USER_ID, boundedLimit).stream()
+        return traceRepository.findRecoverableRuns(
+                UserContextHolder.get().userId(), boundedLimit).stream()
                 .map(this::toSummary)
                 .toList();
     }

@@ -1,5 +1,6 @@
 package com.anchr.core.search.interfaces.rest;
 
+import com.anchr.core.common.infrastructure.DemoQuota;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.search.application.acl.SearchActivityAcl;
@@ -40,6 +41,7 @@ public class SearchController {
     private final SearchRestAssembler searchRestAssembler;
 
     @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    @DemoQuota
     @PostMapping("/kb")
     public Result<SearchTopNDTO> searchKb(@Valid @RequestBody SearchQueryDTO query) {
         String userQuery = query.getQuery();

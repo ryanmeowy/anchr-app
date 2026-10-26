@@ -35,7 +35,12 @@ public enum ApiError {
     SEARCH_BACKEND_UNAVAILABLE(500, "Search backend unavailable"),
     PREVIEW_URL_SIGN_FAILED(500, "Failed to sign preview URL"),
     INTERNAL_ERROR(500, "Internal error, please try again later."),
-    INVALID_API_KEY(500, "Invalid API KEY");
+    INVALID_API_KEY(500, "Invalid API KEY"),
+    DEMO_DISABLED(503, "The demo environment is temporarily closed. Please try again later."),
+    DEMO_QUOTA_EXHAUSTED(429, "Trial credits are used up. You can request a new one."),
+    DEMO_DAILY_LIMIT_REACHED(429, "Today's demo quota is used up. Please come back tomorrow."),
+    DEMO_VERIFICATION_FAILED(403, "Human verification failed. Disable extensions blocking this site and retry."),
+    DEMO_ISSUE_TOO_FREQUENT(429, "A demo token was issued too recently. Please retry later.");
 
     private final int code;
     private final String message;

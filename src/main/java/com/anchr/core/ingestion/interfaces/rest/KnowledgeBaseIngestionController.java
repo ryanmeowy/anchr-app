@@ -2,6 +2,7 @@ package com.anchr.core.ingestion.interfaces.rest;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.UploadCleanupContract;
+import com.anchr.core.common.infrastructure.DemoQuota;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.anchr.core.ingestion.application.IngestionApplicationService;
@@ -48,6 +49,7 @@ public class KnowledgeBaseIngestionController {
             ApiError.KNOWLEDGE_BASE_NOT_FOUND,
             ApiError.UPLOAD_TOO_LARGE
     })
+    @DemoQuota
     @PostMapping("/ingestion-tasks")
     public ResponseEntity<Result<IngestionTaskDTO>> createTask(
             @PathVariable @NotBlank String kbId,
@@ -108,6 +110,7 @@ public class KnowledgeBaseIngestionController {
     }
 
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @DemoQuota
     @PostMapping("/documents/{assetId}/reparse")
     public Result<DocumentMaintenanceTaskDTO> reparse(@PathVariable @NotBlank String kbId,
                                                       @PathVariable @NotBlank String assetId) {
@@ -116,6 +119,7 @@ public class KnowledgeBaseIngestionController {
     }
 
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @DemoQuota
     @PostMapping("/documents/{assetId}/reembed")
     public Result<DocumentMaintenanceTaskDTO> reembed(@PathVariable @NotBlank String kbId,
                                                       @PathVariable @NotBlank String assetId) {

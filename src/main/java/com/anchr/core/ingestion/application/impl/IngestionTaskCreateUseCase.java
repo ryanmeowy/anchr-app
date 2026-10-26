@@ -357,6 +357,11 @@ final class IngestionTaskCreateUseCase {
     }
 
     private void validateUploadLimits(NormalizedCreateRequest request) {
+        int maxFiles = ingestionCapabilityService.maxFilesPerBatch();
+        if (request.items().size() > maxFiles) {
+            throw new BusinessException(ApiError.INVALID_REQUEST,
+                    "Too many files in one request. Limit: " + maxFiles);
+        }
         for (IngestionCreateItemCommand item : request.items()) {
             if (ingestionCapabilityService.isSupportedFileType(item.fileType())) {
                 validateFileSize(item.fileName(), item.fileType(), item.sizeBytes());

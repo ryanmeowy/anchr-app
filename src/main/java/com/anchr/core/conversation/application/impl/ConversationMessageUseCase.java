@@ -1,6 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.ConversationProgressListener;
 import com.anchr.core.conversation.application.ConversationCitationReasonEnricher;
@@ -41,7 +42,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
-import static com.anchr.core.conversation.application.constant.ConversationConstant.SINGLE_USER_ID;
 
 @Component
 @RequiredArgsConstructor
@@ -309,7 +309,8 @@ public class ConversationMessageUseCase {
         task.setRunId(result.agentRunId());
         task.setTurnId(turn.getTurnId());
         task.setSessionId(turn.getSessionId());
-        task.setUserId(SINGLE_USER_ID);
+        // Request thread: the worker later reads this field instead of the thread context.
+        task.setUserId(UserContextHolder.get().userId());
         task.setTaskType(result.agentTask().type());
         task.setStatus(AgentTaskStatus.PENDING.name());
         task.setProgress(0);

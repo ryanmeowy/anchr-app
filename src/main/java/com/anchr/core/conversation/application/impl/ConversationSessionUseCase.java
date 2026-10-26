@@ -2,6 +2,7 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
 import com.anchr.core.conversation.application.agent.AgentConversationCleanupService;
@@ -28,7 +29,6 @@ import static com.anchr.core.conversation.application.constant.ConversationConst
 import static com.anchr.core.conversation.application.constant.ConversationConstant.MAX_SESSION_LIST_CURSOR_LENGTH;
 import static com.anchr.core.conversation.application.constant.ConversationConstant.MAX_SESSION_LIST_LIMIT;
 import static com.anchr.core.conversation.application.constant.ConversationConstant.SESSION_LIST_CURSOR_VERSION;
-import static com.anchr.core.conversation.application.constant.ConversationConstant.SINGLE_USER_ID;
 
 @Component
 @RequiredArgsConstructor
@@ -45,7 +45,7 @@ final class ConversationSessionUseCase {
         long now = System.currentTimeMillis();
         ConversationSession session = ConversationSession.createActive(
                 newSessionId(),
-                SINGLE_USER_ID,
+                UserContextHolder.get().userId(),
                 safeTrim(request.getTitle()),
                 now
         );
@@ -63,7 +63,7 @@ final class ConversationSessionUseCase {
         int boundedLimit = normalizeLimit(limit);
         ConversationSessionPosition before = decodeCursor(cursor);
         List<ConversationSession> candidates = conversationRepository.findSessionPage(
-                SINGLE_USER_ID, before, boundedLimit + 1);
+                UserContextHolder.get().userId(), before, boundedLimit + 1);
         boolean hasMore = candidates.size() > boundedLimit;
         List<ConversationSession> page = candidates.stream().limit(boundedLimit).toList();
 

@@ -1,5 +1,6 @@
 package com.anchr.core.conversation.application.impl;
 
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.conversation.application.ChatResponseService;
 import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.settings.domain.model.AgentRuntimeConfigKey;
@@ -26,7 +27,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.UUID;
 
-import static com.anchr.core.conversation.application.constant.ConversationConstant.SINGLE_USER_ID;
 
 @Service
 @Slf4j
@@ -84,7 +84,7 @@ public class ConversationMessageOrchestrator {
         if (Boolean.TRUE.equals(request.getAgentEnabled()) && agentEnabled) {
             try {
                 return agentWorkflow.execute(new AgentRunRequest(runId, turnId, sessionId,
-                        SINGLE_USER_ID, request), progress);
+                        UserContextHolder.get().userId(), request), progress);
             } catch (AgentWorkflowException e) {
                 if (!fallbackToTraditional) throw e;
                 meterRegistry.counter("agent.workflow.fallback.count", "target", "traditional").increment();

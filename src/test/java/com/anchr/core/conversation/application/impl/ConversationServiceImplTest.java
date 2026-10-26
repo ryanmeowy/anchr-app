@@ -1,5 +1,7 @@
 package com.anchr.core.conversation.application.impl;
 
+import com.anchr.core.common.application.context.RequestUserContext;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
 import com.anchr.core.conversation.application.AgentRuntimeSnapshotService;
@@ -70,6 +72,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -134,6 +137,8 @@ class ConversationServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // Session ownership now comes from the request context instead of a constant.
+        UserContextHolder.set(new RequestUserContext("single_user", "USER"));
         repository = new InMemoryConversationRepository();
         objectMapper = new ObjectMapper();
         meterRegistry = new SimpleMeterRegistry();
@@ -1335,5 +1340,10 @@ class ConversationServiceImplTest {
             copy.setAssetScope(source.getAssetScope() == null ? null : List.copyOf(source.getAssetScope()));
             return copy;
         }
+    }
+
+    @AfterEach
+    void tearDown() {
+        UserContextHolder.clear();
     }
 }

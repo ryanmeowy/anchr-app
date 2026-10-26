@@ -1,5 +1,6 @@
 package com.anchr.core.ingestion.application;
 
+import com.anchr.core.common.config.DemoProperties;
 import com.anchr.core.ingestion.application.constant.IngestionConstant;
 import com.anchr.core.ingestion.domain.model.DedupeStrategy;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
@@ -17,17 +18,33 @@ import java.util.stream.Stream;
 @Service
 public class IngestionCapabilityService {
 
+    private final DemoProperties demoProperties;
+
+    public IngestionCapabilityService(DemoProperties demoProperties) {
+        this.demoProperties = demoProperties;
+    }
+
     public IngestionCapabilities getCapabilities() {
         return IngestionCapabilities.builder()
                 .supportedFormats(Stream.of(AssetType.PDF, AssetType.TXT, AssetType.IMAGE, AssetType.MARKDOWN).map(SupportedFormat::of).toList())
                 .maxFileSizeBytes(IngestionConstant.MAX_FILE_SIZE_BYTES)
                 .maxImageFileSizeBytes(IngestionConstant.MAX_IMAGE_FILE_SIZE_BYTES)
-                .maxFilesPerBatch(IngestionConstant.MAX_FILES_PER_BATCH)
+                .maxFilesPerBatch(maxFilesPerBatch())
                 .dedupeStrategies(List.of(DedupeStrategy.SKIP, DedupeStrategy.OVERWRITE, DedupeStrategy.VERSIONED))
                 .defaultDedupeStrategy(DedupeStrategy.SKIP)
                 .ingestionStages(List.of(IngestionStage.UPLOAD, IngestionStage.PARSE, IngestionStage.CHUNK,
                         IngestionStage.EMBED, IngestionStage.INDEX, IngestionStage.ASKABLE))
                 .build();
+    }
+
+    /**
+     * Files allowed in one ingestion request. The demo deployment restricts it to keep a single
+     * visitor from occupying the shared parsing queue.
+     */
+    public int maxFilesPerBatch() {
+        return demoProperties.enabled()
+                ? demoProperties.uploadMaxFiles()
+                : IngestionConstant.MAX_FILES_PER_BATCH;
     }
 
     public boolean isSupportedFileType(String fileType) {
