@@ -244,7 +244,7 @@ public @interface DemoQuota {}
 
 **不带参数**——计数恒为 1（Agent 与普通提问同价，见 PRD F2.6），所以不需要 `cost` 字段。
 
-### 5.3 标注位置（6 处）
+### 5.3 标注位置（8 处）
 
 | Controller | 方法 | 完整路径 |
 | --- | --- | --- |
@@ -364,7 +364,7 @@ curl -X POST -H "X-Admin-Secret: $APP_ADMIN_SECRET" \
 | --- | --- |
 | `/actuator/**`、`/api/v1/health` | 放行（不受 `@DemoQuota` 标注，天然放行） |
 | 发券接口 | 503 `DEMO_DISABLED` |
-| 6 个计费端点 | 503 `DEMO_DISABLED` |
+| 8 个计费端点 | 503 `DEMO_DISABLED` |
 | 只读端点 | 放行 |
 
 **熔断只在 `DemoQuotaInterceptor` 与 `DemoAuthController` 内实现**，不影响任何其他路径。
@@ -578,7 +578,7 @@ if (request.items().size() > maxFiles) {
 1. **改动清单**：新建 5 个文件、改主干 5 个文件，逐条说明为什么必须改主干
 2. **同步主干后的检查项**（4 条）：
    - 领券仍能成功且 cookie 幂等
-   - 6 个端点仍计费、其余不计费
+   - 8 个端点仍计费、其余不计费
    - 熔断仍 5 秒内生效
    - 上传仍限 1 个文件
 3. **worker 线程规则**：禁止在 `@Scheduled` 线程调用 `UserContextHolder.get()`

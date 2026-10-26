@@ -39,7 +39,7 @@
 | `ConversationConstant` | 删除 `SINGLE_USER_ID` | 不再需要常量 |
 | `IngestionCapabilityService` | 注入 `DemoProperties`，`maxFilesPerBatch` 可变 | 演示限 1 个文件 |
 | `IngestionTaskCreateUseCase` | `validateUploadLimits` 加数量校验 | **原来只声明不校验** |
-| `ConversationController` / `SearchController` / `KnowledgeBaseIngestionController` | 各加 `@DemoQuota`（共 6 处） | 计费入口 |
+| `ConversationController` / `SearchController` / `KnowledgeBaseIngestionController` | 各加 `@DemoQuota`（共 **8** 处） | 计费入口；含两个重试端点 |
 | `SettingsController` | 两个 test 端点从 `ADMIN,USER` 收紧为 `ADMIN` | 演示票是 USER，否则等于给匿名访客一个 SSRF 入口 |
 | `application.yaml` | `app.demo.*` 一段 | 配置来源 |
 
@@ -54,7 +54,7 @@ git merge origin/main
 合并后逐项验证（`DEMO.md` 的核心价值就在这一节）：
 
 1. **领券仍可用**：`POST /api/v1/auth/demo` 返回 token，重复调用返回同一张（cookie 幂等）
-2. **计费仍准确**：6 个端点扣 1 次，其余端点不扣
+2. **计费仍准确**：8 个端点扣 1 次，其余端点不扣（`DemoQuotaCoverageContractTest` 会守住这条）
 3. **熔断仍生效**：切换后 5 秒内计费端点 503、`/actuator/health` 仍 200
 4. **上传仍限 1 个**：`curl` 传 2 个文件返回 400
 
