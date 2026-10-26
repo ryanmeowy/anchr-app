@@ -11,6 +11,8 @@ public record DemoStatusDTO(
         boolean closed,
         int tokenQuota,
         String sceneId,
-        String prefix
+        String prefix,
+        /** True when sceneId is an AES token that must be sent as EncryptedSceneId. */
+        boolean sceneIdEncrypted
 ) {
 }
