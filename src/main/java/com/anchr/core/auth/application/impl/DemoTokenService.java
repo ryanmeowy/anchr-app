@@ -45,10 +45,15 @@ public class DemoTokenService {
         String cookie = StringUtils.hasText(browserCookie) ? browserCookie.trim() : newCookieId();
 
         DemoTokenIssue existing = findIssued(cookie);
-        if (existing != null) {
+        if (existing != null && !isExhausted(existing.token())) {
             return new DemoTokenResult(existing, cookie, false);
         }
-        if (onCooldown(cookie)) {
+        if (existing != null) {
+            // Spent token: hand the visitor a fresh one instead of the same dead token, which
+            // would trap them in a "claim -> immediately rejected" loop. The cooldown only
+            // guards accidental double clicks, so it must not apply here.
+            log.info("Demo token for browser {} is spent, issuing a replacement", cookie);
+        } else if (onCooldown(cookie)) {
             throw new BusinessException(ApiError.DEMO_ISSUE_TOO_FREQUENT);
         }
         long issuedToday = incrementIssuedToday();
@@ -96,6 +101,33 @@ public class DemoTokenService {
             throw new BusinessException(ApiError.INTERNAL_ERROR);
         }
         return new DemoTokenIssue(token, userId, expiresAt);
+    }
+
+    /** True when every credit on this token has been charged. */
+    private boolean isExhausted(String token) {
+        try {
+            String hash = sha256(token);
+            String used = redisTemplate.opsForValue()
+                    .get(DemoConstant.QUOTA_TOKEN_PREFIX + hash);
+            return used != null && Long.parseLong(used.trim()) >= demoProperties.tokenQuota();
+        } catch (RuntimeException exception) {
+            log.warn("Failed to read demo token usage: {}", exception.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Must match {@code AccessTokenInterceptor#tokenHash}: the quota interceptor keys its counter
+     * on that hash, so a different algorithm here would silently read nobody's usage.
+     */
+    private static String sha256(String value) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(value.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private DemoTokenIssue findIssued(String browserCookie) {

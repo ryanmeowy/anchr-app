@@ -71,7 +71,22 @@ class DemoTokenServiceTest {
     }
 
     @Test
-    void shouldRefuseDuringCooldownWithoutAnIssuedToken() {
+    void shouldHandOutANewTokenWhenThePreviousOneIsSpent() {
+        DemoTokenResult first = service.issue("browser-1");
+        // Simulate the visitor exhausting the credits: the quota interceptor stores the count
+        // under the SHA-256 of the token.
+        values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(first.issue().token()), "8");
+
+        DemoTokenResult replacement = service.issue("browser-1");
+
+        assertThat(replacement.created()).isTrue();
+        assertThat(replacement.issue().token()).isNotEqualTo(first.issue().token());
+        // A spent-token replacement must not be blocked by the anti-double-click cooldown.
+        assertThat(replacement.issue().userId()).isNotEqualTo(first.issue().userId());
+    }
+
+    @Test
+    void shouldStillRefuseCooldownWhenThePreviousTokenWasNeverIssued() {
         service.issue("browser-1");
         values.remove(DemoConstant.ISSUE_TOKEN_PREFIX + "browser-1");
 
@@ -79,6 +94,16 @@ class DemoTokenServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getError())
                 .isEqualTo(ApiError.DEMO_ISSUE_TOO_FREQUENT);
+    }
+
+    private static String sha256(String value) {
+        try {
+            return java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     /** Minimal in-memory stand-in; only the operations the service uses. */
