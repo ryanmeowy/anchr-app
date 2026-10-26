@@ -17,6 +17,4 @@ public class DemoTokenDTO {
     private String userId;
 
     private long expiresAt;
-
-    private String turnstileSiteKey;
 }

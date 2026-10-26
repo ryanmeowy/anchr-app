@@ -88,7 +88,6 @@ public class DemoAuthController {
                 .role("USER")
                 .userId(result.issue().userId())
                 .expiresAt(result.issue().expiresAt())
-                .turnstileSiteKey(demoProperties.siteKey())
                 .build());
     }
 
