@@ -24,17 +24,18 @@ class DemoPropertiesBindingTest {
 
     @Test
     void shouldBindFromTheSameKebabCaseKeysTheYamlUses() {
-        DemoProperties properties = bind(Map.of(
-                "app.demo.enabled", "true",
-                "app.demo.token-ttl-hours", "6",
-                "app.demo.token-quota", "12",
-                "app.demo.daily-operation-limit", "150",
-                "app.demo.daily-token-limit", "70",
-                "app.demo.issue-cooldown-minutes", "3",
-                "app.demo.upload-max-files", "2",
-                "app.demo.turnstile-enabled", "true",
-                "app.demo.turnstile-site-key", "site-key",
-                "app.demo.turnstile-secret-key", "secret-key-value"));
+        DemoProperties properties = bind(Map.ofEntries(
+                Map.entry("app.demo.enabled", "true"),
+                Map.entry("app.demo.token-ttl-hours", "6"),
+                Map.entry("app.demo.token-quota", "12"),
+                Map.entry("app.demo.daily-operation-limit", "150"),
+                Map.entry("app.demo.daily-token-limit", "70"),
+                Map.entry("app.demo.issue-cooldown-minutes", "3"),
+                Map.entry("app.demo.upload-max-files", "2"),
+                Map.entry("app.demo.turnstile-enabled", "true"),
+                Map.entry("app.demo.turnstile-site-key", "site-key"),
+                Map.entry("app.demo.turnstile-secret-key", "secret-key-value"),
+                Map.entry("app.demo.start-closed", "true")));
 
         assertThat(properties.enabled()).isTrue();
         assertThat(properties.tokenTtlHours()).isEqualTo(6);
@@ -45,6 +46,7 @@ class DemoPropertiesBindingTest {
         assertThat(properties.uploadMaxFiles()).isEqualTo(2);
         assertThat(properties.turnstileVerificationActive()).isTrue();
         assertThat(properties.siteKey()).isEqualTo("site-key");
+        assertThat(properties.startClosed()).isTrue();
     }
 
     @Test
