@@ -56,6 +56,14 @@ class DemoPropertiesTest {
     }
 
     @Test
+    void mustRequireSiteKeyWhenEnabledWithVerification() {
+        assertThatThrownBy(() -> new DemoProperties(
+                true, 5, 8, 80, 50, 10, 1, true, "", "secret-value", false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("turnstile-site-key");
+    }
+
+    @Test
     void shouldAllowEnabledDemoWithoutSecretWhenVerificationIsOff() {
         DemoProperties properties = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", false);
 

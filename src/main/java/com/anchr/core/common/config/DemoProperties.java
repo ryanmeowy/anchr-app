@@ -38,10 +38,19 @@ public record DemoProperties(
             throw new IllegalArgumentException(
                     "app.demo.issue-cooldown-minutes must not be negative");
         }
-        if (enabled && turnstileEnabled && blank(turnstileSecretKey)) {
-            throw new IllegalArgumentException(
-                    "app.demo.turnstile-secret-key is required when the demo is enabled"
-                            + " and Turnstile verification is on");
+        if (enabled && turnstileEnabled) {
+            // Both halves are required: without them the entry card cannot render a challenge,
+            // and the failure would only show up in front of a visitor.
+            if (blank(turnstileSecretKey)) {
+                throw new IllegalArgumentException(
+                        "app.demo.turnstile-secret-key is required when the demo is enabled"
+                                + " and Turnstile verification is on");
+            }
+            if (blank(turnstileSiteKey)) {
+                throw new IllegalArgumentException(
+                        "app.demo.turnstile-site-key is required when the demo is enabled"
+                                + " and Turnstile verification is on");
+            }
         }
     }
 
