@@ -52,6 +52,23 @@ class DemoPropertiesContextTest {
     }
 
     @Test
+    void shouldStartWhenTheDemoIsFullyConfigured() {
+        runner.withPropertyValues(
+                "app.demo.enabled=true",
+                "app.demo.turnstile-enabled=true",
+                "app.demo.turnstile-site-key=site-key",
+                "app.demo.turnstile-secret-key=secret-value",
+                "app.demo.start-closed=true")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    DemoProperties properties = context.getBean(DemoProperties.class);
+                    assertThat(properties.turnstileVerificationActive()).isTrue();
+                    assertThat(properties.startClosed()).isTrue();
+                    assertThat(properties.siteKey()).isEqualTo("site-key");
+                });
+    }
+
+    @Test
     void shouldFailStartupWhenAnEnabledDemoHasNoTurnstileSecret() {
         runner.withPropertyValues(
                 "app.demo.enabled=true",
