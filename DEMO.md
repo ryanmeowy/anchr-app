@@ -181,3 +181,29 @@ DELETE FROM conversation_session WHERE user_id LIKE 'demo_%';
 | 熔断读取每进程缓存 5 秒 | 换掉每请求一次 Redis 往返 | 已是延迟与开销的折中 |
 | 配额是次数限制，不是成本控制 | Agent 与普通提问同价 1 次 | 成本靠 `DAILY_OPERATION_LIMIT` 兜底 |
 | Redis `allkeys-lru` | 配额 key 可能被驱逐后短暂失效 | 彻底解决需独立 Redis 实例改 `volatile-lru` |
+
+## 9. 端到端验证记录（2026-10-26，真实 MySQL + Redis + ES）
+
+用真实基础设施启动应用后实测，**不是 mock**：
+
+| 验证项 | 环境值 | 结果 |
+| --- | --- | --- |
+| 应用启动 | 真实 MySQL `anchr_demo` + Redis db4 + ES | `Started AnchrApplication in 7.0s`，无 ERROR |
+| Flyway 建表 | 空库 | 15 张表全部建好 |
+| 健康检查 | — | `/actuator/health` → `{"status":"UP"}` |
+| 发券 | — | 200，返回 `role=USER`，`userId=demo_c45195b8f6cf` |
+| 幂等（同 cookie） | — | 返回**同一张** token 与 userId |
+| 单券配额 | quota=2 | 前 2 次 200，第 3 次 `DEMO_QUOTA_EXHAUSTED` 429 |
+| 每日发券 | limit=5 | 第 5 张起 `DEMO_DAILY_LIMIT_REACHED` 429 |
+| 每日操作 | limit=4，已用 2 | 第 3 次触发 `DEMO_DAILY_LIMIT_REACHED` |
+| 熔断开 | — | 发券 503 `DEMO_DISABLED`，健康检查仍 200 |
+| 熔断关 | — | 5 秒内恢复，`closed=false` |
+| 上传限 1 个 | 传 2 个 | 400 `INVALID_REQUEST`，消息含 `Limit: 1` |
+| **会话身份** | — | 库中 `conversation_session.user_id = demo_968eb37778d7`（**不是 `single_user`**） |
+| **跨访客隔离** | 甲有 2 个会话 | 乙查询得到 **0 个** |
+| SSRF 加固 | USER 票调 test-connection | 403 `AUTH_ROLE_FORBIDDEN` |
+| Redis 落库 | — | 所有 `demo:*` 在 db4，db0 为空 |
+
+> 两条加粗的是整个方案的核心目标：访客身份真实隔离、危险端点不可达。均已实测通过。
+>
+> 清理时遇到的真实约束：`FLUSHDB` 被实例禁用（与文档一致），只能按 key 逐个 `DEL`。这印证了 §6.2 的应急方案是必要的。
