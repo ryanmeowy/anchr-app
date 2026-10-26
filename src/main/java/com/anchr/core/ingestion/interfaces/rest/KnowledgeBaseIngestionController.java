@@ -94,7 +94,10 @@ public class KnowledgeBaseIngestionController {
                         ingestionApplicationService.getTaskByClientRequestId(kbId, clientRequestId))));
     }
 
+    // Both retry endpoints re-run the parse/embed pipeline, so they cost as much as a fresh
+    // upload; leaving them unmetered would be an unlimited-cost path around the upload cap.
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @DemoQuota
     @PostMapping("/ingestion-tasks/{taskId}/retry-failed")
     public Result<IngestionTaskDTO> retryFailed(@PathVariable @NotBlank String kbId,
                                                 @PathVariable @NotBlank String taskId) {
@@ -102,6 +105,7 @@ public class KnowledgeBaseIngestionController {
     }
 
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @DemoQuota
     @PostMapping("/ingestion-tasks/{taskId}/items/{itemId}/retry")
     public Result<IngestionTaskDTO> retryItem(@PathVariable @NotBlank String kbId,
                                               @PathVariable @NotBlank String taskId,
