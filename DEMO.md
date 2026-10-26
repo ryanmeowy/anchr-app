@@ -7,7 +7,7 @@
 
 ---
 
-## 1. 新增文件（8 个）
+## 1. 新增文件（13 个生产类）
 
 | 文件 | 职责 |
 | --- | --- |
@@ -20,8 +20,12 @@
 | `auth/application/impl/DemoTokenService.java` | 发券、幂等、冷却、每日上限 |
 | `auth/interfaces/rest/DemoAuthController.java` | `/api/v1/auth/demo*` |
 | `integration/security/TurnstileVerifier.java` | Turnstile 服务端校验 |
+| `auth/application/model/DemoTokenIssue.java` | 发券结果值对象 |
+| `auth/interfaces/rest/dto/DemoTokenDTO.java` | 发券响应 |
+| `auth/interfaces/rest/dto/DemoTokenRequestDTO.java` | 发券请求 |
+| `auth/interfaces/rest/dto/DemoStatusDTO.java` | 公开状态响应（不含 secret） |
 
-## 2. 改动的共享文件（9 个）
+## 2. 改动的共享文件（15 个生产文件；另有 5 个测试与 1 个 env 示例）
 
 | 文件 | 改动 | 为什么必须改 |
 | --- | --- | --- |
@@ -36,6 +40,7 @@
 | `IngestionCapabilityService` | 注入 `DemoProperties`，`maxFilesPerBatch` 可变 | 演示限 1 个文件 |
 | `IngestionTaskCreateUseCase` | `validateUploadLimits` 加数量校验 | **原来只声明不校验** |
 | `ConversationController` / `SearchController` / `KnowledgeBaseIngestionController` | 各加 `@DemoQuota`（共 6 处） | 计费入口 |
+| `SettingsController` | 两个 test 端点从 `ADMIN,USER` 收紧为 `ADMIN` | 演示票是 USER，否则等于给匿名访客一个 SSRF 入口 |
 | `application.yaml` | `app.demo.*` 一段 | 配置来源 |
 
 ---
@@ -153,7 +158,21 @@ DELETE FROM conversation_session WHERE user_id LIKE 'demo_%';
 
 ---
 
-## 7. 已知取舍
+## 7. 已用真实 Redis 验证的行为
+
+本机验证过（`redis-server --port 16399`，未使用 mock），这些是 mock 测不出来的：
+
+| 行为 | 结果 |
+| --- | --- |
+| db 4 与 db 0 隔离 | db4 有 key，db0 读不到 `demo:*` ✓ |
+| 单券计数 TTL | 6 小时（5 小时 token + 1 小时余量）✓ |
+| 过期后自动复位 | TTL 归 -2，计数消失，不需要清理任务 ✓ |
+| `INCR` 不重置 TTL | ttl 保持递减 ✓（所以代码只在 `used == 1` 时设 TTL 是必要的） |
+| key 被 LRU 驱逐后自愈 | 重新 `INCR` 得到 1，再次触发设 TTL ✓ |
+
+> 最后一条解释了为什么 `allkeys-lru` 只是「短暂失效」而不是永久损坏：计数器被驱逐后会从 1 重新开始，当天可能短暂突破上限，但不会卡死。
+
+## 8. 已知取舍
 
 | 项 | 取舍 | 何时升级 |
 | --- | --- | --- |
