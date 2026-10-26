@@ -10,9 +10,12 @@ public record DemoStatusDTO(
         boolean enabled,
         boolean closed,
         int tokenQuota,
+        /** Plain scenario id; always sent, even in encryption mode. */
         String sceneId,
         String prefix,
-        /** True when sceneId is an AES token that must be sent as EncryptedSceneId. */
-        boolean sceneIdEncrypted
+        /**
+         * AES token to send alongside sceneId when encryption mode is on. Null otherwise.
+         */
+        String encryptedSceneId
 ) {
 }

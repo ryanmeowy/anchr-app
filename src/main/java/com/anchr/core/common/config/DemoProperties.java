@@ -85,10 +85,10 @@ public record DemoProperties(
      * <p>With encryption mode on this is a short-lived AES token; otherwise the id passes through
      * unchanged. The decision stays on the server so the toggle cannot drift from the console.
      */
-    public String sceneIdForClient() {
+    public String encryptedSceneIdForClient() {
         String raw = sceneId();
         if (!captchaVerificationActive() || !captchaEncryptSceneId || raw.isBlank()) {
-            return raw;
+            return null;
         }
         return com.anchr.core.integration.security.CaptchaSceneIdEncryptor.encrypt(
                 raw, captchaEkey, captchaSceneIdTtlSeconds);
