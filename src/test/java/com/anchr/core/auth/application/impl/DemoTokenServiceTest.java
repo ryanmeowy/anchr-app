@@ -57,6 +57,23 @@ class DemoTokenServiceTest {
     }
 
     @Test
+    void spentTokenReplacementStillCountsAgainstTheDailyIssueLimit() {
+        // Daily cap is 2. The first claim uses one; the replacement uses the second, so a third
+        // must be refused even though the visitor only ever held one browser cookie.
+        DemoTokenResult first = service.issue("browser-1");
+        values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(first.issue().token()), "8");
+
+        assertThat(service.issue("browser-1").created()).isTrue();
+
+        values.put(DemoConstant.QUOTA_TOKEN_PREFIX
+                + sha256(service.issue("browser-1").issue().token()), "8");
+        assertThatThrownBy(() -> service.issue("browser-1"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getError())
+                .isEqualTo(ApiError.DEMO_DAILY_LIMIT_REACHED);
+    }
+
+    @Test
     void shouldRefuseWhenDailyIssueLimitIsReached() {
         service.issue("browser-1");
         service.issue("browser-2");
