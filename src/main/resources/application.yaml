@@ -41,9 +41,14 @@ app:
     daily-token-limit: ${APP_DEMO_DAILY_TOKEN_LIMIT:50}
     issue-cooldown-minutes: ${APP_DEMO_ISSUE_COOLDOWN_MINUTES:10}
     upload-max-files: ${APP_DEMO_UPLOAD_MAX_FILES:1}
-    turnstile-enabled: ${APP_DEMO_TURNSTILE_ENABLED:true}
-    turnstile-site-key: ${APP_DEMO_TURNSTILE_SITE_KEY:}
-    turnstile-secret-key: ${APP_DEMO_TURNSTILE_SECRET_KEY:}
+    # Alibaba Cloud CAPTCHA 2.0. Runs in mainland China, unlike Cloudflare Turnstile, whose
+    # script is unreliable for visitors without a proxy.
+    captcha-enabled: ${APP_DEMO_CAPTCHA_ENABLED:true}
+    captcha-scene-id: ${APP_DEMO_CAPTCHA_SCENE_ID:}
+    captcha-prefix: ${APP_DEMO_CAPTCHA_PREFIX:}
+    captcha-region: ${APP_DEMO_CAPTCHA_REGION:cn-shanghai}
+    captcha-access-key-id: ${APP_DEMO_CAPTCHA_ACCESS_KEY_ID:}
+    captcha-access-key-secret: ${APP_DEMO_CAPTCHA_ACCESS_KEY_SECRET:}
     # Boot with the demo already stopped; a restart never reopens a switch someone closed.
     start-closed: ${APP_DEMO_START_CLOSED:false}
   docling:

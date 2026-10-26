@@ -32,9 +32,12 @@ class DemoPropertiesBindingTest {
                 Map.entry("app.demo.daily-token-limit", "70"),
                 Map.entry("app.demo.issue-cooldown-minutes", "3"),
                 Map.entry("app.demo.upload-max-files", "2"),
-                Map.entry("app.demo.turnstile-enabled", "true"),
-                Map.entry("app.demo.turnstile-site-key", "site-key"),
-                Map.entry("app.demo.turnstile-secret-key", "secret-key-value"),
+                Map.entry("app.demo.captcha-enabled", "true"),
+                Map.entry("app.demo.captcha-scene-id", "scene-1"),
+                Map.entry("app.demo.captcha-prefix", "prefix-1"),
+                Map.entry("app.demo.captcha-region", "cn-shanghai"),
+                Map.entry("app.demo.captcha-access-key-id", "ak-value"),
+                Map.entry("app.demo.captcha-access-key-secret", "secret-value"),
                 Map.entry("app.demo.start-closed", "true")));
 
         assertThat(properties.enabled()).isTrue();
@@ -44,8 +47,8 @@ class DemoPropertiesBindingTest {
         assertThat(properties.dailyTokenLimit()).isEqualTo(70);
         assertThat(properties.issueCooldownMinutes()).isEqualTo(3);
         assertThat(properties.uploadMaxFiles()).isEqualTo(2);
-        assertThat(properties.turnstileVerificationActive()).isTrue();
-        assertThat(properties.siteKey()).isEqualTo("site-key");
+        assertThat(properties.captchaVerificationActive()).isTrue();
+        assertThat(properties.sceneId()).isEqualTo("scene-1");
         assertThat(properties.startClosed()).isTrue();
     }
 

@@ -30,7 +30,7 @@ class DemoPropertiesContextTest {
             assertThat(properties.dailyOperationLimit()).isEqualTo(80);
             assertThat(properties.dailyTokenLimit()).isEqualTo(50);
             assertThat(properties.uploadMaxFiles()).isEqualTo(1);
-            assertThat(properties.turnstileVerificationActive()).isFalse();
+            assertThat(properties.captchaVerificationActive()).isFalse();
         });
     }
 
@@ -40,14 +40,14 @@ class DemoPropertiesContextTest {
                 "app.demo.enabled=true",
                 "app.demo.token-quota=3",
                 "app.demo.daily-operation-limit=9",
-                "app.demo.turnstile-enabled=false")
+                "app.demo.captcha-enabled=false")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     DemoProperties properties = context.getBean(DemoProperties.class);
                     assertThat(properties.enabled()).isTrue();
                     assertThat(properties.tokenQuota()).isEqualTo(3);
                     assertThat(properties.dailyOperationLimit()).isEqualTo(9);
-                    assertThat(properties.turnstileVerificationActive()).isFalse();
+                    assertThat(properties.captchaVerificationActive()).isFalse();
                 });
     }
 
@@ -55,16 +55,17 @@ class DemoPropertiesContextTest {
     void shouldStartWhenTheDemoIsFullyConfigured() {
         runner.withPropertyValues(
                 "app.demo.enabled=true",
-                "app.demo.turnstile-enabled=true",
-                "app.demo.turnstile-site-key=site-key",
-                "app.demo.turnstile-secret-key=secret-value",
+                "app.demo.captcha-enabled=true",
+                "app.demo.captcha-scene-id=scene-1",
+                "app.demo.captcha-access-key-id=ak-value"
+                , "app.demo.captcha-access-key-secret=secret-value",
                 "app.demo.start-closed=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     DemoProperties properties = context.getBean(DemoProperties.class);
-                    assertThat(properties.turnstileVerificationActive()).isTrue();
+                    assertThat(properties.captchaVerificationActive()).isTrue();
                     assertThat(properties.startClosed()).isTrue();
-                    assertThat(properties.siteKey()).isEqualTo("site-key");
+                    assertThat(properties.sceneId()).isEqualTo("scene-1");
                 });
     }
 
@@ -72,7 +73,7 @@ class DemoPropertiesContextTest {
     void shouldFailStartupWhenAnEnabledDemoHasNoTurnstileSecret() {
         runner.withPropertyValues(
                 "app.demo.enabled=true",
-                "app.demo.turnstile-enabled=true")
+                "app.demo.captcha-enabled=true")
                 .run(context -> assertThat(context).hasFailed());
     }
 }

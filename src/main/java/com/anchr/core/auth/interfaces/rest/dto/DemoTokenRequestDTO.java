@@ -10,8 +10,9 @@ import lombok.Data;
 public class DemoTokenRequestDTO {
 
     /**
-     * Cloudflare Turnstile response token. Optional only while verification is disabled.
+     * Alibaba Cloud CAPTCHA 2.0 result parameter produced by the client SDK. Optional only while
+     * verification is disabled.
      */
-    @Size(max = 4096)
-    private String turnstileToken;
+    @Size(max = 8192)
+    private String captchaVerifyParam;
 }

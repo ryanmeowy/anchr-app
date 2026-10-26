@@ -13,7 +13,7 @@ import com.anchr.core.common.infrastructure.DemoKillSwitch;
 import com.anchr.core.common.infrastructure.PermitAll;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
-import com.anchr.core.integration.security.TurnstileVerifier;
+import com.anchr.core.integration.security.AliyunCaptchaVerifier;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -52,7 +52,7 @@ public class DemoAuthController {
     private final DemoTokenService demoTokenService;
     private final DemoProperties demoProperties;
     private final DemoKillSwitch killSwitch;
-    private final TurnstileVerifier turnstileVerifier;
+    private final AliyunCaptchaVerifier captchaVerifier;
 
     @Value("${app.security.admin-secret:}")
     private String adminSecret;
@@ -64,7 +64,8 @@ public class DemoAuthController {
                 demoProperties.enabled(),
                 killSwitch.isOn(),
                 demoProperties.tokenQuota(),
-                demoProperties.siteKey()));
+                demoProperties.sceneId(),
+                demoProperties.prefix()));
     }
 
     /**
@@ -95,8 +96,8 @@ public class DemoAuthController {
         if (killSwitch.isOn()) {
             return Result.error(ApiError.DEMO_DISABLED);
         }
-        String turnstileToken = request == null ? null : request.getTurnstileToken();
-        if (!turnstileVerifier.verify(turnstileToken)) {
+        String captchaVerifyParam = request == null ? null : request.getCaptchaVerifyParam();
+        if (!captchaVerifier.verify(captchaVerifyParam)) {
             return Result.error(ApiError.DEMO_VERIFICATION_FAILED);
         }
 
@@ -146,7 +147,7 @@ public class DemoAuthController {
                 // Browsers drop a Secure cookie over plain HTTP. The demo runs behind HTTPS, but
                 // local development with Turnstile off would then re-issue a token on every load
                 // and quietly burn the daily issue budget.
-                .secure(demoProperties.turnstileVerificationActive())
+                .secure(demoProperties.captchaVerificationActive())
                 .sameSite("Lax")
                 .path("/")
                 .maxAge(java.time.Duration.ofHours(demoProperties.tokenTtlHours()))

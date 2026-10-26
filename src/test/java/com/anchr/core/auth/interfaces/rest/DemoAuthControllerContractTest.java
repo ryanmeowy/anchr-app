@@ -10,7 +10,7 @@ import com.anchr.core.common.exception.ResultHttpStatusAdvice;
 import com.anchr.core.common.infrastructure.DemoKillSwitch;
 import com.anchr.core.common.exception.ApiErrorResponseWriter;
 import com.anchr.core.common.exception.UploadCleanupPolicy;
-import com.anchr.core.integration.security.TurnstileVerifier;
+import com.anchr.core.integration.security.AliyunCaptchaVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -51,12 +51,12 @@ class DemoAuthControllerContractTest {
     private DemoAuthController controller(DemoProperties properties,
                                           DemoKillSwitch killSwitch,
                                           DemoTokenService tokenService,
-                                          TurnstileVerifier verifier) {
+                                          AliyunCaptchaVerifier verifier) {
         return new DemoAuthController(tokenService, properties, killSwitch, verifier);
     }
 
     private DemoProperties demoEnabled() {
-        return new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", false);
+        return new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", false);
     }
 
     @Test
@@ -68,7 +68,7 @@ class DemoAuthControllerContractTest {
                         "browser-cookie", true));
         DemoKillSwitch killSwitch = mock(DemoKillSwitch.class);
         when(killSwitch.isOn()).thenReturn(false);
-        TurnstileVerifier verifier = mock(TurnstileVerifier.class);
+        AliyunCaptchaVerifier verifier = mock(AliyunCaptchaVerifier.class);
         when(verifier.verify(any())).thenReturn(true);
 
         DemoAuthController controller = controller(
@@ -93,7 +93,7 @@ class DemoAuthControllerContractTest {
         DemoTokenService tokenService = mock(DemoTokenService.class);
         DemoKillSwitch killSwitch = mock(DemoKillSwitch.class);
         when(killSwitch.isOn()).thenReturn(false);
-        TurnstileVerifier verifier = mock(TurnstileVerifier.class);
+        AliyunCaptchaVerifier verifier = mock(AliyunCaptchaVerifier.class);
         when(verifier.verify(any())).thenReturn(false);
 
         DemoAuthController controller = controller(
@@ -112,7 +112,7 @@ class DemoAuthControllerContractTest {
     void issuingShouldBeRefusedWhenTheDemoIsDisabled() throws Exception {
         DemoAuthController controller = controller(DemoProperties.defaults(),
                 mock(DemoKillSwitch.class), mock(DemoTokenService.class),
-                mock(TurnstileVerifier.class));
+                mock(AliyunCaptchaVerifier.class));
         MockMvc mockMvc = mvc(controller);
 
         mockMvc.perform(post("/api/v1/auth/demo")
@@ -127,7 +127,7 @@ class DemoAuthControllerContractTest {
         DemoKillSwitch killSwitch = mock(DemoKillSwitch.class);
         when(killSwitch.isOn()).thenReturn(true);
         DemoAuthController controller = controller(demoEnabled(), killSwitch,
-                mock(DemoTokenService.class), mock(TurnstileVerifier.class));
+                mock(DemoTokenService.class), mock(AliyunCaptchaVerifier.class));
         MockMvc mockMvc = mvc(controller);
 
         mockMvc.perform(post("/api/v1/auth/demo")
@@ -142,7 +142,7 @@ class DemoAuthControllerContractTest {
         DemoKillSwitch killSwitch = mock(DemoKillSwitch.class);
         when(killSwitch.isOn()).thenReturn(false);
         DemoAuthController controller = controller(demoEnabled(), killSwitch,
-                mock(DemoTokenService.class), mock(TurnstileVerifier.class));
+                mock(DemoTokenService.class), mock(AliyunCaptchaVerifier.class));
 
         mvc(controller)
                 .perform(get("/api/v1/auth/demo/status"))
@@ -158,7 +158,7 @@ class DemoAuthControllerContractTest {
         when(service.usage("demo-token"))
                 .thenReturn(new DemoUsage(8, 3, System.currentTimeMillis() + 60_000));
         DemoAuthController controller = controller(demoEnabled(), mockOffKillSwitch(),
-                service, mock(TurnstileVerifier.class));
+                service, mock(AliyunCaptchaVerifier.class));
 
         mvc(controller)
                 .perform(get("/api/v1/auth/demo/usage").header("X-Access-Token", "demo-token"))
@@ -174,7 +174,7 @@ class DemoAuthControllerContractTest {
         DemoTokenService service = mock(DemoTokenService.class);
         when(service.usage("operator-token")).thenReturn(null);
         DemoAuthController controller = controller(demoEnabled(), mockOffKillSwitch(),
-                service, mock(TurnstileVerifier.class));
+                service, mock(AliyunCaptchaVerifier.class));
 
         mvc(controller)
                 .perform(get("/api/v1/auth/demo/usage").header("X-Access-Token", "operator-token"))
@@ -192,7 +192,7 @@ class DemoAuthControllerContractTest {
     void killSwitchShouldRequireTheAdminSecret() throws Exception {
         DemoKillSwitch killSwitch = mock(DemoKillSwitch.class);
         DemoAuthController controller = controller(demoEnabled(), killSwitch,
-                mock(DemoTokenService.class), mock(TurnstileVerifier.class));
+                mock(DemoTokenService.class), mock(AliyunCaptchaVerifier.class));
         MockMvc mockMvc = mvc(controller);
 
         // No secret configured on this instance: the switch refuses rather than opening up.

@@ -22,9 +22,12 @@ public record DemoProperties(
         @DefaultValue("50") int dailyTokenLimit,
         @DefaultValue("10") int issueCooldownMinutes,
         @DefaultValue("1") int uploadMaxFiles,
-        @DefaultValue("true") boolean turnstileEnabled,
-        @DefaultValue("") String turnstileSiteKey,
-        @DefaultValue("") String turnstileSecretKey,
+        @DefaultValue("true") boolean captchaEnabled,
+        @DefaultValue("") String captchaSceneId,
+        @DefaultValue("") String captchaPrefix,
+        @DefaultValue("cn-shanghai") String captchaRegion,
+        @DefaultValue("") String captchaAccessKeyId,
+        @DefaultValue("") String captchaAccessKeySecret,
         @DefaultValue("false") boolean startClosed
 ) {
 
@@ -38,38 +41,48 @@ public record DemoProperties(
             throw new IllegalArgumentException(
                     "app.demo.issue-cooldown-minutes must not be negative");
         }
-        if (enabled && turnstileEnabled) {
+        if (enabled && captchaEnabled) {
             // Both halves are required: without them the entry card cannot render a challenge,
             // and the failure would only show up in front of a visitor.
-            if (blank(turnstileSecretKey)) {
+            if (blank(captchaSceneId)) {
                 throw new IllegalArgumentException(
-                        "app.demo.turnstile-secret-key is required when the demo is enabled"
-                                + " and Turnstile verification is on");
+                        "app.demo.captcha.scene-id is required when the demo is enabled"
+                                + " and CAPTCHA verification is on");
             }
-            if (blank(turnstileSiteKey)) {
+            if (blank(captchaAccessKeyId) || blank(captchaAccessKeySecret)) {
                 throw new IllegalArgumentException(
-                        "app.demo.turnstile-site-key is required when the demo is enabled"
-                                + " and Turnstile verification is on");
+                        "app.demo.captcha.access-key-id and access-key-secret are required"
+                                + " when the demo is enabled and CAPTCHA verification is on");
             }
         }
     }
 
-    /** Turnstile verification runs only when the demo itself is enabled. */
-    public boolean turnstileVerificationActive() {
-        return enabled && turnstileEnabled;
+    /** CAPTCHA verification runs only when the demo itself is enabled. */
+    public boolean captchaVerificationActive() {
+        return enabled && captchaEnabled;
     }
 
-    public boolean hasTurnstileSecret() {
-        return !blank(turnstileSecretKey);
+    public boolean hasCaptchaCredentials() {
+        return !blank(captchaAccessKeyId) && !blank(captchaAccessKeySecret) && !blank(captchaSceneId);
     }
 
-    public String siteKey() {
-        return turnstileSiteKey == null ? "" : turnstileSiteKey;
+
+
+    public String sceneId() {
+        return captchaSceneId == null ? "" : captchaSceneId;
+    }
+
+    public String prefix() {
+        return captchaPrefix == null ? "" : captchaPrefix;
+    }
+
+    public String captchaRegion() {
+        return captchaRegion == null || captchaRegion.isBlank() ? "cn-shanghai" : captchaRegion;
     }
 
     /** All defaults: the demo is disabled and every limit is the production value. */
     public static DemoProperties defaults() {
-        return new DemoProperties(false, 5, 8, 80, 50, 10, 1, true, "", "", false);
+        return new DemoProperties(false, 5, 8, 80, 50, 10, 1, true, "", "", "cn-shanghai", "", "", false);
     }
 
     private static void requirePositive(int value, String name) {
