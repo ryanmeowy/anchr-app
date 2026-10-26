@@ -129,10 +129,18 @@ redis-cli -n 4 --scan --pattern 'demo:quota:*' | xargs -r redis-cli -n 4 del
 ### 6.3 清会话与活动（方案 B）
 
 ```sql
-DELETE FROM conversation_turn  WHERE session_id IN (SELECT session_id FROM conversation_session WHERE user_id LIKE 'demo_%');
-DELETE FROM agent_task         WHERE user_id LIKE 'demo_%';
-DELETE FROM agent_run          WHERE user_id LIKE 'demo_%';
-DELETE FROM activity_event     WHERE user_id LIKE 'demo_%';
+-- agent_run and agent_step carry no user_id; reach them through the session they belong to.
+-- Delete children before parents so no statement depends on rows removed earlier in the batch.
+DELETE FROM agent_step  WHERE run_id IN (SELECT run_id FROM agent_run
+                                         WHERE session_id IN (SELECT session_id
+                                                              FROM conversation_session
+                                                              WHERE user_id LIKE 'demo_%'));
+DELETE FROM agent_run   WHERE session_id IN (SELECT session_id FROM conversation_session
+                                             WHERE user_id LIKE 'demo_%');
+DELETE FROM agent_task  WHERE user_id LIKE 'demo_%';
+DELETE FROM conversation_turn WHERE session_id IN (SELECT session_id FROM conversation_session
+                                                   WHERE user_id LIKE 'demo_%');
+DELETE FROM activity_event WHERE user_id LIKE 'demo_%';
 DELETE FROM conversation_session WHERE user_id LIKE 'demo_%';
 ```
 
