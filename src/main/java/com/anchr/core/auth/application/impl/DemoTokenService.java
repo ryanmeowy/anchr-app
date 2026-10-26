@@ -81,6 +81,9 @@ public class DemoTokenService {
         tokenData.put("role", "USER");
         tokenData.put("userId", userId);
         tokenData.put("createdAt", System.currentTimeMillis());
+        // Marks the token as issued by the demo. Nothing branches on it today -- the quota
+        // interceptor identifies the owner by role -- but it keeps the record self-describing
+        // and allows a future change to distinguish demo tokens without guessing.
         tokenData.put("demo", true);
         try {
             String json = objectMapper.writeValueAsString(tokenData);
