@@ -26,7 +26,7 @@ class DemoKillSwitchTest {
     @Test
     void shouldReflectTheStoredFlag() {
         Map<String, String> values = new ConcurrentHashMap<>();
-        DemoProperties enabled = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", false);
+        DemoProperties enabled = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
         DemoKillSwitch killSwitch = new DemoKillSwitch(new FakeRedis(values), enabled);
 
         assertThat(killSwitch.isOn()).isFalse();
@@ -39,7 +39,7 @@ class DemoKillSwitchTest {
     @Test
     void startClosedShouldStopTrafficAtBoot() {
         Map<String, String> values = new ConcurrentHashMap<>();
-        DemoProperties closed = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", true);
+        DemoProperties closed = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, true);
         DemoKillSwitch killSwitch = new DemoKillSwitch(new FakeRedis(values), closed);
 
         killSwitch.applyStartState();
@@ -52,7 +52,7 @@ class DemoKillSwitchTest {
     void restartShouldKeepASwitchSomebodyAlreadyClosed() {
         Map<String, String> values = new ConcurrentHashMap<>();
         values.put(DemoConstant.KILL_SWITCH_KEY, "1");
-        DemoProperties open = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", false);
+        DemoProperties open = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
         DemoKillSwitch killSwitch = new DemoKillSwitch(new FakeRedis(values), open);
 
         killSwitch.applyStartState();
@@ -74,7 +74,7 @@ class DemoKillSwitchTest {
 
     @Test
     void shouldFailOpenWhenRedisIsUnreachable() {
-        DemoProperties enabled = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", false);
+        DemoProperties enabled = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
         DemoKillSwitch killSwitch = new DemoKillSwitch(new BrokenRedis(), enabled);
 
         // Quota counters live in the same Redis, so refusing traffic here would be a second

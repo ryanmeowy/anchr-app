@@ -28,6 +28,9 @@ public record DemoProperties(
         @DefaultValue("cn-shanghai") String captchaRegion,
         @DefaultValue("") String captchaAccessKeyId,
         @DefaultValue("") String captchaAccessKeySecret,
+        @DefaultValue("") String captchaEkey,
+        @DefaultValue("false") boolean captchaEncryptSceneId,
+        @DefaultValue("3600") int captchaSceneIdTtlSeconds,
         @DefaultValue("false") boolean startClosed
 ) {
 
@@ -49,6 +52,14 @@ public record DemoProperties(
                         "app.demo.captcha.scene-id is required when the demo is enabled"
                                 + " and CAPTCHA verification is on");
             }
+            if (captchaEncryptSceneId && blank(captchaEkey)) {
+                throw new IllegalArgumentException(
+                        "app.demo.captcha.ekey is required when encryption mode is on");
+            }
+            if (captchaSceneIdTtlSeconds < 1 || captchaSceneIdTtlSeconds > 86_400) {
+                throw new IllegalArgumentException(
+                        "app.demo.captcha.scene-id-ttl-seconds must be between 1 and 86400");
+            }
             if (blank(captchaAccessKeyId) || blank(captchaAccessKeySecret)) {
                 throw new IllegalArgumentException(
                         "app.demo.captcha.access-key-id and access-key-secret are required"
@@ -68,6 +79,21 @@ public record DemoProperties(
 
 
 
+    /**
+     * What the browser receives instead of the raw scenario id.
+     *
+     * <p>With encryption mode on this is a short-lived AES token; otherwise the id passes through
+     * unchanged. The decision stays on the server so the toggle cannot drift from the console.
+     */
+    public String sceneIdForClient() {
+        String raw = sceneId();
+        if (!captchaVerificationActive() || !captchaEncryptSceneId || raw.isBlank()) {
+            return raw;
+        }
+        return com.anchr.core.integration.security.CaptchaSceneIdEncryptor.encrypt(
+                raw, captchaEkey, captchaSceneIdTtlSeconds);
+    }
+
     public String sceneId() {
         return captchaSceneId == null ? "" : captchaSceneId;
     }
@@ -82,7 +108,8 @@ public record DemoProperties(
 
     /** All defaults: the demo is disabled and every limit is the production value. */
     public static DemoProperties defaults() {
-        return new DemoProperties(false, 5, 8, 80, 50, 10, 1, true, "", "", "cn-shanghai", "", "", false);
+        return new DemoProperties(false, 5, 8, 80, 50, 10, 1, true, "", "", "cn-shanghai",
+                "", "", "", false, 3600, false);
     }
 
     private static void requirePositive(int value, String name) {

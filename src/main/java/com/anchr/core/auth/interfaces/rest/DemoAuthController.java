@@ -64,7 +64,7 @@ public class DemoAuthController {
                 demoProperties.enabled(),
                 killSwitch.isOn(),
                 demoProperties.tokenQuota(),
-                demoProperties.sceneId(),
+                demoProperties.sceneIdForClient(),
                 demoProperties.prefix()));
     }
 

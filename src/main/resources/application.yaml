@@ -49,6 +49,10 @@ app:
     captcha-region: ${APP_DEMO_CAPTCHA_REGION:cn-shanghai}
     captcha-access-key-id: ${APP_DEMO_CAPTCHA_ACCESS_KEY_ID:}
     captcha-access-key-secret: ${APP_DEMO_CAPTCHA_ACCESS_KEY_SECRET:}
+    # Encryption mode (V3): the browser receives an AES token instead of the raw scene id.
+    captcha-ekey: ${APP_DEMO_CAPTCHA_EKEY:}
+    captcha-encrypt-scene-id: ${APP_DEMO_CAPTCHA_ENCRYPT_SCENE_ID:false}
+    captcha-scene-id-ttl-seconds: ${APP_DEMO_CAPTCHA_SCENE_ID_TTL_SECONDS:3600}
     # Boot with the demo already stopped; a restart never reopens a switch someone closed.
     start-closed: ${APP_DEMO_START_CLOSED:false}
   docling:

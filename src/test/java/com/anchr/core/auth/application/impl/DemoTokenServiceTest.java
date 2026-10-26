@@ -26,7 +26,7 @@ class DemoTokenServiceTest {
     @BeforeEach
     void setUp() {
         values = new ConcurrentHashMap<>();
-        DemoProperties properties = new DemoProperties(true, 5, 8, 80, 2, 10, 1, false, "", "", "cn-shanghai", "", "", false);
+        DemoProperties properties = new DemoProperties(true, 5, 8, 80, 2, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
         service = new DemoTokenService(new FakeRedisTemplate(values),
                 new ObjectMapper(), properties);
     }

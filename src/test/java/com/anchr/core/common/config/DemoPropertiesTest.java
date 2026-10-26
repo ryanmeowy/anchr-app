@@ -24,26 +24,26 @@ class DemoPropertiesTest {
 
     @Test
     void mustRejectNonPositiveLimits() {
-        assertThatThrownBy(() -> new DemoProperties(false, 0, 8, 80, 50, 10, 1, true, "", "", "cn-shanghai", "", "", false))
+        assertThatThrownBy(() -> new DemoProperties(false, 0, 8, 80, 50, 10, 1, true, "", "", "cn-shanghai", "", "", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("token-ttl-hours");
-        assertThatThrownBy(() -> new DemoProperties(false, 5, 0, 80, 50, 10, 1, true, "", "", "cn-shanghai", "", "", false))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 0, 80, 50, 10, 1, true, "", "", "cn-shanghai", "", "", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("token-quota");
-        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 0, 50, 10, 1, true, "", "", "cn-shanghai", "", "", false))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 0, 50, 10, 1, true, "", "", "cn-shanghai", "", "", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("daily-operation-limit");
-        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 0, 10, 1, true, "", "", "cn-shanghai", "", "", false))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 0, 10, 1, true, "", "", "cn-shanghai", "", "", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("daily-token-limit");
-        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 50, 10, 0, true, "", "", "cn-shanghai", "", "", false))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 50, 10, 0, true, "", "", "cn-shanghai", "", "", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("upload-max-files");
     }
 
     @Test
     void mustRejectNegativeCooldown() {
-        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 50, -1, 1, true, "", "", "cn-shanghai", "", "", false))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 50, -1, 1, true, "", "", "cn-shanghai", "", "", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("issue-cooldown-minutes");
     }
@@ -51,32 +51,28 @@ class DemoPropertiesTest {
     @Test
     void mustRequireCredentialsWhenEnabledWithVerification() {
         // Scene id missing.
-        assertThatThrownBy(() -> new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, true, "", "", "cn-shanghai", "ak", "secret", false))
+        assertThatThrownBy(() -> new DemoProperties(true, 5, 8, 80, 50, 10, 1, true, "", "", "cn-shanghai", "ak", "secret", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("scene-id");
     }
 
     @Test
     void mustRequireAccessKeyWhenEnabledWithVerification() {
-        assertThatThrownBy(() -> new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, true, "scene-1", "", "cn-shanghai", "", "secret", false))
+        assertThatThrownBy(() -> new DemoProperties(true, 5, 8, 80, 50, 10, 1, true, "scene-1", "", "cn-shanghai", "", "secret", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("access-key-id");
     }
 
     @Test
     void mustRequireAccessSecretWhenEnabledWithVerification() {
-        assertThatThrownBy(() -> new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, true, "scene-1", "", "cn-shanghai", "ak", "", false))
+        assertThatThrownBy(() -> new DemoProperties(true, 5, 8, 80, 50, 10, 1, true, "scene-1", "", "cn-shanghai", "ak", "", "", false, 3600, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("access-key-secret");
     }
 
     @Test
     void shouldAllowEnabledDemoWithoutCredentialsWhenVerificationIsOff() {
-        DemoProperties properties = new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", false);
+        DemoProperties properties = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
 
         assertThat(properties.enabled()).isTrue();
         assertThat(properties.captchaVerificationActive()).isFalse();
@@ -84,8 +80,7 @@ class DemoPropertiesTest {
 
     @Test
     void verificationShouldRequireBothSwitchesOn() {
-        DemoProperties enabled = new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, true, "scene-1", "prefix-1", "cn-shanghai", "ak", "secret", false);
+        DemoProperties enabled = new DemoProperties(true, 5, 8, 80, 50, 10, 1, true, "scene-1", "prefix-1", "cn-shanghai", "ak", "secret", "", false, 3600, false);
 
         assertThat(enabled.captchaVerificationActive()).isTrue();
         assertThat(enabled.hasCaptchaCredentials()).isTrue();

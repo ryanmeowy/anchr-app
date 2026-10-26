@@ -91,7 +91,7 @@ class IngestionUploadLimitDemoTest {
     }
 
     private DemoProperties demoProperties() {
-        return new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", false);
+        return new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
     }
 
     private IngestionTaskCreateUseCase useCaseFor(DemoProperties properties) {
