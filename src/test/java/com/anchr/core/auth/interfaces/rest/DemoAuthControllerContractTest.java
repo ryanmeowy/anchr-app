@@ -55,7 +55,7 @@ class DemoAuthControllerContractTest {
     }
 
     private DemoProperties demoEnabled() {
-        return new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "");
+        return new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", false);
     }
 
     @Test

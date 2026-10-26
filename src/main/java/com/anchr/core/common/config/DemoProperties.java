@@ -24,7 +24,8 @@ public record DemoProperties(
         @DefaultValue("1") int uploadMaxFiles,
         @DefaultValue("true") boolean turnstileEnabled,
         @DefaultValue("") String turnstileSiteKey,
-        @DefaultValue("") String turnstileSecretKey
+        @DefaultValue("") String turnstileSecretKey,
+        @DefaultValue("false") boolean startClosed
 ) {
 
     public DemoProperties {
@@ -59,7 +60,7 @@ public record DemoProperties(
 
     /** All defaults: the demo is disabled and every limit is the production value. */
     public static DemoProperties defaults() {
-        return new DemoProperties(false, 5, 8, 80, 50, 10, 1, true, "", "");
+        return new DemoProperties(false, 5, 8, 80, 50, 10, 1, true, "", "", false);
     }
 
     private static void requirePositive(int value, String name) {

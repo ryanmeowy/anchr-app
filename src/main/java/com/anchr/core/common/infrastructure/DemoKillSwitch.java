@@ -4,6 +4,8 @@ import com.anchr.core.common.config.DemoProperties;
 import com.anchr.core.common.constant.DemoConstant;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +30,35 @@ public class DemoKillSwitch {
 
     private volatile boolean cachedOn = false;
     private volatile long cachedUntil = 0L;
+
+    /**
+     * Applies {@code app.demo.start-closed} once, so a deployment can boot with the demo already
+     * stopped. Without this a restart would silently reopen traffic that someone had closed.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void applyStartState() {
+        if (!demoProperties.enabled()) {
+            return;
+        }
+        boolean startClosed = demoProperties.startClosed();
+        if (startClosed) {
+            set(true);
+        } else if ("1".equals(readStored())) {
+            // A previous process left the switch on; keep it on rather than reopen by accident.
+            cachedOn = true;
+            cachedUntil = System.currentTimeMillis() + CACHE_MILLIS;
+            log.warn("Demo kill switch restored from Redis as ON");
+        }
+    }
+
+    private String readStored() {
+        try {
+            return redisTemplate.opsForValue().get(DemoConstant.KILL_SWITCH_KEY);
+        } catch (RuntimeException exception) {
+            log.warn("Demo kill switch unreadable at startup: {}", exception.getMessage());
+            return null;
+        }
+    }
 
     public boolean isOn() {
         if (!demoProperties.enabled()) {

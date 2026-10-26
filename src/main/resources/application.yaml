@@ -44,6 +44,8 @@ app:
     turnstile-enabled: ${APP_DEMO_TURNSTILE_ENABLED:true}
     turnstile-site-key: ${APP_DEMO_TURNSTILE_SITE_KEY:}
     turnstile-secret-key: ${APP_DEMO_TURNSTILE_SECRET_KEY:}
+    # Boot with the demo already stopped; a restart never reopens a switch someone closed.
+    start-closed: ${APP_DEMO_START_CLOSED:false}
   docling:
     base-url: ${APP_DOCLING_BASE_URL}
     api-token: ${APP_DOCLING_API_TOKEN}

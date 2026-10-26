@@ -21,8 +21,7 @@ class IngestionCapabilityDemoLimitTest {
 
     @Test
     void demoDeploymentNarrowsTheBatchLimitToOneFile() {
-        DemoProperties demo = new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, false, "", "");
+        DemoProperties demo = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", false);
         IngestionCapabilityService service = new IngestionCapabilityService(demo);
 
         assertThat(service.maxFilesPerBatch()).isEqualTo(1);

@@ -24,48 +24,40 @@ class DemoPropertiesTest {
 
     @Test
     void mustRejectNonPositiveLimits() {
-        assertThatThrownBy(() -> new DemoProperties(
-                false, 0, 8, 80, 50, 10, 1, true, "", ""))
+        assertThatThrownBy(() -> new DemoProperties(false, 0, 8, 80, 50, 10, 1, true, "", "", false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("token-ttl-hours");
-        assertThatThrownBy(() -> new DemoProperties(
-                false, 5, 0, 80, 50, 10, 1, true, "", ""))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 0, 80, 50, 10, 1, true, "", "", false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("token-quota");
-        assertThatThrownBy(() -> new DemoProperties(
-                false, 5, 8, 0, 50, 10, 1, true, "", ""))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 0, 50, 10, 1, true, "", "", false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("daily-operation-limit");
-        assertThatThrownBy(() -> new DemoProperties(
-                false, 5, 8, 80, 0, 10, 1, true, "", ""))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 0, 10, 1, true, "", "", false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("daily-token-limit");
-        assertThatThrownBy(() -> new DemoProperties(
-                false, 5, 8, 80, 50, 10, 0, true, "", ""))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 50, 10, 0, true, "", "", false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("upload-max-files");
     }
 
     @Test
     void mustRejectNegativeCooldown() {
-        assertThatThrownBy(() -> new DemoProperties(
-                false, 5, 8, 80, 50, -1, 1, true, "", ""))
+        assertThatThrownBy(() -> new DemoProperties(false, 5, 8, 80, 50, -1, 1, true, "", "", false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("issue-cooldown-minutes");
     }
 
     @Test
     void mustRequireSecretWhenEnabledWithVerification() {
-        assertThatThrownBy(() -> new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, true, "site", ""))
+        assertThatThrownBy(() -> new DemoProperties(true, 5, 8, 80, 50, 10, 1, true, "site", "", false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("turnstile-secret-key");
     }
 
     @Test
     void shouldAllowEnabledDemoWithoutSecretWhenVerificationIsOff() {
-        DemoProperties properties = new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, false, "", "");
+        DemoProperties properties = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", false);
 
         assertThat(properties.enabled()).isTrue();
         assertThat(properties.turnstileVerificationActive()).isFalse();
@@ -73,8 +65,7 @@ class DemoPropertiesTest {
 
     @Test
     void verificationShouldRequireBothSwitchesOn() {
-        DemoProperties enabled = new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, true, "site", "secret-value-1234");
+        DemoProperties enabled = new DemoProperties(true, 5, 8, 80, 50, 10, 1, true, "site", "secret-value-1234", false);
 
         assertThat(enabled.turnstileVerificationActive()).isTrue();
         assertThat(enabled.hasTurnstileSecret()).isTrue();

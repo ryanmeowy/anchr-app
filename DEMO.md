@@ -87,6 +87,7 @@ git merge origin/main
 | `APP_DEMO_TURNSTILE_ENABLED` | `true` | Turnstile 开关 |
 | `APP_DEMO_TURNSTILE_SITE_KEY` | 空 | Cloudflare sitekey |
 | `APP_DEMO_TURNSTILE_SECRET_KEY` | 空 | Cloudflare secret |
+| `APP_DEMO_START_CLOSED` | `false` | 启动即熔断；重启不会误开已关闭的开关 |
 
 演示环境另需：
 

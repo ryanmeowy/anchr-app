@@ -2,6 +2,7 @@ package com.anchr.core.common.infrastructure;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.config.DemoProperties;
+import com.anchr.core.common.constant.DemoConstant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.Test;
@@ -15,7 +16,7 @@ class DemoKillSwitchTest {
     @Test
     void shouldBeOffWhenTheDemoIsDisabledRegardlessOfRedis() {
         Map<String, String> values = new ConcurrentHashMap<>();
-        values.put(DemoConstantKey.KILL, "1");
+        values.put(DemoConstant.KILL_SWITCH_KEY, "1");
         DemoKillSwitch killSwitch = new DemoKillSwitch(
                 new FakeRedis(values), DemoProperties.defaults());
 
@@ -25,8 +26,7 @@ class DemoKillSwitchTest {
     @Test
     void shouldReflectTheStoredFlag() {
         Map<String, String> values = new ConcurrentHashMap<>();
-        DemoProperties enabled = new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, false, "", "");
+        DemoProperties enabled = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", false);
         DemoKillSwitch killSwitch = new DemoKillSwitch(new FakeRedis(values), enabled);
 
         assertThat(killSwitch.isOn()).isFalse();
@@ -37,18 +37,51 @@ class DemoKillSwitchTest {
     }
 
     @Test
+    void startClosedShouldStopTrafficAtBoot() {
+        Map<String, String> values = new ConcurrentHashMap<>();
+        DemoProperties closed = new DemoProperties(
+                true, 5, 8, 80, 50, 10, 1, false, "", "", true);
+        DemoKillSwitch killSwitch = new DemoKillSwitch(new FakeRedis(values), closed);
+
+        killSwitch.applyStartState();
+
+        assertThat(killSwitch.isOn()).isTrue();
+        assertThat(values.get(DemoConstant.KILL_SWITCH_KEY)).isEqualTo("1");
+    }
+
+    @Test
+    void restartShouldKeepASwitchSomebodyAlreadyClosed() {
+        Map<String, String> values = new ConcurrentHashMap<>();
+        values.put(DemoConstant.KILL_SWITCH_KEY, "1");
+        DemoProperties open = new DemoProperties(
+                true, 5, 8, 80, 50, 10, 1, false, "", "", false);
+        DemoKillSwitch killSwitch = new DemoKillSwitch(new FakeRedis(values), open);
+
+        killSwitch.applyStartState();
+
+        assertThat(killSwitch.isOn()).isTrue();
+    }
+
+    @Test
+    void startStateShouldBeIgnoredWhileTheDemoIsDisabled() {
+        Map<String, String> values = new ConcurrentHashMap<>();
+        DemoKillSwitch killSwitch = new DemoKillSwitch(
+                new FakeRedis(values), DemoProperties.defaults());
+
+        killSwitch.applyStartState();
+
+        assertThat(killSwitch.isOn()).isFalse();
+        assertThat(values).isEmpty();
+    }
+
+    @Test
     void shouldFailOpenWhenRedisIsUnreachable() {
-        DemoProperties enabled = new DemoProperties(
-                true, 5, 8, 80, 50, 10, 1, false, "", "");
+        DemoProperties enabled = new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", false);
         DemoKillSwitch killSwitch = new DemoKillSwitch(new BrokenRedis(), enabled);
 
         // Quota counters live in the same Redis, so refusing traffic here would be a second
         // outage on top of the first.
         assertThat(killSwitch.isOn()).isFalse();
-    }
-
-    private static final class DemoConstantKey {
-        private static final String KILL = "demo:killswitch";
     }
 
     private static final class FakeRedis extends StringRedisTemplate {

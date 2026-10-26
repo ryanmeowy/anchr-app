@@ -46,8 +46,7 @@ class DemoQuotaInterceptorTest {
     }
 
     private void rebuild() {
-        DemoProperties properties = new DemoProperties(
-                true, 5, tokenQuota, dailyLimit, 50, 10, 1, false, "", "");
+        DemoProperties properties = new DemoProperties(true, 5, tokenQuota, dailyLimit, 50, 10, 1, false, "", "", false);
         DemoKillSwitch killSwitch = new DemoKillSwitch(
                 new CountingRedisTemplate(counters), properties);
         interceptor = new DemoQuotaInterceptor(
