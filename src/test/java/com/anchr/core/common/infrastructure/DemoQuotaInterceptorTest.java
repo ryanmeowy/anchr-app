@@ -144,6 +144,17 @@ class DemoQuotaInterceptorTest {
     }
 
     @Test
+    void ownerTokenShouldNotSpendTheVisitorBudget() throws Exception {
+        UserContextHolder.set(new RequestUserContext("system", "ADMIN", TOKEN_HASH));
+
+        boolean allowed = interceptor.preHandle(new MockHttpServletRequest(),
+                new MockHttpServletResponse(), handler(new BillableController(), "ask"));
+
+        assertThat(allowed).isTrue();
+        assertThat(counters.values).isEmpty();
+    }
+
+    @Test
     void killSwitchShouldRejectBillableCalls() throws Exception {
         signIn("demo_a");
         counters.values.put(DemoConstant.KILL_SWITCH_KEY, "1");

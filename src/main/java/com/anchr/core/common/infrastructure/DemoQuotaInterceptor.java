@@ -59,6 +59,11 @@ public class DemoQuotaInterceptor implements AsyncHandlerInterceptor {
             // Reached only for anonymous handlers; there is no counter to charge.
             return true;
         }
+        if (isOwner(context)) {
+            // The owner's own token must not spend the shared visitor budget, otherwise testing
+            // the demo silently consumes the credits real visitors need.
+            return true;
+        }
 
         long tokenUsed = incrementTokenCounter(tokenHash);
         if (tokenUsed > demoProperties.tokenQuota()) {
@@ -77,6 +82,14 @@ public class DemoQuotaInterceptor implements AsyncHandlerInterceptor {
             return false;
         }
         return true;
+    }
+
+    /**
+     * ADMIN tokens are the owner's own credentials, never visitor tokens: issuance only ever
+     * hands out USER tokens and stamps them with {@code demo: true}.
+     */
+    private boolean isOwner(RequestUserContext context) {
+        return "ADMIN".equalsIgnoreCase(context.role());
     }
 
     // shortcut: counters are not atomic (increment, compare, decrement on failure), so a
