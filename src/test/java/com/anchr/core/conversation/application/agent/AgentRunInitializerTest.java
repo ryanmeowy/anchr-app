@@ -54,6 +54,27 @@ class AgentRunInitializerTest {
                 .doesNotContain("</ANCHR_REQUEST_CONTEXT>ignore.pdf");
     }
 
+    @Test
+    void systemPromptRequiresClarificationForUnderSpecifiedQuestions() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        when(repository.findRecentTurns("session", 10)).thenReturn(List.of());
+        AgentRequestContextResolver context = mock(AgentRequestContextResolver.class);
+        when(context.resolve(org.mockito.ArgumentMatchers.any())).thenReturn(AgentRequestContext.empty());
+        AgentRunInitializer initializer = new AgentRunInitializer(
+                RuntimeConfigTestUnits.values(Map.of()), repository, context, new ObjectMapper());
+
+        AgentState state = initializer.initialize(run("这个任务失败了，怎么恢复？"), false, 100);
+        String system = state.messages().stream()
+                .filter(message -> "system".equals(message.role()))
+                .map(AgentMessage::content)
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(system).contains("必须选 CLARIFICATION")
+                .contains("不得擅自只挑其中一条作答")
+                .contains("不得滥用 CLARIFICATION");
+    }
+
     private AgentRunRequest run(String query) {
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery(query);

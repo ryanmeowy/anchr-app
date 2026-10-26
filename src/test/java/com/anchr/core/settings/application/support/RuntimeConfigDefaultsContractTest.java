@@ -59,7 +59,9 @@ class RuntimeConfigDefaultsContractTest {
                         "intentContextTurnLimit", Integer.toString(conversation.intentContextTurnLimit()),
                         "intentTimeoutSeconds", Long.toString(conversation.intentTimeout().toSeconds()),
                         "legacyEvidenceFallbackEnabled",
-                        Boolean.toString(conversation.legacyEvidenceFallbackEnabled())));
+                        Boolean.toString(conversation.legacyEvidenceFallbackEnabled()),
+                        "evidenceOutlineEnabled",
+                        Boolean.toString(conversation.evidenceOutlineEnabled())));
         assertThat(serializedDefaults(RuntimeConfigType.AGENT))
                 .containsExactlyInAnyOrderEntriesOf(Map.ofEntries(
                         Map.entry("enabled", Boolean.toString(agent.enabled())),

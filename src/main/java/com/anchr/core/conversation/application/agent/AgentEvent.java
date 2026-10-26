@@ -21,7 +21,8 @@ sealed interface AgentEvent permits AgentEvent.RunStarted, AgentEvent.ModelCompl
                          int attempt, long durationMs, long occurredAt) implements AgentEvent {}
     record ToolFailed(AgentToolCall call, RuntimeException cause, int attempt,
                       long durationMs, long occurredAt) implements AgentEvent {}
-    record AnswerAccepted(VerifiedAgentAnswer answer, long occurredAt) implements AgentEvent {}
+    record AnswerAccepted(VerifiedAgentAnswer answer, AgentTokenUsage usage,
+                          long occurredAt) implements AgentEvent {}
     record AnswerRejected(String code, String message, String fallbackReason,
                           String validationToolCallId, String validationToolName,
                           long occurredAt) implements AgentEvent {}

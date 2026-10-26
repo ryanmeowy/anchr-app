@@ -97,7 +97,7 @@ public class RuntimeConfigCatalog {
         values.put(SearchRuntimeConfigKey.MAX_CANDIDATES, "200");
         values.put(SearchRuntimeConfigKey.TEXT_TOP_K, "80");
         values.put(SearchRuntimeConfigKey.DOCUMENT_IMAGE_TOP_K, "40");
-        values.put(SearchRuntimeConfigKey.TEXT_SIMILARITY, "0.75");
+        values.put(SearchRuntimeConfigKey.TEXT_SIMILARITY, "0.45");
         values.put(SearchRuntimeConfigKey.DOCUMENT_IMAGE_SIMILARITY, "0.7");
         values.put(SearchRuntimeConfigKey.MAX_DOC_CHARS, "1200");
         values.put(SearchRuntimeConfigKey.WINDOW_ENABLED, "true");
@@ -128,6 +128,8 @@ public class RuntimeConfigCatalog {
         values.put(ConversationRuntimeConfigKey.INTENT_TIMEOUT_SECONDS, "5");
         values.put(
                 ConversationRuntimeConfigKey.LEGACY_EVIDENCE_FALLBACK_ENABLED, "false");
+        values.put(
+                ConversationRuntimeConfigKey.EVIDENCE_OUTLINE_ENABLED, "false");
         return values;
     }
 
@@ -200,7 +202,7 @@ public class RuntimeConfigCatalog {
         ConversationRuntimeConfigKey conversationKey =
                 (ConversationRuntimeConfigKey) key;
         return switch (conversationKey) {
-            case INTENT_ROUTING_ENABLED, LEGACY_EVIDENCE_FALLBACK_ENABLED ->
+            case INTENT_ROUTING_ENABLED, LEGACY_EVIDENCE_FALLBACK_ENABLED, EVIDENCE_OUTLINE_ENABLED ->
                     booleanText(value, key);
             default -> positiveInteger(value, key);
         };

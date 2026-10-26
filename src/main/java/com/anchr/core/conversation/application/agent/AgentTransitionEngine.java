@@ -165,7 +165,9 @@ public final class AgentTransitionEngine {
         boolean modelAttempt = !noEvidence && !cited && state.streamingSupported()
                 && StringUtils.hasText(event.answer().answer())
                 && state.budget().remainingMillis(event.occurredAt()) >= 1_000L;
-        AgentState next = state.beginPresentation(modelAttempt);
+        AgentState next = state.withModelResult(event.usage().promptTokens(), event.usage().completionTokens(),
+                state.traceOrder());
+        next = next.beginPresentation(modelAttempt);
         List<AgentSignal> signals = noEvidence
                 ? List.of(new AgentSignal.NoEvidenceDeclared()) : List.of();
         int order = modelAttempt ? next.traceOrder() + 1 : next.traceOrder();
@@ -235,7 +237,7 @@ public final class AgentTransitionEngine {
                     "stepOrder", order, "decision", "FINAL_RESPONSE", "evidenceCount", selectedEvidenceCount(next),
                     "citationCount", citations, "durationMs", event.durationMs())));
             AgentTransition presentation = answerAccepted(next,
-                    new AgentEvent.AnswerAccepted(verified, event.occurredAt()));
+                    new AgentEvent.AnswerAccepted(verified, AgentTokenUsage.EMPTY, event.occurredAt()));
             signals.addAll(presentation.signals());
             return new AgentTransition(presentation.nextState(), presentation.command(), signals, presentation.terminal());
         }

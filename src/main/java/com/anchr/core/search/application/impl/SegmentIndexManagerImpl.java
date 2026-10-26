@@ -1,6 +1,7 @@
 package com.anchr.core.search.application.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import com.anchr.core.common.constant.SegmentIndexConstant;
 import com.anchr.core.search.application.SegmentIndexManager;
 import com.anchr.core.search.application.SegmentRebuildMutationTracker;
 import com.anchr.core.search.application.SegmentIndexWriteBarrier;
@@ -34,8 +35,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static com.anchr.core.common.constant.SegmentIndexConstant.READ_ALIAS;
-import static com.anchr.core.common.constant.SegmentIndexConstant.WRITE_ALIAS;
 
 @Slf4j
 @Service
@@ -86,7 +85,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
         } else {
             markReadyFromStatus(s);
             log.info("Boot: index exists via alias [{}], actualDim={}, expectedDim={}",
-                    READ_ALIAS, s.getActualDim(), s.getExpectedDim());
+                    SegmentIndexConstant.readAlias(), s.getActualDim(), s.getExpectedDim());
         }
     }
 
@@ -217,8 +216,8 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
         } catch (Exception e) {
             cleanupFailedTargetIndex(
                     physicalIndexName,
-                    READ_ALIAS,
-                    WRITE_ALIAS);
+                    SegmentIndexConstant.readAlias(),
+                    SegmentIndexConstant.writeAlias());
             throw e;
         }
     }
@@ -412,7 +411,7 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
             log.error("Rebuild: migration or alias switch failed for new index [{}]",
                     newPhysicalIndex, e);
             stopMutationCapture(claim.taskId());
-            cleanupFailedTargetIndex(newPhysicalIndex, READ_ALIAS, WRITE_ALIAS);
+            cleanupFailedTargetIndex(newPhysicalIndex, SegmentIndexConstant.readAlias(), SegmentIndexConstant.writeAlias());
             throw e;
         }
     }

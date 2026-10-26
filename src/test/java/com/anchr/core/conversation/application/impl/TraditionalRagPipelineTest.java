@@ -41,6 +41,62 @@ class TraditionalRagPipelineTest {
     }
 
     @Test
+    void clarificationAnswerKeepsBranchCitations() {
+        var retrieval = mock(ConversationRetrievalOrchestrator.class);
+        var answers = mock(AnswerGenerationService.class);
+        var pipeline = new ConversationMessagePipeline(null, retrieval, new ConversationCitationMapper(),
+                new ConversationResultCardMapper(), answers);
+        var request = new ConversationMessageRequestDTO();
+        request.setQuery("这个任务失败了，怎么恢复？");
+        var rewrite = new RewriteResult();
+        rewrite.setRewrittenQuery("这个任务失败了，怎么恢复？");
+        var result = new ConversationRetrievalResult();
+        result.setTopCandidates(List.of(ConversationRetrievalCandidate.builder().segmentId("s1").assetId("a1")
+                .kbId("kb1").segmentType("TEXT_CHUNK").content("摄取任务失败后最多重试 3 次").score(0.9).build()));
+        when(retrieval.retrieve(anyString(), any(), any(), any(), any())).thenReturn(result);
+        var clarification = new AnswerGenerationResult();
+        clarification.setAnswerText("问题存在多种可能。摄取任务失败后最多重试 3 次[1-1]；请指定是哪一类任务。");
+        clarification.setFallbackUsed(true);
+        clarification.setClarificationRequested(true);
+        clarification.setFallbackReason("no_evidence_clarification_requested");
+        clarification.setAnswerInputSegmentIds(List.of("s1"));
+        when(answers.generate(anyString(), anyString(), any(), anyList(), anyList())).thenReturn(clarification);
+
+        var pipelineResult = pipeline.execute(request, rewrite);
+
+        assertThat(pipelineResult.answerCitations()).hasSize(1);
+        assertThat(pipelineResult.answerCitations().getFirst().getSegmentId()).isEqualTo("s1");
+        assertThat(AnswerStatus.from(pipelineResult.answerGenerationResult())).isEqualTo(AnswerStatus.CLARIFICATION);
+    }
+
+    @Test
+    void noEvidenceAnswerStillDropsCitations() {
+        var retrieval = mock(ConversationRetrievalOrchestrator.class);
+        var answers = mock(AnswerGenerationService.class);
+        var pipeline = new ConversationMessagePipeline(null, retrieval, new ConversationCitationMapper(),
+                new ConversationResultCardMapper(), answers);
+        var request = new ConversationMessageRequestDTO();
+        request.setQuery("没有资料的问题");
+        var rewrite = new RewriteResult();
+        rewrite.setRewrittenQuery("没有资料的问题");
+        var result = new ConversationRetrievalResult();
+        result.setTopCandidates(List.of(ConversationRetrievalCandidate.builder().segmentId("s1").assetId("a1")
+                .kbId("kb1").segmentType("TEXT_CHUNK").content("无关内容").score(0.9).build()));
+        when(retrieval.retrieve(anyString(), any(), any(), any(), any())).thenReturn(result);
+        var noEvidence = new AnswerGenerationResult();
+        noEvidence.setAnswerText("本次资料未通过证据检查，无法生成可靠回答。");
+        noEvidence.setFallbackUsed(true);
+        noEvidence.setFallbackReason("no_evidence_no_grounding_segment");
+        noEvidence.setAnswerInputSegmentIds(List.of("s1"));
+        when(answers.generate(anyString(), anyString(), any(), anyList(), anyList())).thenReturn(noEvidence);
+
+        var pipelineResult = pipeline.execute(request, rewrite);
+
+        assertThat(pipelineResult.answerCitations()).isEmpty();
+        assertThat(AnswerStatus.from(pipelineResult.answerGenerationResult())).isEqualTo(AnswerStatus.NO_EVIDENCE);
+    }
+
+    @Test
     void emptyResultsDoNotTriggerAnotherSearch() {
         var retrieval = mock(ConversationRetrievalOrchestrator.class);
         var answers = mock(AnswerGenerationService.class);
@@ -52,5 +108,37 @@ class TraditionalRagPipelineTest {
         pipeline.execute(request, rewrite);
         verify(retrieval).retrieve(eq("不存在的实体"), any(), any(), any(), any());
         verifyNoMoreInteractions(retrieval);
+    }
+
+    @Test
+    void traceDtoExposesTheSegmentsThatWerePutInFrontOfTheModel() {
+        var request = new ConversationMessageRequestDTO();
+        request.setQuery("问题"); request.setLimit(5);
+        var rewrite = new RewriteResult(); rewrite.setRewrittenQuery("问题");
+        var result = new ConversationRetrievalResult();
+        result.setTopCandidates(List.of(
+                ConversationRetrievalCandidate.builder().segmentId("s1").assetId("a1")
+                        .kbId("kb1").segmentType("TEXT_CHUNK").content("c1").score(0.9).build(),
+                ConversationRetrievalCandidate.builder().segmentId("s2").assetId("a1")
+                        .kbId("kb1").segmentType("TEXT_CHUNK").content("c2").score(0.8).build()));
+        var generation = new AnswerGenerationResult();
+        generation.setAnswerInputSegmentIds(List.of("s1", "s2"));
+
+        var dto = new ConversationRetrievalTraceBuilder(new com.fasterxml.jackson.databind.ObjectMapper())
+                .buildTraceDto(request, rewrite, result, generation);
+
+        assertThat(dto.getAnswerInputSegmentIds()).containsExactly("s1", "s2");
+        assertThat(dto.getTopSegmentIds()).containsExactly("s1", "s2");
+    }
+
+    @Test
+    void traceDtoFallsBackToAnEmptyListWhenNoContextWasSelected() {
+        var request = new ConversationMessageRequestDTO(); request.setQuery("问题");
+        var rewrite = new RewriteResult(); rewrite.setRewrittenQuery("问题");
+
+        var dto = new ConversationRetrievalTraceBuilder(new com.fasterxml.jackson.databind.ObjectMapper())
+                .buildTraceDto(request, rewrite, new ConversationRetrievalResult(), new AnswerGenerationResult());
+
+        assertThat(dto.getAnswerInputSegmentIds()).isEmpty();
     }
 }

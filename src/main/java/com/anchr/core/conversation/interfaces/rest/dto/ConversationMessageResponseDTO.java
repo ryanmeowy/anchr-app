@@ -44,6 +44,12 @@ public class ConversationMessageResponseDTO implements Serializable {
         private Map<String, Integer> groupedResultCounts;
         private List<String> topSegmentIds;
         private List<String> topHitSources;
+        /**
+         * Segments that were actually fed into answer generation. Unlike {@code topSegmentIds}
+         * (the first few retrieval hits), this is the full context the model saw, so offline
+         * evaluation can attribute a missing fact to retrieval or to generation.
+         */
+        private List<String> answerInputSegmentIds;
         private Boolean answerFallback;
         private String answerFallbackReason;
     }

@@ -9,7 +9,8 @@ import java.util.*;
 /** Limits only traditional answer inputs; never changes retrieval or Agent policy. */
 public final class TraditionalRagEvidencePolicy {
     public static final int MAX_ASSETS = 5;
-    public static final int MAX_PER_ASSET = 3;
+    /** Kept equal to the retrieval per-asset/type limit so the evidence budget is the only cap. */
+    public static final int MAX_PER_ASSET = 6;
     public static final int MAX_SEGMENTS = 10;
     public static final int MAX_CONTEXT_CHARS = 24_000;
 

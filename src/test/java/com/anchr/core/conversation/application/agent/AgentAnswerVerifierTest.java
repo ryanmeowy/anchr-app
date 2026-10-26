@@ -47,7 +47,7 @@ class AgentAnswerVerifierTest {
         assertRejected(verifier.verify(state, knowledge(
                 "有效 {{segment:seg-1}}", List.of("seg-1", " "))), "INVALID_CITATION");
         assertRejected(verifier.verify(state, knowledge(
-                "有效 {{segment:seg-1}}", List.of("seg-1", "seg-2"))),
+                "只有伪造 Marker {{segment:forged}}", List.of("seg-1"))),
                 "CITATION_BINDING_MISMATCH");
         assertRejected(verifier.verify(state, knowledge(
                 "只有声明，没有 Marker", List.of("seg-1"))),
@@ -74,7 +74,144 @@ class AgentAnswerVerifierTest {
     }
 
     @Test
-    void enforcesTenUniqueTwelveTotalAndThreePerParagraphLimits() {
+    void normalizesCitationBindingInsteadOfRejectingWhenDeclarationsAndMarkersDisagree() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-2", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome declaredButUnmarked = verifier.verify(state, knowledge(
+                "A {{segment:seg-1}}，B {{segment:seg-3}}", List.of("seg-1", "seg-2", "seg-3")));
+        assertThat(declaredButUnmarked).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer declared = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) declaredButUnmarked).answer();
+        assertThat(declared.answer()).isEqualTo("A [1-1]，B [2-1]");
+        assertThat(declared.citations()).hasSize(2);
+
+        AgentAnswerValidationOutcome undeclaredMarker = verifier.verify(state, knowledge(
+                "A {{segment:seg-1}}，B {{segment:seg-3}}", List.of("seg-1")));
+        assertThat(undeclaredMarker).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        assertThat(((VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) undeclaredMarker).answer()).citations()).hasSize(2);
+    }
+
+    @Test
+    void normalizesModelAuthoredVisibleCitationsWhenTheDeclaredOrderReproducesThem() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A [1-1]，B [2-1]", List.of("seg-1", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).isEqualTo("A [1-1]，B [2-1]");
+        assertThat(answer.citations()).hasSize(2);
+    }
+
+    @Test
+    void rejectsModelAuthoredVisibleCitationsThatDoNotMatchTheDeclaredOrder() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        assertRejected(verifier.verify(state, knowledge(
+                "A [2-1]，B [1-1]", List.of("seg-1", "seg-3"))),
+                "UNTRUSTED_VISIBLE_CITATION");
+        assertRejected(verifier.verify(state, knowledge(
+                "A [1-2]", List.of("seg-1", "seg-3"))),
+                "UNTRUSTED_VISIBLE_CITATION");
+    }
+
+    @Test
+    void resolvesBareModelAuthoredGroupLabelsToTheFirstDeclaredSegmentOfThatDocument() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A [1]，B [2]", List.of("seg-1", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).isEqualTo("A [1-1]，B [2-1]");
+        assertThat(answer.citations()).hasSize(2);
+    }
+
+    @Test
+    void resolvesModelAuthoredGroupLabelsAndDropsDeclarationsWithoutVisibleCitations() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A [1-1]", List.of("seg-1", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).isEqualTo("A [1-1]");
+        assertThat(answer.citations()).hasSize(1);
+    }
+
+    @Test
+    void resolvesMixedAuthoredLabelAndInternalMarkersAgainstTheDeclaredOrder() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-2", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A {{segment:seg-1}}，B [1-2]", List.of("seg-1", "seg-2", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).doesNotContain("{{segment:");
+        assertThat(answer.citations()).hasSize(2);
+    }
+
+    @Test
+    void resolvesModelAuthoredGroupLabelsSpanningSeveralSegmentsOfTheSameDocument() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-2", "asset-1"),
+                evidence("seg-3", "asset-2")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "A [1-1]，B [1-2]，C [2-1]", List.of("seg-1", "seg-2", "seg-3")));
+
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).isEqualTo("A [1-1]，B [1-2]，C [2-1]");
+        assertThat(answer.citations()).hasSize(3);
+    }
+
+    @Test
+    void dropsMarkersForSegmentsOutsideCurrentRunEvidenceBeforeRejecting() {
+        AgentState state = state("STRICT").registerEvidence(List.of(
+                evidence("seg-1", "asset-1"),
+                evidence("seg-2", "asset-1")));
+
+        AgentAnswerValidationOutcome outcome = verifier.verify(state, knowledge(
+                "伪造 {{segment:forged}} 与 {{segment:seg-2}}", List.of("seg-1", "seg-2")));
+        assertThat(outcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        assertThat(answer.answer()).doesNotContain("forged").contains("[1-1]");
+        assertThat(answer.citations()).hasSize(1);
+
+        assertRejected(verifier.verify(state, knowledge(
+                "全部伪造 {{segment:forged}}", List.of("seg-1"))),
+                "CITATION_BINDING_MISMATCH");
+    }
+
+    @Test
+    void compactsCitationDensityInsteadOfRejectingBeyondLimits() {
         AgentState state = state("STRICT");
         List<ConversationRetrievalCandidate> evidence = IntStream.rangeClosed(1, 11)
                 .mapToObj(index -> evidence("seg-" + index, "asset-" + index))
@@ -89,27 +226,36 @@ class AgentAnswerVerifierTest {
                 .isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
 
         String elevenUnique = tenUnique + "\n\n段落 11 {{segment:seg-11}}";
-        assertRejected(verifier.verify(state, knowledge(elevenUnique,
-                IntStream.rangeClosed(1, 11).mapToObj(index -> "seg-" + index).toList())),
-                "CITATION_DENSITY_EXCEEDED");
+        AgentAnswerValidationOutcome elevenUniqueOutcome = verifier.verify(state, knowledge(elevenUnique,
+                IntStream.rangeClosed(1, 11).mapToObj(index -> "seg-" + index).toList()));
+        assertThat(elevenUniqueOutcome).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        assertThat(renderedMarkerCount(elevenUniqueOutcome)).isEqualTo(10);
 
         String twelveMarkers = IntStream.rangeClosed(1, 12)
                 .mapToObj(index -> "段落 " + index + " {{segment:seg-1}}")
                 .collect(Collectors.joining("\n\n"));
         assertThat(verifier.verify(state, knowledge(twelveMarkers, List.of("seg-1"))))
                 .isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
-        assertRejected(verifier.verify(state, knowledge(
-                twelveMarkers + "\n\n段落 13 {{segment:seg-1}}", List.of("seg-1"))),
-                "CITATION_DENSITY_EXCEEDED");
+        AgentAnswerValidationOutcome thirteenMarkers = verifier.verify(state, knowledge(
+                twelveMarkers + "\n\n段落 13 {{segment:seg-1}}", List.of("seg-1")));
+        assertThat(thirteenMarkers).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        assertThat(renderedMarkerCount(thirteenMarkers)).isEqualTo(12);
 
         assertThat(verifier.verify(state, knowledge(
                 "一段 {{segment:seg-1}} {{segment:seg-2}} {{segment:seg-3}}",
                 List.of("seg-1", "seg-2", "seg-3"))))
                 .isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
-        assertRejected(verifier.verify(state, knowledge(
+        AgentAnswerValidationOutcome fourInOneParagraph = verifier.verify(state, knowledge(
                 "一段 {{segment:seg-1}} {{segment:seg-2}} {{segment:seg-3}} {{segment:seg-4}}",
-                List.of("seg-1", "seg-2", "seg-3", "seg-4"))),
-                "CITATION_DENSITY_EXCEEDED");
+                List.of("seg-1", "seg-2", "seg-3", "seg-4")));
+        assertThat(fourInOneParagraph).isInstanceOf(AgentAnswerValidationOutcome.Verified.class);
+        assertThat(renderedMarkerCount(fourInOneParagraph)).isEqualTo(3);
+    }
+
+    private static int renderedMarkerCount(AgentAnswerValidationOutcome outcome) {
+        VerifiedCitedAnswer answer = (VerifiedCitedAnswer)
+                ((AgentAnswerValidationOutcome.Verified) outcome).answer();
+        return answer.answer().split("\\[\\d+-\\d+\\]", -1).length - 1;
     }
 
     private AgentFinalAnswer knowledge(String answer, List<String> ids) {

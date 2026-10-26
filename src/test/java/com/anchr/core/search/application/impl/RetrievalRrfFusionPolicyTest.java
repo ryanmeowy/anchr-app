@@ -1,5 +1,6 @@
 package com.anchr.core.search.application.impl;
 
+import com.anchr.core.conversation.application.impl.TraditionalRagEvidencePolicy;
 import com.anchr.core.search.domain.model.Segment;
 import com.anchr.core.search.domain.model.SegmentHit;
 import com.anchr.core.search.domain.model.SegmentRerankCandidate;
@@ -40,18 +41,25 @@ class RetrievalRrfFusionPolicyTest {
     }
 
     @Test
-    void diversifyShouldKeepFirstThreePerAssetAndSegmentTypeWithoutReorderingOthers() {
+    void diversifyShouldKeepFirstSixPerAssetAndSegmentTypeWithoutReorderingOthers() {
         List<SegmentRerankCandidate> candidates = List.of(
                 candidate("text-1", "asset-1", SegmentType.TEXT_CHUNK),
                 candidate("text-2", "asset-1", SegmentType.TEXT_CHUNK),
                 candidate("text-3", "asset-1", SegmentType.TEXT_CHUNK),
                 candidate("text-4", "asset-1", SegmentType.TEXT_CHUNK),
+                candidate("text-5", "asset-1", SegmentType.TEXT_CHUNK),
+                candidate("text-6", "asset-1", SegmentType.TEXT_CHUNK),
+                candidate("text-7", "asset-1", SegmentType.TEXT_CHUNK),
                 candidate("image-1", "asset-1", SegmentType.DOCUMENT_IMAGE),
-                candidate("text-5", "asset-2", SegmentType.TEXT_CHUNK));
+                candidate("text-8", "asset-2", SegmentType.TEXT_CHUNK));
 
         assertThat(policy.diversify(candidates))
                 .extracting(SegmentRerankCandidate::segmentId)
-                .containsExactly("text-1", "text-2", "text-3", "image-1", "text-5");
+                .containsExactly("text-1", "text-2", "text-3", "text-4", "text-5", "text-6",
+                        "image-1", "text-8");
+        assertThat(RetrievalRrfFusionPolicy.PER_ASSET_TYPE_LIMIT).isEqualTo(6);
+        assertThat(TraditionalRagEvidencePolicy.MAX_PER_ASSET)
+                .isEqualTo(RetrievalRrfFusionPolicy.PER_ASSET_TYPE_LIMIT);
     }
 
     private SegmentHit hit(

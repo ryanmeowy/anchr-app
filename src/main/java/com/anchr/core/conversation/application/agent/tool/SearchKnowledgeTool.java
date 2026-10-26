@@ -61,6 +61,7 @@ public class SearchKnowledgeTool implements AgentTool<SearchKnowledgeTool.Input>
                 input.limit() == null ? SEARCH_KNOWLEDGE_DEFAULT_LIMIT : input.limit());
         var retrieval = retrievalOrchestrator.retrieve(
                 rewrite.getRewrittenQuery(),
+                rewrite.getKeywords(),
                 input.limit() == null ? SEARCH_KNOWLEDGE_DEFAULT_LIMIT : input.limit(),
                 context.kbIds(),
                 normalizeModalities(input.modalities()), assets);

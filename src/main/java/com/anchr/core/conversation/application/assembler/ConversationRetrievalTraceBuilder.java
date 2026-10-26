@@ -68,6 +68,8 @@ public class ConversationRetrievalTraceBuilder {
         traceDTO.setGroupedResultCounts(toGroupedCounts(retrievalResult));
         traceDTO.setTopSegmentIds(extractTopSegmentIds(retrievalResult, 5));
         traceDTO.setTopHitSources(extractTopHitSources(retrievalResult, 6));
+        traceDTO.setAnswerInputSegmentIds(answerGenerationResult.getAnswerInputSegmentIds() == null
+                ? List.of() : List.copyOf(answerGenerationResult.getAnswerInputSegmentIds()));
         traceDTO.setAnswerFallback(answerGenerationResult.isFallbackUsed());
         traceDTO.setAnswerFallbackReason(answerGenerationResult.getFallbackReason());
         return traceDTO;

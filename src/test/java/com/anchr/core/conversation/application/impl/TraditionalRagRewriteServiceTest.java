@@ -64,6 +64,32 @@ class TraditionalRagRewriteServiceTest {
     }
 
     @Test
+    void keywordsBeyondEightAreCappedInsteadOfLosingResolvedQuestion() {
+        when(repository.findRecentTurns(anyString(), anyInt())).thenReturn(List.of());
+        when(model.generate(any(), any())).thenReturn("""
+                {"resolvedQuestion":"预算上限分别是多少？",
+                "keywords":["k1","k2","k3","k4","k5","k6","k7","k8","k9","k10"],
+                "rewriteReason":"多关键词","confidence":0.8}
+                """);
+        var result = service.rewrite("session", "预算上限分别是多少？");
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.getResolvedQuestion()).isEqualTo("预算上限分别是多少？");
+        assertThat(result.getRewrittenQuery()).isEqualTo("预算上限分别是多少？");
+        assertThat(result.getKeywords()).containsExactly("k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8");
+    }
+
+    @Test
+    void malformedKeywordItemsAreSkippedAndEmptyArrayStillKeepsResolvedQuestion() {
+        when(repository.findRecentTurns(anyString(), anyInt())).thenReturn(List.of());
+        when(model.generate(any(), any())).thenReturn(
+                "{\"resolvedQuestion\":\"组件何时生效？\",\"keywords\":[\"组件A\",\"\",\"超时\"]}");
+        var result = service.rewrite("session", "它何时生效？");
+        assertThat(result.isFallbackUsed()).isFalse();
+        assertThat(result.getRewrittenQuery()).isEqualTo("组件何时生效？");
+        assertThat(result.getKeywords()).containsExactly("组件A", "超时");
+    }
+
+    @Test
     void malformedOrMultipleQueriesFallBackWithoutAdditionalModelCalls() {
         when(repository.findRecentTurns(anyString(), anyInt())).thenReturn(List.of());
         for (String raw : List.of("not json", "{\"resolvedQuestion\":\"完整问题\",\"keywords\":\"a b\"}", "{\"keywords\":[\"a\"]}")) {

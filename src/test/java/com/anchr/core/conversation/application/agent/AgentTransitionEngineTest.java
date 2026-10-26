@@ -239,6 +239,32 @@ class AgentTransitionEngineTest {
         assertThat(transition.terminal().answer()).isEqualTo("已验证草稿");
     }
 
+    @Test
+    void answerAcceptedAddsPreAcceptanceRevisionUsageToTheRunCounters() {
+        AgentState planning = engine.transition(state(100, 10, 10),
+                new AgentEvent.RunStarted(100)).nextState();
+
+        AgentTransition transition = engine.transition(planning,
+                new AgentEvent.AnswerAccepted(new VerifiedPlainAnswer("答案"), new AgentTokenUsage(12, 7), 120));
+
+        assertThat(transition.nextState().promptTokens()).isEqualTo(planning.promptTokens() + 12);
+        assertThat(transition.nextState().completionTokens()).isEqualTo(planning.completionTokens() + 7);
+        assertThat(transition.nextState().stepCount()).isEqualTo(planning.stepCount());
+        assertThat(transition.nextState().traceOrder()).isEqualTo(planning.traceOrder());
+    }
+
+    @Test
+    void answerAcceptedWithoutUsageKeepsTheRunCountersUnchanged() {
+        AgentState planning = engine.transition(state(100, 10, 10),
+                new AgentEvent.RunStarted(100)).nextState();
+
+        AgentTransition transition = engine.transition(planning,
+                new AgentEvent.AnswerAccepted(new VerifiedPlainAnswer("答案"), AgentTokenUsage.EMPTY, 120));
+
+        assertThat(transition.nextState().promptTokens()).isEqualTo(planning.promptTokens());
+        assertThat(transition.nextState().completionTokens()).isEqualTo(planning.completionTokens());
+    }
+
     private AgentState state(long now, int maxSteps, int maxTools) {
         ConversationMessageRequestDTO request = new ConversationMessageRequestDTO();
         request.setQuery("问题");

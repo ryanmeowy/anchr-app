@@ -4,7 +4,8 @@ public enum ConversationRuntimeConfigKey implements RuntimeConfigKey {
     INTENT_ROUTING_ENABLED("intentRoutingEnabled"),
     INTENT_CONTEXT_TURN_LIMIT("intentContextTurnLimit"),
     INTENT_TIMEOUT_SECONDS("intentTimeoutSeconds"),
-    LEGACY_EVIDENCE_FALLBACK_ENABLED("legacyEvidenceFallbackEnabled");
+    LEGACY_EVIDENCE_FALLBACK_ENABLED("legacyEvidenceFallbackEnabled"),
+    EVIDENCE_OUTLINE_ENABLED("evidenceOutlineEnabled");
 
     private final String propertyName;
 
