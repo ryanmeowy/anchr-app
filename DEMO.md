@@ -199,6 +199,7 @@ DELETE FROM conversation_session WHERE user_id LIKE 'demo_%';
 | 熔断开 | — | 发券 503 `DEMO_DISABLED`，健康检查仍 200 |
 | 熔断关 | — | 5 秒内恢复，`closed=false` |
 | 上传限 1 个 | 传 2 个 | 400 `INVALID_REQUEST`，消息含 `Limit: 1` |
+| 重试端点计费 | quota=2 | `retry-failed`/`retry-item` 前 2 次进入（404），第 3 次 `DEMO_QUOTA_EXHAUSTED` |
 | **会话身份** | — | 库中 `conversation_session.user_id = demo_968eb37778d7`（**不是 `single_user`**） |
 | **跨访客隔离** | 甲有 2 个会话 | 乙查询得到 **0 个** |
 | SSRF 加固 | USER 票调 test-connection | 403 `AUTH_ROLE_FORBIDDEN` |
