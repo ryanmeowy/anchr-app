@@ -137,7 +137,9 @@ public class SettingsController {
 
     // ── test connection ────────────────────────────────────────────────────
 
-    @RequireAuth(roles = {"ADMIN", "USER"})
+    // Demo hardening: the request carries an arbitrary baseUrl and the server fetches it, so a
+    // visitor holding a demo token must not reach this endpoint.
+    @RequireAuth
     @PostMapping("/test-connection")
     public Result<CapabilityConnectionTestResultDTO> testConnection(
             @Valid @RequestBody CapabilityConnectionTestRequestDTO request) {
@@ -170,7 +172,8 @@ public class SettingsController {
                 storageConfigService.maskSecretKey(saved)));
     }
 
-    @RequireAuth(roles = {"ADMIN", "USER"})
+    // Same SSRF surface as /test-connection: admin only.
+    @RequireAuth
     @PostMapping("/storage/test")
     public Result<StorageConnectionTestResultDTO> testStorage(
             @Valid @RequestBody StorageConnectionTestRequestDTO request) {
