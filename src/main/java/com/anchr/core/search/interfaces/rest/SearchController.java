@@ -40,7 +40,9 @@ public class SearchController {
     private final SearchActivityAcl searchActivityAcl;
     private final SearchRestAssembler searchRestAssembler;
 
-    @RequireAuth(roles = {"ADMIN", "GUEST", "USER"})
+    // Search runs the vector index and a rerank pass, so it costs real money per call. It is a
+    // claimed-token capability like asking and uploading, not something browsing grants.
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @DemoQuota
     @PostMapping("/kb")
     public Result<SearchTopNDTO> searchKb(@Valid @RequestBody SearchQueryDTO query) {

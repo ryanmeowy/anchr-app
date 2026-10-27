@@ -45,6 +45,41 @@ class DemoQuotaCoverageContractTest {
     );
 
     @Test
+    void everyBilledEndpointMustBeOutOfReachForVisitors() {
+        List<String> violations = new ArrayList<>();
+        int billed = 0;
+
+        ClassPathScanningCandidateComponentProvider scanner =
+                new ClassPathScanningCandidateComponentProvider(false);
+        scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
+
+        for (var candidate : scanner.findCandidateComponents("com.anchr.core")) {
+            Class<?> controller = load(candidate.getBeanClassName());
+            if (!isProductionClass(controller)) {
+                continue;
+            }
+            for (Method method : ReflectionUtils.getUniqueDeclaredMethods(controller)) {
+                if (AnnotatedElementUtils.findMergedAnnotation(method, DemoQuota.class) == null) {
+                    continue;
+                }
+                billed++;
+                String label = controller.getSimpleName() + "#" + method.getName();
+                // The inverse of the rule above: if a call costs money it must need a claimed
+                // token. A guest-only-reads demo cannot afford free access to a paid path, and
+                // the quota is meaningless if the same work is also reachable without it.
+                if (allowsGuest(method) || isPermitAll(method)) {
+                    violations.add(label + " is billed but still callable by a visitor");
+                }
+            }
+        }
+
+        assertThat(billed).as("there must be billed endpoints to check").isGreaterThan(0);
+        assertThat(violations)
+                .as("A metered endpoint must require a claimed token, not merely be metered")
+                .isEmpty();
+    }
+
+    @Test
     void everyVisitorWritableEndpointMustEitherBillOrBeJustified() {
         List<String> violations = new ArrayList<>();
         int checked = 0;
@@ -109,5 +144,14 @@ class DemoQuotaCoverageContractTest {
         } catch (ClassNotFoundException exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private static boolean allowsGuest(Method method) {
+        RequireAuth require = AnnotatedElementUtils.findMergedAnnotation(method, RequireAuth.class);
+        return require != null && Arrays.asList(require.roles()).contains("GUEST");
+    }
+
+    private static boolean isPermitAll(Method method) {
+        return AnnotatedElementUtils.findMergedAnnotation(method, PermitAll.class) != null;
     }
 }
