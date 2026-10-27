@@ -144,7 +144,9 @@ public class KnowledgeBaseController {
         return Result.success(assetPreviewService.getPreview(kbId, assetId));
     }
 
-    @RequireAuth
+    // Removing a document frees storage and is a normal cleanup action; it does not call a paid
+    // provider, so it is not metered.
+    @RequireAuth(roles = {"ADMIN", "USER"})
     @DeleteMapping("/{kbId}/documents/{assetId}")
     public Result<Void> deleteDocument(@PathVariable @NotBlank String kbId,
                                        @PathVariable @NotBlank String assetId) {

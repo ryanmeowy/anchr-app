@@ -90,7 +90,9 @@ public class ConversationController {
     }
     
     @DeleteMapping("/{sessionId}")
-    @RequireAuth
+    // A demo visitor owns only their own sessions, so cleaning up their own history is harmless.
+    // It touches no provider and consumes no credits, hence no @DemoQuota.
+    @RequireAuth(roles = {"ADMIN", "USER"})
     public Result<Void> deleteSession(@PathVariable @NotBlank String sessionId) {
         conversationService.deleteSession(sessionId);
         return Result.success();

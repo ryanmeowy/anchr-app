@@ -84,7 +84,14 @@ final class ConversationSessionUseCase {
     }
 
     void delete(String sessionId) {
-        loadSessionOrThrow(sessionId);
+        ConversationSession session = loadSessionOrThrow(sessionId);
+        // Demo tokens share one process but not one history: deleting by id alone would let any
+        // claimed token wipe someone else's session. ADMIN passes so the owner can still clean up.
+        String caller = UserContextHolder.get().userId();
+        if (!"ADMIN".equals(UserContextHolder.get().role())
+                && !session.getUserId().equals(caller)) {
+            throw new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND);
+        }
         agentConversationCleanupService.cancelRunning(sessionId);
         conversationRepository.deleteSession(sessionId);
         agentConversationCleanupService.deleteRecords(sessionId);
