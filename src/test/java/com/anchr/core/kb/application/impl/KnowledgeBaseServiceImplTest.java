@@ -89,6 +89,33 @@ class KnowledgeBaseServiceImplTest {
     }
 
     @Test
+    void deleteDocument_shouldLetAUserRemoveItsOwnUpload() {
+        UserContextHolder.set(new RequestUserContext("user-a", "USER"));
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset("asset-1", 7L, "user-a")));
+        when(assetRepository.markDeleted(eq("kb-1"), eq("asset-1"), eq("user-a"), any()))
+                .thenReturn(true);
+
+        service.deleteDocument("kb-1", "asset-1");
+
+        verify(assetRepository).markDeleted(eq("kb-1"), eq("asset-1"), eq("user-a"), any());
+    }
+
+    @Test
+    void deleteDocument_shouldHideASeededDocumentFromAUser() {
+        UserContextHolder.set(new RequestUserContext("user-a", "USER"));
+        // Seeded content has no uploader, so it must survive: letting a demo token delete it would
+        // strip the shared library for every later visitor.
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(asset("asset-1", 7L, "system")));
+
+        assertThatThrownBy(() -> service.deleteDocument("kb-1", "asset-1"))
+                .isInstanceOf(BusinessException.class);
+
+        verify(assetRepository, never()).markDeleted(any(), any(), any(), any());
+    }
+
+    @Test
     void deleteDocument_shouldStopBeforeMutationWhenDocumentDoesNotExist() {
         when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
                 .thenReturn(Optional.empty());
@@ -199,10 +226,16 @@ class KnowledgeBaseServiceImplTest {
     }
 
     private Asset asset(String id, long activeIndexGeneration) {
+        // Owned by the ADMIN caller of the existing tests, so the ownership rule does not apply.
+        return asset(id, activeIndexGeneration, "user-a");
+    }
+
+    private Asset asset(String id, long activeIndexGeneration, String createdBy) {
         return Asset.builder()
                 .id(id)
                 .kbId("kb-1")
                 .activeIndexGeneration(activeIndexGeneration)
+                .createdBy(createdBy)
                 .build();
     }
 }

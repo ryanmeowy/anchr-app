@@ -213,9 +213,15 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         RequestUserContext context = UserContextHolder.get();
         get(kbId);
         LocalDateTime now = LocalDateTime.now();
-        assetRepository.findByIdForUpdate(kbId, assetId)
+        Asset asset = assetRepository.findByIdForUpdate(kbId, assetId)
                 .filter(candidate -> candidate.getDeletedAt() == null)
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
+        // The knowledge bases are shared, so deleting by id alone would let any demo token remove
+        // the seeded documents every other visitor depends on. A visitor may remove only what it
+        // uploaded itself; ADMIN keeps the ability to clear anything.
+        if (!"ADMIN".equals(context.role()) && !context.userId().equals(asset.getCreatedBy())) {
+            throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
+        }
         boolean deleted = assetRepository.markDeleted(
                 kbId, assetId, context.userId(), now);
         if (!deleted) {
