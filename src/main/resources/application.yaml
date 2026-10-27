@@ -35,7 +35,7 @@ app:
   # these keys starts exactly as before, and the feature stays inert while enabled=false.
   demo:
     enabled: ${APP_DEMO_ENABLED:false}
-    token-ttl-hours: ${APP_DEMO_TOKEN_TTL_HOURS:5}
+    token-ttl-hours: ${APP_DEMO_TOKEN_TTL_HOURS:2}
     token-quota: ${APP_DEMO_TOKEN_QUOTA:10}
     daily-operation-limit: ${APP_DEMO_DAILY_OPERATION_LIMIT:80}
     daily-token-limit: ${APP_DEMO_DAILY_TOKEN_LIMIT:50}

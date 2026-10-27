@@ -58,20 +58,17 @@ class DemoTokenServiceTest {
     }
 
     @Test
-    void spentTokenReplacementStillCountsAgainstTheDailyIssueLimit() {
-        // Daily cap is 2. The first claim uses one; the replacement uses the second, so a third
-        // must be refused even though the visitor only ever held one browser cookie.
+    void aSpentTokenBlocksANewClaimUntilItExpires() {
         DemoTokenResult first = service.issue("browser-1");
         values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(first.issue().token()), "10");
 
-        assertThat(service.issue("browser-1").created()).isTrue();
-
-        values.put(DemoConstant.QUOTA_TOKEN_PREFIX
-                + sha256(service.issue("browser-1").issue().token()), "10");
         assertThatThrownBy(() -> service.issue("browser-1"))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getError())
-                .isEqualTo(ApiError.DEMO_DAILY_LIMIT_REACHED);
+                .isEqualTo(ApiError.DEMO_TOKEN_STILL_ACTIVE);
+        // Refusing must not consume a daily slot.
+        assertThat(values.get(DemoConstant.QUOTA_DAILY_ISSUED_PREFIX + java.time.LocalDate.now()))
+                .isEqualTo("1");
     }
 
     @Test
@@ -129,18 +126,14 @@ class DemoTokenServiceTest {
     }
 
     @Test
-    void shouldHandOutANewTokenWhenThePreviousOneIsSpent() {
+    void shouldRefuseANewTokenWhileTheSpentOneIsStillLive() {
         DemoTokenResult first = service.issue("browser-1");
-        // Simulate the visitor exhausting the credits: the quota interceptor stores the count
-        // under the SHA-256 of the token.
         values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(first.issue().token()), "10");
 
-        DemoTokenResult replacement = service.issue("browser-1");
-
-        assertThat(replacement.created()).isTrue();
-        assertThat(replacement.issue().token()).isNotEqualTo(first.issue().token());
-        // A spent-token replacement must not be blocked by the anti-double-click cooldown.
-        assertThat(replacement.issue().userId()).isNotEqualTo(first.issue().userId());
+        assertThatThrownBy(() -> service.issue("browser-1"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getError())
+                .isEqualTo(ApiError.DEMO_TOKEN_STILL_ACTIVE);
     }
 
     @Test

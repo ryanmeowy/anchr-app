@@ -80,15 +80,19 @@ public class DemoTokenService {
         String cookie = StringUtils.hasText(browserCookie) ? browserCookie.trim() : newCookieId();
 
         DemoTokenIssue existing = findIssued(cookie);
-        if (existing != null && !isExhausted(existing.token())) {
+        // One token per browser, and it is held for its whole life. A spent token is not an
+        // invitation to issue another: that would let a visitor burn 10 credits and immediately
+        // claim 10 more, which is the limit the quota exists to enforce. The only way to a new
+        // token is for the old one to expire.
+        if (existing != null) {
+            if (isExhausted(existing.token())) {
+                log.info("Demo token for browser {} is spent but still live, refusing a new one",
+                        cookie);
+                throw new BusinessException(ApiError.DEMO_TOKEN_STILL_ACTIVE);
+            }
             return new DemoTokenResult(existing, cookie, false);
         }
-        if (existing != null) {
-            // Spent token: hand the visitor a fresh one instead of the same dead token, which
-            // would trap them in a "claim -> immediately rejected" loop. The cooldown only
-            // guards accidental double clicks, so it must not apply here.
-            log.info("Demo token for browser {} is spent, issuing a replacement", cookie);
-        } else if (onCooldown(cookie)) {
+        if (onCooldown(cookie)) {
             throw new BusinessException(ApiError.DEMO_ISSUE_TOO_FREQUENT);
         }
         long issuedToday = incrementIssuedToday();

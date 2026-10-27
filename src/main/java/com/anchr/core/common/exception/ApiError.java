@@ -40,7 +40,8 @@ public enum ApiError {
     DEMO_QUOTA_EXHAUSTED(429, "Trial credits are used up. You can request a new one."),
     DEMO_DAILY_LIMIT_REACHED(429, "Today's demo quota is used up. Please come back tomorrow."),
     DEMO_VERIFICATION_FAILED(403, "Human verification failed. Disable extensions blocking this site and retry."),
-    DEMO_ISSUE_TOO_FREQUENT(429, "A demo token was issued too recently. Please wait a few minutes and try again.");
+    DEMO_ISSUE_TOO_FREQUENT(429, "A demo token was issued too recently. Please wait a few minutes and try again."),
+    DEMO_TOKEN_STILL_ACTIVE(429, "Your demo token is still active. Claim a new one after it expires.");
 
     private final int code;
     private final String message;
