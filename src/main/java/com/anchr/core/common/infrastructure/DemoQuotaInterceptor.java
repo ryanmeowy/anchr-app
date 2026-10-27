@@ -7,6 +7,7 @@ import com.anchr.core.common.constant.DemoConstant;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.ApiErrorResponseWriter;
 import com.anchr.core.common.exception.UploadCleanupPolicy;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
@@ -44,6 +45,12 @@ public class DemoQuotaInterceptor implements AsyncHandlerInterceptor {
                              @NonNull HttpServletResponse response,
                              @NonNull Object handler) throws Exception {
         if (!demoProperties.enabled() || !(handler instanceof HandlerMethod method)) {
+            return true;
+        }
+        // An SSE handler is dispatched twice: once for the request and again when the async
+        // response completes. Only the first dispatch is a call the visitor made, so charging on
+        // anything but REQUEST would bill a single question twice.
+        if (request.getDispatcherType() != DispatcherType.REQUEST) {
             return true;
         }
         if (AnnotatedElementUtils.findMergedAnnotation(method.getMethod(), DemoQuota.class) == null) {

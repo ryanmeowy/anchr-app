@@ -38,6 +38,40 @@ public class DemoTokenService {
 
     private final SecureRandom secureRandom = new SecureRandom();
 
+    /** Redis key holding the single shared guest token. */
+    private static final String GUEST_TOKEN_KEY = "demo:guest-token";
+
+    /**
+     * The one visitor token everybody browses with.
+     *
+     * <p>Created once and kept alive for a year, so it behaves like a constant without being
+     * hardcoded in the frontend where it would expire and break silently. It grants reads only:
+     * the write endpoints stay restricted to USER, so it cannot be abused for billable work.
+     */
+    public String guestToken() {
+        String existing = redisTemplate.opsForValue().get(GUEST_TOKEN_KEY);
+        if (StringUtils.hasText(existing)) {
+            return existing;
+        }
+        byte[] tokenBytes = new byte[24];
+        secureRandom.nextBytes(tokenBytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
+        Map<String, Object> tokenData = new LinkedHashMap<>();
+        tokenData.put("role", "GUEST");
+        tokenData.put("userId", "guest");
+        tokenData.put("createdAt", System.currentTimeMillis());
+        try {
+            String json = objectMapper.writeValueAsString(tokenData);
+            redisTemplate.opsForValue().set(DemoConstant.TOKEN_CACHE_PREFIX + token, json, 365, TimeUnit.DAYS);
+            redisTemplate.opsForValue().set(GUEST_TOKEN_KEY, token, 365, TimeUnit.DAYS);
+        } catch (Exception exception) {
+            log.error("Failed to store guest token", exception);
+            throw new BusinessException(ApiError.INTERNAL_ERROR);
+        }
+        log.info("Created the shared guest token");
+        return token;
+    }
+
     /**
      * @param browserCookie previously presented browser cookie, may be null
      * @return the issue result plus the cookie value the caller must set

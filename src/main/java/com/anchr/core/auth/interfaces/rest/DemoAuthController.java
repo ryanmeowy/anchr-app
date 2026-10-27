@@ -86,6 +86,28 @@ public class DemoAuthController {
                 usage.quota(), usage.used(), usage.remaining(), usage.expiresAt()));
     }
 
+    /**
+     * Hands a visitor a read-only GUEST token, so browsing works without claiming a trial.
+     *
+     * <p>Deliberately unauthenticated and unlimited: the token grants only the read endpoints, and
+     * the billable ones still require a claimed USER token.
+     */
+    @PermitAll
+    @PostMapping("/guest")
+    public Result<DemoTokenDTO> guest() {
+        if (!demoProperties.enabled()) {
+            return Result.error(ApiError.DEMO_DISABLED);
+        }
+        String token = demoTokenService.guestToken();
+        return Result.success(DemoTokenDTO.builder()
+                .token(token)
+                .role("GUEST")
+                .userId("guest")
+                .expiresAt(System.currentTimeMillis()
+                        + java.time.Duration.ofHours(demoProperties.tokenTtlHours()).toMillis())
+                .build());
+    }
+
     @PermitAll
     @PostMapping
     public Result<DemoTokenDTO> issue(@Valid @RequestBody(required = false) DemoTokenRequestDTO request,

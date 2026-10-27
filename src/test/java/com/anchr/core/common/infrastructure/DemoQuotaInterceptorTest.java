@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import jakarta.servlet.DispatcherType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.method.HandlerMethod;
@@ -55,6 +56,21 @@ class DemoQuotaInterceptorTest {
                 killSwitch,
                 new ApiErrorResponseWriter(objectMapper),
                 new UploadCleanupPolicy());
+    }
+
+    @Test
+    void asyncDispatchShouldNotBeChargedAgain() throws Exception {
+        UserContextHolder.set(new RequestUserContext("demo_x", "USER", TOKEN_HASH));
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/conversations/1/messages/stream");
+        // An SSE handler is dispatched a second time when its async response completes. That is
+        // bookkeeping, not another question, and charging it billed one ask twice.
+        request.setDispatcherType(DispatcherType.ASYNC);
+
+        boolean allowed = interceptor.preHandle(request,
+                new MockHttpServletResponse(), handler(new BillableController(), "ask"));
+
+        assertThat(allowed).isTrue();
+        assertThat(counters.values).isEmpty();
     }
 
     @Test
