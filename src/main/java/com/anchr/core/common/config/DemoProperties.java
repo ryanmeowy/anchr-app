@@ -17,7 +17,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record DemoProperties(
         @DefaultValue("false") boolean enabled,
         @DefaultValue("5") int tokenTtlHours,
-        @DefaultValue("8") int tokenQuota,
+        @DefaultValue("10") int tokenQuota,
         @DefaultValue("80") int dailyOperationLimit,
         @DefaultValue("50") int dailyTokenLimit,
         @DefaultValue("10") int issueCooldownMinutes,
@@ -108,7 +108,7 @@ public record DemoProperties(
 
     /** All defaults: the demo is disabled and every limit is the production value. */
     public static DemoProperties defaults() {
-        return new DemoProperties(false, 5, 8, 80, 50, 10, 1, true, "", "", "cn-shanghai",
+        return new DemoProperties(false, 5, 10, 80, 50, 10, 1, true, "", "", "cn-shanghai",
                 "", "", "", false, 3600, false);
     }
 

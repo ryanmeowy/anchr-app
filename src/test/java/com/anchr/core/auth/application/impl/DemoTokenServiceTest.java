@@ -26,7 +26,7 @@ class DemoTokenServiceTest {
     @BeforeEach
     void setUp() {
         values = new ConcurrentHashMap<>();
-        DemoProperties properties = new DemoProperties(true, 5, 8, 80, 2, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
+        DemoProperties properties = new DemoProperties(true, 5, 10, 80, 2, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
         service = new DemoTokenService(new FakeRedisTemplate(values),
                 new ObjectMapper(), properties);
     }
@@ -62,12 +62,12 @@ class DemoTokenServiceTest {
         // Daily cap is 2. The first claim uses one; the replacement uses the second, so a third
         // must be refused even though the visitor only ever held one browser cookie.
         DemoTokenResult first = service.issue("browser-1");
-        values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(first.issue().token()), "8");
+        values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(first.issue().token()), "10");
 
         assertThat(service.issue("browser-1").created()).isTrue();
 
         values.put(DemoConstant.QUOTA_TOKEN_PREFIX
-                + sha256(service.issue("browser-1").issue().token()), "8");
+                + sha256(service.issue("browser-1").issue().token()), "10");
         assertThatThrownBy(() -> service.issue("browser-1"))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getError())
@@ -96,9 +96,9 @@ class DemoTokenServiceTest {
         DemoUsage usage = service.usage(issued.issue().token());
 
         assertThat(usage).isNotNull();
-        assertThat(usage.quota()).isEqualTo(8);
+        assertThat(usage.quota()).isEqualTo(10);
         assertThat(usage.used()).isEqualTo(3);
-        assertThat(usage.remaining()).isEqualTo(5);
+        assertThat(usage.remaining()).isEqualTo(7);
         assertThat(usage.expiresAt()).isGreaterThan(System.currentTimeMillis());
     }
 
@@ -133,7 +133,7 @@ class DemoTokenServiceTest {
         DemoTokenResult first = service.issue("browser-1");
         // Simulate the visitor exhausting the credits: the quota interceptor stores the count
         // under the SHA-256 of the token.
-        values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(first.issue().token()), "8");
+        values.put(DemoConstant.QUOTA_TOKEN_PREFIX + sha256(first.issue().token()), "10");
 
         DemoTokenResult replacement = service.issue("browser-1");
 

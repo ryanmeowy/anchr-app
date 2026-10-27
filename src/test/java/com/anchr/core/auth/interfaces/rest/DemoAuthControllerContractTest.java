@@ -56,7 +56,7 @@ class DemoAuthControllerContractTest {
     }
 
     private DemoProperties demoEnabled() {
-        return new DemoProperties(true, 5, 8, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
+        return new DemoProperties(true, 5, 10, 80, 50, 10, 1, false, "", "", "cn-shanghai", "", "", "", false, 3600, false);
     }
 
     @Test
@@ -148,7 +148,7 @@ class DemoAuthControllerContractTest {
                 .perform(get("/api/v1/auth/demo/status"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.enabled").value(true))
-                .andExpect(jsonPath("$.data.tokenQuota").value(8))
+                .andExpect(jsonPath("$.data.tokenQuota").value(10))
                 .andExpect(jsonPath("$.data.secretKey").doesNotExist());
     }
 
@@ -156,16 +156,16 @@ class DemoAuthControllerContractTest {
     void usageShouldReportCreditsForTheCallersOwnToken() throws Exception {
         DemoTokenService service = mock(DemoTokenService.class);
         when(service.usage("demo-token"))
-                .thenReturn(new DemoUsage(8, 3, System.currentTimeMillis() + 60_000));
+                .thenReturn(new DemoUsage(10, 3, System.currentTimeMillis() + 60_000));
         DemoAuthController controller = controller(demoEnabled(), mockOffKillSwitch(),
                 service, mock(AliyunCaptchaVerifier.class));
 
         mvc(controller)
                 .perform(get("/api/v1/auth/demo/usage").header("X-Access-Token", "demo-token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.quota").value(8))
+                .andExpect(jsonPath("$.data.quota").value(10))
                 .andExpect(jsonPath("$.data.used").value(3))
-                .andExpect(jsonPath("$.data.remaining").value(5));
+                .andExpect(jsonPath("$.data.remaining").value(7));
     }
 
     @Test

@@ -13,7 +13,7 @@ class DemoPropertiesTest {
 
         assertThat(properties.enabled()).isFalse();
         assertThat(properties.tokenTtlHours()).isEqualTo(5);
-        assertThat(properties.tokenQuota()).isEqualTo(8);
+        assertThat(properties.tokenQuota()).isEqualTo(10);
         assertThat(properties.dailyOperationLimit()).isEqualTo(80);
         assertThat(properties.dailyTokenLimit()).isEqualTo(50);
         assertThat(properties.issueCooldownMinutes()).isEqualTo(10);

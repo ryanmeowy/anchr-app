@@ -61,7 +61,7 @@ class DemoPropertiesBindingTest {
                 .isBound())
                 .isFalse();
         assertThat(DemoProperties.defaults().enabled()).isFalse();
-        assertThat(DemoProperties.defaults().tokenQuota()).isEqualTo(8);
+        assertThat(DemoProperties.defaults().tokenQuota()).isEqualTo(10);
         assertThat(DemoProperties.defaults().dailyOperationLimit()).isEqualTo(80);
         assertThat(DemoProperties.defaults().uploadMaxFiles()).isEqualTo(1);
     }

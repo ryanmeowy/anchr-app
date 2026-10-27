@@ -26,7 +26,7 @@ class DemoPropertiesContextTest {
 
             DemoProperties properties = context.getBean(DemoProperties.class);
             assertThat(properties.enabled()).isFalse();
-            assertThat(properties.tokenQuota()).isEqualTo(8);
+            assertThat(properties.tokenQuota()).isEqualTo(10);
             assertThat(properties.dailyOperationLimit()).isEqualTo(80);
             assertThat(properties.dailyTokenLimit()).isEqualTo(50);
             assertThat(properties.uploadMaxFiles()).isEqualTo(1);
