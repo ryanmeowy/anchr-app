@@ -11,9 +11,6 @@ spring:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT}
       password: ${REDIS_PASSWORD}
-      # Placeholder like the three lines above, so a deployment can see from this file which
-      # database it uses. The default keeps every existing caller on db 0; the demo deployment
-      # sets SPRING_DATA_REDIS_DATABASE=4 to keep its tokens and quota counters out of db 0.
       database: ${SPRING_DATA_REDIS_DATABASE:0}
       timeout: 3000ms
   datasource:
