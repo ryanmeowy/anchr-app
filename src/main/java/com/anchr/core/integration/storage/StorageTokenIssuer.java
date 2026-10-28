@@ -63,10 +63,18 @@ public class StorageTokenIssuer {
     }
 
     /**
-     * Restricts writes to {@code prefix/scope/}. Read-back of the just-uploaded object is included
-     * because the ingestion pipeline fetches it again; nothing outside the caller's folder is.
+     * Restricts writes to {@code prefix/scope/}.
+     *
+     * <p>Deliberately write-only: the browser uploads the object and the pipeline reads it back
+     * through its own credentials, so a visitor's credential never needs read access. Anything
+     * outside the caller's folder is denied.
      */
     public static String uploadPolicy(String bucket, String prefix, String scope) {
+        // Ids are hexadecimal today, but this value is interpolated into a JSON document and an
+        // OSS resource ARN: refuse anything that could break either, rather than trusting callers.
+        if (scope == null || !scope.matches("[A-Za-z0-9_-]{1,64}")) {
+            throw new IllegalArgumentException("scope must be a plain identifier");
+        }
         String base = (prefix == null ? "" : prefix) + scope + "/";
         String resource = "acs:oss:*:*:" + bucket + "/" + base + "*";
         return "{\"Version\":\"1\",\"Statement\":["
