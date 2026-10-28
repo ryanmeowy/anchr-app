@@ -21,7 +21,14 @@ public class StorageTokenIssuer {
     private static final long STS_DURATION_SECONDS = 3600L;
 
     public Map<String, Object> issueToken(StorageConfig config, String accessKey, String secretKey) {
-        return issueToken(config, accessKey, secretKey, null);
+        return issueToken(config, accessKey, secretKey, null, null);
+    }
+
+    /** Issues a credential whose policy only permits writes under {@code scope}, and reports that
+     *  folder as the prefix so the client uploads where it is allowed to. */
+    public Map<String, Object> issueToken(StorageConfig config, String accessKey, String secretKey,
+                                          String inlinePolicy, String userScope) {
+        return issueTokenInternal(config, accessKey, secretKey, inlinePolicy, userScope);
     }
 
     /**
@@ -31,6 +38,12 @@ public class StorageTokenIssuer {
      */
     public Map<String, Object> issueToken(StorageConfig config, String accessKey, String secretKey,
                                           String inlinePolicy) {
+        return issueTokenInternal(config, accessKey, secretKey, inlinePolicy, null);
+    }
+
+    private Map<String, Object> issueTokenInternal(StorageConfig config, String accessKey,
+                                                   String secretKey, String inlinePolicy,
+                                                   String userScope) {
         DefaultProfile profile = DefaultProfile.getProfile(config.getRegion(), accessKey, secretKey);
         IAcsClient client = new DefaultAcsClient(profile);
         AssumeRoleRequest request = new AssumeRoleRequest();
@@ -43,7 +56,7 @@ public class StorageTokenIssuer {
 
         try {
             AssumeRoleResponse response = client.getAcsResponse(request);
-            return getObjectMap(config, response);
+            return getObjectMap(config, response, userScope);
         } catch (Exception e) {
             throw new RuntimeException("Failed to issue STS token: " + e.getMessage(), e);
         }
@@ -62,12 +75,19 @@ public class StorageTokenIssuer {
                 + "\"Resource\":[\"" + resource + "\"]}]}";
     }
 
-    private @NonNull Map<String, Object> getObjectMap(StorageConfig config, AssumeRoleResponse response) {
+    private @NonNull Map<String, Object> getObjectMap(StorageConfig config, AssumeRoleResponse response,
+                                                      String userScope) {
         Map<String, Object> result = new HashMap<>();
         result.put("endpoint", config.getEndpoint());
         result.put("bucket", config.getBucket());
         result.put("region", config.getRegion());
-        result.put("prefix", config.getPrefix() != null ? config.getPrefix() : "");
+        // The session policy confines writes to <prefix><scope>/. Reporting the bare prefix would
+        // tell the client to upload outside that folder, and every PUT would be denied.
+        String basePrefix = config.getPrefix() != null ? config.getPrefix() : "";
+        String effectivePrefix = userScope == null || userScope.isBlank()
+                ? basePrefix
+                : basePrefix + userScope + "/";
+        result.put("prefix", effectivePrefix);
         result.put("accessKeyId", response.getCredentials().getAccessKeyId());
         result.put("accessKeySecret", response.getCredentials().getAccessKeySecret());
         result.put("securityToken", response.getCredentials().getSecurityToken());

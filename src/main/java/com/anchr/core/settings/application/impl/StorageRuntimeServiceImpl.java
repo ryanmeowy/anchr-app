@@ -43,7 +43,8 @@ public class StorageRuntimeServiceImpl implements StorageRuntimeApi {
                 ? null
                 : StorageTokenIssuer.uploadPolicy(
                         config.getBucket(), config.getPrefix(), userScope);
-        Map<String, Object> token = tokenIssuer.issueToken(config, accessKey, secretKey, policy);
+        Map<String, Object> token = tokenIssuer.issueToken(
+                config, accessKey, secretKey, policy, userScope);
         return new StorageTemporaryCredential(
                 text(token, "endpoint"),
                 text(token, "bucket"),
