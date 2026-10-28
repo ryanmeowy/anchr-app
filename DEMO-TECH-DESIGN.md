@@ -34,7 +34,8 @@ anchr-web:  demo   ← 从 main (39be9e5) 切出，永不合并回 main
 | 新建 | `auth/interfaces/rest/DemoAuthController.java` | ~90 |
 | 新建 | `common/infrastructure/DemoQuota.java`（注解） | ~15 |
 | 新建 | `common/infrastructure/DemoQuotaInterceptor.java` | ~110 |
-| 新建 | `integration/security/TurnstileVerifier.java` | ~70 |
+| 新建 | `integration/security/AliyunCaptchaVerifier.java` | ~100 |
+| 新建 | `integration/security/CaptchaSceneIdEncryptor.java` | ~80 |
 | 改主干 | `common/infrastructure/AccessTokenInterceptor.java` | +3 |
 | 改主干 | `common/config/WebConfig.java` | +3 |
 | 改主干 | `common/exception/ApiError.java` | +5 |
@@ -55,16 +56,21 @@ anchr-web:  demo   ← 从 main (39be9e5) 切出，永不合并回 main
 app:
   demo:
     enabled: ${APP_DEMO_ENABLED:false}
-    token-ttl-hours: ${APP_DEMO_TOKEN_TTL_HOURS:5}
-    token-quota: ${APP_DEMO_TOKEN_QUOTA:8}
+    token-ttl-hours: ${APP_DEMO_TOKEN_TTL_HOURS:2}
+    token-quota: ${APP_DEMO_TOKEN_QUOTA:10}
     daily-operation-limit: ${APP_DEMO_DAILY_OPERATION_LIMIT:80}
     daily-token-limit: ${APP_DEMO_DAILY_TOKEN_LIMIT:50}
     issue-cooldown-minutes: ${APP_DEMO_ISSUE_COOLDOWN_MINUTES:10}
     upload-max-files: ${APP_DEMO_UPLOAD_MAX_FILES:1}
-    turnstile:
-      enabled: ${APP_DEMO_TURNSTILE_ENABLED:true}
-      site-key: ${APP_DEMO_TURNSTILE_SITE_KEY:}
-      secret-key: ${APP_DEMO_TURNSTILE_SECRET_KEY:}
+    captcha-enabled: ${APP_DEMO_CAPTCHA_ENABLED:true}
+    captcha-scene-id: ${APP_DEMO_CAPTCHA_SCENE_ID:}
+    captcha-prefix: ${APP_DEMO_CAPTCHA_PREFIX:}
+    captcha-region: ${APP_DEMO_CAPTCHA_REGION:cn-shanghai}
+    captcha-access-key-id: ${APP_DEMO_CAPTCHA_ACCESS_KEY_ID:}
+    captcha-access-key-secret: ${APP_DEMO_CAPTCHA_ACCESS_KEY_SECRET:}
+    captcha-ekey: ${APP_DEMO_CAPTCHA_EKEY:}
+    captcha-encrypt-scene-id: ${APP_DEMO_CAPTCHA_ENCRYPT_SCENE_ID:false}
+    captcha-scene-id-ttl-seconds: ${APP_DEMO_CAPTCHA_SCENE_ID_TTL_SECONDS:3600}
 ```
 
 > **所有值必须带默认值**。生产环境的 `application.yaml` 里 `app.security.admin-secret` 等都没有默认值（缺失即启动失败），若照抄这种写法会导致生产环境拉取本次代码后起不来。
@@ -76,18 +82,21 @@ app:
 - 构造器内做跨字段校验，**配置写错则启动失败**：
   - `tokenQuota > 0`、`dailyOperationLimit > 0`、`dailyTokenLimit > 0`
   - `uploadMaxFiles >= 1`
-  - `enabled == true` 时：`turnstile.enabled == true` 则 `siteKey` / `secretKey` 不能为空
+  - `enabled == true` 且 `captchaEnabled == true` 时：`captchaSceneId` 不能为空
+  - 加密模式开启时：`captchaEkey` 不能为空
 
 ### 2.3 演示环境 `.env` 差异
 
 ```bash
 APP_DEMO_ENABLED=true
-APP_DEMO_TOKEN_QUOTA=8
+APP_DEMO_TOKEN_QUOTA=10
 APP_DEMO_DAILY_OPERATION_LIMIT=80
 APP_DEMO_DAILY_TOKEN_LIMIT=50
 APP_DEMO_UPLOAD_MAX_FILES=1
-APP_DEMO_TURNSTILE_SITE_KEY=<cloudflare 提供>
-APP_DEMO_TURNSTILE_SECRET_KEY=<cloudflare 提供>
+APP_DEMO_CAPTCHA_SCENE_ID=<控制台场景 ID>
+APP_DEMO_CAPTCHA_PREFIX=<控制台 prefix>
+APP_DEMO_CAPTCHA_ACCESS_KEY_ID=<RAM 凭据>
+APP_DEMO_CAPTCHA_ACCESS_KEY_SECRET=<RAM 凭据>
 
 SPRING_DATA_REDIS_DATABASE=4
 ANCHR_SEGMENT_INDEX=demo_kb_segment
@@ -106,7 +115,7 @@ APP_ADMIN_SECRET=<新生成>
 POST /api/v1/auth/demo
 Content-Type: application/json
 
-{ "turnstileToken": "xxx" }
+{ "captchaVerifyParam": "xxx" }
 ```
 
 标注 `@PermitAll`（`ControllerAuthorizationContractTest` 强制要求显式声明）。
@@ -124,7 +133,7 @@ Content-Type: application/json
 2. kill switch 打开                 → DEMO_DISABLED
 3. 请求带有效 cookie                → 直接返回该 cookie 绑定的 token（幂等，不消耗额度）
 4. issue cooldown (同 cookie)       → DEMO_ISSUE_TOO_FREQUENT
-5. Turnstile 校验失败/超时          → DEMO_VERIFICATION_FAILED
+5. 人机校验失败/超时                → DEMO_VERIFICATION_FAILED
 6. daily issued limit 已达          → DEMO_DAILY_LIMIT_REACHED
 7. 生成 token + userId，写 Redis，下发 cookie
 ```
@@ -137,7 +146,7 @@ Content-Type: application/json
 { "role": "USER", "userId": "demo_a1b2c3d4", "createdAt": 1792880000000, "demo": true }
 ```
 
-- TTL = `token-ttl-hours`（5 小时），**独立常量，不碰现有 1 小时 TTL**
+- TTL = `token-ttl-hours`（默认 2 小时），**独立常量，不碰现有 1 小时 TTL**
 - `demo: true` 标记让配额拦截器只对演示凭证生效
 
 ### 3.5 Cookie
@@ -150,7 +159,7 @@ Content-Type: application/json
 | `Secure` | 演示环境为 HTTPS，是 |
 | `SameSite` | `Lax` |
 | `Path` | `/` |
-| `Max-Age` | 5 小时（与 token 一致） |
+| `Max-Age` | 与 token TTL 一致（默认 2 小时） |
 
 **为什么 cookie 里存的是独立 id 而不是 token**：token 需要被前端 JS 读取（现有 `X-Access-Token` 机制不变），若 cookie 里也是 token，等于绕过 `HttpOnly` 的意义。cookie 只用于"这台浏览器已经领过券"的幂等判定。
 
@@ -164,43 +173,59 @@ demo:quota:daily:issued:{yyyy-MM-dd} → 当日已发券数，TTL 到次日 00:0
 
 ---
 
-## 4. Turnstile 接入
+## 4. 人机校验接入（阿里云验证码 2.0）
+
+> 早期方案用 Cloudflare Turnstile，因脚本托管在境外、国内访客无代理时不可靠而替换。
 
 ### 4.1 服务端校验
 
 ```
-POST https://challenges.cloudflare.com/turnstile/v0/siteverify
-Content-Type: application/x-www-form-urlencoded
-
-secret=<secret-key>&response=<token>&remoteip=<可选>
+POST https://captcha.cn-shanghai.aliyuncs.com/
+Action=VerifyIntelligentCaptcha
+SceneId=<场景 ID>&CaptchaVerifyParam=<前端回传的串>
 ```
 
-响应判定：`success == true` 才继续。
+响应判定：`Success == true` 且 `Result.VerifyResult == true` 才继续；两层都要满足，因为传输成功不等于验证通过。
 
 ### 4.2 实现要点
 
-- 用 JDK 自带 `java.net.http.HttpClient`（项目已在用，见 [AiClient.java](src/main/java/com/anchr/core/integration/ai/client/AiClient.java:30)），**不引新依赖**
-- 超时 **3 秒**，连接超时 2 秒
-- 失败（超时 / 非 200 / `success == false`）→ `DEMO_VERIFICATION_FAILED`
-- **fail closed**：Cloudflare 不可达时拒绝发券，不放行
-- 日志记录 `error-codes`，便于排查
+- 复用 `aliyun-java-sdk-captcha`（与 OSS/STS 同一套 SDK 体系）
+- 必须显式 `request.setEndpoint("captcha.cn-shanghai.aliyuncs.com")`：SDK 内置的端点表里没有 captcha 条目
+- 失败（超时 / 非 200 / `VerifyResult == false`）→ `DEMO_VERIFICATION_FAILED`
+- **fail closed**：验证服务不可达时拒绝发券
+- 日志记录 `Code` 与 `VerifyCode`，便于排查
 
 ### 4.3 本地开发
 
-`app.demo.turnstile.enabled=false` 时跳过校验，**启动日志 WARN 输出一行**：
+`app.demo.captcha.enabled=false` 时跳过校验，启动日志 WARN 输出一行：
 
 ```
-WARN  Demo Turnstile verification is DISABLED. Do not use this setting in production.
+WARN  CAPTCHA verification is DISABLED; not for production use.
 ```
 
-或使用 Cloudflare 官方测试密钥对（sitekey `1x00000000000000000000AA`），任意 hostname 通过。
+### 4.4 加密模式（可选）
 
-### 4.4 前端
+控制台开启加密模式后，服务端必须下发加密串而非明文场景 ID：
 
-- 引入 Turnstile 脚本与 widget，Managed 模式
-- 拿到 token → `POST /auth/demo`
-- **必须监听 error 回调**：脚本被广告拦截器阻断时 widget 不会正常渲染，需给出明确文案与重试按钮
-- token 单次有效，失败后必须重新获取，不得重发
+```
+plaintext = sceneId + "&" + epochSeconds + "&" + ttlSeconds
+key       = Base64.decode(ekey)              # 32 字节
+cipher    = AES-256-CBC / PKCS5
+output    = Base64(iv ‖ ciphertext)          # iv 每次随机
+```
+
+前端初始化时 **同时**传 `SceneId` 和 `EncryptedSceneId`：
+
+- 只传 `EncryptedSceneId` → SDK 无法计算签名，返回 401
+- 只传 `SceneId` → 服务端无法解密，返回 F022
+
+### 4.5 前端
+
+- 引入 `o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js`，popup 模式
+- `initAliyunCaptcha` 的 `element` / `button` 必须传 **以 `#` 开头的选择器**，SDK 只认这种形式
+- 初始化前先设 `window.AliyunCaptchaConfig = { region, prefix }`，顺序不能反
+- 脚本加载失败必须移除 `<script>` 标签，否则重试会挂在已失败的标签上永不返回
+- 关闭弹窗时需手动清理 SDK 插入到 `<body>` 的全屏遮罩，否则访客被困
 
 ---
 
@@ -299,7 +324,7 @@ shortcut: 计数非原子（INCR 成功后才比较、失败再 DECR），并发
 演示额度内可忽略；若额度变得敏感，改为 Lua 脚本原子扣减。
 ```
 
-**计数器 TTL** 必须**长于 token TTL**（6 小时 vs 5 小时），否则 token 还在、计数器先过期，额度被重置。
+**计数器 TTL** 必须**长于 token TTL**（默认 3 小时 vs 2 小时），否则 token 还在、计数器先过期，额度被重置。
 
 ### 5.5 Redis key 设计
 
@@ -492,7 +517,7 @@ if (request.items().size() > maxFiles) {
 
 ```
 无 token → 显示「开始体验」按钮
-         → 点击 → 渲染 Turnstile widget → 取 token
+         → 点击 → 渲染阿里云滑块 → 取 captchaVerifyParam
          → POST /auth/demo
          → 成功后 saveAccessToken(token, "USER")
          → 进入工作区
@@ -514,26 +539,38 @@ if (request.items().size() > maxFiles) {
 + setAgentEnabled(window.localStorage.getItem(ASK_AGENT_ENABLED_KEY) !== "0");
 ```
 
-### 10.3 Turnstile 脚本失败的兜底
+### 10.3 人机校验脚本失败的兜底
 
-**这是全套方案里最容易让演示翻车的点**（广告拦截器会拦 `challenges.cloudflare.com`）。
+**这是全套方案里最容易让演示翻车的点**（广告拦截器会拦 `o.alicdn.com`）。
 
 要求：
 
 - 脚本加载失败时**不能静默卡住**
-- 监听 widget 的 error 回调与脚本 `onerror`
-- 超时保护：10 秒内未渲染出 widget → 显示"人机校验加载失败" + 重试按钮
-- 提交流程中若 `DEMO_VERIFICATION_FAILED` → 提示排查扩展，并重新渲染 widget（token 已失效，不能重放）
+- 监听脚本 `onerror` 与 SDK 的 `onError` 回调
+- 失败时必须 `script.remove()`，否则重试会给一个已经失败、再也不会触发事件的标签挂监听，Promise 永不 settle
+- 关闭弹窗时要清理 SDK 插到 `<body>` 的全屏遮罩（`.aliyunCaptcha-top`），否则访客被困在无法点击的页面上
+- 提交流程中若 `DEMO_VERIFICATION_FAILED` → 提示重试（`captchaVerifyParam` 单次有效，不能重放）
+
+### 10.4 已踩过的坑
+
+| 现象 | 原因 |
+| --- | --- |
+| `SDK.EndpointResolvingError` | SDK 内置端点表没有 captcha，需显式 `setEndpoint` |
+| `region参数传入值不合法` | 前端传 `cn`，不是 `cn-shanghai`（与服务端 region 是两套命名） |
+| `button参数传入值不合法` | `element`/`button` 必须以 `#` 开头 |
+| `INIT_FAIL`，请求打到 `undefined.captcha-open...` | `AliyunCaptchaConfig.prefix` 没在任何请求前设置 |
+| `401 Specified signature is not matched` | 只传 `EncryptedSceneId` 没传 `SceneId` |
+| `F022` 全部拒绝 | 控制台开了加密模式，但服务端没下发加密串（或反之） |
 
 ---
 
 ## 11. 联调与部署顺序
 
 ```
-1. 云控制台：建 anchr_demo 库、演示 OSS bucket、RAM 角色、Turnstile sitekey/secret
+1. 云控制台：建 anchr_demo 库、演示 OSS bucket、RAM 角色、验证码场景（scene id / prefix / ekey）
 2. Docling：ANCHR_DOCLING_ALLOWED_UPLOAD_TARGETS 加演示 bucket → 重启 Docling
    └─ 验证：传一张有图的 PDF，确认解析结果里图片被提取（不是仅 warnings）
-3. 切 demo 分支，实现后端（DemoProperties → DemoQuotaInterceptor → DemoAuthController → Turnstile → 上传校验 → userId 改造）
+3. 切 demo 分支，实现后端（DemoProperties → DemoQuotaInterceptor → DemoAuthController → AliyunCaptcha → 上传校验 → userId 改造）
 4. 部署演示 App，确认连的是 anchr_demo / db 4 / demo_kb_segment
 5. 前端 demo 分支：删硬编码 token、加领券 gate、Agent 默认开
 6. 导入预置内容（seed）
@@ -550,7 +587,8 @@ if (request.items().size() > maxFiles) {
 | --- | --- |
 | `DemoPropertiesTest` | 跨字段校验：非法值启动失败 |
 | `DemoQuotaInterceptorTest` | 未标注端点不碰 Redis；单券超限 429；每日超限 429 且回滚单券计数 |
-| `TurnstileVerifierTest` | success / 失败 / 超时 / 非 200 四种分支 |
+| `AliyunCaptchaVerifierTest` | 通过 / 不通过 / 异常 三种分支 |
+| `CaptchaSceneIdEncryptorTest` | 加解密互逆、TTL 边界、ekey 长度校验 |
 | `DemoAuthControllerTest` | cookie 幂等、冷却、发券上限、熔断 |
 
 **注意**：`AccessTokenInterceptorTest` 内的 `StubStringRedisTemplate` **只实现了 `get`**。新测试需要自己的 stub 支持 `increment` / `decrement` / `expire`，不要复用该 stub。
@@ -560,8 +598,8 @@ if (request.items().size() > maxFiles) {
 | 用例 | 期望 |
 | --- | --- |
 | curl 传 2 个文件建上传任务 | 400，不是 200 |
-| 不带 Turnstile token 领券 | 403 |
-| 同一 Turnstile token 重放 | 403 |
+| 不带 captchaVerifyParam 领券 | 403 |
+| 服务端校验失败时拒绝发券 | 403，且不消耗每日签发额度 |
 | 清 localStorage 后重复领券 | 取回同一张（cookie 幂等） |
 | 清 cookie 后重复领券 | 冷却期内 429 |
 | 熔断后调计费端点 | 503；`/actuator/health` 仍 200 |

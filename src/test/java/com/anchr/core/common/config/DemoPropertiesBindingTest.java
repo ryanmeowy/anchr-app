@@ -67,10 +67,10 @@ class DemoPropertiesBindingTest {
     }
 
     @Test
-    void shouldRejectAnEnabledDemoThatForgetsTheSecret() {
+    void shouldRejectAnEnabledDemoThatForgetsTheSceneId() {
         Map<String, String> source = Map.of(
                 "app.demo.enabled", "true",
-                "app.demo.turnstile-enabled", "true");
+                "app.demo.captcha-enabled", "true");
 
         // The failure surfaces as a bind exception wrapping the record's validation message.
         assertThatThrownBy(() -> bind(source))

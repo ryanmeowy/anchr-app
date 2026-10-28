@@ -70,7 +70,7 @@ class DemoPropertiesContextTest {
     }
 
     @Test
-    void shouldFailStartupWhenAnEnabledDemoHasNoTurnstileSecret() {
+    void shouldFailStartupWhenAnEnabledDemoHasNoCaptchaSceneId() {
         runner.withPropertyValues(
                 "app.demo.enabled=true",
                 "app.demo.captcha-enabled=true")

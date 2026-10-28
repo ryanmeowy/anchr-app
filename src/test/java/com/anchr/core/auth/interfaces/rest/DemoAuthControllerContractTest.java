@@ -77,12 +77,16 @@ class DemoAuthControllerContractTest {
 
         MvcResult result = mockMvc.perform(post("/api/v1/auth/demo")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"turnstileToken\":\"cf-token\"}"))
+                        .content("{\"captchaVerifyParam\":\"cf-token\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.token").value("tok"))
                 .andExpect(jsonPath("$.data.role").value("USER"))
                 .andExpect(jsonPath("$.data.userId").value("demo_abc"))
                 .andReturn();
+
+        // The verifier must receive the field the DTO actually binds. A renamed payload would
+        // otherwise pass on the mock alone, exercising the binding path not at all.
+        org.mockito.Mockito.verify(verifier).verify("cf-token");
 
         String setCookie = result.getResponse().getHeader("Set-Cookie");
         assertThat(setCookie).contains("anchr_demo_id=browser-cookie").contains("HttpOnly");
@@ -102,7 +106,7 @@ class DemoAuthControllerContractTest {
 
         mockMvc.perform(post("/api/v1/auth/demo")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"turnstileToken\":\"bad\"}"))
+                        .content("{\"captchaVerifyParam\":\"bad\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode")
                         .value(ApiError.DEMO_VERIFICATION_FAILED.name()));

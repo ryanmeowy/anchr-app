@@ -168,8 +168,8 @@ public class DemoAuthController {
         return ResponseCookie.from(DemoConstant.BROWSER_COOKIE, value)
                 .httpOnly(true)
                 // Browsers drop a Secure cookie over plain HTTP. The demo runs behind HTTPS, but
-                // local development with Turnstile off would then re-issue a token on every load
-                // and quietly burn the daily issue budget.
+                // local development with the CAPTCHA disabled would then re-issue a token on
+                // every load and quietly burn the daily issue budget.
                 .secure(demoProperties.captchaVerificationActive())
                 .sameSite("Lax")
                 .path("/")

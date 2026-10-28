@@ -54,11 +54,6 @@ public class AnswerGenerationServiceImpl implements AnswerGenerationService {
     private static final String GENERATION_FAILED_TEMPLATE =
             "回答模型未能生成可靠结果，请稍后重试。";
 
-    /**
-     * Upper bound for the verifier output that is handed to the follow-up revision.
-     */
-    private static final int MAX_MISSING_POINTS_CHARS = 2_000;
-
     private final ConversationGenerationPort generationPort;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;

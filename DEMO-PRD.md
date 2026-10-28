@@ -225,11 +225,19 @@ Cookie 是演示环境可接受的身份近似。
 
 ---
 
-## 11. 已定但尚未实现
+## 11. 实现对齐情况
 
-以下规则已确认，代码尚未对齐：
+本文件描述的规则均已在代码中实现：
 
-1. **单票有效期 5 小时 → 2 小时**
-2. **失效后不满额度用完，都不可在有效期内重领**：当前实现中，额度用完会直接签发新票，绕过了「只能持有一张」。
+| 规则 | 位置 |
+| --- | --- |
+| 单票 10 次 | `app.demo.token-quota`（默认 10） |
+| 单票 2 小时 | `app.demo.token-ttl-hours`（默认 2） |
+| 一浏览器一张 | Cookie + `demo:issue:token:*` |
+| 额度用完不可重领 | `DemoTokenService.issue()` 抛 `DEMO_TOKEN_STILL_ACTIVE` |
+| 每日签发 50 张 | `app.demo.daily-token-limit` |
+| 全站每日 80 次操作 | `app.demo.daily-operation-limit` |
+| 访客只读 | `@RequireAuth` 不含 GUEST 的写端点 |
+| 人机校验仅在领取时 | 只有 `POST /auth/demo` 调用验证 |
 
-第 2 条是本次新增的硬约束，属于规则变更，需要改 `DemoTokenService.issue()`。
+行为细节见 [DEMO-FIX-PLAN.md](./DEMO-FIX-PLAN.md)。

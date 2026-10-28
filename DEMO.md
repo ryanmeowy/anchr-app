@@ -19,7 +19,8 @@
 | `common/infrastructure/DemoKillSwitch.java` | Redis 熔断，5 秒内生效 |
 | `auth/application/impl/DemoTokenService.java` | 发券、幂等、冷却、每日上限 |
 | `auth/interfaces/rest/DemoAuthController.java` | `/api/v1/auth/demo*` |
-| `integration/security/TurnstileVerifier.java` | Turnstile 服务端校验 |
+| `integration/security/AliyunCaptchaVerifier.java` | 阿里云滑块服务端校验 |
+| `integration/security/CaptchaSceneIdEncryptor.java` | 加密模式下生成 EncryptedSceneId |
 | `auth/application/model/DemoTokenIssue.java` | 发券结果值对象 |
 | `auth/interfaces/rest/dto/DemoTokenDTO.java` | 发券响应 |
 | `auth/interfaces/rest/dto/DemoTokenRequestDTO.java` | 发券请求 |
@@ -89,9 +90,12 @@ git merge origin/main
 | `APP_DEMO_DAILY_TOKEN_LIMIT` | `50` | 全站每日发券数 |
 | `APP_DEMO_ISSUE_COOLDOWN_MINUTES` | `10` | 同一 cookie 发券冷却 |
 | `APP_DEMO_UPLOAD_MAX_FILES` | `1` | 单次上传文件数 |
-| `APP_DEMO_TURNSTILE_ENABLED` | `true` | Turnstile 开关 |
-| `APP_DEMO_TURNSTILE_SITE_KEY` | 空 | Cloudflare sitekey |
-| `APP_DEMO_TURNSTILE_SECRET_KEY` | 空 | Cloudflare secret |
+| `APP_DEMO_CAPTCHA_ENABLED` | `true` | 人机校验开关 |
+| `APP_DEMO_CAPTCHA_SCENE_ID` | 空 | 阿里云场景 ID |
+| `APP_DEMO_CAPTCHA_PREFIX` | 空 | 阿里云前端 prefix |
+| `APP_DEMO_CAPTCHA_ACCESS_KEY_ID` / `_SECRET` | 空 | 服务端校验用 RAM 凭据 |
+| `APP_DEMO_CAPTCHA_EKEY` | 空 | 加密模式密钥（控制台复制） |
+| `APP_DEMO_CAPTCHA_ENCRYPT_SCENE_ID` | `false` | 加密模式开关，**必须与控制台一致** |
 | `APP_DEMO_START_CLOSED` | `false` | 启动即熔断；重启不会误开已关闭的开关 |
 
 演示环境另需：
@@ -165,9 +169,9 @@ DELETE FROM conversation_session WHERE user_id LIKE 'demo_%';
 | 行为 | 结果 |
 | --- | --- |
 | db 4 与 db 0 隔离 | db4 有 key，db0 读不到 `demo:*` ✓ |
-| 单券计数 TTL | 6 小时（5 小时 token + 1 小时余量）✓ |
+| 单券计数 TTL | 3 小时（2 小时 token + 1 小时余量）✓ |
 | 过期后自动复位 | TTL 归 -2，计数消失，不需要清理任务 ✓ |
-| `INCR` 不重置 TTL | ttl 保持递减 ✓（所以代码只在 `used == 1` 时设 TTL 是必要的） |
+| `INCR` 每次都刷新 TTL | 防止回滚把 key 降成无 TTL 的负数后永久残留 ✓ |
 | key 被 LRU 驱逐后自愈 | 重新 `INCR` 得到 1，再次触发设 TTL ✓ |
 
 > 最后一条解释了为什么 `allkeys-lru` 只是「短暂失效」而不是永久损坏：计数器被驱逐后会从 1 重新开始，当天可能短暂突破上限，但不会卡死。
