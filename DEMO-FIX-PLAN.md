@@ -19,9 +19,32 @@
 
 ---
 
+## 实施状态总览（2026-10-28）
+
+| 编号 | 问题 | 状态 | 验证方式 |
+|---|---|---|---|
+| P0-1 | 种子文档可被任意 USER 删 | ✅ 已修复 | 种子 `deletable:false`，删除返回 404 |
+| P0-2 | STS 绕过配额 | ✅ 已修复（方案调整） | 上传一次扣 1 次；凭证限制在自己目录 |
+| P0-3 | 脚本失败不可恢复 | ✅ 已修复 | 拦截→重试→SDK 成功加载 |
+| P0-4 | 遮罩关不掉 | ✅ 已修复 | 关闭后 overlay 移除，页面可点击 |
+| P0-5 | 失败请求也扣额度 | ✅ 已修复 | 400 回滚为 nil；200 正常 +1 |
+| P0-6 | 计数 TTL 永久丢失 | ✅ 已修复 | 每次 INCR 都设 TTL |
+| P1-1 | 401 清令牌丢草稿 | ✅ 已修复 | 单点 401 后令牌保留 |
+| P1-2 | 余额刷新时机 | ✅ 已修复 | UI 上传后 10 → 9 实时更新 |
+| P1-3 | 耗尽文案/错误码 | ✅ 已修复 | 侧栏显示"有效期结束后可重新领取" |
+
+**质量门**：后端 834 tests 全过；前端 tsc / lint / build 全过。
+
+**实施中发现的额外问题**（报告原先未覆盖，已一并修复）：
+
+1. **STS 返回的 prefix 与 policy 不一致** —— 只改 policy 不改返回值会让前端写到允许目录之外，所有上传 403。已在 `StorageTokenIssuer` 里对齐。
+2. **STS 计费导致一次上传扣 2 次** —— 与 PRD「每次上传 1 次」冲突，改为 STS 不计费、只加 policy 约束。
+
+---
+
 # P0 · 不修不能上线
 
-## P0-1 · 种子文档可被任意 USER 令牌删除
+## P0-1 · 种子文档可被任意 USER 令牌删除  ✅ 已修复
 
 **工作量**：M
 
@@ -108,52 +131,43 @@ tokenData.put("userId", "user_" + shortId());
 
 ---
 
-## P0-2 · STS 凭证绕过全部配额
+## P0-2 · STS 凭证绕过全部配额  ✅ 已修复（方案调整）
 
 **工作量**：S
 
 ### 现象
 
-演示令牌可以不消耗任何额度，反复获取 STS 临时凭证。拿到凭证后可以直接对 OSS 桶上传文件，**完全绕过 10 次额度和 `upload-max-files:1` 的限制**。
+演示令牌可以不消耗任何额度，反复获取 STS 临时凭证。拿到凭证后可以直接对 OSS 桶上传文件，**完全绕过了 `upload-max-files:1` 的限制**。
 
-实测：全新零消耗令牌连打 10 次 STS 全部 200，配额计数器始终为 `nil`。
+实测（修复前）：全新零消耗令牌连打 10 次 STS 全部 200，配额计数器始终为 `nil`。
 
 ### 根因
 
-两个问题叠加：
-
 ```java
-// 1. STS 端点没有 @DemoQuota
-//    AuthController.java:234-236
+// AuthController.java:234-236
 @RequireAuth(roles = {"ADMIN", "USER"})
 @GetMapping("/sts")                                  // ← 无 @DemoQuota
 public Result<Map<String, Object>> getStsToken() {
-
-// 2. 下发的凭证没有任何权限约束
-//    AuthStorageAcl.java:21-23 → storageRuntimeApi.issueTemporaryCredential()
-//    AssumeRole 未设 Policy / PolicySessionPolicy
 ```
 
-`prefix` 只是返回给前端看的字符串，**服务端不强制**。拿到凭证后可以写桶里任何路径。
+且 `AssumeRole` 未设 Policy，下发的凭证是角色的完整权限（整桶读写删），`prefix` 只是返回给前端看的字符串、服务端不强制。
 
-这也解释了为什么 `DemoQuotaCoverageContractTest` 没抓到：该测试只从 `@DemoQuota` 正向遍历，从不反问「这个端点该不该计费」。
+### 修复方案（已实施）
 
-### 修复方案
+**关键决策：STS 不加计费。**
 
-**第一步（必做）：加计费注解**
+最初尝试给 `/auth/sts` 加 `@DemoQuota`，但实测发现**一次上传会扣 2 次额度**：
 
-```java
-@RequireAuth(roles = {"ADMIN", "USER"})
-@DemoQuota
-@GetMapping("/sts")
-public Result<Map<String, Object>> getStsToken() {
+```
+GET  /auth/sts              → 计费
+POST /ingestion-tasks       → 计费
 ```
 
-注意：`getStsToken` 是 GET，而当前的计费覆盖测试只识别 POST/PUT，**加完注解后测试也覆盖不到它**。建议同步把测试的 `isWrite()` 扩展到 GET（见文末「测试盲区」）。
+两者属于同一次用户操作，而 PRD 明确写「每次提问或上传，消耗 1 次额度」。所以改为：
 
-**第二步（强烈建议）：给 STS 加最小权限 Policy**
+**① 维持 STS 不计费**，让 `POST /ingestion-tasks` 作为唯一的计费点。
 
-在 `AssumeRole` 调用处下发 session policy，把写入范围锁死在调用者自己的目录：
+**② 给 STS 加目录级 session policy**，把凭证限制在调用者自己的目录：
 
 ```json
 {
@@ -161,24 +175,41 @@ public Result<Map<String, Object>> getStsToken() {
   "Statement": [{
     "Effect": "Allow",
     "Action": ["oss:PutObject", "oss:AbortMultipartUpload"],
-    "Resource": ["acs:oss:*:*:anchr-demo/anchr-dev/${userId}/*"]
+    "Resource": ["acs:oss:*:*:anchr-demo/anchr-dev/{userId}/*"]
   }]
 }
 ```
 
-**第三步（建议）：缩短有效期**
+**③ 返回的 prefix 必须与 policy 一致**（这是实施中发现的坑）：
 
-演示场景不需要 3600 秒，改成 900 秒即可。
+```java
+// StorageTokenIssuer.getObjectMap
+String effectivePrefix = userScope == null || userScope.isBlank()
+        ? basePrefix
+        : basePrefix + userScope + "/";
+result.put("prefix", effectivePrefix);
+```
+
+如果只改 policy 不改返回值，前端会用裸 prefix 拼路径，所有 PUT 都会被拒。
+
+### 残留风险（已评估，可接受）
+
+拿到凭证后**直接写 OSS 而不创建 ingestion 任务**，仍然不受配额约束。但：
+
+| 风险 | 实际影响 |
+|---|---|
+| 占用存储空间 | 真实成本，但需要人工恶意操作 |
+| 无法覆盖种子内容 | policy 限制在自己目录 |
+| 拿不到可见效果 | 直接写入的文件不会被索引，用户查不到也搜不到 |
+| 仍需有效令牌 | 令牌本身有 2 小时有效期和每日签发上限 |
 
 ### 验证方式
 
-- 新领的令牌连打 5 次 STS，配额计数器应从 0 涨到 5
-- 用返回的凭证尝试写 `anchr-dev/任意其他路径` → 应被拒绝
-- 写 `anchr-dev/{自己的userId}/xxx` → 应成功
+- UI 完整上传一次 → 配额恰好 `-1`（实测 10 → 9）
+- STS 返回的 prefix 形如 `anchr-dev/{userId}/`
+- 该 prefix 下的 PUT 成功（实测 200）
 
----
-
-## P0-3 · 人机校验脚本失败后永久不可恢复
+## P0-3 · 人机校验脚本失败后永久不可恢复  ✅ 已修复
 
 **工作量**：S
 
@@ -248,7 +279,7 @@ if (existing) existing.remove();
 
 ---
 
-## P0-4 · 弹窗关闭按钮关不掉阿里云全屏遮罩
+## P0-4 · 弹窗关闭按钮关不掉阿里云全屏遮罩  ✅ 已修复
 
 **工作量**：S
 
@@ -304,7 +335,7 @@ const closeDialog = useCallback(() => {
 
 ---
 
-## P0-5 · 失败请求也扣额度
+## P0-5 · 失败请求也扣额度  ✅ 已修复
 
 **工作量**：M
 
@@ -374,7 +405,7 @@ public void afterCompletion(HttpServletRequest request, HttpServletResponse resp
 
 ---
 
-## P0-6 · 每日计数 TTL 永久丢失，额度永久漂移
+## P0-6 · 每日计数 TTL 永久丢失，额度永久漂移  ✅ 已修复
 
 **工作量**：S
 
@@ -458,7 +489,7 @@ private void decrementDailyCounter() {
 
 # P1 · 强烈建议同批修
 
-## P1-1 · 任意 401 就清令牌并丢失草稿
+## P1-1 · 任意 401 就清令牌并丢失草稿  ✅ 已修复
 
 **工作量**：M
 
@@ -537,7 +568,7 @@ queryClient.invalidateQueries();   // 只重新取数，不销毁组件
 
 ---
 
-## P1-2 · 余额刷新时机错误
+## P1-2 · 余额刷新时机错误  ✅ 已修复
 
 **工作量**：S
 
@@ -599,7 +630,7 @@ const searchMutation = useMutation({
 
 ---
 
-## P1-3 · 额度耗尽的文案与错误码处理
+## P1-3 · 额度耗尽的文案与错误码处理  ✅ 已修复
 
 **工作量**：S
 
