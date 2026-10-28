@@ -219,7 +219,10 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         // The knowledge bases are shared, so deleting by id alone would let any demo token remove
         // the seeded documents every other visitor depends on. A visitor may remove only what it
         // uploaded itself; ADMIN keeps the ability to clear anything.
-        if (!"ADMIN".equals(context.role()) && !context.userId().equals(asset.getCreatedBy())) {
+        // `owns` refuses to match placeholder owners (system/guest/anonymous). Seeded rows carry
+        // created_by='system', so a plain equality test would let every token with no userId of
+        // its own delete them.
+        if (!"ADMIN".equals(context.role()) && !context.owns(asset.getCreatedBy())) {
             throw new BusinessException(ApiError.DOCUMENT_NOT_FOUND);
         }
         boolean deleted = assetRepository.markDeleted(

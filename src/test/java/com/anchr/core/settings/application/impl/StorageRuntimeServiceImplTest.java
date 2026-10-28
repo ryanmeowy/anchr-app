@@ -53,7 +53,7 @@ class StorageRuntimeServiceImplTest {
         issued.put("accessKeySecret", "temp-sk");
         issued.put("securityToken", "token");
         issued.put("expiration", "2026-07-29T19:00:00Z");
-        when(tokenIssuer.issueToken(config, "ak", "sk")).thenReturn(issued);
+        when(tokenIssuer.issueToken(config, "ak", "sk", null)).thenReturn(issued);
 
         var credential = service.issueTemporaryCredential();
 
@@ -61,7 +61,7 @@ class StorageRuntimeServiceImplTest {
         assertThat(credential.accessKeySecret()).isEqualTo("temp-sk");
         assertThat(credential.securityToken()).isEqualTo("token");
         assertThat(credential.expiration()).isEqualTo("2026-07-29T19:00:00Z");
-        verify(tokenIssuer).issueToken(config, "ak", "sk");
+        verify(tokenIssuer).issueToken(config, "ak", "sk", null);
     }
 
     @Test

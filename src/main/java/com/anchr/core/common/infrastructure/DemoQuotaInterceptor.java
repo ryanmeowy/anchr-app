@@ -34,6 +34,12 @@ import org.springframework.web.servlet.AsyncHandlerInterceptor;
 @Slf4j
 public class DemoQuotaInterceptor implements AsyncHandlerInterceptor {
 
+    /**
+     * Request attribute holding the token hash charged by this request, so {@link #afterCompletion}
+     * can refund it when the handler turns out to have failed.
+     */
+    private static final String CHARGED_TOKEN_ATTR = "demo.quota.chargedTokenHash";
+
     private final StringRedisTemplate redisTemplate;
     private final DemoProperties demoProperties;
     private final DemoKillSwitch killSwitch;
@@ -88,7 +94,41 @@ public class DemoQuotaInterceptor implements AsyncHandlerInterceptor {
             reject(response, handler, ApiError.DEMO_DAILY_LIMIT_REACHED);
             return false;
         }
+        // Reached only after both counters were incremented: remember that so a failed handler
+        // can be refunded. Set here rather than above, otherwise a rejected request would refund
+        // a counter that was never charged for this call.
+        request.setAttribute(CHARGED_TOKEN_ATTR, tokenHash);
         return true;
+    }
+
+    /**
+     * Refunds the credit when the request itself failed.
+     *
+     * <p>A charge happens in {@code preHandle}, before the handler runs, so a malformed request or
+     * a downstream error used to cost the visitor a credit for work that never happened. The
+     * response status is only known here.
+     *
+     * <p>SSE handlers are dispatched asynchronously; this runs once the async exchange completes,
+     * which is exactly once per accepted stream.
+     */
+    @Override
+    public void afterCompletion(@NonNull HttpServletRequest request,
+                                @NonNull HttpServletResponse response,
+                                @NonNull Object handler,
+                                Exception ex) {
+        Object charged = request.getAttribute(CHARGED_TOKEN_ATTR);
+        if (!(charged instanceof String tokenHash) || tokenHash.isBlank()) {
+            return;
+        }
+        request.removeAttribute(CHARGED_TOKEN_ATTR);
+        boolean failed = ex != null || response.getStatus() >= 400;
+        if (!failed) {
+            return;
+        }
+        decrementTokenCounter(tokenHash);
+        decrementDailyCounter();
+        log.info("Demo quota refunded after a failed request, tokenHash={}, status={}",
+                mask(tokenHash), response.getStatus());
     }
 
     /**
@@ -105,16 +145,19 @@ public class DemoQuotaInterceptor implements AsyncHandlerInterceptor {
     private long incrementTokenCounter(String tokenHash) {
         String key = DemoConstant.QUOTA_TOKEN_PREFIX + tokenHash;
         Long value = redisTemplate.opsForValue().increment(key);
-        long used = value == null ? 1L : value;
-        if (used == 1L) {
-            redisTemplate.expire(key, tokenCounterTtl());
-        }
-        return used;
+        // Same reasoning as the daily counter: never rely on `used == 1L` to set the expiry,
+        // because a rollback can leave the key at 0 or below with no TTL.
+        redisTemplate.expire(key, tokenCounterTtl());
+        return value == null ? 1L : value;
     }
 
     private void decrementTokenCounter(String tokenHash) {
         try {
-            redisTemplate.opsForValue().decrement(DemoConstant.QUOTA_TOKEN_PREFIX + tokenHash);
+            String key = DemoConstant.QUOTA_TOKEN_PREFIX + tokenHash;
+            Long value = redisTemplate.opsForValue().decrement(key);
+            if (value != null && value <= 0) {
+                redisTemplate.delete(key);
+            }
         } catch (RuntimeException exception) {
             log.warn("Failed to roll back demo token counter: {}", exception.getMessage());
         }
@@ -123,16 +166,23 @@ public class DemoQuotaInterceptor implements AsyncHandlerInterceptor {
     private long incrementDailyCounter() {
         String key = dailyOpsKey();
         Long value = redisTemplate.opsForValue().increment(key);
-        long used = value == null ? 1L : value;
-        if (used == 1L) {
-            redisTemplate.expire(key, untilNextDay());
-        }
-        return used;
+        // Always set the expiry rather than only on the first increment. A rollback can decrement
+        // a key that does not exist, which Redis creates with value -1 and no TTL; the next
+        // increment then returns 0, `used == 1L` never holds again, and the counter would live
+        // forever with its value permanently offset.
+        redisTemplate.expire(key, untilNextDay());
+        return value == null ? 1L : value;
     }
 
     private void decrementDailyCounter() {
         try {
-            redisTemplate.opsForValue().decrement(dailyOpsKey());
+            String key = dailyOpsKey();
+            Long value = redisTemplate.opsForValue().decrement(key);
+            if (value != null && value <= 0) {
+                // Rolled back past zero: the key only ever held this failed attempt, so drop it
+                // instead of leaving a negative counter behind.
+                redisTemplate.delete(key);
+            }
         } catch (RuntimeException exception) {
             log.warn("Failed to roll back demo daily counter: {}", exception.getMessage());
         }

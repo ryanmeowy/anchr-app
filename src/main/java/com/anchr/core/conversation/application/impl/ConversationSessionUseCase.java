@@ -2,6 +2,7 @@ package com.anchr.core.conversation.application.impl;
 
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.conversation.application.acl.ConversationActivityAcl;
 import com.anchr.core.conversation.application.acl.ConversationKnowledgeAcl;
@@ -87,9 +88,8 @@ final class ConversationSessionUseCase {
         ConversationSession session = loadSessionOrThrow(sessionId);
         // Demo tokens share one process but not one history: deleting by id alone would let any
         // claimed token wipe someone else's session. ADMIN passes so the owner can still clean up.
-        String caller = UserContextHolder.get().userId();
-        if (!"ADMIN".equals(UserContextHolder.get().role())
-                && !session.getUserId().equals(caller)) {
+        RequestUserContext caller = UserContextHolder.get();
+        if (!"ADMIN".equals(caller.role()) && !caller.owns(session.getUserId())) {
             throw new BusinessException(ApiError.CONVERSATION_SESSION_NOT_FOUND);
         }
         agentConversationCleanupService.cancelRunning(sessionId);

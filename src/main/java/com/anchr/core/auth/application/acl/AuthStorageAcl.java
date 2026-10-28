@@ -18,9 +18,23 @@ public class AuthStorageAcl {
                 .orElseThrow(() -> new RuntimeException("Object storage is not configured."));
     }
 
-    public AuthStorageCredential issueUploadCredential() {
+    /**
+     * @param userScope folder name the credential is confined to. Scoping the session policy is
+     *                  what stops one demo visitor from writing over another's uploads, or over
+     *                  the seeded content, in the shared bucket.
+     */
+    public AuthStorageCredential issueUploadCredential(String userScope) {
         StorageTemporaryCredential credential =
-                storageRuntimeApi.issueTemporaryCredential();
+                storageRuntimeApi.issueTemporaryCredentialFor(userScope);
+        return toCredential(credential);
+    }
+
+    /** Unscoped variant, kept for callers that have no user identity to scope by. */
+    public AuthStorageCredential issueUploadCredential() {
+        return toCredential(storageRuntimeApi.issueTemporaryCredential());
+    }
+
+    private AuthStorageCredential toCredential(StorageTemporaryCredential credential) {
         return new AuthStorageCredential(
                 credential.endpoint(),
                 credential.bucket(),

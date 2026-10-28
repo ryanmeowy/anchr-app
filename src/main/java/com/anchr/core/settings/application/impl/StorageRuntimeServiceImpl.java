@@ -30,11 +30,20 @@ public class StorageRuntimeServiceImpl implements StorageRuntimeApi {
 
     @Override
     public StorageTemporaryCredential issueTemporaryCredential() {
+        return issueTemporaryCredentialFor(null);
+    }
+
+    @Override
+    public StorageTemporaryCredential issueTemporaryCredentialFor(String userScope) {
         StorageConfig config = repository.find()
                 .orElseThrow(() -> new RuntimeException("Object storage is not configured."));
         String accessKey = aesUtil.decrypt(config.getAccessKeyEnc());
         String secretKey = aesUtil.decrypt(config.getSecretKeyEnc());
-        Map<String, Object> token = tokenIssuer.issueToken(config, accessKey, secretKey);
+        String policy = userScope == null || userScope.isBlank()
+                ? null
+                : StorageTokenIssuer.uploadPolicy(
+                        config.getBucket(), config.getPrefix(), userScope);
+        Map<String, Object> token = tokenIssuer.issueToken(config, accessKey, secretKey, policy);
         return new StorageTemporaryCredential(
                 text(token, "endpoint"),
                 text(token, "bucket"),

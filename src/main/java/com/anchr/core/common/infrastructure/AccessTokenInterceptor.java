@@ -88,9 +88,13 @@ public class AccessTokenInterceptor implements AsyncHandlerInterceptor {
             Map<String, Object> tokenData = objectMapper.readValue(tokenJson, Map.class);
             role = (String) tokenData.getOrDefault("role", "");
             Object storedUserId = tokenData.get("userId");
+            // Deliberately not falling back to DEFAULT_USER_ID ("system"): that value is also the
+            // database default for seeded rows, so a token without an owner would appear to own
+            // them. Tokens issued before the owner field existed simply carry no identity, and
+            // ownership checks treat that as "owns nothing".
             userId = storedUserId instanceof String text && !text.isBlank()
                     ? text.trim()
-                    : RequestUserContext.DEFAULT_USER_ID;
+                    : "";
         } catch (Exception e) {
             log.warn("Failed to parse token JSON", e);
             reject(response, handler, 401, ApiError.AUTH_TOKEN_INVALID);

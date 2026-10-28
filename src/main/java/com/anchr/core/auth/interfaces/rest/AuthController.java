@@ -2,8 +2,12 @@ package com.anchr.core.auth.interfaces.rest;
 
 import com.anchr.core.auth.application.acl.AuthStorageAcl;
 import com.anchr.core.auth.interfaces.rest.dto.TokenValidationDTO;
+import com.anchr.core.auth.application.model.AuthStorageCredential;
+import com.anchr.core.common.application.context.RequestUserContext;
+import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.infrastructure.PermitAll;
+import com.anchr.core.common.infrastructure.DemoQuota;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -23,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.UUID;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -132,6 +137,10 @@ public class AuthController {
         String redisKey = TOKEN_CACHE_PREFIX + newToken;
         Map<String, Object> tokenData = new LinkedHashMap<>();
         tokenData.put("role", requestedRole);
+        // Give every token a concrete owner. Without this the interceptor falls back to the
+        // shared "system" placeholder, which is also the database default for seeded content, so
+        // ownership checks could not distinguish one token from another.
+        tokenData.put("userId", "user_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12));
         tokenData.put("createdAt", System.currentTimeMillis());
         try {
             String json = objectMapper.writeValueAsString(tokenData);
@@ -224,6 +233,17 @@ public class AuthController {
         }
     }
 
+    /**
+     * Scopes the upload credential to the caller's own folder when the token carries an identity,
+     * falling back to the unscoped credential otherwise (owner tokens, legacy tokens).
+     */
+    private AuthStorageCredential issueUploadCredential() {
+        RequestUserContext context = UserContextHolder.get();
+        return context.hasConcreteIdentity()
+                ? authStorageAcl.issueUploadCredential(context.userId())
+                : authStorageAcl.issueUploadCredential();
+    }
+
     private String maskToken(String token) {
         if (token == null || token.length() <= 8) {
             return token == null ? "" : token.substring(0, Math.min(4, token.length())) + "...";
@@ -231,13 +251,17 @@ public class AuthController {
         return token.substring(0, 4) + "..." + token.substring(token.length() - 4);
     }
 
+    // Metered: the credential this returns lets the caller write straight to object storage for
+    // an hour, which is exactly the work the upload quota exists to bound. Without the annotation
+    // a token could fetch a fresh credential per upload and never spend a credit.
     @RequireAuth(roles = {"ADMIN", "USER"})
+    @DemoQuota
     @GetMapping("/sts")
     public Result<Map<String, Object>> getStsToken() {
         authStorageAcl.requireConfigured();
         try {
             return Result.success(
-                    authStorageAcl.issueUploadCredential().toResponseMap());
+                    issueUploadCredential().toResponseMap());
         } catch (Exception e) {
             log.error("Failed to issue STS token", e);
             return Result.error(ApiError.AUTH_STS_FETCH_FAILED);
