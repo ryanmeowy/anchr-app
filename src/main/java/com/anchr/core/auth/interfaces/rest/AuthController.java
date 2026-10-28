@@ -7,7 +7,6 @@ import com.anchr.core.common.application.context.RequestUserContext;
 import com.anchr.core.common.application.context.UserContextHolder;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.infrastructure.PermitAll;
-import com.anchr.core.common.infrastructure.DemoQuota;
 import com.anchr.core.common.infrastructure.RequireAuth;
 import com.anchr.core.common.model.Result;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -251,11 +250,11 @@ public class AuthController {
         return token.substring(0, 4) + "..." + token.substring(token.length() - 4);
     }
 
-    // Metered: the credential this returns lets the caller write straight to object storage for
-    // an hour, which is exactly the work the upload quota exists to bound. Without the annotation
-    // a token could fetch a fresh credential per upload and never spend a credit.
+    // Deliberately not metered: fetching this credential is the first half of an upload whose
+    // second half (creating the ingestion task) is what charges. Metering both billed a single
+    // upload twice. The exposure is bounded instead by the session policy below, which confines
+    // the credential to the caller's own folder, and by the per-request file cap.
     @RequireAuth(roles = {"ADMIN", "USER"})
-    @DemoQuota
     @GetMapping("/sts")
     public Result<Map<String, Object>> getStsToken() {
         authStorageAcl.requireConfigured();
