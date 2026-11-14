@@ -137,7 +137,7 @@ public class SettingsController {
 
     // ── test connection ────────────────────────────────────────────────────
 
-    @RequireAuth(roles = {"ADMIN", "USER"})
+    @RequireAuth
     @PostMapping("/test-connection")
     public Result<CapabilityConnectionTestResultDTO> testConnection(
             @Valid @RequestBody CapabilityConnectionTestRequestDTO request) {
@@ -170,7 +170,7 @@ public class SettingsController {
                 storageConfigService.maskSecretKey(saved)));
     }
 
-    @RequireAuth(roles = {"ADMIN", "USER"})
+    @RequireAuth
     @PostMapping("/storage/test")
     public Result<StorageConnectionTestResultDTO> testStorage(
             @Valid @RequestBody StorageConnectionTestRequestDTO request) {
