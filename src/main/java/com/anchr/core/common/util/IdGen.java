@@ -49,8 +49,41 @@ public class IdGen {
         if (ID_GEN_MAX_STEP > ID_GEN_SEGMENT_SIZE) {
             throw new IllegalArgumentException("MAX_STEP MUST be <= SEGMENT_SIZE to prevent duplicate IDs");
         }
-        this.cacheKey = String.format("%s:%s", ID_GEN_KEY, activeProfile);
-        stringRedisTemplate.opsForValue().setIfAbsent(cacheKey, String.valueOf(ID_GEN_MIN_ID));
+        this.cacheKey = ID_GEN_KEY;
+        String currentValue = stringRedisTemplate.opsForValue().get(cacheKey);
+        if (currentValue != null) {
+            if (!isValidCounter(currentValue)) {
+                throw new IllegalStateException(
+                        "ID generator counter is invalid: " + cacheKey);
+            }
+            return;
+        }
+
+        // Older releases scoped the counter by spring.profiles.active. Copy that value
+        // once so changing the active profile no longer starts a fresh ID space against
+        // an existing database.
+        String legacyKey = ID_GEN_KEY + ":" + activeProfile;
+        String legacyValue = stringRedisTemplate.opsForValue().get(legacyKey);
+        String initialValue = isValidCounter(legacyValue)
+                ? legacyValue
+                : String.valueOf(ID_GEN_MIN_ID);
+        stringRedisTemplate.opsForValue().setIfAbsent(cacheKey, initialValue);
+        if (isValidCounter(legacyValue)) {
+            log.info("Migrated ID generator counter from legacy key [{}] to [{}]",
+                    legacyKey, cacheKey);
+        }
+    }
+
+    private boolean isValidCounter(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            long parsed = Long.parseLong(value);
+            return parsed >= ID_GEN_MIN_ID && parsed <= ID_GEN_MAX_ID;
+        } catch (NumberFormatException exception) {
+            return false;
+        }
     }
 
     public String nextIdStr() {

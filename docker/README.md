@@ -37,6 +37,13 @@ docker compose --env-file docker/infra/.env \
 
 Elasticsearch, Redis, and MySQL are published on loopback-only host ports.
 
+Redis runs with `maxmemory-policy noeviction` so auth tokens, Agent snapshots,
+and the stable `id:gen` counter are not silently evicted. If memory is
+exhausted, writes fail instead of corrupting application state; size Redis for
+the expected token, snapshot, and cache volume. Do not switch the policy to
+`allkeys-lru`. The App migrates the ID counter once from the legacy
+`id:gen:<profile>` key.
+
 ## 3. Start Anchr App
 
 ```bash
