@@ -369,6 +369,7 @@ See [`project_layout.text`](../project_layout.text) for the maintained repositor
 - Store admin, encryption, Docling, model, and storage secrets outside source control.
 - Persist and back up MySQL and object storage; manage Elasticsearch indexes as rebuildable projections.
 - Monitor `/actuator/health`, `/actuator/metrics`, ingestion failures, Agent task leases, outbox retries, and index alias state.
+- If Elasticsearch is briefly unavailable at startup, `/api/v1/index/retry` re-inspects the aliases and reuses an existing serving alias pair instead of creating another index; index creation is refused while segment aliases exist.
 - After an application restart, review interrupted ingestion items: they are marked failed and require a manual whole-document retry. Agent recovery and cancellation are separate Lease-based capabilities.
 - Validate migrations and index rebuilds against production-like data before deployment.
 

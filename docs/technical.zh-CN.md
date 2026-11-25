@@ -372,6 +372,7 @@ Surefire XML 报告会作为 workflow artifact 保留七天。
 - 在源码之外保存 Admin、加密、Docling、模型与存储密钥。
 - 持久化并备份 MySQL 与对象存储；将 Elasticsearch 索引作为可重建投影管理。
 - 监控 `/actuator/health`、`/actuator/metrics`、入库失败、Agent Task Lease、Outbox 重试和索引 alias 状态。
+- 如果启动时 Elasticsearch 短暂不可用，`/api/v1/index/retry` 会重新检查 alias 并复用已有的服务索引，不会创建新索引；已有 segment alias 时会拒绝创建。
 - 应用重启后需要检查被中断的入库 Item：它们会被标记为失败，必须人工按整文档重试。Agent 的恢复和取消是另一套基于 Lease 的能力。
 - 上线前使用接近生产的数据验证数据库迁移与索引重建。
 

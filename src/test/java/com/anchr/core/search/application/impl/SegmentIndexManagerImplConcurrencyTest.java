@@ -41,7 +41,7 @@ class SegmentIndexManagerImplConcurrencyTest {
     @Test
     void retryCreateShouldEnqueueOnlyOneTaskUnderConcurrency() throws Exception {
         ConcurrentLinkedQueue<Runnable> queuedTasks = new ConcurrentLinkedQueue<>();
-        SegmentIndexManagerImpl manager = newManager(queuedTasks::add);
+        SegmentIndexManagerImpl manager = newManager(queuedTasks::add, noAliasesTopology());
         int callerCount = 16;
         ExecutorService callers = Executors.newFixedThreadPool(callerCount);
         CountDownLatch start = new CountDownLatch(1);
@@ -95,7 +95,7 @@ class SegmentIndexManagerImplConcurrencyTest {
             }
             queuedTasks.add(task);
         };
-        SegmentIndexManagerImpl manager = newManager(rejectOnce);
+        SegmentIndexManagerImpl manager = newManager(rejectOnce, noAliasesTopology());
 
         assertFalse(manager.retryCreate());
         assertTrue(manager.retryCreate());
@@ -354,18 +354,25 @@ class SegmentIndexManagerImplConcurrencyTest {
             Executor executor,
             EmbeddingProfileProvider profileProvider
     ) {
+        return newManager(executor, profileProvider, readyTopology());
+    }
+
+    private SegmentIndexManagerImpl newManager(
+            Executor executor,
+            AliasTopology topology
+    ) {
+        return newManager(executor, PROFILE_PROVIDER, topology);
+    }
+
+    private SegmentIndexManagerImpl newManager(
+            Executor executor,
+            EmbeddingProfileProvider profileProvider,
+            AliasTopology topology
+    ) {
         SegmentIndexAliasManager aliasManager = new SegmentIndexAliasManager(null) {
             @Override
             public AliasTopology inspect() {
-                return new AliasTopology(
-                        true,
-                        true,
-                        true,
-                        true,
-                        true,
-                        "kb_segment_20260101000000",
-                        "kb_segment_20260101000000",
-                        null);
+                return topology;
             }
         };
         return SegmentIndexManagerTestFactory.create(
@@ -377,5 +384,29 @@ class SegmentIndexManagerImplConcurrencyTest {
                 executor,
                 new SegmentIndexWriteBarrier(),
                 aliasManager);
+    }
+
+    private static AliasTopology readyTopology() {
+        return new AliasTopology(
+                true,
+                true,
+                true,
+                true,
+                true,
+                "kb_segment_20260101000000",
+                "kb_segment_20260101000000",
+                null);
+    }
+
+    private static AliasTopology noAliasesTopology() {
+        return new AliasTopology(
+                true,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                "readTargets=[], writeTargets=[], explicitWriteTargets=[]");
     }
 }
