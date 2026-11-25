@@ -106,6 +106,45 @@ class OutboxEventProcessorTest {
     }
 
     @Test
+    void process_shouldDeleteSourceAndPreviewObjectsForAssetDelete() {
+        OutboxEvent event = event(0, assetDeletePayloadWithObjects());
+        when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any())).thenReturn(true);
+
+        processor.process(event);
+
+        verify(objectStoragePort).deleteObject("object-1");
+        verify(objectStoragePort).deleteObject("preview-1");
+        verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
+    }
+
+    @Test
+    void process_shouldKeepBackwardCompatibilityWithPayloadsWithoutObjectKeys() {
+        OutboxEvent event = event(0, validPayload());
+        when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any())).thenReturn(true);
+
+        processor.process(event);
+
+        verify(objectStoragePort, never()).deleteObject(anyString());
+        verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
+    }
+
+    @Test
+    void process_shouldRetryWhenObjectDeletionFails() {
+        OutboxEvent event = event(0, assetDeletePayloadWithObjects());
+        doThrow(new IllegalStateException("OSS unavailable"))
+                .when(objectStoragePort).deleteObject("object-1");
+        when(outboxEventRepository.markRetry(
+                eq(1L), eq("claim-1"), eq(1), any(), any(), any()))
+                .thenReturn(true);
+
+        processor.process(event);
+
+        verify(outboxEventRepository).markRetry(
+                eq(1L), eq("claim-1"), eq(1), any(), eq("OSS unavailable"), any());
+        verify(outboxEventRepository, never()).markDone(anyLong(), anyString(), any());
+    }
+
+    @Test
     void process_shouldDeleteOnlyRequestedGenerationAndMarkDone() {
         OutboxEvent event = event(
                 OutboxEventType.DELETE_ASSET_GENERATION,
@@ -371,6 +410,11 @@ class OutboxEventProcessorTest {
 
     private String validPayload() {
         return "{\"kbId\":\"kb-1\",\"assetId\":\"asset-1\"}";
+    }
+
+    private String assetDeletePayloadWithObjects() {
+        return "{\"kbId\":\"kb-1\",\"assetId\":\"asset-1\","
+                + "\"objectKey\":\"object-1\",\"previewObjectKey\":\"preview-1\"}";
     }
 
     private String generationPayload(long indexGeneration) {

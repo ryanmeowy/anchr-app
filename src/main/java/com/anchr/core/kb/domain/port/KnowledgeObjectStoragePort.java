@@ -10,4 +10,7 @@ public interface KnowledgeObjectStoragePort {
 
     /** Idempotently remove every owned object below an exact, validated prefix. */
     void deleteObjectsByPrefix(String prefix);
+
+    /** Idempotently remove a single owned object by its exact key. */
+    void deleteObject(String objectKey);
 }

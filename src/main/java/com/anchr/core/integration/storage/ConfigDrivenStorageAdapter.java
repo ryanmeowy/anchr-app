@@ -90,6 +90,21 @@ public class ConfigDrivenStorageAdapter implements
     }
 
     @Override
+    public void deleteObject(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Object deletion key must be a non-empty object key.");
+        }
+        StorageConfig config = loadConfig();
+        OSS client = buildClient(config);
+        try {
+            client.deleteObject(config.getBucket(), objectKey.trim());
+        } finally {
+            client.shutdown();
+        }
+    }
+
+    @Override
     public void deleteObjectsByPrefix(String prefix) {
         if (prefix == null || prefix.isBlank() || !prefix.endsWith("/")) {
             throw new IllegalArgumentException(

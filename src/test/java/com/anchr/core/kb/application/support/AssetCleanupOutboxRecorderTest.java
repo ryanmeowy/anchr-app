@@ -70,7 +70,7 @@ class AssetCleanupOutboxRecorderTest {
         LocalDateTime occurredAt = LocalDateTime.of(2026, 7, 24, 15, 0);
 
         recorder.assetDeleted(
-                "kb-1", "asset-1", "user-a", occurredAt);
+                "kb-1", "asset-1", "object-1", "preview-1", "user-a", occurredAt);
 
         ArgumentCaptor<OutboxEvent> eventCaptor =
                 ArgumentCaptor.forClass(OutboxEvent.class);
@@ -85,7 +85,9 @@ class AssetCleanupOutboxRecorderTest {
                 .isEqualTo(objectMapper.readTree("""
                         {
                           "kbId": "kb-1",
-                          "assetId": "asset-1"
+                          "assetId": "asset-1",
+                          "objectKey": "object-1",
+                          "previewObjectKey": "preview-1"
                         }
                         """));
     }
@@ -98,6 +100,8 @@ class AssetCleanupOutboxRecorderTest {
         assertThatThrownBy(() -> recorder.assetDeleted(
                 "kb-1",
                 "asset-1",
+                "object-1",
+                "preview-1",
                 "user-a",
                 LocalDateTime.of(2026, 7, 24, 15, 0)))
                 .isInstanceOf(IllegalStateException.class)

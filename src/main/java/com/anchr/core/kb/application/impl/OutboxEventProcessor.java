@@ -77,6 +77,8 @@ public class OutboxEventProcessor {
                             ingestionTaskRepository.listTargetIndexGenerations(payload.assetId()));
                     knowledgeRetrievalCleanupAcl.deleteAsset(
                             payload.kbId(), payload.assetId());
+                    cleanupAssetObject(payload.objectKey());
+                    cleanupAssetObject(payload.previewObjectKey());
                 }
                 case DELETE_ASSET_GENERATION -> {
                     DocumentIndexGenerationDeletePayload payload =
@@ -103,6 +105,13 @@ public class OutboxEventProcessor {
         } catch (Exception e) {
             retryOrFail(event, e, runtimeConfig.maxAttempts());
         }
+    }
+
+    private void cleanupAssetObject(String objectKey) {
+        if (!StringUtils.hasText(objectKey)) {
+            return;
+        }
+        objectStoragePort.deleteObject(objectKey.trim());
     }
 
     private void cleanupIngestionImages(String assetId, List<Long> generations) {
@@ -142,10 +151,18 @@ public class OutboxEventProcessor {
                     || !payload.assetId().trim().equals(event.getAggregateId())) {
                 throw new PermanentEventException("Invalid document index delete payload.");
             }
-            return new DocumentIndexDeletePayload(payload.kbId().trim(), payload.assetId().trim());
+            return new DocumentIndexDeletePayload(
+                    payload.kbId().trim(),
+                    payload.assetId().trim(),
+                    trimToNull(payload.objectKey()),
+                    trimToNull(payload.previewObjectKey()));
         } catch (JsonProcessingException | IllegalArgumentException e) {
             throw new PermanentEventException("Invalid document index delete payload.", e);
         }
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private DocumentIndexGenerationDeletePayload readGenerationDeletePayload(

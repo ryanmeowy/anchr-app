@@ -139,7 +139,12 @@ public class IngestionIndexFinalizer {
                     "Overwritten asset changed while holding its row lock.");
         }
         assetCleanupOutboxRecorder.assetDeleted(
-                item.getKbId(), oldAssetId, updatedBy, now);
+                item.getKbId(),
+                oldAssetId,
+                oldAsset.getObjectKey(),
+                oldAsset.getPreviewObjectKey(),
+                updatedBy,
+                now);
     }
 
     private String updatedBy(IngestionTaskItem item) {

@@ -213,7 +213,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         RequestUserContext context = UserContextHolder.get();
         get(kbId);
         LocalDateTime now = LocalDateTime.now();
-        assetRepository.findByIdForUpdate(kbId, assetId)
+        Asset asset = assetRepository.findByIdForUpdate(kbId, assetId)
                 .filter(candidate -> candidate.getDeletedAt() == null)
                 .orElseThrow(() -> new BusinessException(ApiError.DOCUMENT_NOT_FOUND));
         boolean deleted = assetRepository.markDeleted(
@@ -226,6 +226,8 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         assetCleanupOutboxRecorder.assetDeleted(
                 kbId,
                 assetId,
+                asset.getObjectKey(),
+                asset.getPreviewObjectKey(),
                 context.userId(),
                 now);
     }
