@@ -91,6 +91,15 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
 
     private void reconcileInterruptedRebuild() {
         AliasTopology topology = aliasManager.inspect();
+        if (!topology.valid()) {
+            // A failed or partial alias inspection cannot identify the serving indices.
+            // Deleting BUILDING/SWITCHING indices in this state could remove the index
+            // that is still serving traffic, so defer cleanup until the topology is
+            // readable and writable again.
+            log.warn("Skipping abandoned rebuild target cleanup because the alias "
+                    + "topology is not valid: {}", topology.error());
+            return;
+        }
         Set<String> protectedIndices = new HashSet<>();
         if (StringUtils.hasText(topology.readIndex())) {
             protectedIndices.add(topology.readIndex());
@@ -99,9 +108,6 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
             protectedIndices.add(topology.writeIndex());
         }
         physicalIndexFactory.cleanupAbandonedRebuildTargets(protectedIndices);
-        if (!topology.valid()) {
-            return;
-        }
         EmbeddingProfile interrupted = topologyInspector.interruptedCutoverProfile(
                 topology.physicalIndex());
         if (interrupted == null) {

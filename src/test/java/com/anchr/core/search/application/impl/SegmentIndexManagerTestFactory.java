@@ -52,6 +52,31 @@ final class SegmentIndexManagerTestFactory {
             SegmentIndexAliasManager aliasManager,
             RetrievalCapabilityAcl retrievalCapabilityAcl
     ) {
+        return create(
+                esClient,
+                embeddingProfileProvider,
+                embeddingPort,
+                storagePort,
+                idGen,
+                indexInitExecutor,
+                indexWriteBarrier,
+                aliasManager,
+                new SegmentPhysicalIndexFactory(esClient),
+                retrievalCapabilityAcl);
+    }
+
+    static SegmentIndexManagerImpl create(
+            ElasticsearchClient esClient,
+            EmbeddingProfileProvider embeddingProfileProvider,
+            SearchEmbeddingPort embeddingPort,
+            SearchObjectStoragePort storagePort,
+            IdGen idGen,
+            Executor indexInitExecutor,
+            SegmentIndexWriteBarrier indexWriteBarrier,
+            SegmentIndexAliasManager aliasManager,
+            SegmentPhysicalIndexFactory physicalIndexFactory,
+            RetrievalCapabilityAcl retrievalCapabilityAcl
+    ) {
         return new SegmentIndexManagerImpl(
                 esClient,
                 embeddingProfileProvider,
@@ -61,7 +86,7 @@ final class SegmentIndexManagerTestFactory {
                 new SegmentRebuildMutationTracker(),
                 aliasManager,
                 new SegmentIndexTopologyInspector(esClient, aliasManager),
-                new SegmentPhysicalIndexFactory(esClient),
+                physicalIndexFactory,
                 new SegmentIndexMigrationRunner(esClient, storagePort, idGen, null),
                 new SegmentIndexStatusAssembler(),
                 retrievalCapabilityAcl);
