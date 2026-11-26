@@ -9,24 +9,32 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static com.anchr.core.common.constant.CacheConstant.TOKEN_CACHE_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AuthControllerTest {
 
     private AuthController controller;
+    private StringRedisTemplate redisTemplate;
     private ValueOperations<String, String> valueOperations;
     private AuthStorageAcl authStorageAcl;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        redisTemplate = mock(StringRedisTemplate.class);
         valueOperations = mock(ValueOperations.class);
         authStorageAcl = mock(AuthStorageAcl.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
@@ -82,6 +90,46 @@ class AuthControllerTest {
                 .isEqualTo(ApiError.AUTH_TOKEN_INVALID.getCode());
         assertThat(controller.validateToken("unsupported-token").getCode())
                 .isEqualTo(ApiError.AUTH_TOKEN_INVALID.getCode());
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void cleanTokenShouldNotLogTheRawToken(CapturedOutput output) {
+        ReflectionTestUtils.setField(controller, "adminSecret", "admin-secret");
+        String token = "sensitive-token-value";
+        when(redisTemplate.delete(TOKEN_CACHE_PREFIX + token)).thenReturn(true);
+
+        Result<Void> result = controller.cleanToken("admin-secret", null, token);
+
+        assertThat(result.getCode()).isEqualTo(200);
+        assertThat(output.getAll()).doesNotContain(token);
+        assertThat(output.getAll()).contains("Token deleted: ref=");
+    }
+
+    @Test
+    void cleanTokenShouldPreferTheTargetTokenHeader() {
+        ReflectionTestUtils.setField(controller, "adminSecret", "admin-secret");
+        when(redisTemplate.delete(TOKEN_CACHE_PREFIX + "header-token")).thenReturn(true);
+
+        Result<Void> result = controller.cleanToken(
+                "admin-secret", "header-token", "query-token");
+
+        assertThat(result.getCode()).isEqualTo(200);
+        verify(redisTemplate).delete(TOKEN_CACHE_PREFIX + "header-token");
+        verify(redisTemplate, never()).delete(TOKEN_CACHE_PREFIX + "query-token");
+    }
+
+    @Test
+    void refreshTokenShouldDisableCaching() {
+        ReflectionTestUtils.setField(controller, "adminSecret", "admin-secret");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        Result<String> result = controller.refreshToken(
+                "admin-secret", null, "ADMIN", response);
+
+        assertThat(result.getCode()).isEqualTo(200);
+        assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
+        assertThat(response.getHeader("Pragma")).isEqualTo("no-cache");
     }
 
     @Test
