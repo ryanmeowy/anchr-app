@@ -21,12 +21,15 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -107,7 +110,8 @@ public class AuthController {
     @GetMapping("/refresh-token")
     public Result<String> refreshToken(@RequestHeader("X-Admin-Secret") String secret,
                                        @RequestParam(required = false) String code,
-                                       @RequestParam String role) {
+                                       @RequestParam String role,
+                                       HttpServletResponse response) {
         if (!StringUtils.hasText(adminSecret)) {
             log.error("Admin secret is not configured");
             return Result.error(ApiError.AUTH_ADMIN_SECRET_MISSING);
@@ -121,6 +125,8 @@ public class AuthController {
                 && !"GUEST".equals(requestedRole)) {
             return Result.error(ApiError.INVALID_REQUEST);
         }
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("Pragma", "no-cache");
         String newToken;
         if (code != null && !code.isBlank()) {
             newToken = code;
@@ -150,6 +156,8 @@ public class AuthController {
     @PermitAll
     @GetMapping("/clean-token")
     public Result<Void> cleanToken(@RequestHeader("X-Admin-Secret") String secret,
+                                   @RequestHeader(value = "X-Target-Token", required = false)
+                                   String headerToken,
                                    @RequestParam(required = false) String token) {
         if (!StringUtils.hasText(adminSecret)) {
             log.error("Admin secret is not configured");
@@ -158,14 +166,17 @@ public class AuthController {
         if (!constantTimeEquals(adminSecret, secret)) {
             return Result.error(ApiError.FORBIDDEN);
         }
+        String targetToken = StringUtils.hasText(headerToken) ? headerToken : token;
         try {
-            if (StringUtils.hasText(token)) {
-                String redisKey = TOKEN_CACHE_PREFIX + token.trim();
+            if (StringUtils.hasText(targetToken)) {
+                String normalizedToken = targetToken.trim();
+                String redisKey = TOKEN_CACHE_PREFIX + normalizedToken;
                 Boolean deleted = redisTemplate.delete(redisKey);
                 if (Boolean.TRUE.equals(deleted)) {
-                    log.info("Token deleted: {}", redisKey);
+                    log.info("Token deleted: ref={}", tokenReference(normalizedToken));
                 } else {
-                    log.info("Token not found for deletion: {}", redisKey);
+                    log.info("Token not found for deletion: ref={}",
+                            tokenReference(normalizedToken));
                 }
             } else {
                 Set<String> keys = scanTokenKeys();
@@ -221,6 +232,16 @@ public class AuthController {
             Set<String> keys = new HashSet<>();
             cursor.forEachRemaining(keys::add);
             return keys;
+        }
+    }
+
+    private String tokenReference(String token) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest).substring(0, 12);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 algorithm is unavailable.", exception);
         }
     }
 
