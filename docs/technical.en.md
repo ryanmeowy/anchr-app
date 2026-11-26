@@ -370,6 +370,7 @@ See [`project_layout.text`](../project_layout.text) for the maintained repositor
 - Persist and back up MySQL and object storage; manage Elasticsearch indexes as rebuildable projections.
 - Monitor `/actuator/health`, `/actuator/metrics`, ingestion failures, Agent task leases, outbox retries, and index alias state.
 - If Elasticsearch is briefly unavailable at startup, `/api/v1/index/retry` re-inspects the aliases and reuses an existing serving alias pair instead of creating another index; index creation is refused while segment aliases exist.
+- Status checks also re-inspect the alias topology at most once every 15 seconds while the index is not READY, so an existing readable/writable alias pair is adopted automatically; a deployment that starts with no aliases still needs `POST /api/v1/index/retry` to create the index.
 - After an application restart, review interrupted ingestion items: they are marked failed and require a manual whole-document retry. Agent recovery and cancellation are separate Lease-based capabilities.
 - Validate migrations and index rebuilds against production-like data before deployment.
 

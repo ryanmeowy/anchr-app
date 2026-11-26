@@ -143,6 +143,12 @@ class SegmentIndexManagerRecoveryTest {
 
         manager.asyncCreate();
 
+        // Keep the cached state so the assertion below observes the refusal error instead of
+        // depending on the 15s refresh interval.
+        AtomicLong lastRefresh = (AtomicLong) ReflectionTestUtils.getField(
+                manager, "lastAliasTopologyRefreshMs");
+        lastRefresh.set(System.currentTimeMillis());
+
         SegmentIndexStatusDTO status = manager.status();
         assertEquals(SegmentIndexStatus.NOT_READY, status.getStatus());
         assertNotNull(status.getLastError());
@@ -151,11 +157,27 @@ class SegmentIndexManagerRecoveryTest {
     }
 
     @Test
+    void createShouldRefuseToRunWhileTopologyIsUnavailable() {
+        AtomicInteger inspections = new AtomicInteger();
+        AtomicReference<AliasTopology> topology = new AtomicReference<>(
+                AliasTopology.unavailable("elasticsearch is starting"));
+        SegmentIndexManagerImpl manager = newManager(topology, inspections, Runnable::run);
+
+        manager.status();
+        manager.asyncCreate();
+
+        SegmentIndexStatusDTO status = manager.status();
+        assertEquals(SegmentIndexStatus.NOT_READY, status.getStatus());
+        assertNotNull(status.getLastError());
+        assertTrue(status.getLastError().contains("alias topology is unavailable"),
+                () -> "unexpected error: " + status.getLastError());
+    }
+
+    @Test
     void retryCreateShouldRecoverAfterARefusedCreateFoundExistingAliases() {
         AtomicInteger inspections = new AtomicInteger();
         AtomicReference<AliasTopology> topology = new AtomicReference<>(
                 AliasTopology.unavailable("elasticsearch is starting"));
-        ConcurrentLinkedQueue<Runnable> queuedTasks = new ConcurrentLinkedQueue<>();
         SegmentIndexManagerImpl manager = newManager(topology, inspections, Runnable::run);
 
         manager.status();
@@ -164,11 +186,41 @@ class SegmentIndexManagerRecoveryTest {
         manager.asyncCreate();
 
         assertEquals(SegmentIndexStatus.NOT_READY, manager.status().getStatus());
-        assertTrue(queuedTasks.isEmpty());
 
         assertTrue(manager.retryCreate());
-        assertTrue(queuedTasks.isEmpty());
-        assertEquals(SegmentIndexStatus.READY, manager.status().getStatus());
+        SegmentIndexStatusDTO status = manager.status();
+        assertEquals(SegmentIndexStatus.READY, status.getStatus());
+        assertNull(status.getLastError(),
+                "The recovery must clear the previous create-refusal error");
+    }
+
+    @Test
+    void statusShouldClearStaleCreateFailureAfterTopologyRecovers() {
+        AtomicInteger inspections = new AtomicInteger();
+        AtomicReference<AliasTopology> topology = new AtomicReference<>(
+                AliasTopology.unavailable("elasticsearch is starting"));
+        SegmentIndexManagerImpl manager = newManager(topology, inspections, Runnable::run);
+
+        assertEquals(SegmentIndexStatus.NOT_READY, manager.status().getStatus());
+
+        topology.set(validTopology());
+        manager.asyncCreate();
+
+        SegmentIndexStatusDTO refused = manager.status();
+        assertEquals(SegmentIndexStatus.NOT_READY, refused.getStatus());
+        assertNotNull(refused.getLastError());
+        assertFalse(refused.getLastError().startsWith("Alias topology invalid: "),
+                () -> "expected a create-refusal error, got: " + refused.getLastError());
+
+        AtomicLong lastRefresh = (AtomicLong) ReflectionTestUtils.getField(
+                manager, "lastAliasTopologyRefreshMs");
+        lastRefresh.set(0L);
+
+        SegmentIndexStatusDTO recovered = manager.status();
+        assertEquals(SegmentIndexStatus.READY, recovered.getStatus());
+        assertTrue(recovered.isWritable());
+        assertNull(recovered.getLastError(),
+                "A promoted READY state must not keep the old create failure");
     }
 
     private static SegmentIndexManagerImpl newManager(

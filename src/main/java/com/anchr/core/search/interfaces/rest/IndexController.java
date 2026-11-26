@@ -37,7 +37,7 @@ public class IndexController {
         if (!accepted) {
             throw new BusinessException(
                     ApiError.INDEX_OPERATION_CONFLICT,
-                    "Retry conditions not met: index status must be NOT_READY and active embedding configured");
+                    "Retry conditions not met: the index must be NOT_READY, segment aliases must not block creation, and an active embedding must be configured");
         }
         return Result.success(true);
     }
