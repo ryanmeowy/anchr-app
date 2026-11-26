@@ -46,12 +46,14 @@ services:
       - TZ=Asia/Shanghai
     ports:
       - "127.0.0.1:6379:6379"
+    # Keep auth tokens, Agent snapshots, and the ID counter. If memory is
+    # exhausted, fail writes instead of silently evicting application state.
     command: >
       redis-server
       --requirepass "${REDIS_PASSWORD}"
       --appendonly yes
       --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --rename-command FLUSHALL ""
       --rename-command FLUSHDB ""
       --rename-command CONFIG ""

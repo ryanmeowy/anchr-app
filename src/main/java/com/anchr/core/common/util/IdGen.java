@@ -4,9 +4,13 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -49,8 +53,75 @@ public class IdGen {
         if (ID_GEN_MAX_STEP > ID_GEN_SEGMENT_SIZE) {
             throw new IllegalArgumentException("MAX_STEP MUST be <= SEGMENT_SIZE to prevent duplicate IDs");
         }
-        this.cacheKey = String.format("%s:%s", ID_GEN_KEY, activeProfile);
-        stringRedisTemplate.opsForValue().setIfAbsent(cacheKey, String.valueOf(ID_GEN_MIN_ID));
+        this.cacheKey = ID_GEN_KEY;
+        String currentValue = stringRedisTemplate.opsForValue().get(cacheKey);
+        if (currentValue != null) {
+            if (!isValidCounter(currentValue)) {
+                throw new IllegalStateException(
+                        "ID generator counter is invalid: " + cacheKey);
+            }
+            return;
+        }
+
+        // Older releases scoped the counter by spring.profiles.active. Migrate from the
+        // highest valid legacy counter, not just the current profile's key: PROFILE may
+        // already have changed when the new release starts for the first time, and
+        // restarting from ID_GEN_MIN_ID would reissue IDs that already exist in MySQL.
+        String activeLegacyKey = ID_GEN_KEY + ":" + activeProfile;
+        String activeLegacyValue =
+                stringRedisTemplate.opsForValue().get(activeLegacyKey);
+        if (activeLegacyValue != null && !isValidCounter(activeLegacyValue)) {
+            throw new IllegalStateException(
+                    "Legacy ID generator counter is invalid: " + activeLegacyKey);
+        }
+
+        long highestLegacyValue = 0L;
+        for (String legacyKey : scanLegacyCounterKeys()) {
+            String value = legacyKey.equals(activeLegacyKey)
+                    ? activeLegacyValue
+                    : stringRedisTemplate.opsForValue().get(legacyKey);
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            if (!isValidCounter(value)) {
+                log.warn("Ignoring invalid legacy ID generator counter [{}]", legacyKey);
+                continue;
+            }
+            highestLegacyValue = Math.max(highestLegacyValue, Long.parseLong(value));
+        }
+
+        String initialValue = highestLegacyValue > 0L
+                ? String.valueOf(highestLegacyValue)
+                : String.valueOf(ID_GEN_MIN_ID);
+        Boolean created = stringRedisTemplate.opsForValue()
+                .setIfAbsent(cacheKey, initialValue);
+        if (Boolean.TRUE.equals(created) && highestLegacyValue > 0L) {
+            log.info("Migrated ID generator counter from legacy key(s) to [{}]", cacheKey);
+        }
+    }
+
+    private Set<String> scanLegacyCounterKeys() {
+        ScanOptions options = ScanOptions.scanOptions()
+                .match(ID_GEN_KEY + ":*")
+                .count(100)
+                .build();
+        Set<String> keys = new HashSet<>();
+        try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
+            cursor.forEachRemaining(keys::add);
+        }
+        return keys;
+    }
+
+    private boolean isValidCounter(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            long parsed = Long.parseLong(value);
+            return parsed >= ID_GEN_MIN_ID && parsed <= ID_GEN_MAX_ID;
+        } catch (NumberFormatException exception) {
+            return false;
+        }
     }
 
     public String nextIdStr() {
