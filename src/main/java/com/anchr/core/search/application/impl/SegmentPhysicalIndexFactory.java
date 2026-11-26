@@ -119,6 +119,13 @@ final class SegmentPhysicalIndexFactory {
     }
 
     void cleanupAbandonedRebuildTargets(Set<String> protectedIndices) {
+        if (protectedIndices == null || protectedIndices.isEmpty()) {
+            // Without a confirmed serving index, a BUILDING/SWITCHING index could be the
+            // live rebuild target; refusing to delete is safer than guessing.
+            log.warn("Skipping abandoned rebuild target cleanup because no serving "
+                    + "indices are protected");
+            return;
+        }
         try {
             var mappings = esClient.indices().getMapping(
                     request -> request.index(SegmentIndexConstant.indexName() + "_*")).result();
