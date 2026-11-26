@@ -18,12 +18,15 @@ import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
 import com.anchr.core.ingestion.domain.model.IngestionTaskStatus;
+import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
+import com.anchr.core.settings.application.api.StorageRuntimeApi;
+import com.anchr.core.settings.application.api.model.StorageLocationSnapshot;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -74,6 +78,10 @@ class IngestionApplicationServiceImplTest {
     private IngestionTaskProcessor ingestionTaskProcessor;
     @Mock
     private IngestionCreateTransactionRunner transactionRunner;
+    @Mock
+    private IngestionObjectStoragePort objectStoragePort;
+    @Mock
+    private StorageRuntimeApi storageRuntimeApi;
 
     private IngestionApplicationServiceImpl service;
     private final AtomicReference<IngestionTask> savedTask = new AtomicReference<>();
@@ -91,6 +99,8 @@ class IngestionApplicationServiceImplTest {
                 knowledgeBaseRepository,
                 ingestionTaskRepository,
                 new IngestionCapabilityService(),
+                objectStoragePort,
+                storageRuntimeApi,
                 idGen,
                 activityEventService,
                 ingestionTaskProcessor,
@@ -105,6 +115,12 @@ class IngestionApplicationServiceImplTest {
                 ingestionTaskProcessor,
                 taskQuery);
         service = new IngestionApplicationServiceImpl(createUseCase, maintenanceUseCase, taskQuery);
+        lenient().when(storageRuntimeApi.findLocation()).thenReturn(
+                Optional.of(new StorageLocationSnapshot(
+                        "endpoint", "bucket", "region", "")));
+        lenient().when(objectStoragePort.statObject(anyString())).thenReturn(
+                Optional.of(new IngestionObjectStoragePort.ObjectStat(
+                        1024L, "application/pdf")));
         lenient().when(transactionRunner.write(any())).thenAnswer(invocation ->
                 ((Supplier<?>) invocation.getArgument(0)).get());
         lenient().when(transactionRunner.read(any())).thenAnswer(invocation ->
@@ -128,6 +144,65 @@ class IngestionApplicationServiceImplTest {
     @AfterEach
     void tearDown() {
         UserContextHolder.clear();
+    }
+
+    @Test
+    void createTask_shouldRejectObjectKeyOutsideTheConfiguredPrefix() {
+        when(storageRuntimeApi.findLocation()).thenReturn(
+                Optional.of(new StorageLocationSnapshot(
+                        "endpoint", "bucket", "region", "tenant")));
+
+        BusinessException error = assertThrows(BusinessException.class, () ->
+                service.createTask("kb-1", commandWithObjectKey("objects/mysql.pdf")));
+
+        assertThat(error.getCode()).isEqualTo(ApiError.INVALID_REQUEST.getCode());
+        verifyNoInteractions(objectStoragePort);
+    }
+
+    @Test
+    void createTask_shouldRejectObjectKeyWithTraversal() {
+        BusinessException error = assertThrows(BusinessException.class, () ->
+                service.createTask("kb-1",
+                        commandWithObjectKey("objects/../private.pdf")));
+
+        assertThat(error.getCode()).isEqualTo(ApiError.INVALID_REQUEST.getCode());
+        verifyNoInteractions(objectStoragePort);
+    }
+
+    @Test
+    void createTask_shouldRejectMissingSourceObject() {
+        when(objectStoragePort.statObject("objects/mysql.pdf"))
+                .thenReturn(Optional.empty());
+
+        BusinessException error = assertThrows(BusinessException.class, () ->
+                service.createTask("kb-1", commandWithObjectKey("objects/mysql.pdf")));
+
+        assertThat(error.getCode()).isEqualTo(ApiError.INVALID_REQUEST.getCode());
+    }
+
+    @Test
+    void createTask_shouldRejectActualObjectSizeOverTheLimit() {
+        when(objectStoragePort.statObject("objects/mysql.pdf")).thenReturn(
+                Optional.of(new IngestionObjectStoragePort.ObjectStat(
+                        IngestionConstant.MAX_FILE_SIZE_BYTES + 1, "application/pdf")));
+
+        BusinessException error = assertThrows(BusinessException.class, () ->
+                service.createTask("kb-1", commandWithObjectKey("objects/mysql.pdf")));
+
+        assertThat(error.getCode()).isEqualTo(ApiError.UPLOAD_TOO_LARGE.getCode());
+    }
+
+    @Test
+    void createTask_shouldUseTheActualObjectSizeForTheAsset() {
+        ArgumentCaptor<Asset> asset = ArgumentCaptor.forClass(Asset.class);
+        when(objectStoragePort.statObject("objects/mysql.pdf")).thenReturn(
+                Optional.of(new IngestionObjectStoragePort.ObjectStat(
+                        2048L, "application/pdf")));
+
+        service.createTask("kb-1", commandWithObjectKey("objects/mysql.pdf"));
+
+        verify(assetRepository).save(asset.capture());
+        assertThat(asset.getValue().getSizeBytes()).isEqualTo(2048L);
     }
 
     @Test
@@ -192,6 +267,9 @@ class IngestionApplicationServiceImplTest {
     @Test
     void createTask_shouldUseSeparateImageFileLimit() {
         long imageSize = IngestionConstant.MAX_IMAGE_FILE_SIZE_BYTES;
+        when(objectStoragePort.statObject("objects/upload")).thenReturn(
+                Optional.of(new IngestionObjectStoragePort.ObjectStat(
+                        imageSize, "image/png")));
 
         IngestionTask task = service.createTask("kb-1", command(
                 DedupeStrategy.SKIP,
@@ -811,6 +889,24 @@ class IngestionApplicationServiceImplTest {
         verify(ingestionTaskRepository, never())
                 .refreshSummary(any(), any(), any(), any(LocalDateTime.class));
         verify(ingestionTaskProcessor, never()).submit(any(), any(), any());
+    }
+
+    private IngestionApplicationService.IngestionCreateCommand commandWithObjectKey(
+            String objectKey) {
+        return new IngestionApplicationService.IngestionCreateCommand(
+                null,
+                IngestionSourceType.UPLOAD,
+                DedupeStrategy.SKIP,
+                List.of(new IngestionApplicationService.IngestionCreateItemCommand(
+                        "mysql.pdf",
+                        "MySQL",
+                        "PDF",
+                        "application/pdf",
+                        1024L,
+                        objectKey,
+                        null
+                ))
+        );
     }
 
     private IngestionApplicationService.IngestionCreateCommand command(DedupeStrategy strategy,

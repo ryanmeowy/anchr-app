@@ -18,6 +18,7 @@ import com.anchr.core.ingestion.domain.model.IngestionPublicProjectionPolicy;
 import com.anchr.core.ingestion.domain.model.IngestionSourceType;
 import com.anchr.core.ingestion.domain.model.IngestionTask;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
+import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.kb.application.KnowledgeBaseService;
 import com.anchr.core.kb.domain.model.Asset;
@@ -25,6 +26,8 @@ import com.anchr.core.kb.domain.model.DocumentIndexStatus;
 import com.anchr.core.kb.domain.model.DocumentParseStatus;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
+import com.anchr.core.settings.application.api.StorageRuntimeApi;
+import com.anchr.core.settings.application.api.model.StorageLocationSnapshot;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -34,8 +37,10 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 @Component
@@ -48,6 +53,8 @@ final class IngestionTaskCreateUseCase {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final IngestionTaskRepository ingestionTaskRepository;
     private final IngestionCapabilityService ingestionCapabilityService;
+    private final IngestionObjectStoragePort objectStoragePort;
+    private final StorageRuntimeApi storageRuntimeApi;
     private final IdGen idGen;
     private final IngestionActivityAcl ingestionActivityAcl;
     private final IngestionTaskProcessor ingestionTaskProcessor;
@@ -60,6 +67,8 @@ final class IngestionTaskCreateUseCase {
                                KnowledgeBaseRepository knowledgeBaseRepository,
                                IngestionTaskRepository ingestionTaskRepository,
                                IngestionCapabilityService ingestionCapabilityService,
+                               IngestionObjectStoragePort objectStoragePort,
+                               StorageRuntimeApi storageRuntimeApi,
                                IdGen idGen,
                                IngestionActivityAcl ingestionActivityAcl,
                                IngestionTaskProcessor ingestionTaskProcessor,
@@ -70,6 +79,8 @@ final class IngestionTaskCreateUseCase {
         this.knowledgeBaseRepository = knowledgeBaseRepository;
         this.ingestionTaskRepository = ingestionTaskRepository;
         this.ingestionCapabilityService = ingestionCapabilityService;
+        this.objectStoragePort = objectStoragePort;
+        this.storageRuntimeApi = storageRuntimeApi;
         this.idGen = idGen;
         this.ingestionActivityAcl = ingestionActivityAcl;
         this.ingestionTaskProcessor = ingestionTaskProcessor;
@@ -96,9 +107,10 @@ final class IngestionTaskCreateUseCase {
 
         validateUploadLimits(normalized);
         knowledgeBaseService.get(normalizedKbId);
+        Map<String, Long> actualObjectSizes = validateSourceObjects(normalized);
         try {
             IngestionTask created = transactionRunner.write(() -> createNewTask(
-                    context, normalizedKbId, normalized, requestHash));
+                    context, normalizedKbId, normalized, requestHash, actualObjectSizes));
             return new IngestionTaskCreateResult(created, true);
         } catch (DuplicateKeyException duplicate) {
             if (normalized.clientRequestId() == null || !isClientRequestUniqueConflict(duplicate)) {
@@ -117,10 +129,12 @@ final class IngestionTaskCreateUseCase {
     private IngestionTask createNewTask(RequestUserContext context,
                                         String kbId,
                                         NormalizedCreateRequest request,
-                                        String requestHash) {
+                                        String requestHash,
+                                        Map<String, Long> actualObjectSizes) {
         LocalDateTime now = LocalDateTime.now();
         List<IngestionTaskItem> items = createItems(
-                context, kbId, request.dedupeStrategy(), request.items(), now);
+                context, kbId, request.dedupeStrategy(), request.items(),
+                actualObjectSizes, now);
         IngestionTask task = taskFactory.build(
                 context, kbId, request.sourceType(), items, now,
                 request.clientRequestId(), requestHash);
@@ -135,6 +149,7 @@ final class IngestionTaskCreateUseCase {
                                                 String kbId,
                                                 DedupeStrategy dedupeStrategy,
                                                 List<IngestionCreateItemCommand> commands,
+                                                Map<String, Long> actualObjectSizes,
                                                 LocalDateTime now) {
         if (CollectionUtils.isEmpty(commands)) {
             throw new BusinessException(ApiError.INVALID_REQUEST, "items cannot be empty.");
@@ -145,7 +160,9 @@ final class IngestionTaskCreateUseCase {
         String taskId = idGen.nextIdStr();
         List<IngestionTaskItem> items = new ArrayList<>();
         for (IngestionCreateItemCommand command : commands) {
-            items.add(createItem(context, kbId, taskId, dedupeStrategy, command, now));
+            items.add(createItem(
+                    context, kbId, taskId, dedupeStrategy, command,
+                    actualObjectSizes, now));
         }
         return items;
     }
@@ -155,6 +172,7 @@ final class IngestionTaskCreateUseCase {
                                          String taskId,
                                          DedupeStrategy dedupeStrategy,
                                          IngestionCreateItemCommand command,
+                                         Map<String, Long> actualObjectSizes,
                                          LocalDateTime now) {
         String fileType = normalizeFileType(command.fileType());
         String fileName = normalizeFileName(command.fileName());
@@ -169,7 +187,9 @@ final class IngestionTaskCreateUseCase {
             return skippedItem(kbId, taskId, decision.existingAsset(), dedupeStrategy, now);
         }
 
-        Asset document = createDocument(context, kbId, command, fileName, fileType, decision, now);
+        Asset document = createDocument(
+                context, kbId, command, fileName, fileType, decision,
+                actualObjectSizes, now);
         assetRepository.save(document);
         String itemId = idGen.nextIdStr();
         return IngestionTaskItem.builder()
@@ -197,6 +217,7 @@ final class IngestionTaskCreateUseCase {
                                  String fileName,
                                  String fileType,
                                  DedupeDecision decision,
+                                 Map<String, Long> actualObjectSizes,
                                  LocalDateTime now) {
         return Asset.builder()
                 .id(idGen.nextIdStr())
@@ -205,7 +226,9 @@ final class IngestionTaskCreateUseCase {
                 .title(trimToNull(command.title()))
                 .fileType(fileType)
                 .mimeType(trimToNull(command.mimeType()))
-                .sizeBytes(command.sizeBytes())
+                .sizeBytes(actualObjectSizes.getOrDefault(
+                        requireText(command.objectKey(), "objectKey"),
+                        command.sizeBytes()))
                 .fileHash(trimToNull(command.fileHash()))
                 .versionGroupId(decision.versionGroupId())
                 .versionNo(decision.versionNo())
@@ -354,6 +377,79 @@ final class IngestionTaskCreateUseCase {
                 sourceType,
                 dedupeStrategy,
                 List.copyOf(items));
+    }
+
+    private Map<String, Long> validateSourceObjects(NormalizedCreateRequest request) {
+        StorageLocationSnapshot location = null;
+        Map<String, Long> actualSizes = new HashMap<>();
+        for (IngestionCreateItemCommand item : request.items()) {
+            if (!ingestionCapabilityService.isSupportedFileType(item.fileType())) {
+                continue;
+            }
+            if (location == null) {
+                location = storageRuntimeApi.findLocation()
+                        .orElseThrow(() -> new BusinessException(
+                                ApiError.INTERNAL_ERROR,
+                                "Object storage is not configured."));
+            }
+            String objectKey = requireText(item.objectKey(), "objectKey");
+            validateObjectKey(objectKey, location.prefix());
+            Optional<IngestionObjectStoragePort.ObjectStat> stat =
+                    objectStoragePort.statObject(objectKey);
+            if (stat == null || stat.isEmpty()) {
+                throw new BusinessException(
+                        ApiError.INVALID_REQUEST,
+                        "objectKey does not reference an uploaded object.");
+            }
+            long actualSize = stat.get().size();
+            if (actualSize <= 0) {
+                throw new BusinessException(
+                        ApiError.INVALID_REQUEST, "Uploaded object is empty.");
+            }
+            long maxSize = ingestionCapabilityService.maxFileSizeBytesFor(item.fileType());
+            if (actualSize > maxSize) {
+                throw new BusinessException(
+                        ApiError.UPLOAD_TOO_LARGE,
+                        item.fileName() + " exceeds the allowed size for "
+                                + item.fileType() + ".");
+            }
+            actualSizes.put(objectKey, actualSize);
+        }
+        return actualSizes;
+    }
+
+    private void validateObjectKey(String objectKey, String configuredPrefix) {
+        if (objectKey.length() > 1024
+                || objectKey.startsWith("/")
+                || objectKey.endsWith("/")
+                || objectKey.contains("\\")
+                || objectKey.contains("://")) {
+            throw invalidObjectKey();
+        }
+        for (String segment : objectKey.split("/", -1)) {
+            if (segment.isEmpty()
+                    || ".".equals(segment)
+                    || "..".equals(segment)
+                    || segment.chars().anyMatch(Character::isISOControl)) {
+                throw invalidObjectKey();
+            }
+        }
+        String prefix = configuredPrefix == null ? "" : configuredPrefix.trim();
+        while (prefix.startsWith("/")) {
+            prefix = prefix.substring(1);
+        }
+        while (prefix.endsWith("/")) {
+            prefix = prefix.substring(0, prefix.length() - 1);
+        }
+        if (!prefix.isEmpty() && !objectKey.startsWith(prefix + "/")) {
+            throw invalidObjectKey();
+        }
+    }
+
+    private BusinessException invalidObjectKey() {
+        return new BusinessException(
+                ApiError.INVALID_REQUEST,
+                "objectKey is not a valid storage key for this deployment.");
     }
 
     private void validateUploadLimits(NormalizedCreateRequest request) {

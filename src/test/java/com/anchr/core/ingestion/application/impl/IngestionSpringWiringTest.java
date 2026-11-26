@@ -4,8 +4,10 @@ import com.anchr.core.common.util.IdGen;
 import com.anchr.core.ingestion.application.IngestionCapabilityService;
 import com.anchr.core.ingestion.application.IngestionTaskProcessor;
 import com.anchr.core.ingestion.application.acl.IngestionActivityAcl;
+import com.anchr.core.ingestion.domain.port.IngestionObjectStoragePort;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
 import com.anchr.core.kb.application.KnowledgeBaseService;
+import com.anchr.core.settings.application.api.StorageRuntimeApi;
 import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.KnowledgeBaseRepository;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,10 @@ class IngestionSpringWiringTest {
                     () -> mock(IngestionTaskRepository.class));
             context.registerBean(IngestionCapabilityService.class,
                     () -> mock(IngestionCapabilityService.class));
+            context.registerBean(IngestionObjectStoragePort.class,
+                    () -> mock(IngestionObjectStoragePort.class));
+            context.registerBean(StorageRuntimeApi.class,
+                    () -> mock(StorageRuntimeApi.class));
             context.registerBean(IdGen.class, () -> mock(IdGen.class));
             context.registerBean(IngestionActivityAcl.class, () -> mock(IngestionActivityAcl.class));
             context.registerBean(IngestionTaskProcessor.class,
