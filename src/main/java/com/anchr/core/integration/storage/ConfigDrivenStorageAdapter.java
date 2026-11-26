@@ -3,11 +3,13 @@ package com.anchr.core.integration.storage;
 import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
+import com.aliyun.oss.OSSException;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.DeleteObjectsRequest;
 import com.aliyun.oss.model.ListObjectsRequest;
 import com.aliyun.oss.model.OSSObjectSummary;
 import com.aliyun.oss.model.ObjectListing;
+import com.aliyun.oss.model.ObjectMetadata;
 import com.anchr.core.common.util.AesUtil;
 import com.anchr.core.common.exception.ApiError;
 import com.anchr.core.common.exception.BusinessException;
@@ -23,6 +25,7 @@ import org.springframework.stereotype.Service;
 import java.net.URL;
 import java.util.Date;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Config-driven object storage adapter backed by storage_config.
@@ -87,6 +90,35 @@ public class ConfigDrivenStorageAdapter implements
     @Override
     public String buildImageEmbeddingUrl(String objectKey) {
         return buildProcessedImageUrl(objectKey, MEDIUM_VALIDITY_MS);
+    }
+
+    @Override
+    public Optional<ObjectStat> statObject(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            throw new IllegalArgumentException("Object key must not be blank.");
+        }
+        StorageConfig config = loadConfig();
+        OSS client = buildClient(config);
+        try {
+            ObjectMetadata metadata =
+                    client.getObjectMetadata(config.getBucket(), objectKey.trim());
+            if (metadata == null) {
+                return Optional.empty();
+            }
+            return Optional.of(new ObjectStat(
+                    metadata.getContentLength(), metadata.getContentType()));
+        } catch (OSSException exception) {
+            if ("NoSuchKey".equals(exception.getErrorCode())) {
+                return Optional.empty();
+            }
+            throw new BusinessException(
+                    ApiError.INTERNAL_ERROR, "Failed to inspect source object.", exception);
+        } catch (Exception exception) {
+            throw new BusinessException(
+                    ApiError.INTERNAL_ERROR, "Failed to inspect source object.", exception);
+        } finally {
+            client.shutdown();
+        }
     }
 
     @Override

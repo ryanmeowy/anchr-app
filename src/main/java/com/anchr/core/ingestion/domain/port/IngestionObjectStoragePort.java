@@ -1,9 +1,22 @@
 package com.anchr.core.ingestion.domain.port;
 
+import java.util.Optional;
+
 /**
  * Domain port for object storage operations used by ingestion.
  */
 public interface IngestionObjectStoragePort {
+
+    record ObjectStat(long size, String contentType) {
+    }
+
+    /**
+     * Read the authoritative size and content type of a source object.
+     *
+     * @param objectKey object storage key
+     * @return metadata when the object exists
+     */
+    Optional<ObjectStat> statObject(String objectKey);
 
     /**
      * Build temporary download url for original object content.
