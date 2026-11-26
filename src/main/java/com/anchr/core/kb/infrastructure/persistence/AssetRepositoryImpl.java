@@ -115,6 +115,16 @@ public class AssetRepositoryImpl implements AssetRepository {
     }
 
     @Override
+    public boolean isSourceObjectKeyReferenced(String objectKey) {
+        return mapper.countActiveByObjectKey(objectKey) > 0;
+    }
+
+    @Override
+    public boolean isPreviewObjectKeyReferenced(String previewObjectKey) {
+        return mapper.countActiveByPreviewObjectKey(previewObjectKey) > 0;
+    }
+
+    @Override
     public int findMaxVersionNo(String kbId, String versionGroupId) {
         Integer maxVersionNo = mapper.findMaxVersionNo(kbId, versionGroupId);
         return maxVersionNo == null ? 0 : maxVersionNo;

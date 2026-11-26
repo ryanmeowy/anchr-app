@@ -83,7 +83,9 @@ class KnowledgeBaseServiceImplTest {
         ordered.verify(assetRepository).markDeleted(
                 eq("kb-1"), eq("asset-1"), eq("user-a"), any());
         ordered.verify(assetCleanupOutboxRecorder).assetDeleted(
-                eq("kb-1"), eq("asset-1"), eq("user-a"), any());
+                eq("kb-1"), eq("asset-1"),
+                eq("object-1"), eq("preview-1"),
+                eq("user-a"), any());
         verify(knowledgeBaseRepository).refreshDocumentStats("kb-1", "user-a", false);
         verify(activityEventRepository).deleteCitationOpenedByAssetId("user-a", "asset-1");
     }
@@ -98,7 +100,7 @@ class KnowledgeBaseServiceImplTest {
 
         verify(assetRepository, never()).markDeleted(any(), any(), any(), any());
         verify(assetCleanupOutboxRecorder, never())
-                .assetDeleted(any(), any(), any(), any());
+                .assetDeleted(any(), any(), any(), any(), any(), any());
         verify(activityEventRepository, never()).deleteCitationOpenedByAssetId(any(), any());
         verify(knowledgeBaseRepository, never()).refreshDocumentStats(any(), any(), eq(false));
     }
@@ -114,7 +116,7 @@ class KnowledgeBaseServiceImplTest {
                 .isInstanceOf(BusinessException.class);
 
         verify(assetCleanupOutboxRecorder, never())
-                .assetDeleted(any(), any(), any(), any());
+                .assetDeleted(any(), any(), any(), any(), any(), any());
         verify(activityEventRepository, never()).deleteCitationOpenedByAssetId(any(), any());
         verify(knowledgeBaseRepository, never()).refreshDocumentStats(any(), any(), eq(false));
     }
@@ -127,7 +129,9 @@ class KnowledgeBaseServiceImplTest {
                 .thenReturn(true);
         doThrow(new IllegalStateException("database unavailable"))
                 .when(assetCleanupOutboxRecorder)
-                .assetDeleted(eq("kb-1"), eq("asset-1"), eq("user-a"), any());
+                .assetDeleted(eq("kb-1"), eq("asset-1"),
+                        eq("object-1"), eq("preview-1"),
+                        eq("user-a"), any());
 
         assertThatThrownBy(() -> service.deleteDocument("kb-1", "asset-1"))
                 .isInstanceOf(IllegalStateException.class)
@@ -147,7 +151,8 @@ class KnowledgeBaseServiceImplTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("activity cleanup unavailable");
 
-        verify(assetCleanupOutboxRecorder, never()).assetDeleted(any(), any(), any(), any());
+        verify(assetCleanupOutboxRecorder, never())
+                .assetDeleted(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -202,6 +207,8 @@ class KnowledgeBaseServiceImplTest {
         return Asset.builder()
                 .id(id)
                 .kbId("kb-1")
+                .objectKey("object-1")
+                .previewObjectKey("preview-1")
                 .activeIndexGeneration(activeIndexGeneration)
                 .build();
     }

@@ -49,6 +49,10 @@ public interface AssetMapper {
     Optional<AssetRecord> findActiveByHash(@Param("kbId") String kbId,
                                                     @Param("fileHash") String fileHash);
 
+    int countActiveByObjectKey(@Param("objectKey") String objectKey);
+
+    int countActiveByPreviewObjectKey(@Param("previewObjectKey") String previewObjectKey);
+
     Integer findMaxVersionNo(@Param("kbId") String kbId,
                              @Param("versionGroupId") String versionGroupId);
 

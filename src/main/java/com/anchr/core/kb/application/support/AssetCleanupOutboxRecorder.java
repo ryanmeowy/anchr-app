@@ -42,12 +42,15 @@ public class AssetCleanupOutboxRecorder {
 
     public void assetDeleted(String kbId,
                              String assetId,
+                             String objectKey,
+                             String previewObjectKey,
                              String createdBy,
                              LocalDateTime occurredAt) {
         saveOutbox(
                 OutboxEventType.DELETE_ASSET,
                 assetId,
-                toJson(new DocumentIndexDeletePayload(kbId, assetId)),
+                toJson(new DocumentIndexDeletePayload(
+                        kbId, assetId, objectKey, previewObjectKey)),
                 createdBy,
                 occurredAt);
     }

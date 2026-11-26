@@ -5,6 +5,7 @@ import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.kb.application.model.OutboxRuntimeSettings;
 import com.anchr.core.kb.domain.model.DocumentIndexGenerationDeletePayload;
 import com.anchr.core.kb.domain.model.OutboxEvent;
+import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.ingestion.application.impl.IngestionImagePaths;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
@@ -42,6 +43,7 @@ public class OutboxEventProcessor {
     private final KnowledgeRetrievalCleanupAcl knowledgeRetrievalCleanupAcl;
     private final ObjectMapper objectMapper;
     private final IngestionTaskRepository ingestionTaskRepository;
+    private final AssetRepository assetRepository;
     private final KnowledgeObjectStoragePort objectStoragePort;
     private final KnowledgeStorageAcl knowledgeStorageAcl;
     private final RuntimeConfigUnit runtimeConfigUnit;
@@ -77,6 +79,8 @@ public class OutboxEventProcessor {
                             ingestionTaskRepository.listTargetIndexGenerations(payload.assetId()));
                     knowledgeRetrievalCleanupAcl.deleteAsset(
                             payload.kbId(), payload.assetId());
+                    cleanupSourceObject(payload.objectKey());
+                    cleanupPreviewObject(payload.previewObjectKey());
                 }
                 case DELETE_ASSET_GENERATION -> {
                     DocumentIndexGenerationDeletePayload payload =
@@ -103,6 +107,32 @@ public class OutboxEventProcessor {
         } catch (Exception e) {
             retryOrFail(event, e, runtimeConfig.maxAttempts());
         }
+    }
+
+    private void cleanupSourceObject(String objectKey) {
+        if (!StringUtils.hasText(objectKey)) {
+            return;
+        }
+        String key = objectKey.trim();
+        if (assetRepository.isSourceObjectKeyReferenced(key)) {
+            log.info("Skipping deletion of source object still referenced by an active asset: {}",
+                    key);
+            return;
+        }
+        objectStoragePort.deleteObject(key);
+    }
+
+    private void cleanupPreviewObject(String previewObjectKey) {
+        if (!StringUtils.hasText(previewObjectKey)) {
+            return;
+        }
+        String key = previewObjectKey.trim();
+        if (assetRepository.isPreviewObjectKeyReferenced(key)) {
+            log.info("Skipping deletion of preview object still referenced by an active asset: {}",
+                    key);
+            return;
+        }
+        objectStoragePort.deleteObject(key);
     }
 
     private void cleanupIngestionImages(String assetId, List<Long> generations) {
@@ -142,10 +172,18 @@ public class OutboxEventProcessor {
                     || !payload.assetId().trim().equals(event.getAggregateId())) {
                 throw new PermanentEventException("Invalid document index delete payload.");
             }
-            return new DocumentIndexDeletePayload(payload.kbId().trim(), payload.assetId().trim());
+            return new DocumentIndexDeletePayload(
+                    payload.kbId().trim(),
+                    payload.assetId().trim(),
+                    trimToNull(payload.objectKey()),
+                    trimToNull(payload.previewObjectKey()));
         } catch (JsonProcessingException | IllegalArgumentException e) {
             throw new PermanentEventException("Invalid document index delete payload.", e);
         }
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
     private DocumentIndexGenerationDeletePayload readGenerationDeletePayload(

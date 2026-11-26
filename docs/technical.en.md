@@ -369,6 +369,7 @@ See [`project_layout.text`](../project_layout.text) for the maintained repositor
 - Store admin, encryption, Docling, model, and storage secrets outside source control.
 - Persist and back up MySQL and object storage; manage Elasticsearch indexes as rebuildable projections.
 - Monitor `/actuator/health`, `/actuator/metrics`, ingestion failures, Agent task leases, outbox retries, and index alias state.
+- Deleting a document durably schedules deletion of its stored source and preview objects. Cleanup skips an object that another active asset still references and only deletes keys below the configured storage prefix; delete events written by older releases have no object keys and therefore only clean the search projection and generated images; events that exhaust outbox retries remain failed and require operator inspection.
 - After an application restart, review interrupted ingestion items: they are marked failed and require a manual whole-document retry. Agent recovery and cancellation are separate Lease-based capabilities.
 - Validate migrations and index rebuilds against production-like data before deployment.
 

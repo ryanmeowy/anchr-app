@@ -180,6 +180,20 @@
         limit 1
     </select>
 
+    <select id="countActiveByObjectKey" resultType="int">
+        select count(1)
+        from asset
+        where object_key = #{objectKey}
+          and deleted_at is null
+    </select>
+
+    <select id="countActiveByPreviewObjectKey" resultType="int">
+        select count(1)
+        from asset
+        where preview_object_key = #{previewObjectKey}
+          and deleted_at is null
+    </select>
+
     <select id="findMaxVersionNo" resultType="int">
         select coalesce(max(version_no), 0)
         from asset
