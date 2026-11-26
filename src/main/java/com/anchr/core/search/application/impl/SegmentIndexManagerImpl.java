@@ -199,6 +199,13 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
         }
     }
 
+    private String describeAliasConflict(AliasTopology topology) {
+        return StringUtils.hasText(topology.error())
+                ? topology.error()
+                : "readIndex=" + topology.readIndex()
+                        + ", writeIndex=" + topology.writeIndex();
+    }
+
     private void rollbackCreateClaim(String error) {
         stateRef.updateAndGet(current ->
                 current.status() == SegmentIndexStatus.INITIALIZING
@@ -207,6 +214,17 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
     }
 
     private void doCreate(EmbeddingProfile profile) throws Exception {
+        AliasTopology topology = aliasManager.inspect();
+        if (!topology.querySucceeded()) {
+            throw new IllegalStateException(
+                    "Cannot create index while the alias topology is unavailable: "
+                            + topology.error());
+        }
+        if (topology.readAliasPresent() || topology.writeAliasPresent()) {
+            throw new IllegalStateException(
+                    "Cannot create index while segment aliases already exist: "
+                            + describeAliasConflict(topology));
+        }
         String physicalIndexName = physicalIndexFactory.newPhysicalIndexName();
         log.info("Create: building index [{}] with dim={}",
                 physicalIndexName, profile.dimension());
@@ -708,9 +726,13 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
     private boolean shouldRefreshAliasTopology(
             SegmentIndexLifecycleState current
     ) {
-        if (current.status() != SegmentIndexStatus.READY) {
+        if (current.status() != SegmentIndexStatus.READY
+                && current.status() != SegmentIndexStatus.NOT_READY) {
             return false;
         }
+        // Also refresh while NOT_READY, but keep the normal interval so a down or
+        // unhealthy Elasticsearch cluster is not queried once per API request. A manual
+        // /index/retry forces an immediate refresh when faster recovery is needed.
         long now = System.currentTimeMillis();
         long previous = lastAliasTopologyRefreshMs.get();
         if (now - previous < ALIAS_TOPOLOGY_REFRESH_INTERVAL_MS) {
@@ -723,10 +745,13 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
             SegmentIndexTopologyInspector.IndexInspection inspection
     ) {
         return stateRef.updateAndGet(previous -> {
-            SegmentIndexLifecycleState base = previous;
-            if (inspection.readable() && previous.status() == SegmentIndexStatus.NOT_READY) {
-                base = previous.withStatus(SegmentIndexStatus.READY, null);
-            }
+            boolean wasNotReady = previous.status() == SegmentIndexStatus.NOT_READY;
+            SegmentIndexLifecycleState base = inspection.readable() && wasNotReady
+                    ? previous.withStatus(SegmentIndexStatus.READY, null)
+                    : previous;
+            boolean recoveredToWritableReady = inspection.readable()
+                    && inspection.writable()
+                    && wasNotReady;
             SegmentIndexTopologyInspector.MappingProfile mappingProfile =
                     inspection.mappingProfile();
             SegmentIndexLifecycleState updated = base.withIndexInfo(
@@ -739,7 +764,13 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
                     mappingProfile.loaded()
                             ? mappingProfile.actualProfileFingerprint()
                             : previous.actualProfileFingerprint());
-            return updated.withLastError(resolveInspectionError(previous.lastError(), inspection));
+            // A failed boot-time create can leave a non-alias error in the state. Once the
+            // topology is readable and writable, the status is READY, so that stale error must
+            // not keep claiming that the index is unusable. READY->READY refreshes still keep
+            // rebuild failures, which are reported through the same field.
+            return updated.withLastError(recoveredToWritableReady
+                    ? null
+                    : resolveInspectionError(previous.lastError(), inspection));
         });
     }
 
@@ -762,6 +793,27 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
         SegmentIndexLifecycleState current = stateRef.get();
         if (current.status() != SegmentIndexStatus.NOT_READY) {
             log.warn("Retry create: status is {}, not NOT_READY", current.status());
+            return false;
+        }
+        // Re-inspect before scheduling a create so a recovered Elasticsearch cluster with
+        // existing aliases is adopted instead of triggering a new index that can never bind
+        // over the existing aliases. This also lets a manual retry repair a status snapshot
+        // that was poisoned by a failed boot-time topology query.
+        lastAliasTopologyRefreshMs.set(0L);
+        SegmentIndexStatusDTO refreshed = status();
+        if (refreshed.getStatus() == SegmentIndexStatus.READY && refreshed.isWritable()) {
+            log.info("Retry create: existing segment index recovered through its aliases");
+            return true;
+        }
+        AliasTopology topology = aliasManager.inspect();
+        if (!topology.querySucceeded()) {
+            log.warn("Retry create: alias topology is still unavailable: {}",
+                    topology.error());
+            return false;
+        }
+        if (topology.readAliasPresent() || topology.writeAliasPresent()) {
+            log.warn("Retry create: refusing to create while segment aliases exist: {}",
+                    describeAliasConflict(topology));
             return false;
         }
         return tryScheduleCreate();
