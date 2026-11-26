@@ -94,10 +94,20 @@ public class SegmentIndexManagerImpl implements SegmentIndexManager, RetrievalEm
         if (!topology.valid()) {
             // A failed or partial alias inspection cannot identify the serving indices.
             // Deleting BUILDING/SWITCHING indices in this state could remove the index
-            // that is still serving traffic, so defer cleanup until the topology is
-            // readable and writable again.
-            log.warn("Skipping abandoned rebuild target cleanup because the alias "
-                    + "topology is not valid: {}", topology.error());
+            // that is still serving traffic, so skip cleanup for this process lifetime;
+            // the next startup retries once the topology is valid. A fresh cluster without
+            // aliases is expected here, not an incident, so keep that case at INFO.
+            String message = "Skipping abandoned rebuild target cleanup because the alias "
+                    + "topology is not valid: {}";
+            if (!topology.querySucceeded()
+                    || topology.readAliasPresent()
+                    || topology.writeAliasPresent()) {
+                log.warn(message, topology.error());
+            } else {
+                // A fresh cluster without any alias is an expected deployment state, not
+                // an incident; the next startup retries after the first index is created.
+                log.info(message, topology.error());
+            }
             return;
         }
         Set<String> protectedIndices = new HashSet<>();
