@@ -46,10 +46,14 @@ public class AgentRunFinalizer {
     }
 
     public void markTurnFailed(String runId) {
+        markTurnFailed(runId, "turn_persistence_failed");
+    }
+
+    public void markTurnFailed(String runId, String errorCode) {
         AgentRun run = awaitingRun(runId);
         if (run == null) return;
         run.setStatus(AgentRunStatus.FAILED.name());
-        run.setErrorCode("turn_persistence_failed");
+        run.setErrorCode(StringUtils.hasText(errorCode) ? errorCode : "turn_persistence_failed");
         run.setFinishedAt(System.currentTimeMillis());
         run.setLatencyMs(run.getFinishedAt() - run.getStartedAt());
         if (repository.transitionRun(run, AgentRunStatus.AWAITING_TURN.name())) {

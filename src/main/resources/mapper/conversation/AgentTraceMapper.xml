@@ -61,7 +61,9 @@
             latency_ms = #{latencyMs},
             fallback_reason = #{fallbackReason},
             error_code = #{errorCode},
-            finished_at = #{finishedAt}
+            finished_at = #{finishedAt},
+            awaiting_since = case when #{status} = 'AWAITING_TURN'
+                then current_timestamp(3) else null end
         where run_id = #{runId}
           and status = 'RUNNING'
     </update>
@@ -73,7 +75,14 @@
             latency_ms = #{record.latencyMs},
             fallback_reason = #{record.fallbackReason},
             error_code = #{record.errorCode},
-            finished_at = #{record.finishedAt}
+            finished_at = #{record.finishedAt},
+            awaiting_since = case
+                when #{record.status} = 'AWAITING_TURN'
+                    then coalesce(awaiting_since, current_timestamp(3))
+                when #{record.status} in
+                    ('COMPLETED', 'FAILED', 'CANCELLED', 'DEGRADED', 'FALLBACK')
+                    then null
+                else awaiting_since end
         where run_id = #{record.runId}
           and status = #{expectedStatus}
     </update>
@@ -83,6 +92,22 @@
         set fallback_reason = #{fallbackReason}
         where run_id = #{runId}
           and status = 'AWAITING_TURN'
+    </update>
+
+    <update id="failStaleAwaitingRuns">
+        update agent_run
+        set status = 'FAILED',
+            error_code = 'stale_awaiting_turn',
+            finished_at = current_timestamp(3),
+            awaiting_since = null,
+            latency_ms = greatest(
+                0, timestampdiff(MICROSECOND, started_at, current_timestamp(3)) div 1000)
+        where status = 'AWAITING_TURN'
+          and awaiting_since is not null
+          and awaiting_since &lt;
+              timestampadd(MINUTE, -#{staleMinutes}, current_timestamp(3))
+        order by awaiting_since asc
+        limit #{limit}
     </update>
 
     <update id="addRunTokenUsage">

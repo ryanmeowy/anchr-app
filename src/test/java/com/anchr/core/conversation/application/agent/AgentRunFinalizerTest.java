@@ -72,6 +72,18 @@ class AgentRunFinalizerTest {
     }
 
     @Test
+    void markTurnFailed_shouldStoreTheProvidedErrorCode() {
+        AgentRun run = awaitingRun(null);
+        when(repository.findRun("run-1")).thenReturn(Optional.of(run));
+        AgentRunFinalizer finalizer = new AgentRunFinalizer(repository, new SimpleMeterRegistry());
+
+        finalizer.markTurnFailed("run-1", "conversation_turn_failed");
+
+        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.FAILED.name());
+        assertThat(run.getErrorCode()).isEqualTo("conversation_turn_failed");
+    }
+
+    @Test
     void prepareTraditionalFallback_shouldBecomeFallbackAfterTurnPersistence() {
         AgentRun run = awaitingRun(null);
         when(repository.markTraditionalFallback("run-1", "traditional_rag_fallback"))

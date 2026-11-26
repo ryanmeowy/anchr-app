@@ -208,6 +208,25 @@ class ConversationServiceImplTest {
     }
 
     @Test
+    void createMessage_shouldFailTheAwaitingRunWhenOrchestrationThrows() {
+        ConversationMessageOrchestrator failingOrchestrator =
+                mock(ConversationMessageOrchestrator.class);
+        when(failingOrchestrator.execute(any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("agent fallback failed"));
+        ConversationServiceImpl failingService = buildService(failingOrchestrator);
+        ConversationSessionDTO session =
+                failingService.createSession(new ConversationCreateRequestDTO());
+
+        assertThatThrownBy(() -> failingService.createMessage(
+                session.getSessionId(), buildMessageRequest("hello")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("agent fallback failed");
+
+        verify(agentRunFinalizer).markTurnFailed(
+                ArgumentMatchers.anyString(), eq("conversation_turn_failed"));
+    }
+
+    @Test
     void createMessage_shouldSkipRetrievalAndQuestionActivityForChat() {
         ConversationSessionDTO session = service.createSession(new ConversationCreateRequestDTO());
         when(conversationIntentRouter.route(eq(session.getSessionId()), eq("你好"))).thenReturn(
