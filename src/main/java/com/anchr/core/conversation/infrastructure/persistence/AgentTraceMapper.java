@@ -17,6 +17,8 @@ public interface AgentTraceMapper {
     int addRunTokenUsage(@Param("runId") String runId,
                          @Param("promptTokens") int promptTokens,
                          @Param("completionTokens") int completionTokens);
+    int failStaleAwaitingRuns(@Param("staleMinutes") int staleMinutes,
+                              @Param("limit") int limit);
     int insertStep(AgentStepRecord record);
     String lockRun(@Param("runId") String runId);
     Optional<AgentRunRecord> findRun(@Param("runId") String runId);

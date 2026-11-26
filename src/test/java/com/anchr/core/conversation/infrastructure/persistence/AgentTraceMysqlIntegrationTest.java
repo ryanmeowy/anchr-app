@@ -265,6 +265,50 @@ class AgentTraceMysqlIntegrationTest {
         assertRunCreationAndDeletionAreSerialized(Connection.TRANSACTION_READ_COMMITTED);
     }
 
+    @Test
+    void staleAwaitingRunSweepShouldOnlyFailRunsPastTheThreshold() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+             Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    insert into agent_run
+                      (run_id, session_id, turn_id, status, current_step,
+                       started_at, awaiting_since)
+                    values
+                      ('stale-run', 'session-1', 'turn-stale', 'AWAITING_TURN', 'FINAL',
+                       now(3) - interval 20 minute, now(3) - interval 15 minute),
+                      ('fresh-run', 'session-1', 'turn-fresh', 'AWAITING_TURN', 'FINAL',
+                       now(3) - interval 20 minute, now(3))
+                    """);
+        }
+        int updated;
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            updated = session.getMapper(AgentTraceMapper.class)
+                    .failStaleAwaitingRuns(10, 100);
+        }
+
+        assertThat(updated).isEqualTo(1);
+        try (Connection connection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet stale = statement.executeQuery("""
+                     select status, error_code from agent_run where run_id = 'stale-run'
+                     """)) {
+            assertThat(stale.next()).isTrue();
+            assertThat(stale.getString("status")).isEqualTo("FAILED");
+            assertThat(stale.getString("error_code")).isEqualTo("stale_awaiting_turn");
+        }
+        try (Connection connection = DriverManager.getConnection(
+                MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+             Statement statement = connection.createStatement();
+             ResultSet fresh = statement.executeQuery("""
+                     select status from agent_run where run_id = 'fresh-run'
+                     """)) {
+            assertThat(fresh.next()).isTrue();
+            assertThat(fresh.getString("status")).isEqualTo("AWAITING_TURN");
+        }
+    }
+
     private int allocate(String taskId, String stage,
                          CountDownLatch locked, CountDownLatch release) throws Exception {
         try (SqlSession session = sqlSessionFactory.openSession(false)) {

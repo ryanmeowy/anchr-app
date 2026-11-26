@@ -12,6 +12,7 @@ public interface AgentTraceRepository {
     boolean transitionRun(AgentRun run, String expectedStatus);
     boolean markTraditionalFallback(String runId, String fallbackReason);
     boolean addRunTokenUsage(String runId, int promptTokens, int completionTokens);
+    int failStaleAwaitingRuns(int staleMinutes, int limit);
     void saveStep(AgentStep step);
     boolean lockRun(String runId);
     Optional<AgentRun> findRun(String runId);

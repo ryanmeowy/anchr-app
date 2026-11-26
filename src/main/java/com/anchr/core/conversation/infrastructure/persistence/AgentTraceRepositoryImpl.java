@@ -56,6 +56,15 @@ public class AgentTraceRepositoryImpl implements AgentTraceRepository {
     }
 
     @Override
+    public int failStaleAwaitingRuns(int staleMinutes, int limit) {
+        if (staleMinutes < 1) {
+            throw new IllegalArgumentException("staleMinutes must be positive");
+        }
+        int boundedLimit = Math.max(1, Math.min(limit, 500));
+        return mapper.failStaleAwaitingRuns(staleMinutes, boundedLimit);
+    }
+
+    @Override
     public void saveStep(AgentStep step) {
         if (step == null || !StringUtils.hasText(step.getStepId()) || !StringUtils.hasText(step.getRunId())) {
             throw new IllegalArgumentException("stepId and runId cannot be empty");

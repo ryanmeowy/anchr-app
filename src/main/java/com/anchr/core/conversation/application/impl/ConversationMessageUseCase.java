@@ -88,6 +88,23 @@ public class ConversationMessageUseCase {
             String turnId,
             String runId
     ) {
+        try {
+            return executeInternal(sessionId, request, progressListener, turnId, runId);
+        } catch (RuntimeException exception) {
+            // A failure in orchestration, fallback, turn persistence, or post-processing must
+            // not leave the Agent run in AWAITING_TURN forever.
+            markAgentRunTurnFailed(runId, exception, "conversation_turn_failed");
+            throw exception;
+        }
+    }
+
+    private ConversationMessageResponseDTO executeInternal(
+            String sessionId,
+            ConversationMessageRequestDTO request,
+            ConversationProgressListener progressListener,
+            String turnId,
+            String runId
+    ) {
         ConversationSession session = loadSessionOrThrow(sessionId);
         String titleAtRequestStart = session.getTitle();
         boolean autoGenerateTitle =
@@ -135,7 +152,8 @@ public class ConversationMessageUseCase {
                 }
             });
         } catch (RuntimeException exception) {
-            markAgentRunTurnFailed(executionResult.agentRunId(), exception);
+            markAgentRunTurnFailed(
+                    executionResult.agentRunId(), exception, "turn_persistence_failed");
             throw exception;
         }
 
@@ -407,9 +425,11 @@ public class ConversationMessageUseCase {
         return "run_" + UUID.randomUUID().toString().replace("-", "");
     }
 
-    private void markAgentRunTurnFailed(String runId, RuntimeException original) {
+    private void markAgentRunTurnFailed(String runId,
+                                        RuntimeException original,
+                                        String errorCode) {
         try {
-            agentRunFinalizer.markTurnFailed(runId);
+            agentRunFinalizer.markTurnFailed(runId, errorCode);
         } catch (RuntimeException traceError) {
             original.addSuppressed(traceError);
         }
