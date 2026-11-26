@@ -372,6 +372,7 @@ Surefire XML 报告会作为 workflow artifact 保留七天。
 - 在源码之外保存 Admin、加密、Docling、模型与存储密钥。
 - 持久化并备份 MySQL 与对象存储；将 Elasticsearch 索引作为可重建投影管理。
 - 监控 `/actuator/health`、`/actuator/metrics`、入库失败、Agent Task Lease、Outbox 重试和索引 alias 状态。
+- 删除文档会通过 Outbox 持久化清理其源/预览对象：仍被其它活跃 asset 引用的对象会跳过删除，且只删除配置存储前缀下的 key；旧版本写入的删除事件不含对象 key，因此只会清理搜索投影和生成图片；重试耗尽的 Outbox 事件会保持 failed 状态，需要运维检查。
 - 应用重启后需要检查被中断的入库 Item：它们会被标记为失败，必须人工按整文档重试。Agent 的恢复和取消是另一套基于 Lease 的能力。
 - 上线前使用接近生产的数据验证数据库迁移与索引重建。
 

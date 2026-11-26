@@ -5,6 +5,7 @@ import com.anchr.core.common.util.RuntimeConfigUnit;
 import com.anchr.core.kb.application.model.OutboxRuntimeSettings;
 import com.anchr.core.kb.domain.model.DocumentIndexGenerationDeletePayload;
 import com.anchr.core.kb.domain.model.OutboxEvent;
+import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.ingestion.application.impl.IngestionImagePaths;
 import com.anchr.core.ingestion.domain.repository.IngestionTaskRepository;
@@ -42,6 +43,7 @@ public class OutboxEventProcessor {
     private final KnowledgeRetrievalCleanupAcl knowledgeRetrievalCleanupAcl;
     private final ObjectMapper objectMapper;
     private final IngestionTaskRepository ingestionTaskRepository;
+    private final AssetRepository assetRepository;
     private final KnowledgeObjectStoragePort objectStoragePort;
     private final KnowledgeStorageAcl knowledgeStorageAcl;
     private final RuntimeConfigUnit runtimeConfigUnit;
@@ -77,8 +79,8 @@ public class OutboxEventProcessor {
                             ingestionTaskRepository.listTargetIndexGenerations(payload.assetId()));
                     knowledgeRetrievalCleanupAcl.deleteAsset(
                             payload.kbId(), payload.assetId());
-                    cleanupAssetObject(payload.objectKey());
-                    cleanupAssetObject(payload.previewObjectKey());
+                    cleanupSourceObject(payload.objectKey());
+                    cleanupPreviewObject(payload.previewObjectKey());
                 }
                 case DELETE_ASSET_GENERATION -> {
                     DocumentIndexGenerationDeletePayload payload =
@@ -107,11 +109,30 @@ public class OutboxEventProcessor {
         }
     }
 
-    private void cleanupAssetObject(String objectKey) {
+    private void cleanupSourceObject(String objectKey) {
         if (!StringUtils.hasText(objectKey)) {
             return;
         }
-        objectStoragePort.deleteObject(objectKey.trim());
+        String key = objectKey.trim();
+        if (assetRepository.isSourceObjectKeyReferenced(key)) {
+            log.info("Skipping deletion of source object still referenced by an active asset: {}",
+                    key);
+            return;
+        }
+        objectStoragePort.deleteObject(key);
+    }
+
+    private void cleanupPreviewObject(String previewObjectKey) {
+        if (!StringUtils.hasText(previewObjectKey)) {
+            return;
+        }
+        String key = previewObjectKey.trim();
+        if (assetRepository.isPreviewObjectKeyReferenced(key)) {
+            log.info("Skipping deletion of preview object still referenced by an active asset: {}",
+                    key);
+            return;
+        }
+        objectStoragePort.deleteObject(key);
     }
 
     private void cleanupIngestionImages(String assetId, List<Long> generations) {

@@ -71,6 +71,12 @@ public interface AssetRepository {
 
     Optional<Asset> findActiveByHash(String kbId, String fileHash);
 
+    /** True when any non-deleted asset still references the given source object key. */
+    boolean isSourceObjectKeyReferenced(String objectKey);
+
+    /** True when any non-deleted asset still references the given preview object key. */
+    boolean isPreviewObjectKeyReferenced(String previewObjectKey);
+
     int findMaxVersionNo(String kbId, String versionGroupId);
 
     boolean updateStatuses(String kbId, String assetId,

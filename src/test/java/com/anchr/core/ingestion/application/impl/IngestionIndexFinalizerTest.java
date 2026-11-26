@@ -1,6 +1,7 @@
 package com.anchr.core.ingestion.application.impl;
 
 import com.anchr.core.common.exception.BusinessException;
+import com.anchr.core.ingestion.domain.model.DedupeResult;
 import com.anchr.core.ingestion.domain.model.IngestionStage;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItem;
 import com.anchr.core.ingestion.domain.model.IngestionTaskItemStatus;
@@ -39,6 +40,45 @@ class IngestionIndexFinalizerTest {
     void setUp() {
         finalizer = new IngestionIndexFinalizer(
                 assetRepository, repository, cleanupRecorder);
+    }
+
+    @Test
+    void activateGeneration_shouldRecordOverwrittenAssetObjectKeys() {
+        IngestionTaskItem item = item().toBuilder()
+                .dedupeResult(DedupeResult.OVERWRITTEN)
+                .duplicateAssetId("old-asset")
+                .build();
+        Asset newAsset = asset();
+        Asset oldAsset = asset().toBuilder()
+                .id("old-asset")
+                .objectKey("tenant/file.pdf")
+                .previewObjectKey("tenant/file-preview.pdf")
+                .build();
+        when(repository.isRunningForUpdate("item-1", IngestionStage.INDEX)).thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "asset-1"))
+                .thenReturn(Optional.of(newAsset));
+        when(assetRepository.activateIndexGeneration(
+                eq("kb-1"), eq("asset-1"), eq(1L), eq(2L),
+                eq("SUCCESS"), eq("SUCCESS"), eq(1), eq(1), eq("user-1"),
+                any(LocalDateTime.class))).thenReturn(true);
+        when(assetRepository.findByIdForUpdate("kb-1", "old-asset"))
+                .thenReturn(Optional.of(oldAsset));
+        when(assetRepository.markDeleted(
+                eq("kb-1"), eq("old-asset"), eq("user-1"), any(LocalDateTime.class)))
+                .thenReturn(true);
+        when(repository.completeRunningItem(
+                eq("kb-1"), eq("task-1"), eq("item-1"), eq(IngestionStage.INDEX),
+                eq("user-1"), any(LocalDateTime.class))).thenReturn(true);
+
+        assertThat(finalizer.activateGeneration(item, newAsset, 1, receipt())).isTrue();
+
+        verify(cleanupRecorder).assetDeleted(
+                eq("kb-1"),
+                eq("old-asset"),
+                eq("tenant/file.pdf"),
+                eq("tenant/file-preview.pdf"),
+                eq("user-1"),
+                any(LocalDateTime.class));
     }
 
     @Test

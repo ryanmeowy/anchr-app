@@ -9,6 +9,7 @@ import com.anchr.core.kb.domain.model.OutboxEvent;
 import com.anchr.core.kb.domain.model.OutboxEventStatus;
 import com.anchr.core.kb.domain.model.OutboxEventType;
 import com.anchr.core.kb.domain.port.KnowledgeObjectStoragePort;
+import com.anchr.core.kb.domain.repository.AssetRepository;
 import com.anchr.core.kb.domain.repository.OutboxEventRepository;
 import com.anchr.core.testsupport.RuntimeConfigTestUnits;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,6 +48,8 @@ class OutboxEventProcessorTest {
     @Mock
     private IngestionTaskRepository ingestionTaskRepository;
     @Mock
+    private AssetRepository assetRepository;
+    @Mock
     private KnowledgeObjectStoragePort objectStoragePort;
     @Mock
     private KnowledgeStorageAcl knowledgeStorageAcl;
@@ -60,6 +63,7 @@ class OutboxEventProcessorTest {
                 knowledgeRetrievalCleanupAcl,
                 new ObjectMapper(),
                 ingestionTaskRepository,
+                assetRepository,
                 objectStoragePort,
                 knowledgeStorageAcl,
                 RuntimeConfigTestUnits.defaults());
@@ -114,6 +118,32 @@ class OutboxEventProcessorTest {
 
         verify(objectStoragePort).deleteObject("object-1");
         verify(objectStoragePort).deleteObject("preview-1");
+        verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
+    }
+
+    @Test
+    void process_shouldKeepSourceObjectWhenAnotherActiveAssetReferencesIt() {
+        OutboxEvent event = event(0, assetDeletePayloadWithObjects());
+        when(assetRepository.isSourceObjectKeyReferenced("object-1")).thenReturn(true);
+        when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any())).thenReturn(true);
+
+        processor.process(event);
+
+        verify(objectStoragePort, never()).deleteObject("object-1");
+        verify(objectStoragePort).deleteObject("preview-1");
+        verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
+    }
+
+    @Test
+    void process_shouldKeepPreviewObjectWhenAnotherActiveAssetReferencesIt() {
+        OutboxEvent event = event(0, assetDeletePayloadWithObjects());
+        when(assetRepository.isPreviewObjectKeyReferenced("preview-1")).thenReturn(true);
+        when(outboxEventRepository.markDone(eq(1L), eq("claim-1"), any())).thenReturn(true);
+
+        processor.process(event);
+
+        verify(objectStoragePort).deleteObject("object-1");
+        verify(objectStoragePort, never()).deleteObject("preview-1");
         verify(outboxEventRepository).markDone(eq(1L), eq("claim-1"), any());
     }
 
