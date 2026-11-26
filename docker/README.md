@@ -41,8 +41,16 @@ Redis runs with `maxmemory-policy noeviction` so auth tokens, Agent snapshots,
 and the stable `id:gen` counter are not silently evicted. If memory is
 exhausted, writes fail instead of corrupting application state; size Redis for
 the expected token, snapshot, and cache volume. Do not switch the policy to
-`allkeys-lru`. The App migrates the ID counter once from the legacy
-`id:gen:<profile>` key.
+`allkeys-lru`. The App migrates the ID counter once from the highest valid
+legacy `id:gen:<profile>` key, so changing `PROFILES_ACTIVE` during the upgrade
+does not reset the ID space; a corrupt legacy counter for the active profile
+aborts startup.
+
+After the migration, do not roll back to an older release: it still reads
+`id:gen:<profile>`, which stops at the pre-migration value, and would reissue
+IDs. To roll back deliberately, copy the current `id:gen` value into
+`id:gen:<profile>` first. Clearing Redis loses the counter; it is not rebuilt
+from MySQL.
 
 ## 3. Start Anchr App
 
